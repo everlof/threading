@@ -102,9 +102,11 @@ final class ThemedTabStripView: NSView {
     /// destination highlight) without guessing when the gesture is over.
     var onDragEnded: ((UUID) -> Void)?
 
-    /// Another strip's chip is travelling and would land here. Drawn as a quiet wash over the
-    /// band — the resting surface fill, nothing louder: the dimmed traveller already says a
-    /// move is happening, this only answers *where*.
+    /// Another strip's chip is travelling and would land here. Drawn as the app's one drop
+    /// wash, `Design.Surface.dropTarget` — the accent held back far enough that the titles under
+    /// it stay readable, and the same ground the docking preview lays over a pane, so a row and
+    /// a pane say "this is where it lands" in one voice. Nothing louder: the dimmed traveller
+    /// already says a move is happening, this only answers *where*.
     var isDropTarget = false {
         didSet {
             if !isDropTarget { externalLandingPoint = nil }
@@ -376,9 +378,10 @@ final class ThemedTabStripView: NSView {
         guard isDropTarget else { return }
         ThemedSurface.draw(
             bounds,
-            fill: inkSource.ink.surface,
+            fill: Design.Surface.dropTarget,
             border: nil,
-            radius: Design.Radius.control
+            radius: Design.Radius.control,
+            bevel: .none
         )
     }
 

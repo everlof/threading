@@ -97,7 +97,10 @@ final class DisplayPaneController: NSViewController {
     slot.translatesAutoresizingMaskIntoConstraints = false
     let size = ThemedIconButton.Target.toolbar.size
     NSLayoutConstraint.activate([
-      slot.widthAnchor.constraint(equalToConstant: size.width),
+      // A docked pane never receives the window's one toggle, so its corner keeps no room for
+      // it: `+` takes the margin the toggle stands at in the side panel, instead of leaving a
+      // button-sized hole at the end of every docked row.
+      slot.widthAnchor.constraint(equalToConstant: dockID == nil ? size.width : 0),
       slot.heightAnchor.constraint(equalToConstant: size.height)
     ])
     return slot
@@ -730,7 +733,7 @@ final class DisplayPaneController: NSViewController {
         lessThanOrEqualTo: headerView.heightAnchor
       ),
       newTabButton.trailingAnchor.constraint(
-        equalTo: panelToggleSlot.leadingAnchor, constant: -gap),
+        equalTo: panelToggleSlot.leadingAnchor, constant: dockID == nil ? -gap : 0),
       newTabButton.centerYAnchor.constraint(equalTo: headerView.contentCenterYAnchor),
 
       // The toggle in the corner, the margin its own — `+` measures from it, and the strip and
@@ -1014,7 +1017,6 @@ final class DisplayPaneController: NSViewController {
     for sessionID: SessionID
   ) -> NativePluginPaneViewController? {
     let deviceLogs = bundleURL == NativePluginCatalog.deviceLogsBundle
-    defer { if deviceLogs { ensureBluetoothTab(bundleURL: bundleURL, for: sessionID) } }
     if let existing = revealPeerTab?(sessionID, { tab in
       if case let .nativePlugin(plugin) = tab.body { return plugin.bundleURL == bundleURL && (!deviceLogs || plugin.paneSection != "bluetooth") }
       return false
@@ -1039,6 +1041,9 @@ final class DisplayPaneController: NSViewController {
     activeTabIDBySession[sessionID] = tab.id
     persist(sessionID)
     if sessionID == currentSessionID { render() }
+    // Bluetooth arrives beside Device Logs when the logs are first opened, not on every reveal:
+    // a Bluetooth tab the user closed stays closed while Device Logs is simply brought forward.
+    if deviceLogs { ensureBluetoothTab(bundleURL: bundleURL, for: sessionID) }
     return controller
   }
 

@@ -243,6 +243,11 @@ enum AppCommands {
 
         static let previousTab = "tab.previous"
         static let nextTab = "tab.next"
+        static let splitTabLeft = "tab.split.left"
+        static let splitTabRight = "tab.split.right"
+        static let splitTabAbove = "tab.split.above"
+        static let splitTabBelow = "tab.split.below"
+        static let splitTab = [splitTabLeft, splitTabRight, splitTabAbove, splitTabBelow]
 
         static let navigateBack = "nav.back"
         static let navigateForward = "nav.forward"
@@ -483,6 +488,24 @@ enum AppCommands {
                    defaultShortcut: KeyboardShortcut(key: "[", modifiers: [.command, .shift]), isEditable: true),
         AppCommand(id: ID.nextTab, group: .view, title: "Next Tab",
                    defaultShortcut: KeyboardShortcut(key: "]", modifiers: [.command, .shift]), isEditable: true),
+        // The tab menu's Split rows, reachable from the palette. No default chords: these earn a
+        // key only when someone assigns one on the shortcuts page.
+        AppCommand(id: ID.splitTabLeft, group: .view, title: "Split Tab Left",
+                   detail: "Moves the active tab into a new pane on its left.",
+                   defaultShortcut: nil, isEditable: true, scope: .session,
+                   iconName: "rectangle.lefthalf.inset.filled"),
+        AppCommand(id: ID.splitTabRight, group: .view, title: "Split Tab Right",
+                   detail: "Moves the active tab into a new pane on its right.",
+                   defaultShortcut: nil, isEditable: true, scope: .session,
+                   iconName: "rectangle.righthalf.inset.filled"),
+        AppCommand(id: ID.splitTabAbove, group: .view, title: "Split Tab Above",
+                   detail: "Moves the active tab into a new pane above it.",
+                   defaultShortcut: nil, isEditable: true, scope: .session,
+                   iconName: "rectangle.tophalf.inset.filled"),
+        AppCommand(id: ID.splitTabBelow, group: .view, title: "Split Tab Below",
+                   detail: "Moves the active tab into a new pane below it.",
+                   defaultShortcut: nil, isEditable: true, scope: .session,
+                   iconName: "rectangle.bottomhalf.inset.filled"),
 
         // One command, not two. Element and freeflow are read from the modifiers held while
         // pointing, so the old ⌥⇧⌘I still opens freeflow — it arrives with ⇧ already down.

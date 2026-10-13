@@ -1198,10 +1198,20 @@ and hiding both stream views retires discovery and stops both readers. Reparenti
 main run-loop turn preserves capture; a tab's destruction also clears its visibility membership.
 
 Docking expects two to four groups and caps additional groups at eight (19 flat tree nodes).
-Pointer movement reads bounded geometry and paints one preview; it does not create controllers,
-persist, or reparent content. A stationary header dwell is sampled at 10 Hz only during the drag.
+Pointer movement reads bounded geometry and moves one preview; it does not create controllers,
+persist, or reparent content, and an unchanged landing returns before touching a view. No timer
+runs during a drag: the earlier 10 Hz sampler existed only for a hold-to-split gesture, which was
+removed because a pause could change what a drop did. The preview's two surfaces are recorded
+layer surfaces animated by Core Animation, so a glide between landings redraws nothing.
 Commits rebuild the small split skeleton around retained content controllers and record a coarse
 `workspace-dock.commit` span. Divider persistence occurs on mouse release.
+
+A session switch reparents nothing unless the dock tree's shape changes. Before this, every
+switch — docked or not — removed the whole workspace from the window and added it back, so the
+selected terminal stopped its render loop, released its Metal transient resources and focused
+itself twice. That cost was structural rather than measured; the regression boundary is
+`WorkspaceDockTests.testSwitchingBetweenUndockedSessionsLeavesTheWorkspaceInTheWindow`, which
+counts window moves of the conversation and panel across four switches and requires zero.
 
 The 2026-10-12 docking stress run exercised both visible stream projections with 100,000 rows
 per stream and retained 50,000 each. Paired 1,000-row drains measured 12.4 ms median and 143.6 ms

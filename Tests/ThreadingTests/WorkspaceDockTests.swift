@@ -189,4 +189,246 @@ final class WorkspaceDockTests: HostedStoreTestCase {
     XCTAssertEqual(saved.dockTabs.first?.mode, ExecutionAuditViewController.Mode.browserSplit.rawValue)
     XCTAssertTrue(saved.panelTabs.isEmpty)
   }
+
+  // MARK: - Review fixes
+
+  func testNearestPaneStaysInsideTheAnchorsBranch() {
+    var layout = WorkspaceDockLayout()
+    let whole = UUID(), chat = UUID(), below = UUID(), beside = UUID()
+    XCTAssertNil(layout.nearestPane(to: WorkspaceDockLayout.displayID))
+    layout.insert(whole, beside: nil, edge: .bottom)
+    layout.insert(chat, beside: WorkspaceDockLayout.conversationID, edge: .bottom)
+    XCTAssertNil(layout.nearestPane(to: WorkspaceDockLayout.displayID),
+      "panes under the conversation or across the workspace are not the side panel's neighbours")
+    layout.insert(below, beside: WorkspaceDockLayout.displayID, edge: .bottom)
+    layout.insert(beside, beside: below, edge: .right)
+    XCTAssertTrue(layout.validated())
+    XCTAssertTrue(layout.displayBranchHasPanes)
+    XCTAssertEqual(layout.nearestPane(to: WorkspaceDockLayout.displayID), below,
+      "the leaf touching the panel is the one that grows into its space")
+    XCTAssertEqual(layout.nearestPane(to: below), beside)
+    XCTAssertEqual(layout.nearestPane(to: beside), below)
+  }
+
+  func testLandingIsDecidedByPlaceAndNeverByATabRow() throws {
+    // Conversation on the left, side panel on the right, one docked pane under the panel.
+    let bounds = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    let pane = UUID()
+    let targets: [WorkspaceDockController.Target] = [
+      .init(id: pane, host: .dock(pane), frame: NSRect(x: 800, y: 0, width: 400, height: 300)),
+      .init(id: WorkspaceDockLayout.conversationID, host: nil, frame: NSRect(x: 0, y: 0, width: 800, height: 800)),
+      .init(id: WorkspaceDockLayout.displayID, host: .displayPanel,
+        frame: NSRect(x: 800, y: 300, width: 400, height: 500)),
+    ]
+    func landing(_ point: NSPoint, from source: TabHostID = .drawer, tabs: Int = 2,
+      canAddPane: Bool = true, overTabRow: Bool = false) -> WorkspaceDockController.Landing? {
+      WorkspaceDockController.landing(at: point, in: bounds, targets: targets, sourceID: source,
+        sourceTabCount: tabs, canAddPane: canAddPane, overTabRow: overTabRow)
+    }
+
+    XCTAssertNil(landing(NSPoint(x: 1000, y: 790), overTabRow: true),
+      "the panel's row is a row: it never turns into a split however close to an edge")
+    let whole = try XCTUnwrap(landing(NSPoint(x: 400, y: 5)))
+    XCTAssertNil(whole.targetID)
+    XCTAssertEqual(whole.edge, .bottom)
+
+    let middle = try XCTUnwrap(landing(NSPoint(x: 1000, y: 550)))
+    XCTAssertNil(middle.edge, "the middle of a pane that holds tabs joins it")
+    XCTAssertEqual(middle.targetID, WorkspaceDockLayout.displayID)
+    XCTAssertEqual(middle.frame, targets[2].frame)
+
+    let split = try XCTUnwrap(landing(NSPoint(x: 1000, y: 330)))
+    XCTAssertEqual(split.edge, .bottom)
+    XCTAssertEqual(split.targetID, WorkspaceDockLayout.displayID)
+
+    XCTAssertNil(landing(NSPoint(x: 400, y: 400)), "the conversation holds no tabs to join")
+    XCTAssertNil(landing(NSPoint(x: 1000, y: 550), from: .displayPanel, tabs: 1),
+      "the panel's only tab can neither split nor rejoin the pane it fills")
+    XCTAssertNil(landing(NSPoint(x: 1000, y: 150), from: .dock(pane), tabs: 2),
+      "a pane's own middle is not somewhere to move its tab")
+    XCTAssertEqual(landing(NSPoint(x: 1000, y: 150))?.targetID, pane)
+
+    XCTAssertNil(landing(NSPoint(x: 1000, y: 330), canAddPane: false),
+      "at the pane ceiling, edges offer nothing…")
+    let joinAtCeiling = try XCTUnwrap(landing(NSPoint(x: 1000, y: 550), canAddPane: false),
+      "…but the middle of a pane still joins it")
+    XCTAssertNil(joinAtCeiling.edge)
+    XCTAssertEqual(joinAtCeiling.targetID, WorkspaceDockLayout.displayID)
+  }
+
+  func testSwitchingBetweenUndockedSessionsLeavesTheWorkspaceInTheWindow() throws {
+    let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+    let window = try XCTUnwrap(controller.window)
+    let first = SessionID(), second = SessionID()
+    controller.containerViewController.setCurrentSessionForTesting(first)
+    controller.syncDisplayPane(to: first)
+    let conversationProbe = WindowMoveProbe(), panelProbe = WindowMoveProbe()
+    controller.containerViewController.view.addSubview(conversationProbe)
+    controller.displayPaneController.view.addSubview(panelProbe)
+    let moves = (conversationProbe.moves, panelProbe.moves)
+    for session in [second, first, second, first] {
+      controller.containerViewController.setCurrentSessionForTesting(session)
+      controller.syncDisplayPane(to: session)
+    }
+    XCTAssertEqual(conversationProbe.moves, moves.0,
+      "a session switch with no docked panes must not take the conversation out of the window")
+    XCTAssertEqual(panelProbe.moves, moves.1)
+    XCTAssertTrue(conversationProbe.window === window)
+  }
+
+  func testClosingThePanelsLastTabLetsItsDockedNeighbourTakeItsPlace() throws {
+    let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+    let session = SessionID()
+    controller.containerViewController.setCurrentSessionForTesting(session)
+    controller.syncDisplayPane(to: session)
+    let panel = controller.displayPaneController
+    let kept = contentTab("Kept", session), docked = contentTab("Docked", session)
+    let other = contentTab("Other", session)
+    for tab in [kept, docked, other] { panel.adopt(tab, at: nil, for: session) }
+    controller.setDisplayPaneVisible(true, animated: false)
+    let below = try XCTUnwrap(controller.workspaceDock.createGroup(at: .init(
+      targetID: WorkspaceDockLayout.displayID, edge: .bottom, frame: .zero)))
+    controller.moveTab(docked.id, from: .displayPanel, to: below.hostID)
+    controller.moveTab(other.id, from: .displayPanel, to: below.hostID)
+    XCTAssertTrue(below.activateTab(id: docked.id, for: session))
+
+    XCTAssertTrue(panel.closeTab(id: kept.id, for: session))
+    XCTAssertTrue(controller.workspaceDock.hosts.isEmpty, "the emptied half closes")
+    XCTAssertEqual(panel.tabs(for: session).map(\.id), [docked.id, other.id])
+    XCTAssertTrue(panel.tabs(for: session).first === docked, "the neighbour's live tabs move, not copies")
+    XCTAssertEqual(panel.activeTabID(for: session), docked.id, "and keep the neighbour's selection")
+    XCTAssertFalse(try XCTUnwrap(controller.contentSplitController.splitViewItems.last).isCollapsed)
+    XCTAssertNil(DisplayPaneStore.shared.loadLayout(for: session)?.dockLayout)
+  }
+
+  func testMovingThePanelsOnlyTabIntoItsDockedNeighbourLeavesOnePane() throws {
+    let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+    let session = SessionID()
+    controller.containerViewController.setCurrentSessionForTesting(session)
+    controller.syncDisplayPane(to: session)
+    let panel = controller.displayPaneController
+    let only = contentTab("Only", session), neighbour = contentTab("Neighbour", session)
+    panel.adopt(only, at: nil, for: session)
+    panel.adopt(neighbour, at: nil, for: session)
+    controller.setDisplayPaneVisible(true, animated: false)
+    let below = try XCTUnwrap(controller.workspaceDock.createGroup(at: .init(
+      targetID: WorkspaceDockLayout.displayID, edge: .bottom, frame: .zero)))
+    controller.moveTab(neighbour.id, from: .displayPanel, to: below.hostID)
+
+    controller.moveTab(only.id, from: .displayPanel, to: below.hostID)
+    XCTAssertTrue(controller.workspaceDock.hosts.isEmpty)
+    XCTAssertEqual(panel.tabs(for: session).map(\.id), [neighbour.id, only.id])
+    XCTAssertEqual(panel.activeTabID(for: session), only.id)
+    XCTAssertFalse(try XCTUnwrap(controller.contentSplitController.splitViewItems.last).isCollapsed)
+  }
+
+  func testRestoredPaneWithNothingStoredIsNotShownEmpty() {
+    let session = SessionID(), group = UUID()
+    var layout = WorkspaceDockLayout()
+    layout.insert(group, beside: nil, edge: .bottom)
+    DisplayPaneStore.shared.saveDockLayout(layout, for: session)
+    let base = SidebarSplitViewController()
+    let conversation = NSViewController()
+    conversation.view = NSView()
+    let dock = WorkspaceDockController(base: base, conversation: conversation, display: DisplayPaneController())
+    base.addSplitViewItem(NSSplitViewItem(viewController: dock.conversationBranch))
+    base.addSplitViewItem(NSSplitViewItem(viewController: dock.displayBranch))
+    dock.showSession(session)
+    _ = dock.view
+    XCTAssertTrue(dock.hosts.isEmpty)
+    XCTAssertEqual(dock.layout, WorkspaceDockLayout())
+    XCTAssertNil(DisplayPaneStore.shared.loadLayout(for: session)?.dockLayout)
+  }
+
+  func testSplitMenuNamesWhatItDividesAndEachRowWearsItsHalf() throws {
+    let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+    let session = SessionID()
+    controller.containerViewController.setCurrentSessionForTesting(session)
+    controller.syncDisplayPane(to: session)
+    let panel = controller.displayPaneController
+    let first = contentTab("First", session), second = contentTab("Second", session)
+    panel.adopt(first, at: nil, for: session)
+
+    func splitBand(_ entries: [ThemedMenuEntry]) -> (header: String, rows: [ThemedMenuItem])? {
+      guard let index = entries.firstIndex(where: { if case .header = $0 { return true }; return false }),
+        case let .header(title) = entries[index] else { return nil }
+      let rows = entries[(index + 1)...].compactMap { entry -> ThemedMenuItem? in
+        if case let .item(item) = entry { return item }
+        return nil
+      }
+      return (title, rows)
+    }
+    let lone = try XCTUnwrap(splitBand(panel.tabContextEntries(for: first.id)))
+    XCTAssertEqual(lone.header, L10n.string("Whole workspace"), "a lone tab docks at the workspace edge")
+    XCTAssertEqual(lone.rows.map(\.title), WorkspaceDockLayout.Edge.allCases.map { L10n.string($0.title) })
+    XCTAssertTrue(lone.rows.allSatisfy { $0.image != nil }, "every Split row wears the half it creates")
+
+    panel.adopt(second, at: nil, for: session)
+    XCTAssertEqual(try XCTUnwrap(splitBand(panel.tabContextEntries(for: first.id))).header,
+      L10n.string("Side panel"), "a tab with company splits the pane it is in")
+  }
+
+  func testSplitCommandDividesThePaneTheActiveTabIsIn() throws {
+    let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+    let session = SessionID()
+    controller.containerViewController.setCurrentSessionForTesting(session)
+    controller.syncDisplayPane(to: session)
+    let panel = controller.displayPaneController
+    let first = contentTab("First", session), second = contentTab("Second", session)
+    panel.adopt(first, at: nil, for: session)
+    panel.adopt(second, at: nil, for: session)
+    XCTAssertTrue(panel.activateTab(id: second.id, for: session))
+    controller.setDisplayPaneVisible(true, animated: false)
+
+    XCTAssertTrue(controller.canSplitActiveTab)
+    controller.splitActiveTab(.bottom)
+    let pane = try XCTUnwrap(controller.workspaceDock.hosts.first)
+    XCTAssertEqual(pane.tabs(for: session).map(\.id), [second.id])
+    XCTAssertEqual(panel.tabs(for: session).map(\.id), [first.id])
+    XCTAssertTrue(controller.workspaceDock.layout.displayBranchHasPanes, "the side panel was divided")
+    XCTAssertEqual(controller.workspaceDock.layout.rootID, WorkspaceDockLayout.workspaceID)
+  }
+
+  func testDockedPaneHeaderKeepsNoRoomForTheWindowToggle() {
+    func corner(_ pane: DisplayPaneController) -> CGFloat {
+      pane.view.frame = NSRect(x: 0, y: 0, width: 420, height: 300)
+      pane.view.layoutSubtreeIfNeeded()
+      return pane.panelToggleSlot.frame.width
+    }
+    XCTAssertEqual(corner(DisplayPaneController()), ThemedIconButton.Target.toolbar.size.width)
+    XCTAssertEqual(corner(DisplayPaneController(dockID: UUID(), dockSessionID: SessionID())), 0)
+  }
+
+  func testClosedBluetoothTabStaysClosedWhenDeviceLogsIsRevealedAgain() throws {
+    try XCTSkipIf(NativePluginCatalog.deviceLogsBundle == nil, "Device Logs is not bundled in this build")
+    let panel = DisplayPaneController()
+    let session = SessionID()
+    panel.showSession(session)
+    func bluetooth() -> PaneTab? {
+      panel.tabs(for: session).first { tab in
+        if case let .nativePlugin(plugin) = tab.body { return plugin.paneSection == "bluetooth" }
+        return false
+      }
+    }
+    XCTAssertNotNil(panel.activateDeviceLog(for: session))
+    let opened = try XCTUnwrap(bluetooth(), "first opening brings Bluetooth beside Device Logs")
+    XCTAssertTrue(panel.closeTab(id: opened.id, for: session))
+    XCTAssertNotNil(panel.activateDeviceLog(for: session))
+    XCTAssertNil(bluetooth(), "revealing Device Logs again must not reopen what the user closed")
+    panel.removeSession(session)
+  }
+
+  private func contentTab(_ title: String, _ session: SessionID) -> PaneTab {
+    PaneTab(body: .content(.init(body: .html("<p>\(title)</p>"), title: title, subtitle: "")),
+      owningSessionID: session)
+  }
+}
+
+/// Counts how often a view enters or leaves a window, which is what a reparent costs.
+private final class WindowMoveProbe: NSView {
+  private(set) var moves = 0
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    moves += 1
+  }
 }

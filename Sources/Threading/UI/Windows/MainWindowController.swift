@@ -1447,14 +1447,17 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Adds the panel agents display content in, collapsed until something arrives.
     ///
-    /// Appended last, so it takes divider index 1 and leaves the toolbar's tracking separator
-    /// — which is bound to divider 0, between sidebar and terminal — undisturbed.
+    /// It is the trailing item of `contentSplitController`, beside the conversation inside the
+    /// docking workspace — so the outer split keeps only the sidebar and the workspace, and the
+    /// toolbar's tracking separator stays bound to the divider between those two.
     private func setupDisplayPane() {
         displayPaneController.onInvokePanelCommand = { id in
             (NSApp.delegate as? AppDelegate)?.invokePanelCommand(id)
         }
         displayPaneController.onClose = { [weak self] in
-            self?.setDisplayPaneVisible(false)
+            guard let self else { return }
+            if let sessionID = currentSessionID, absorbDockedPaneIntoEmptyPanel(for: sessionID) { return }
+            setDisplayPaneVisible(false)
         }
         displayPaneController.onShowCurrentTheme = { [weak self] in
             self?.toggleCurrentTheme()
@@ -2030,9 +2033,17 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return
         }
 
-        let displayBranchHasDocks = workspaceDock.layout.nodes
-            .first { $0.id == WorkspaceDockLayout.workspaceID }?.second != WorkspaceDockLayout.displayID
-        guard let sessionID, displayPaneController.hasContent(for: sessionID) || displayBranchHasDocks else {
+        // A panel left empty while this session was elsewhere — its last tab closed in the
+        // background — still yields its half to a docked neighbour. Only when nothing of its own
+        // is stored either, so a tab that could not be rebuilt yet keeps its home.
+        if let sessionID, workspaceDock.layout.displayBranchHasPanes,
+           displayPaneController.tabs(for: sessionID).isEmpty,
+           DisplayPaneStore.shared.loadLayout(for: sessionID)?.panelTabs.isEmpty ?? true {
+            absorbDockedPaneIntoEmptyPanel(for: sessionID)
+        }
+        guard let sessionID,
+              displayPaneController.hasContent(for: sessionID) || workspaceDock.layout.displayBranchHasPanes
+        else {
             setDisplayPaneVisible(
                 false,
                 animated: false,
@@ -3231,6 +3242,15 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     private func configureTabTransfer() {
         configurePeerTabs(displayPaneController)
+        workspaceDock.isOverTabRow = { [weak self] screenPoint in
+            guard let self else { return false }
+            let window = window
+            return dropBandHosts.contains { _, host in
+                (host as? NSViewController)?.view.window === window
+                    && host.isDropBandVisible
+                    && host.dropBandContains(screenPoint: screenPoint)
+            }
+        }
         workspaceDock.configureHost = { [weak self] host in
             guard let self else { return }
             configurePeerTabs(host)
@@ -3305,9 +3325,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
     }
 
-    private var dockPreviewTimer: Timer?
-    private var dockDragSample: (source: TabHostID, tab: UUID, point: NSPoint)?
-
     /// The strip reports its own window's coordinates; every question after this is asked in
     /// screen space, because the drag can now end in another window entirely.
     private func screenPoint(_ windowPoint: NSPoint, in view: NSView) -> NSPoint? {
@@ -3341,41 +3358,43 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             + detachedBrowserWindows.values.map { (.detachedWindow($0.windowID), $0.host) }
     }
 
-    /// Keep the passive landing preview in step with the hand, including a stationary dwell.
+    /// Keeps the destination row's wash and the docking preview in step with the hand. Every
+    /// answer is a function of where the pointer is, never of how long it has been there, so a
+    /// pause to aim cannot change what the drop does.
     private func trackDrag(
         from sourceID: TabHostID,
         tabID: UUID,
         at screenPoint: NSPoint
     ) -> DragLanding? {
-        dockDragSample = (sourceID, tabID, screenPoint)
-        if dockPreviewTimer == nil {
-            let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] timer in
-                MainActor.assumeIsolated {
-                    guard let self, let sample = self.dockDragSample else { timer.invalidate(); return }
-                    _ = self.trackDrag(from: sample.source, tabID: sample.tab, at: sample.point)
-                }
-            }
-            dockPreviewTimer = timer
-            RunLoop.main.add(timer, forMode: .common)
-        }
         let landing = dragDestination(from: sourceID, tabID: tabID, at: screenPoint)
         highlightDropTarget(landing?.hostID, at: screenPoint)
-        if case let .split(target) = landing { workspaceDock.showPreview(target) }
-        else { workspaceDock.showPreview(nil) }
+        workspaceDock.showPreview(landing?.dockLanding)
         return landing
     }
 
     /// Where a travelling chip would land. A tear-off is not a host, which is the whole reason
     /// this is not simply a `TabHostID?`.
     private enum DragLanding {
+        /// A tab row, at the slot under the pointer.
         case host(TabHostID)
+        /// Beside a pane, or across the whole workspace, in a new docked pane.
         case split(WorkspaceDockController.Landing)
+        /// The middle of a pane that holds tabs: appended to its row.
+        case join(TabHostID, WorkspaceDockController.Landing)
         /// Outside every window: let go and the tab gets one of its own.
         case newWindow
 
         var hostID: TabHostID? {
             if case let .host(id) = self { return id }
             return nil
+        }
+
+        /// The space the docking preview shades, for the two landings that take a pane's area.
+        var dockLanding: WorkspaceDockController.Landing? {
+            switch self {
+            case let .split(landing), let .join(_, landing): return landing
+            case .host, .newWindow: return nil
+            }
         }
     }
 
@@ -3393,10 +3412,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Finish every gesture through one route, including Escape and a drop outside any target.
     private func dragDidSettle() {
-        dockPreviewTimer?.invalidate()
-        dockPreviewTimer = nil
-        dockDragSample = nil
-        workspaceDock.clearHover()
         workspaceDock.showPreview(nil)
         highlightDropTarget(nil)
     }
@@ -3411,18 +3426,27 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     ) -> DragLanding? {
         guard let sessionID = tabSession(of: tabID, in: sourceID) else { return nil }
 
-        if isOverOwnBand(sourceID, screenPoint) {
-            // Ordinary movement reorders. Holding over a dock group's own header can also
-            // separate one of its tabs, using the same dwell as an incoming tab.
-            guard case let .dock(id) = sourceID,
-                  let source = tabTransfer.resolve(sourceID) else {
-                workspaceDock.clearHover()
-                return nil
-            }
-            guard let target = workspaceDock.landing(at: screenPoint, sourceID: sourceID,
-                sourceTabCount: source.tabs(for: sessionID).count), target.targetID == id
+        // Over its own row the chip reorders, and only reorders.
+        if isOverOwnBand(sourceID, screenPoint) { return nil }
+
+        // A tab row is always a row: it takes the tab at the slot under the pointer, or nothing.
+        // Never a split laid over the row the hand is aiming at — checked before any docking
+        // landing, so the side panel's row stays reachable even though its top edge is also
+        // the top of a pane.
+        for (hostID, host) in dropBandHosts where hostID != sourceID {
+            guard host.isDropBandVisible,
+                  isWindowUsableForDrop(host),
+                  host.dropBandContains(screenPoint: screenPoint)
+            else { continue }
+            // The drawer is furniture under the session on screen, so a tab belonging to another
+            // one cannot land there: `moveTab` would adopt it into its own session's drawer while
+            // `openShellDrawer` opened the visible session's, and the tab would be in no drawer
+            // anyone can see. The chip menu already refuses this; the drag has to agree.
+            if hostID == .drawer, sessionID != currentSessionID { return nil }
+            if case .dock = hostID, sessionID != currentSessionID { return nil }
+            guard tabTransfer.canMove(tabID: tabID, from: sourceID, to: hostID, sessionID: sessionID)
             else { return nil }
-            return .split(target)
+            return .host(hostID)
         }
 
         if sessionID == currentSessionID,
@@ -3430,24 +3454,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
            source.tabs(for: sessionID).contains(where: { $0.id == tabID }),
            let target = workspaceDock.landing(at: screenPoint, sourceID: sourceID,
                sourceTabCount: source.tabs(for: sessionID).count) {
-            return .split(target)
-        }
-
-        for (hostID, host) in dropBandHosts where hostID != sourceID {
-            // The drawer is furniture under the session on screen, so a tab belonging to another
-            // one cannot land there: `moveTab` would adopt it into its own session's drawer while
-            // `openShellDrawer` opened the visible session's, and the tab would be in no drawer
-            // anyone can see. The chip menu already refuses this; the drag has to agree.
-            if hostID == .drawer, sessionID != currentSessionID { continue }
-            if case .dock = hostID, sessionID != currentSessionID { continue }
-            guard host.isDropBandVisible,
-                  isWindowUsableForDrop(host),
-                  host.dropBandContains(screenPoint: screenPoint),
-                  tabTransfer.canMove(
-                      tabID: tabID, from: sourceID, to: hostID, sessionID: sessionID
-                  )
-            else { continue }
-            return .host(hostID)
+            guard target.edge == nil else { return .split(target) }
+            guard let hostID = workspaceDock.hostID(joining: target),
+                  tabTransfer.canMove(tabID: tabID, from: sourceID, to: hostID, sessionID: sessionID)
+            else { return nil }
+            return .join(hostID, target)
         }
 
         return wouldTearOff(sourceID, tabID: tabID, at: screenPoint) ? .newWindow : nil
@@ -3488,6 +3499,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard let destination = workspaceDock.createGroup(at: target) else { return }
             moveTab(tabID, from: sourceID, to: destination.hostID)
             workspaceDock.pruneEmptyGroups()
+        case let .join(destinationID, _):
+            moveTab(tabID, from: sourceID, to: destinationID)
+            workspaceDock.pruneEmptyGroups()
         case let .host(destinationID):
             // The slot the pointer names, by the destination strip's own midpoint rule — a drop
             // lands where it was aimed, not at the end of the row.
@@ -3502,6 +3516,85 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             // pointer already said where this belongs.
             detachTabIntoWindow(tabID, from: sourceID, droppedAt: screenPoint)
         }
+    }
+
+    /// The side panel never stands empty beside its own docked panes. When its last tab leaves,
+    /// the nearest pane docked in its branch moves up into it — the empty half closes and its
+    /// neighbour fills the space, every tab keeping its live controller and the neighbour's
+    /// selection. Answers whether anything moved, so a caller with nothing to absorb can close
+    /// the panel instead.
+    @discardableResult
+    private func absorbDockedPaneIntoEmptyPanel(for sessionID: SessionID) -> Bool {
+        guard sessionID == currentSessionID,
+              displayPaneController.tabs(for: sessionID).isEmpty,
+              let neighbour = workspaceDock.nearestHost(to: WorkspaceDockLayout.displayID)
+        else { return false }
+        let selected = neighbour.activeTabID(for: sessionID)
+        for tab in neighbour.tabs(for: sessionID) {
+            tabTransfer.move(
+                tabID: tab.id, from: neighbour.hostID, to: .displayPanel, sessionID: sessionID
+            )
+        }
+        if let selected { _ = displayPaneController.activateTab(id: selected, for: sessionID) }
+        workspaceDock.pruneEmptyGroups()
+        displayPaneController.showSessionTabs(sessionID)
+        return true
+    }
+
+    /// What a Split command divides for this tab: the pane holding it when that pane keeps other
+    /// tabs, otherwise the whole workspace — a lone tab has nothing to split away from, and
+    /// splitting its own pane would leave that pane empty. nil when no split can be made here.
+    private func splitScope(
+        of tabID: UUID,
+        in sourceID: TabHostID,
+        sessionID: SessionID
+    ) -> (target: UUID?, title: String)? {
+        guard sessionID == currentSessionID, workspaceDock.canAddPane,
+              let tabs = tabTransfer.resolve(sourceID)?.tabs(for: sessionID),
+              tabs.contains(where: { $0.id == tabID })
+        else { return nil }
+        let keepsOthers = tabs.count > 1
+        switch sourceID {
+        case let .dock(id) where keepsOthers:
+            return (id, L10n.string("This pane"))
+        case .displayPanel where keepsOthers:
+            return (WorkspaceDockLayout.displayID, L10n.string("Side panel"))
+        default:
+            return (nil, L10n.string("Whole workspace"))
+        }
+    }
+
+    /// The one split operation behind the tab menu and the Split Tab commands.
+    private func splitTab(_ tabID: UUID, from sourceID: TabHostID, edge: WorkspaceDockLayout.Edge) {
+        guard let sessionID = tabSession(of: tabID, in: sourceID),
+              let scope = splitScope(of: tabID, in: sourceID, sessionID: sessionID),
+              let destination = workspaceDock.createGroup(
+                  at: .init(targetID: scope.target, edge: edge, frame: .zero)
+              )
+        else {
+            SystemAlert.refuse()
+            return
+        }
+        moveTab(tabID, from: sourceID, to: destination.hostID)
+        workspaceDock.pruneEmptyGroups()
+    }
+
+    /// View ▸ Split Tab: the focused strip's active tab, else the side panel's — the same host
+    /// the tab traversal commands act on.
+    func splitActiveTab(_ edge: WorkspaceDockLayout.Edge) {
+        guard let host = activeTabHost(), let tabID = host.activeTabID(for: currentSessionID) else {
+            SystemAlert.refuse()
+            return
+        }
+        splitTab(tabID, from: host.hostID, edge: edge)
+    }
+
+    var canSplitActiveTab: Bool {
+        guard let sessionID = currentSessionID,
+              let host = activeTabHost(),
+              let tabID = host.activeTabID(for: sessionID)
+        else { return false }
+        return splitScope(of: tabID, in: host.hostID, sessionID: sessionID) != nil
     }
 
     /// The "Move to …" items for one tab — offered only where the destination would say yes,
@@ -3554,20 +3647,17 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 }
             )))
         }
-        if sessionID == currentSessionID, workspaceDock.layout.panes.count < WorkspaceDockLayout.maximumPanes {
+        // The split band names what it divides, so the four rows need not repeat it — and each
+        // row wears the half it creates, the way the move rows wear their destination's glyph.
+        if let scope = splitScope(of: tabID, in: sourceID, sessionID: sessionID) {
+            if !entries.isEmpty { entries.append(.separator) }
+            entries.append(.header(scope.title))
             for edge in WorkspaceDockLayout.Edge.allCases {
-                entries.append(.item(ThemedMenuItem(title: L10n.string(edge.title), onChoose: { [weak self] in
-                    guard let self else { return }
-                    let target: UUID?
-                    if case let .dock(id) = sourceID,
-                       (tabTransfer.resolve(sourceID)?.tabs(for: sessionID).count ?? 0) > 1 {
-                        target = id
-                    } else { target = nil }
-                    let landing = WorkspaceDockController.Landing(targetID: target, edge: edge, frame: .zero)
-                    guard let destination = workspaceDock.createGroup(at: landing) else { return }
-                    moveTab(tabID, from: sourceID, to: destination.hostID)
-                    workspaceDock.pruneEmptyGroups()
-                })))
+                entries.append(.item(ThemedMenuItem(
+                    title: L10n.string(edge.title),
+                    image: ThemedMenuIcon.symbol(edge.symbolName),
+                    onChoose: { [weak self] in self?.splitTab(tabID, from: sourceID, edge: edge) }
+                )))
             }
         }
         return entries
@@ -3634,10 +3724,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         if sourceID == .drawer, containerViewController.drawerHostController.tabs(for: sessionID).isEmpty {
             containerViewController.collapseShellDrawer()
         }
-        let displayBranchHasDocks = workspaceDock.layout.nodes
-            .first { $0.id == WorkspaceDockLayout.workspaceID }?.second != WorkspaceDockLayout.displayID
         if sourceID == .displayPanel, displayPaneController.tabs(for: sessionID).isEmpty,
-           !displayBranchHasDocks {
+           !absorbDockedPaneIntoEmptyPanel(for: sessionID) {
             setDisplayPaneVisible(false)
         }
 

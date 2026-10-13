@@ -29,7 +29,7 @@ final class WorkspaceDockInteractionTests: HostedStoreTestCase {
     XCTAssertFalse(try XCTUnwrap(findBar(in: browser.view)).isHiddenOrHasHiddenAncestor)
   }
 
-  func testMovingLastPanelTabBelowPanelKeepsDestinationVisible() throws {
+  func testMovingLastPanelTabBelowPanelKeepsItVisibleInOnePane() throws {
     let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
     let window = try XCTUnwrap(controller.window)
     defer { window.orderOut(nil) }
@@ -44,9 +44,11 @@ final class WorkspaceDockInteractionTests: HostedStoreTestCase {
       targetID: WorkspaceDockLayout.displayID, edge: .bottom, frame: .zero)))
     controller.moveTab(onlyTab.id, from: .displayPanel, to: destination.hostID)
     window.contentView?.layoutSubtreeIfNeeded()
+    // The panel would stand empty above its only tab, so the pane below folds back into it.
     XCTAssertFalse(try XCTUnwrap(controller.contentSplitController.splitViewItems.last).isCollapsed)
-    XCTAssertFalse(destination.view.isHiddenOrHasHiddenAncestor)
-    XCTAssertTrue(destination.tabs(for: session).first === onlyTab)
+    XCTAssertTrue(controller.workspaceDock.hosts.isEmpty)
+    XCTAssertTrue(controller.displayPaneController.tabs(for: session).first === onlyTab)
+    XCTAssertFalse(controller.displayPaneController.view.isHiddenOrHasHiddenAncestor)
     let other = SessionID()
     controller.containerViewController.setCurrentSessionForTesting(other)
     controller.syncDisplayPane(to: other)
@@ -54,7 +56,7 @@ final class WorkspaceDockInteractionTests: HostedStoreTestCase {
     controller.syncDisplayPane(to: session)
     window.contentView?.layoutSubtreeIfNeeded()
     XCTAssertFalse(try XCTUnwrap(controller.contentSplitController.splitViewItems.last).isCollapsed)
-    XCTAssertFalse(destination.view.isHiddenOrHasHiddenAncestor)
+    XCTAssertTrue(controller.displayPaneController.tabs(for: session).first === onlyTab)
   }
 
   func testWindowDragShowsScopesCancelsAndCommitsNestedBottomSplit() throws {
@@ -97,6 +99,8 @@ final class WorkspaceDockInteractionTests: HostedStoreTestCase {
       XCTAssertEqual(landing.targetID, expected)
       XCTAssertEqual(landing.edge, .bottom)
     }
+    XCTAssertNil(dock.landing(at: window.convertPoint(toScreen: sideBottom), sourceID: .displayPanel,
+      sourceTabCount: 1), "the panel's only tab cannot split the panel it would leave empty")
 
     func strip(_ view: NSView) -> ThemedTabStripView? {
       if let strip = view as? ThemedTabStripView { return strip }
@@ -127,14 +131,34 @@ final class WorkspaceDockInteractionTests: HostedStoreTestCase {
     XCTAssertTrue(left.tabs(for: session).first === third)
     XCTAssertFalse(panel.tabs(for: session).contains { $0.id == third.id })
     let leftFrame = dock.view.convert(left.view.bounds, from: left.view)
-    let headerPoint = window.convertPoint(toScreen: point(dock.view,
-      NSPoint(x: leftFrame.minX + leftFrame.width * 0.7, y: leftFrame.maxY - 14)))
-    XCTAssertNil(dock.landing(at: headerPoint, sourceID: .displayPanel, sourceTabCount: 2, now: 100))
-    let held = try XCTUnwrap(dock.landing(at: headerPoint, sourceID: .displayPanel,
-      sourceTabCount: 2, now: 100.5))
-    XCTAssertEqual(held.targetID, left.dockID)
-    XCTAssertEqual(held.edge, .right)
-    dock.clearHover()
+    let headerPoint = point(dock.view, NSPoint(x: leftFrame.minX + leftFrame.width * 0.7, y: leftFrame.maxY - 14))
+    XCTAssertNil(dock.landing(at: window.convertPoint(toScreen: headerPoint), sourceID: .displayPanel,
+      sourceTabCount: 3), "a tab row is never a split zone, however long the hand rests there")
+
+    // The middle of a pane joins it: no new pane, the tab appended to its row.
+    let leftCentre = point(dock.view, NSPoint(x: leftFrame.midX, y: leftFrame.midY))
+    let joining = try XCTUnwrap(dock.landing(at: window.convertPoint(toScreen: leftCentre),
+      sourceID: .displayPanel, sourceTabCount: 2))
+    XCTAssertNil(joining.edge)
+    XCTAssertEqual(joining.targetID, left.dockID)
+    XCTAssertTrue(panel.dragOutDestination?(first.id, leftCentre) ?? false)
+    panel.performDragOut?(first.id, leftCentre)
+    panel.dragOutEnded?(first.id)
+    XCTAssertEqual(dock.hosts.count, 1)
+    XCTAssertEqual(left.tabs(for: session).map(\.id), [third.id, first.id])
+
+    // The side panel's own row takes a tab back at its slot — the row wins over the split its
+    // top edge would otherwise offer.
+    let panelStrip = try XCTUnwrap(strip(panel.view))
+    let panelRow = point(panelStrip, NSPoint(x: panelStrip.bounds.midX, y: panelStrip.bounds.midY))
+    XCTAssertTrue(left.dragOutDestination?(first.id, panelRow) ?? false)
+    left.performDragOut?(first.id, panelRow)
+    left.dragOutEnded?(first.id)
+    window.contentView?.layoutSubtreeIfNeeded()
+    XCTAssertEqual(dock.hosts.count, 1, "joining a row creates no pane")
+    XCTAssertTrue(panel.tabs(for: session).contains { $0.id == first.id })
+    XCTAssertEqual(left.tabs(for: session).map(\.id), [third.id])
+
     let innerRight = point(dock.view, NSPoint(x: leftFrame.maxX - 55, y: leftFrame.midY))
     XCTAssertTrue(panel.dragOutDestination?(second.id, innerRight) ?? false)
     panel.performDragOut?(second.id, innerRight)

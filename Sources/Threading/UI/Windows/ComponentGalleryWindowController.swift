@@ -4072,7 +4072,7 @@ final class ComponentGalleryViewController: NSViewController {
                 ),
                 story(
                     "WorkspaceDockPreview",
-                    "Choose a scope to preview a bottom split across the workspace, conversation, or side panel. The preview leaves pointer events with the content beneath it.",
+                    "Choose a scope to preview a bottom split across the workspace, conversation, or side panel. The region glides between scopes and leaves pointer events with the content beneath it.",
                     makeWorkspaceDockPreviewSample()
                 ),
                 story(
@@ -5681,8 +5681,7 @@ final class ComponentGalleryViewController: NSViewController {
         let select: (Int) -> Void = { [weak chooser, weak preview] index in
             selected = index
             chooser?.configure(symbolName: nil, title: scopes[index])
-            preview?.landing = landings[index]
-            preview?.title = L10n.string("Split Below") + " · " + scopes[index]
+            preview?.present(landings[index], title: L10n.string("Split Below") + " · " + scopes[index])
         }
         chooser.itemsProvider = {
             scopes.enumerated().map { index, title in

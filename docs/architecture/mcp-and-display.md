@@ -1878,20 +1878,58 @@ resolver. A background session's activation updates its own selection without re
 the user's current workspace.
 
 The outer 22 points target the complete workspace. Farther inside, the nearest edge targets the
-conversation, side panel, or existing dock group. Preview geometry is calculated from those same
-views and the same split fraction used on commit. Dropping in another group's strip joins it;
-a 400 ms dwell in the middle of that strip offers a left/right split. The window polls the last
-drag sample at 10 Hz while the hand is stationary, and ends that timer on drop, cancellation,
-or window closure. Escape clears the preview without creating a pane or changing storage.
+conversation, side panel, or existing dock group; the middle of the side panel or of a dock
+group joins it, appending the tab to its row. Preview geometry is calculated from those same
+views and the same split shares (`WorkspaceDockLayout.workspaceShare`/`paneShare`) used on
+commit. `WorkspaceDockController.landing(at:in:targets:…)` is the pure decision, tested without
+a window.
 
-The additional groups reuse `DisplayPaneController`, scoped by `.dock(UUID)`. Eight additional
-groups is the ceiling. Hover reads only the visible, bounded tree; group construction and
-persistence happen on commit, and divider fractions are persisted on release. Session switches
-retain controllers but detach inactive views. Closing a group's last tab collapses its split;
-removing a session tears down its dock hosts as well as its original panel and drawer.
+**A tab row is always a row.** `dragDestination` asks every visible strip before it asks for a
+docking landing, and `isOverTabRow` makes the dock refuse a landing under any strip in the
+window. The first version asked for a split first, and the side panel's strip — which is also
+the top of a pane — answered "Split Above" everywhere, so no drag could join the panel at all.
+It also offered a left/right split after a 400 ms hold over a group's strip, sampled by a 10 Hz
+timer; a pause to aim while reordering turned the drop into a split, with the strip's own
+reorder marker still showing. Every landing is now a function of position alone and no timer
+runs during a drag. Escape clears the preview without creating a pane or changing storage.
+
+A lone tab can neither split nor rejoin the pane it fills, the side panel included, so no
+landing leaves a pane empty beside its result. The side panel itself never stands empty beside
+its own docked panes: when its last tab closes or moves away, `absorbDockedPaneIntoEmptyPanel`
+moves the nearest pane of its branch (`WorkspaceDockLayout.nearestPane`) into it, controllers
+and selection intact, and the branch folds back. Collapsing the branch would have hidden the
+docked panes with it; keeping the empty panel wasted half of it and stranded the panel toggle in
+a pane with nothing to show. A panel left empty while its session was elsewhere is normalized
+the same way on the next visit, unless stored panel tabs could not be rebuilt yet.
+
+The tab menu and View ▸ Split Tab (`tab.split.*`, palette-reachable, no default chords) share
+`splitTab`: a tab sharing its pane splits that pane; a lone tab splits the whole workspace. The
+menu's header names which, and each row wears the half it creates.
+
+The additional groups reuse `DisplayPaneController`, scoped by `.dock(UUID)`; a docked group's
+header keeps no slot for the window's panel toggle, which only the side panel holds. Eight
+additional groups is the ceiling. Hover reads only the visible, bounded tree; group construction
+and persistence happen on commit, and divider fractions are persisted on release.
+
+**A session switch installs nothing when the tree's shape is unchanged.** `installTree` compares
+the layout's skeleton — nodes and axes, not fractions — with what is installed, and a switch
+between two undocked sessions returns at once. The first version rebuilt on every switch and
+took `base` out of the window each time, so the terminal released and reallocated its Metal
+resources and `viewDidAppear` refocused it twice per selection. When the shape does change, only
+controllers whose parent changes move: a branch already hosting its content is left alone, and
+a previous root that is now nested is not torn down. `WindowMoveProbe` in `WorkspaceDockTests`
+guards the undocked case. Session switches retain controllers but detach inactive panes.
+
+Closing a group's last tab collapses its split, for a background session as well as the one on
+screen. A group restored with no tabs and none stored is removed rather than shown as an empty
+frame; one whose stored tabs could not be rebuilt yet keeps its place. Removing a session tears
+down its dock hosts as well as its original panel and drawer.
 
 The customization gate is deliberately host-only for docking topology, targets, tab movement,
 selection, capture lifetime and persistence. Existing tab-strip extension decoration and the
 shared theme continue to own their published presentation surfaces. The passive landing
-preview lives in `UI/Design/WorkspaceDockPreview.swift`, uses semantic ink and typography, and
-never intercepts the pointer.
+preview lives in `UI/Design/WorkspaceDockPreview.swift`: the shared `Design.Surface.dropTarget`
+wash with an accent edge and a `floating` caption, both through `applySurface` so theme,
+appearance and Increase Contrast changes re-resolve them; it glides between landings at
+`Design.Motion.quick` and never intercepts the pointer. Strip drops paint the same drop role,
+so a row and a pane say "this is where it lands" in one voice.

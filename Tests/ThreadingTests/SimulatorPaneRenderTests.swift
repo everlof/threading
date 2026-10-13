@@ -467,6 +467,9 @@ final class SimulatorPaneRenderTests: XCTestCase {
         try FileManager.default.createDirectory(at: Render.directory, withIntermediateDirectories: true)
         let previous = AppThemePalette.current
         defer { AppThemePalette.set(previous) }
+        // The preview fades between landings; capture each one where it lands.
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer { Design.Motion.reduceMotionOverrideForTesting = nil }
         for (name, theme, appearance) in [
             ("system-dark", AppTheme.system, NSAppearance.Name.darkAqua),
             ("swiss", AppThemeStyles.swissMinimalist, NSAppearance.Name.aqua),
@@ -505,9 +508,15 @@ final class SimulatorPaneRenderTests: XCTestCase {
             ] {
                 let bounds = dock.view.convert(surface.bounds, from: surface)
                 dock.showPreview(.init(targetID: target, edge: .bottom,
-                    frame: WorkspaceDockController.previewFrame(bounds, edge: .bottom, share: target == nil ? 0.3 : 0.5)))
+                    frame: WorkspaceDockController.previewFrame(bounds, edge: .bottom, share: target == nil
+                        ? WorkspaceDockLayout.workspaceShare : WorkspaceDockLayout.paneShare)))
                 try capture("preview-" + scope)
             }
+            // The middle of the side panel joins it: the whole pane is shaded and named.
+            dock.showPreview(.init(targetID: WorkspaceDockLayout.displayID, edge: nil,
+                frame: dock.view.convert(dock.display.view.bounds, from: dock.display.view)))
+            try capture("preview-join")
+            dock.showPreview(nil)
             let left = try XCTUnwrap(dock.createGroup(at: .init(targetID: nil, edge: .bottom, frame: .zero)))
             let detachedBluetooth = try XCTUnwrap(fixture.panel.detachTab(id: bluetooth.id, for: session))
             left.adopt(detachedBluetooth, at: nil, for: session)

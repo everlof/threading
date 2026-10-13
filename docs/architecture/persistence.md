@@ -1203,5 +1203,7 @@ untouched older layouts keep their existing required version.
 
 Every panel, drawer and detached-window writer preserves dock tabs and layout metadata.
 `saveDockTabs` replaces one group's slice; `saveDockLayout` preserves that slice's selection
-while updating geometry. Unknown log stream identifiers are refused instead of being restored
+while updating geometry. On restore, a group with neither live nor stored tabs is removed from
+the layout; a group whose stored tabs could not be rebuilt yet keeps both its node and its
+slice, so nothing is written away before an extension that owns a tab has loaded. Unknown log stream identifiers are refused instead of being restored
 as regular logs. The existing unreadable-document quarantine applies to these writes too.

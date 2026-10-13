@@ -512,9 +512,9 @@
       "status": "implemented",
       "priority": "important",
       "title": "Workspace docking",
-      "states": ["Full-width bottom row", "Nested left/right split", "Whole-workspace preview", "Conversation-only preview", "Side-panel-only preview"],
+      "states": ["Full-width bottom row", "Nested left/right split", "Whole-workspace preview", "Conversation-only preview", "Side-panel-only preview", "Join-pane preview"],
       "matrix": { "themes": ["System", "Swiss Minimalist"], "appearances": ["Dark", "Light"], "sizes": ["1280 × 760"] },
-      "description": "Shipping dock tree and window chrome: Simulator beside the conversation, Bluetooth and Device Logs in a full-width bottom row, plus whole-workspace, conversation-only and side-panel-only previews.",
+      "description": "Shipping dock tree and window chrome: Simulator beside the conversation, Bluetooth and Device Logs in a full-width bottom row, plus whole-workspace, conversation-only and side-panel-only split previews and the join preview over the side panel's middle.",
       "source": {
         "path": "Tests/ThreadingTests/SimulatorPaneRenderTests.swift",
         "test": "ThreadingTests/SimulatorPaneRenderTests/testRendersNestedDockingAndScopedPreviewsInProductShell"

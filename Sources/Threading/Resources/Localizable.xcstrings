@@ -13615,13 +13615,13 @@
         }
       }
     },
-    "Choose a scope to preview a bottom split across the workspace, conversation, or side panel. The preview leaves pointer events with the content beneath it." : {
+    "Choose a scope to preview a bottom split across the workspace, conversation, or side panel. The region glides between scopes and leaves pointer events with the content beneath it." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Välj ett område för att förhandsvisa en nedre delning under hela arbetsytan, konversationen eller sidopanelen. Förhandsvisningen låter pekarhändelser nå innehållet under den."
+            "value" : "Välj ett område för att förhandsvisa en nedre delning under hela arbetsytan, konversationen eller sidopanelen. Området glider mellan områdena och låter pekarhändelser nå innehållet under det."
           }
         }
       }
@@ -33335,6 +33335,17 @@
         }
       }
     },
+    "Move Here" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flytta hit"
+          }
+        }
+      }
+    },
     "Move Left" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33540,6 +33551,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Flyttade ”%@” till %@"
+          }
+        }
+      }
+    },
+    "Moves the active tab into a new pane above it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flyttar den aktiva fliken till en ny panel ovanför den."
+          }
+        }
+      }
+    },
+    "Moves the active tab into a new pane below it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flyttar den aktiva fliken till en ny panel nedanför den."
+          }
+        }
+      }
+    },
+    "Moves the active tab into a new pane on its left." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flyttar den aktiva fliken till en ny panel till vänster om den."
+          }
+        }
+      }
+    },
+    "Moves the active tab into a new pane on its right." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flyttar den aktiva fliken till en ny panel till höger om den."
           }
         }
       }
@@ -53257,6 +53312,61 @@
         }
       }
     },
+    "Split Tab" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela flik"
+          }
+        }
+      }
+    },
+    "Split Tab Above" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela flik ovanför"
+          }
+        }
+      }
+    },
+    "Split Tab Below" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela flik nedanför"
+          }
+        }
+      }
+    },
+    "Split Tab Left" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela flik till vänster"
+          }
+        }
+      }
+    },
+    "Split Tab Right" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela flik till höger"
+          }
+        }
+      }
+    },
     "Split the current work into small reviewable PRs" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -61797,6 +61907,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det finns ingen flik att stänga."
+          }
+        }
+      }
+    },
+    "There is no tab to split here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det finns ingen flik att dela här."
           }
         }
       }

@@ -3982,21 +3982,28 @@ edge in and the panel is squeezed with everything else. Its own width is still y
 divider to set it, and it opens there next time.
 
 Drag a tab out of its row to dock it elsewhere in the workspace. A shaded preview shows the
-space it will occupy. The outermost edge creates a row or column across the whole workspace;
-move slightly inward over the conversation or right-hand panel to split only that side. The
-preview names the scope: **Whole workspace**, **Conversation**, **Side panel**, or **This pane**.
-The project/chat list stays outside this area.
+space it will occupy and glides as you move between places. The outermost edge creates a row or
+column across the whole workspace; move slightly inward over the conversation or right-hand
+panel to split only that side. The preview names what the drop does and where: **Split Below ·
+Whole workspace**, **Split Right · Side panel**, **Move Here · This pane**. The project/chat
+list stays outside this area.
 
-Each docked pane has its own tab row and draggable dividers. Drop near a pane's left or right
-edge to divide it again. Drop onto its tab row to join that group; holding over the row briefly
-offers a left/right split instead. Press Escape to cancel. The tab's secondary-click menu also
-provides **Split Left**, **Split Right**, **Split Above**, and **Split Below**.
+Each docked pane has its own tab row and draggable dividers. Drop near any edge of a pane to
+divide it again, or over the middle of a pane to add the tab to it. A tab row always takes the
+tab at the slot you point at — the side panel's, the shell drawer's or a docked pane's — so
+pausing to aim never turns a drop into a split. Press Escape to cancel. The tab's
+secondary-click menu also provides **Split Left**, **Split Right**, **Split Above**, and **Split
+Below** under a heading that names what they divide: the tab's own pane when it shares that pane
+with other tabs, otherwise the whole workspace. The same four are in **View ▸ Split Tab** and
+the command palette, acting on the active tab, and can be given shortcuts in Settings.
 
 For example, keep Simulator in the right-hand panel, drag Bluetooth to the workspace's bottom
 edge, then drag Device Logs to the right half of the new bottom pane. Both logs remain visible
 beneath the conversation and Simulator. Moving a live tab preserves its controller, page or
 capture history. The layout and tab groups are saved per chat; closing the last tab in a docked
-pane removes that split. Up to eight additional docked groups can be open in one workspace.
+pane removes that split. When the side panel's last tab closes or moves away while panes are
+docked beneath or beside it, the nearest of those panes moves up into the side panel instead of
+leaving an empty half. Up to eight additional docked groups can be open in one workspace.
 Shell, browser and Device Logs tabs can also move to the existing shell drawer using the tab menu.
 
 ### Physical iPhone in the panel
@@ -4075,7 +4082,8 @@ to `idevicesyslog`. That fallback remains live but has only the flattened metada
 supplies. Hiding the pane stops either reader; showing it resumes the selected source without
 clearing the rows already on screen.
 
-Device Logs opens separate **Device Logs** and **Bluetooth** workspace tabs. Device Logs keeps
+Device Logs opens separate **Device Logs** and **Bluetooth** workspace tabs. Close Bluetooth
+if you do not need it; bringing Device Logs forward again does not reopen it. Device Logs keeps
 the system/app source selector; Bluetooth lists paired iPhones and their USB or Wi-Fi capture source.
 Dock the two tabs side by side to watch both streams. Switching or moving tabs keeps each reader,
 filter, scroll position and history; both readers stop when neither log tab is visible.

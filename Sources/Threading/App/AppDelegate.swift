@@ -2824,6 +2824,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(commandItem(AppCommands.ID.previousTab, action: #selector(selectPreviousTab)))
         menu.addItem(commandItem(AppCommands.ID.nextTab, action: #selector(selectNextTab)))
 
+        // One submenu for the four directions: the same rows the tab menu offers, here so a chord
+        // assigned to one of them has a menu item to dispatch through.
+        let splitItem = NSMenuItem()
+        splitItem.title = L10n.string("Split Tab")
+        let splitMenu = NSMenu(title: L10n.string("Split Tab"))
+        for id in AppCommands.ID.splitTab {
+            splitMenu.addItem(commandItem(id, action: #selector(performHostMenuCommand(_:))))
+        }
+        splitItem.submenu = splitMenu
+        menu.addItem(splitItem)
+
         // ⌘1–⌘9 ride hidden items: AppKit dispatches key equivalents through menu items, and
         // nine visible rows would say little a strip does not already show. Same carrier trick
         // the extension commands use.
@@ -3414,6 +3425,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             guard mainWindowController?.canSelectAdjacentTab == true else {
                 return .unavailable(L10n.string("There is no other tab to select."))
             }
+        case let splitID where AppCommands.ID.splitTab.contains(splitID):
+            guard mainWindowController?.canSplitActiveTab == true else {
+                return .unavailable(L10n.string("There is no tab to split here."))
+            }
         case AppCommands.ID.checkForUpdates:
             guard AppUpdater.shared.canCheckForUpdates else {
                 return .unavailable(L10n.string("An update check is already running."))
@@ -3710,6 +3725,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.nextStep: mainWindowController?.moveConversation(byStep: true)
         case AppCommands.ID.previousTab: mainWindowController?.selectAdjacentTab(offset: -1)
         case AppCommands.ID.nextTab: mainWindowController?.selectAdjacentTab(offset: 1)
+        case AppCommands.ID.splitTabLeft: mainWindowController?.splitActiveTab(.left)
+        case AppCommands.ID.splitTabRight: mainWindowController?.splitActiveTab(.right)
+        case AppCommands.ID.splitTabAbove: mainWindowController?.splitActiveTab(.top)
+        case AppCommands.ID.splitTabBelow: mainWindowController?.splitActiveTab(.bottom)
         case AppCommands.ID.inspectElement: mainWindowController?.toggleElementInspector()
         case AppCommands.ID.checkForUpdates: AppUpdater.shared.checkForUpdates()
         case AppCommands.ID.refreshModels:
