@@ -653,6 +653,24 @@ custody, preview and removal. Drawing remains constant work per existing view, a
 strip retains its eight-item bound. `ComposerChromeRenderTests` checks corner pixels, partial
 redraw geometry and thumbnail-independent close-mark pixels.
 
+## Panels at a screen edge
+
+A rounded corner never meets a bar or a screen edge. A panel spanning an edge either floats clear
+of it on every side, at the theme's `panelRadius`, or fills the edge with square corners; a
+rounded panel pressed flat against a bar shows ground between its corners and the bar, which
+reads as notches cut into both. `RemoteThemePalette.floatsEdgePanels` is the one decision: the
+conversation composer floats above the home indicator by it, and the **Since you left** strip
+floats below the navigation bar by it, or joins that bar under a square theme.
+
+UIKit will not make this decision for you, and its default makes the wrong one. A
+`UIButton.Configuration` has a `.dynamic` corner style, and on iOS 26 the button applies that
+radius to its own layer, so a full-width button given a `backgroundColor` became a capsule under
+every theme, including square ones. Paint a button's plate through
+`configuration.background` with `cornerStyle = .fixed` and a radius the theme chose. A floating
+panel's margins also go when the panel hides, so an empty strip takes no height.
+`ComposerTextViewPasteTests/testCatchUpCornersNeverMeetTheBarOrTheScreenEdges` checks the inset
+geometry under a rounded theme and the flush strip's corner pixels under a square one.
+
 
 ## Decorative dashboard motion
 

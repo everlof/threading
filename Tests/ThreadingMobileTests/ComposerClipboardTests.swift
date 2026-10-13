@@ -245,33 +245,63 @@ final class ComposerTextViewPasteTests: XCTestCase {
     }
 
     func testCatchUpHeaderStaysBelowNavigationAndOpensReadingActions() throws {
-        let model = RemoteAppModel()
-        model.startDemo()
-        let connection = RemoteSessionConnection.demoConversation()
-        _ = connection.conversationStore.replace(with: .init(rows: [
-            .init(id: "seen", kind: .user, text: "Check the change"),
-            .init(id: "new", kind: .assistant, text: "Ready to review"),
-        ], canSend: true))
-        let suite = UUID().uuidString
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let continuity = MobileSessionContinuityStore(defaults: defaults)
-        continuity.setConversationLastSeenRow("seen", hostID: try XCTUnwrap(model.activeHostID), sessionID: connection.session.id)
-        let controller = RemoteConversationViewController(
-            connection: connection, model: model, continuity: continuity,
-            notifications: RemoteNotificationManager(), inheritedTheme: RemoteThemePalette(nil)
-        )
-        let navigation = UINavigationController(rootViewController: controller)
-        let window = makeWindow(rootViewController: navigation, size: CGSize(width: 402, height: 874))
-        defer { window.isHidden = true }
-        let button = try XCTUnwrap(descendants(of: UIButton.self, in: window).first {
-            $0.accessibilityIdentifier == "conversation.catch-up"
-        })
+        let fixture = try showCatchUp(themeID: nil, lastSeenRowID: "seen")
+        defer { fixture.window.isHidden = true }
+        let button = fixture.button
         XCTAssertFalse(button.isHidden)
-        XCTAssertGreaterThanOrEqual(button.convert(button.bounds, to: controller.view).minY,
-                                   controller.view.safeAreaInsets.top)
+        XCTAssertGreaterThanOrEqual(button.convert(button.bounds, to: fixture.controller.view).minY,
+                                   fixture.controller.view.safeAreaInsets.top)
         XCTAssertGreaterThanOrEqual(button.bounds.height, MobileDesign.Size.minimumTapTarget)
         XCTAssertEqual(button.menu?.children.count, 3)
+    }
+
+    /// The catch-up strip spans the navigation bar's lower edge and both screen edges. A rounded
+    /// theme floats it clear of all three; a square theme joins it to the bar with square corners.
+    /// UIKit's dynamic corner style once rounded the flush strip under every theme, leaving notches
+    /// of ground between its top corners and the bar above.
+    func testCatchUpCornersNeverMeetTheBarOrTheScreenEdges() throws {
+        let inset = MobileDesign.Spacing.small
+        do {
+            let theme = RemoteThemePalette(RemoteAppModel.demoLightTheme)
+            XCTAssertTrue(theme.floatsEdgePanels)
+            let fixture = try showCatchUp(themeID: "light", lastSeenRowID: "seen")
+            defer { fixture.window.isHidden = true }
+            let view = fixture.controller.view!
+            let frame = fixture.button.convert(fixture.button.bounds, to: view)
+            XCTAssertEqual(frame.minY, view.safeAreaInsets.top + inset)
+            XCTAssertEqual(frame.minX, inset)
+            XCTAssertEqual(frame.maxX, view.bounds.width - inset)
+            XCTAssertEqual(fixture.button.configuration?.background.cornerRadius, theme.panelRadius)
+        }
+        do {
+            let theme = RemoteThemePalette(try XCTUnwrap(RemoteAppModel.demoCatalogThemes.first {
+                $0.id == "swiss-minimalist"
+            }))
+            XCTAssertFalse(theme.floatsEdgePanels)
+            let fixture = try showCatchUp(themeID: "swiss-minimalist", lastSeenRowID: "seen")
+            defer { fixture.window.isHidden = true }
+            let view = fixture.controller.view!
+            let frame = fixture.button.convert(fixture.button.bounds, to: view)
+            XCTAssertEqual(frame.minY, view.safeAreaInsets.top)
+            XCTAssertEqual(frame.minX, 0)
+            XCTAssertEqual(frame.maxX, view.bounds.width)
+            let image = render(fixture.window)
+            let surface = try sRGBBytes(theme.uiSurface)
+            for x in [frame.minX + 1, frame.maxX - 2] {
+                let corner = try pixel(image, CGPoint(x: x, y: frame.minY + 2))
+                for channel in 0..<3 {
+                    XCTAssertEqual(Int(corner[channel]), Int(surface[channel]), accuracy: 2,
+                                   "a flush strip's top corner at x=\(x) shows what lies behind it")
+                }
+            }
+        }
+        do {
+            let fixture = try showCatchUp(themeID: "light", lastSeenRowID: nil)
+            defer { fixture.window.isHidden = true }
+            XCTAssertTrue(fixture.button.isHidden)
+            XCTAssertEqual(try XCTUnwrap(fixture.button.superview).bounds.height, 0,
+                           "a floating strip's margins must not outlive the strip")
+        }
     }
 
     /// The system keyboard implements a held Backspace as repeated `deleteBackward()` calls on
@@ -581,6 +611,81 @@ final class ComposerTextViewPasteTests: XCTestCase {
     private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
         let own = (root as? T).map { [$0] } ?? []
         return own + root.subviews.flatMap { descendants(of: type, in: $0) }
+    }
+
+    private struct CatchUpFixture {
+        let window: UIWindow
+        let controller: RemoteConversationViewController
+        let button: UIButton
+    }
+
+    /// A demo conversation with one row read and one not, under a demo catalogue theme
+    /// (`nil` keeps the demo default), pushed under a navigation bar on an iPhone 17 Pro.
+    private func showCatchUp(themeID: String?, lastSeenRowID: String?) throws -> CatchUpFixture {
+        let themeKey = "THREADING_MOBILE_THEME"
+        let previousTheme = ProcessInfo.processInfo.environment[themeKey]
+        if let themeID { setenv(themeKey, themeID, 1) } else { unsetenv(themeKey) }
+        defer {
+            if let previousTheme { setenv(themeKey, previousTheme, 1) } else { unsetenv(themeKey) }
+        }
+        let model = RemoteAppModel()
+        model.startDemo()
+        let connection = RemoteSessionConnection.demoConversation()
+        _ = connection.conversationStore.replace(with: .init(rows: [
+            .init(id: "seen", kind: .user, text: "Check the change"),
+            .init(id: "new", kind: .assistant, text: "Ready to review"),
+        ], canSend: true))
+        let suite = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let continuity = MobileSessionContinuityStore(defaults: defaults)
+        if let lastSeenRowID {
+            continuity.setConversationLastSeenRow(
+                lastSeenRowID, hostID: try XCTUnwrap(model.activeHostID), sessionID: connection.session.id
+            )
+        }
+        let controller = RemoteConversationViewController(
+            connection: connection, model: model, continuity: continuity,
+            notifications: RemoteNotificationManager(), inheritedTheme: RemoteThemePalette(nil)
+        )
+        let navigation = UINavigationController(rootViewController: controller)
+        let window = makeWindow(rootViewController: navigation, size: CGSize(width: 402, height: 874))
+        let button = try XCTUnwrap(descendants(of: UIButton.self, in: window).first {
+            $0.accessibilityIdentifier == "conversation.catch-up"
+        })
+        return CatchUpFixture(window: window, controller: controller, button: button)
+    }
+
+    private func render(_ window: UIWindow) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.preferredRange = .standard
+        return UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+    }
+
+    private func pixel(_ image: UIImage, _ point: CGPoint) throws -> [UInt8] {
+        let cropped = try XCTUnwrap(image.cgImage?.cropping(to: CGRect(origin: point, size: CGSize(width: 1, height: 1))))
+        return try sRGBBytes { $0.draw(cropped, in: CGRect(x: 0, y: 0, width: 1, height: 1)) }
+    }
+
+    private func sRGBBytes(_ color: UIColor) throws -> [UInt8] {
+        try sRGBBytes { context in
+            context.setFillColor(color.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+    }
+
+    private func sRGBBytes(drawing draw: (CGContext) -> Void) throws -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: 4)
+        try bytes.withUnsafeMutableBytes { buffer in
+            let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: 1, height: 1,
+                bitsPerComponent: 8, bytesPerRow: 4, space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            draw(context)
+        }
+        return bytes
     }
 
     private func makeWindow<Content: View>(

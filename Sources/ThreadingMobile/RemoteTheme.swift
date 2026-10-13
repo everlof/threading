@@ -968,6 +968,10 @@ struct RemoteThemePalette: Equatable {
 
     var panelRadius: CGFloat { CGFloat(source?.material.panelRadius ?? 20) }
     var controlRadius: CGFloat { CGFloat(source?.material.controlRadius ?? 10) }
+    /// Whether a panel that spans a screen edge floats clear of it. A rounded panel pressed flat
+    /// against an edge or a bar leaves ground showing between its corners and that edge, so a
+    /// theme with real roundness insets it on every side; a square theme fills the edge instead.
+    var floatsEdgePanels: Bool { panelRadius > MobileDesign.Spacing.tight }
     var borderWidth: CGFloat { CGFloat(source?.material.borderWidth ?? 1) }
     var glow: RemoteThemeDTO.Material.Glow? { source?.material.glow }
 

@@ -302,8 +302,11 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         catchUpStack.axis = .vertical
         catchUpStack.translatesAutoresizingMaskIntoConstraints = false
         catchUpStack.addArrangedSubview(catchUpButton)
+        catchUpStack.isLayoutMarginsRelativeArrangement = true
+        catchUpStack.insetsLayoutMarginsFromSafeArea = false
         catchUpButton.isHidden = true
         var catchUpConfiguration = compactControlConfiguration()
+        catchUpConfiguration.cornerStyle = .fixed
         catchUpConfiguration.image = UIImage(systemName: "chevron.down")
         catchUpConfiguration.imagePlacement = .trailing
         catchUpConfiguration.imagePadding = MobileDesign.Spacing.small
@@ -765,7 +768,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }
 
     private func applyTheme() {
-        catchUpButton.backgroundColor = theme.uiSurface
+        updateCatchUpGeometry()
         catchUpButton.tintColor = theme.uiAccent
         overrideUserInterfaceStyle = theme.colorScheme == .light ? .light : .dark
         presenceLabel.font = theme.chromeFont(forTextStyle: .caption1)
@@ -821,11 +824,25 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         navigationTitleView.applyTheme(theme)
     }
 
+    /// The catch-up strip meets the navigation bar and both screen edges, so its corners follow
+    /// the composer's rule rather than UIKit's: a rounded theme floats it clear of all three, and
+    /// a square theme joins it to the bar. The button's default dynamic corner style rounded the
+    /// full-width strip under every theme, cutting notches of ground into the bar above it.
+    private func updateCatchUpGeometry() {
+        let floats = theme.floatsEdgePanels
+        let inset = floats && !catchUpButton.isHidden ? MobileDesign.Spacing.small : 0
+        catchUpStack.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: inset, leading: inset, bottom: inset, trailing: inset
+        )
+        catchUpButton.configuration?.background.backgroundColor = theme.uiSurface
+        catchUpButton.configuration?.background.cornerRadius = floats ? theme.panelRadius : 0
+    }
+
     /// Keeps the composer attached to whichever physical edge currently owns text input.
     /// The keyboard is already outside the app's authored chrome, so retaining a decorative
     /// exterior gutter there exposed a strip of the conversation behind the field.
     private func updateComposerGeometry() {
-        let fillsBottomEdge = theme.panelRadius <= MobileDesign.Spacing.tight
+        let fillsBottomEdge = !theme.floatsEdgePanels
         let joinsKeyboard = keyboardIsVisible
         let exteriorInset = fillsBottomEdge || joinsKeyboard
             ? 0
@@ -925,6 +942,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
     private func updateCatchUp(_ recap: RemoteConversationCatchUp?) {
         catchUpButton.isHidden = recap == nil
+        updateCatchUpGeometry()
         catchUpButton.setTitle(recap?.summary, for: .normal)
         var actions = [UIAction(title: MobileL10n.string("First new activity"), image: UIImage(systemName: "text.alignleft")) { [weak self] _ in
             self?.timelineController.jumpToFirstUnread()
