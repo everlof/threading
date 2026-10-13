@@ -529,6 +529,7 @@
 				ThreadingMobile/MobileCollaborationPresence.swift,
 				ThreadingMobile/MobileConnectionStatusPanel.swift,
 				ThreadingMobile/MobileConversationQuestionCard.swift,
+				ThreadingMobile/MobileConversationSettingsView.swift,
 				ThreadingMobile/MobileDashboardCacheStore.swift,
 				ThreadingMobile/MobileDiagnosticsBridge.swift,
 				ThreadingMobile/MobileDraftWelcome.swift,

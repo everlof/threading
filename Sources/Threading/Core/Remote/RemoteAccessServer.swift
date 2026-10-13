@@ -1043,6 +1043,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 targetID: parsed.recipientID,
                 requestID: parsed.requestID
             )
+        case "conversationConfigure":
+            handleConversationConfiguration(connection, message: parsed)
         case "questionAnswer":
             handleQuestionAnswer(connection, id: parsed.id, answers: parsed.answers, decision: parsed.decision)
         case "permission":
@@ -5102,6 +5104,59 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 status: status
             )))
             self.resolveClaim(attachmentUploadIDs, accepted: status == .accepted)
+        }
+    }
+
+    private func handleConversationConfiguration(
+        _ connection: RemoteConnection, message: RemoteClientMessage
+    ) {
+        guard let requestID = message.requestID, UUID(uuidString: requestID) != nil else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidConfigurationRequest")))
+            return
+        }
+        let refuse: @Sendable (String) -> Void = { error in
+            connection.sendText(self.encode(RemoteConversationConfigurationResultDTO(
+                requestID: requestID, error: error
+            )))
+        }
+        guard let authorization = connection.authorization,
+              authorization.principal == .ownerDevice,
+              authorization.capability == .interact,
+              let routed = connection.routedSessionID,
+              let sessionID = SessionID(uuidString: routed),
+              authorization.scope.covers(sessionID) else {
+            refuse("You don’t have permission to change this chat’s settings.")
+            return
+        }
+        guard let name = message.state,
+              let setting = RemoteConversationConfigurationDTO.Setting(rawValue: name),
+              message.text.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true else {
+            refuse("Invalid conversation setting.")
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true,
+                  self.services.mirrors.isAttached(connection, to: sessionID) else {
+                refuse("This chat’s settings are unavailable right now.")
+                return
+            }
+            self.services.mirrors.configureConversation(
+                sessionID: sessionID, setting: setting, value: message.text, authorization: authorization
+            ) { result in
+                let error: String?
+                switch result {
+                case .success:
+                    error = nil
+                    self.services.eventLog.recordRemoteEvent("Remote conversation setting changed", [
+                        .session: sessionID.uuidString, .decision: setting.rawValue,
+                        .device: connection.deviceID ?? "unknown"
+                    ])
+                case .failure(let failure): error = failure.localizedDescription
+                }
+                connection.sendText(self.encode(RemoteConversationConfigurationResultDTO(
+                    requestID: requestID, error: error
+                )))
+            }
         }
     }
 

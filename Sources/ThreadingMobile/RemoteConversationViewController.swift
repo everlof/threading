@@ -106,6 +106,8 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private var composerStackPanelBottomConstraint: NSLayoutConstraint!
 
     private let bottomStack = UIStackView()
+    private let composerSeparator = UIView()
+    private let settingsView = MobileConversationSettingsView()
     private let catchUpStack = UIStackView()
     private let catchUpButton = UIButton(type: .system)
     private let capabilityContainer = UIView()
@@ -272,7 +274,8 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 #endif
         guard initiallyFocusesComposer, !initiallyFocused else { return }
         initiallyFocused = true
-        if textView.text.isEmpty {
+        if textView.text.isEmpty,
+           ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "conversation-keyboard" {
             textView.text = MobileL10n.string(
                 "Check the final layout with the keyboard open and a longer prompt."
             )
@@ -331,6 +334,8 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         bottomStack.spacing = 0
         bottomStack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(bottomStack)
+        composerSeparator.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(composerSeparator)
 
         configureCapabilityList()
         configureBanner(presenceLabel)
@@ -362,6 +367,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             submissionLabel,
             queuedMessagesButton,
             deliveryButton,
+            settingsView,
             composerShell,
         ].forEach(bottomStack.addArrangedSubview)
 
@@ -378,6 +384,10 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             timelineController.view.bottomAnchor.constraint(equalTo: bottomStack.topAnchor),
             bottomStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             bottomStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            composerSeparator.leadingAnchor.constraint(equalTo: bottomStack.leadingAnchor),
+            composerSeparator.trailingAnchor.constraint(equalTo: bottomStack.trailingAnchor),
+            composerSeparator.topAnchor.constraint(equalTo: bottomStack.topAnchor),
+            composerSeparator.heightAnchor.constraint(equalToConstant: MobileDesign.Spacing.hairline),
             bottomConstraint,
         ])
     }
@@ -650,6 +660,9 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }
 
     private func configureActions() {
+        settingsView.onChoose = { [weak self] setting, value in
+            self?.connection.configureConversation(setting: setting, value: value)
+        }
         [
             capabilityButton,
             attachButton,
@@ -776,8 +789,9 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         requestControlButton.titleLabel?.font = theme.chromeFont(forTextStyle: .caption1)
         attentionLabel.font = theme.chromeFont(forTextStyle: .caption1)
         view.backgroundColor = theme.uiGround
-        bottomStack.backgroundColor = theme.uiGround
-        capabilityContainer.backgroundColor = theme.uiGround
+        bottomStack.backgroundColor = theme.uiElevated
+        composerSeparator.backgroundColor = theme.uiBorder
+        capabilityContainer.backgroundColor = theme.uiElevated
         capabilityScrollView.backgroundColor = theme.uiElevated
         capabilityScrollView.layer.cornerRadius = theme.panelRadius
         capabilityOutline.update(
@@ -786,16 +800,16 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             width: theme.borderWidth,
             glow: theme.glow
         )
-        presenceLabel.backgroundColor = theme.uiSurface
+        presenceLabel.backgroundColor = .clear
         presenceLabel.textColor = theme.uiSecondaryLabel
-        controlBar.backgroundColor = theme.uiSurface
+        controlBar.backgroundColor = .clear
         controlLabel.textColor = theme.uiSecondaryLabel
         controlMenuButton.tintColor = theme.uiAccent
         requestControlButton.tintColor = theme.uiAccent
         attentionLabel.backgroundColor = theme.uiAccentMuted
         attentionLabel.textColor = theme.uiLabel
-        submissionLabel.backgroundColor = theme.uiSurface
-        composerShell.backgroundColor = theme.uiGround
+        submissionLabel.backgroundColor = .clear
+        composerShell.backgroundColor = .clear
         composerPanel.backgroundColor = theme.uiPanel
         updateComposerGeometry()
         composerOutline.update(
@@ -1099,6 +1113,14 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             submissionLabel.text = submissionNotice
             submissionLabel.textColor = theme.uiWarning
             submissionLabel.isHidden = false
+        } else if connection.isConfigurationPending {
+            submissionLabel.text = MobileL10n.string("Changing conversation settings…")
+            submissionLabel.textColor = theme.uiSecondaryLabel
+            submissionLabel.isHidden = false
+        } else if let notice = connection.configurationNotice {
+            submissionLabel.text = notice
+            submissionLabel.textColor = theme.uiWarning
+            submissionLabel.isHidden = false
         } else if let attachmentNotice = attachmentTray?.notice {
             // Attachment refusals share the composer's one notice line: two places to look for
             // "why didn't that work" is one more than anybody checks.
@@ -1149,6 +1171,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         microphoneButton.tintColor = dictationID == nil ? theme.uiSecondaryLabel : theme.uiNegative
         sendButton.isHidden = !microphoneButton.isHidden
         sendButton.isEnabled = enabled
+            && !connection.isConfigurationPending
             && dictationID == nil
             && attachmentPicksInFlight == 0
             && (hasText || hasAttachments)
@@ -1161,6 +1184,11 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             theme: theme,
             isRemovalEnabled: enabled,
             isImageMarkupEnabled: enabled
+        )
+        settingsView.update(
+            connection.conversationStore.state.configuration, theme: theme,
+            allowsChanges: connection.phase == .connected && connection.capability == .interact
+                && connection.inputControl?.canWrite != false && !connection.isConfigurationPending
         )
         updateDeliveryControls(delivery)
     }
@@ -1661,6 +1689,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private var initiallyFocusesComposer: Bool {
 #if DEBUG
         ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "conversation-keyboard"
+            || ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?.contains("composer-keyboard") == true
 #else
         false
 #endif

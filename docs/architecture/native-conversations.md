@@ -1485,6 +1485,30 @@ Guests and focused watchers receive disabled input capabilities. Older hosts omi
 and keep the ordinary send path. Session commands retain ordinary command admission, and
 workspace-file references cannot be steered through an unvalidated asynchronous path.
 
+The phone's pinned composer region owns an elevated themed ground and top border, including
+status, delivery and settings, rather than continuing the transcript's ground. The four fixed
+settings controls consume optional `RemoteConversationConfigurationDTO` metadata. The Mac
+caches that catalogue by configuration/default readings, transport availability and model-catalogue
+revision; unchanged streaming frames reuse it and omit it from deltas. A settings-only update
+notifies the composer without remounting timeline rows. Older hosts omit the capability.
+
+Settings are owner-device operations, admitted against current authorization, exact socket
+attachment, visible session and Focused input authority. The host validates the selected value
+against its current enabled choices and invokes the same model/effort/permission/speed handlers
+as the Mac chips. Success is acknowledged only after provider acceptance and persistence;
+provider and persistence failures remain visible on both surfaces. One client request may be
+outstanding. Disconnect or the 45-second confirmation deadline clears the wait with an explicit
+unconfirmed result; it never replays a mutation after reconnect. The next authoritative snapshot
+shows the actual setting. Claude's unsupported live effort control remains absent, and permission
+menus retain the Mac's restart timing. No permission grant or provider setting is inferred from
+client display labels.
+
+The view count is four controls, independent of catalogue and transcript size. Typical catalogues
+have 6–20 models; the existing Codex input bound is 512. At most 100 menu entries per control are
+projected, with a 64 KiB aggregate UTF-8 content ceiling, and UIKit menu actions are constructed
+only on opening. Accessibility text sizes
+stack the controls vertically. These surfaces remain host-owned under the mobile theme boundary.
+
 The phone microphone starts one explicit recording, with live transcription into the editable
 draft. Speech/microphone consent is requested only on tap, audio engine work lives in an actor,
 and backgrounding, leaving the surface, Stop or the 90-second limit ends recording. The draft is

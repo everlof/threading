@@ -543,6 +543,22 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// no metrics — the post-replay Ready, a model change — cannot blank the meter.
     var lastContextReading: (tokens: Int, window: Int?)?
     private var isChangingConversationConfiguration = false
+    private var remoteConfigurationCompletion: ((Result<Void, Error>) -> Void)?
+    private var remoteConfigurationCacheKey: RemoteConfigurationCacheKey?
+    private var remoteConfigurationCache = RemoteConversationConfigurationDTO(controls: [])
+    private var remoteModelCatalogRevision = 0
+
+    private struct RemoteConfigurationCacheKey: Equatable {
+        let effort: String?
+        let model: String?
+        let activeModel: String?
+        let permissionMode: AgentPermissionMode?
+        let fastMode: Bool?
+        let titles: [String]
+        let canConfigure: Bool
+        let isChanging: Bool
+        let catalogRevision: Int
+    }
     private var reportedModel: String?
 
     /// The view showing the assistant's current message while its tokens arrive.
@@ -668,6 +684,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             self?.refreshLimitEscapeStrip()
         }
         appEvents.observe(AgentModelsDidChange.self) { [weak self] _ in
+            self?.remoteModelCatalogRevision &+= 1
             self?.refreshConversationControls()
         }
         appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in
@@ -2426,7 +2443,8 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                         }
                         return .init(id: item.id.wireValue, summary: item.summary, state: state)
                     }
-                )
+                ),
+                configuration: remoteConfigurationCache
             ),
             rowsRevision: remoteRowProjection.rowsRevision
         )
@@ -3483,6 +3501,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }
 
     private func refreshConversationControls() {
+        defer { refreshRemoteConfiguration() }
         refreshInputControl()
         // Ahead of the guards below, because a curfew is not a property of the model catalog: a
         // runtime that publishes no models, and a conversation whose record has gone, both still
@@ -3586,6 +3605,101 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         speedChip.configure(symbolName: speed.symbolName, title: speed.title)
     }
 
+    private func refreshRemoteConfiguration() {
+        guard let session = currentSession else {
+            remoteConfigurationCacheKey = nil
+            remoteConfigurationCache = .init(controls: [])
+            RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+            return
+        }
+        let modeTitle = PermissionModePresentation.chipTitle(
+            for: session.kind, selected: session.permissionMode,
+            inherited: inheritedPermissionMode(for: session)
+        )
+        let modelTitle = activeModel.map { AgentModels.displayName(for: $0, account: account) }
+            ?? ConversationControlDefaults.defaultModel
+        let effortTitle = ReasoningEffortPresentation.title(
+            selected: session.reasoningEffort, kind: session.kind, model: activeModel, account: account
+        )
+        let speed = ConversationSpeedPresentation.chip(
+            selected: session.fastMode, kind: session.kind, model: activeModel, account: account,
+            projectDirectory: session.workingDirectory(in: project)
+        )
+        let key = RemoteConfigurationCacheKey(
+            effort: session.reasoningEffort, model: session.model, activeModel: activeModel,
+            permissionMode: session.permissionMode, fastMode: session.fastMode,
+            titles: [modelTitle, effortTitle, modeTitle, speed.title],
+            canConfigure: stream.acceptsConfigurationChange,
+            isChanging: isChangingConversationConfiguration, catalogRevision: remoteModelCatalogRevision
+        )
+        guard key != remoteConfigurationCacheKey else { return }
+        remoteConfigurationCacheKey = key
+        var controls: [RemoteConversationConfigurationDTO.Control] = []
+        func append(
+            _ setting: RemoteConversationConfigurationDTO.Setting,
+            title: String, enabled: Bool, entries: [ThemedMenuEntry]
+        ) {
+            let choices = entries.prefix(RemoteConversationConfigurationDTO.maximumChoices).compactMap { entry -> RemoteConversationConfigurationDTO.Choice? in
+                guard case .item(let item) = entry, item.isEnabled, item.submenu == nil else { return nil }
+                let value: String?
+                switch setting {
+                case .model, .effort: value = item.representedValue as? String
+                case .permissions: value = (item.representedValue as? AgentPermissionMode)?.rawValue
+                case .speed:
+                    value = (item.representedValue as? ConversationSpeedChoice)?.fastMode.map { $0 ? "true" : "false" }
+                }
+                let timingNote = setting == .permissions ? PermissionModePresentation.note(for: permissionModeTiming) : nil
+                let detail = [item.subtitle, timingNote].compactMap { $0 }.joined(separator: " ")
+                return .init(title: item.title, detail: detail.isEmpty ? nil : detail, value: value, isSelected: item.isSelected)
+            }
+            guard !choices.isEmpty else { return }
+            controls.append(.init(setting: setting, title: title, isEnabled: enabled, choices: choices))
+        }
+        let canConfigure = stream.acceptsConfigurationChange && !isChangingConversationConfiguration
+        if !modelChip.isHidden {
+            append(.model, title: modelTitle, enabled: canConfigure, entries: modelItems(refreshUsage: false))
+        }
+        if !effortChip.isHidden {
+            append(.effort, title: effortTitle, enabled: canConfigure, entries: effortItems())
+        }
+        if !modeChip.isHidden {
+            append(.permissions, title: modeTitle, enabled: !isChangingConversationConfiguration, entries: permissionModeItems())
+        }
+        if !speedChip.isHidden {
+            append(.speed, title: speed.title, enabled: canConfigure, entries: speedItems())
+        }
+        remoteConfigurationCache = .init(controls: controls)
+        RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
+    }
+
+    func configureRemoteConversation(
+        setting: RemoteConversationConfigurationDTO.Setting, value: String?,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        refreshConversationControls()
+        guard remoteConfigurationCompletion == nil,
+              let control = remoteConfigurationCache.controls.first(where: { $0.setting == setting }),
+              control.isEnabled, control.choices.contains(where: { $0.value == value }) else {
+            completion(.failure(NSError(domain: "RemoteConversationConfiguration", code: 1,
+                                        userInfo: [NSLocalizedDescriptionKey: "This setting cannot be changed right now."])))
+            return
+        }
+        remoteConfigurationCompletion = completion
+        switch setting {
+        case .model: selectModel(value)
+        case .effort: selectEffort(value)
+        case .permissions: selectPermissionMode(value.flatMap(AgentPermissionMode.init(rawValue:)))
+        case .speed: selectFastMode(value.map { $0 == "true" })
+        }
+        // A selector can refuse a capability race before starting a provider operation.
+        if remoteConfigurationCompletion != nil, !isChangingConversationConfiguration {
+            let pending = remoteConfigurationCompletion
+            remoteConfigurationCompletion = nil
+            pending?(.failure(NSError(domain: "RemoteConversationConfiguration", code: 1,
+                                     userInfo: [NSLocalizedDescriptionKey: "This setting cannot be changed right now."])))
+        }
+    }
+
     func refreshInputControl() {
         guard isViewLoaded else { return }
         let state = RemoteSessionMirrorRegistry.shared.ownerInputControlState(for: sessionID)
@@ -3602,7 +3716,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         }
     }
 
-    private func modelItems() -> [ThemedMenuEntry] {
+    private func modelItems(refreshUsage: Bool = true) -> [ThemedMenuEntry] {
         guard let session = currentSession else { return [] }
         let resolved = resolvedDefaultModel
 
@@ -3613,7 +3727,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         //
         // One refresh for the whole menu, not one per row: the service throttles either way, but
         // a list is not a reason to ask the network once per item.
-        if let account { AccountUsageService.shared.refresh(account) }
+        if refreshUsage, let account { AccountUsageService.shared.refresh(account) }
 
         // `including:` rather than inserting the pinned model here: a conversation running a
         // model this login's catalog no longer lists still needs a row of its own, but it belongs
@@ -3767,7 +3881,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             configurationChangeFailed(projectPersistenceFailure(changedLiveAgent: false))
             return
         }
-        refreshConversationControls()
+        configurationChangeSucceeded()
     }
 
     /// How much this conversation may do before it has to ask.
@@ -3797,8 +3911,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 ))
                 return
             }
-            self.isChangingConversationConfiguration = false
-            self.refreshConversationControls()
+            self.configurationChangeSucceeded()
         }
 
         guard permissionModeTiming == .immediately,
@@ -3869,8 +3982,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 ))
                 return
             }
-            self.isChangingConversationConfiguration = false
-            self.refreshConversationControls()
+            self.configurationChangeSucceeded()
         }
 
         switch session.kind {
@@ -3947,8 +4059,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 ))
                 return
             }
-            self.isChangingConversationConfiguration = false
-            self.refreshConversationControls()
+            self.configurationChangeSucceeded()
         }
 
         // Standard and Fast have live representations. Following an explicit General default
@@ -4006,14 +4117,29 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
         switcher.setFastMode(fast) { [weak self] result in
             if case .failure(let error) = result {
-                self?.configurationChangeFailed(error)
+                self?.appendConfigurationFailureNotice(error)
             }
         }
+    }
+
+    private func configurationChangeSucceeded() {
+        isChangingConversationConfiguration = false
+        refreshConversationControls()
+        let completion = remoteConfigurationCompletion
+        remoteConfigurationCompletion = nil
+        completion?(.success(()))
     }
 
     private func configurationChangeFailed(_ error: Error) {
         isChangingConversationConfiguration = false
         refreshConversationControls()
+        let completion = remoteConfigurationCompletion
+        remoteConfigurationCompletion = nil
+        completion?(.failure(error))
+        appendConfigurationFailureNotice(error)
+    }
+
+    private func appendConfigurationFailureNotice(_ error: Error) {
         appendNotice(
             "Could not change conversation settings: \(error.localizedDescription)",
             kind: .error

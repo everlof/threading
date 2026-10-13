@@ -1,9 +1,64 @@
 import XCTest
 import PencilKit
+import UIKit
 import ThreadingRemoteKit
 @testable import ThreadingMobile
 
 final class RemoteConversationStoreTests: XCTestCase {
+    @MainActor
+    func testComposerSettingsRespectSquareThemeCorners() throws {
+        let theme = RemoteThemePalette(try XCTUnwrap(RemoteAppModel.demoCatalogThemes.first { $0.id == "neo-brutalism" }))
+        XCTAssertEqual(theme.controlRadius, 0)
+        let settings = MobileConversationSettingsView()
+        settings.update(.init(controls: [
+            .init(setting: .model, title: "Model", isEnabled: true, choices: [])
+        ]), theme: theme, allowsChanges: true)
+        settings.frame = CGRect(x: 0, y: 0, width: 340, height: 80)
+        settings.layoutIfNeeded()
+        let row = try XCTUnwrap(settings.arrangedSubviews.first as? UIStackView)
+        let button = try XCTUnwrap(row.arrangedSubviews.first as? UIButton)
+        button.layoutIfNeeded()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: button.bounds.size, format: format).image {
+            button.layer.render(in: $0.cgContext)
+        }
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let bytes = try XCTUnwrap(cgImage.dataProvider?.data)
+        let pixels = try XCTUnwrap(CFDataGetBytePtr(bytes))
+        let bytesPerPixel = cgImage.bitsPerPixel / 8
+        let corner = cgImage.bytesPerRow + bytesPerPixel
+        let center = cgImage.bytesPerRow + (cgImage.width / 2) * bytesPerPixel
+        XCTAssertGreaterThan(cgImage.width, 44)
+        for channel in 0..<bytesPerPixel {
+            XCTAssertEqual(pixels[corner + channel], pixels[center + channel],
+                           "The control's square corner must paint the same background as its face")
+        }
+    }
+
+    @MainActor
+    func testSettingUpdatesNotifyComposerWithoutResettingTheTranscript() {
+        let store = RemoteConversationStore()
+        store.replace(with: .init(rows: [.init(id: "answer", kind: .assistant, text: "A settled reply")], canSend: true, revision: 1))
+        var composerChanges = 0
+        var changes: [RemoteConversationStore.Change] = []
+        store.onConfigurationChange = { composerChanges += 1 }
+        let token = store.observe { changes.append($0) }
+        defer { store.removeObserver(token) }
+        let settings = RemoteConversationConfigurationDTO(controls: [
+            .init(setting: .model, title: "GPT-6.1 Sol", isEnabled: true, choices: [])
+        ])
+        XCTAssertTrue(store.apply(.init(baseRevision: 1, revision: 2, streamingText: "", canSend: true, configuration: settings)))
+        XCTAssertEqual(composerChanges, 1)
+        XCTAssertEqual(store.state.configuration, settings)
+        XCTAssertEqual(changes.count, 1)
+        guard case .delta(let inserted, let updated, _, _, _, _, _) = changes[0] else {
+            return XCTFail("A composer setting must not reset the reader's transcript")
+        }
+        XCTAssertTrue(inserted.isEmpty)
+        XCTAssertTrue(updated.isEmpty)
+    }
+
     func testDictationConsentDescriptionsShipInTheAppBundle() {
         for key in ["NSMicrophoneUsageDescription", "NSSpeechRecognitionUsageDescription"] {
             XCTAssertFalse((Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "").isEmpty,

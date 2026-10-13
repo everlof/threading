@@ -771,7 +771,8 @@ enum RemoteConversationWirePolicy {
             questions: safeQuestions(snapshot.questions),
             revision: snapshot.revision,
             hasEarlier: snapshot.hasEarlier,
-            delivery: snapshot.delivery
+            delivery: snapshot.delivery,
+            configuration: safeConfiguration(snapshot.configuration)
         )
     }
 
@@ -797,7 +798,8 @@ enum RemoteConversationWirePolicy {
             questions: safeQuestions(snapshot.questions),
             revision: revision,
             hasEarlier: window.hasEarlier,
-            delivery: snapshot.delivery
+            delivery: snapshot.delivery,
+            configuration: safeConfiguration(snapshot.configuration)
         )
     }
 
@@ -867,7 +869,8 @@ enum RemoteConversationWirePolicy {
                 : currentCapabilities,
             permission: current.permission.map(safePermission),
             questions: safeQuestions(current.questions),
-            delivery: current.delivery
+            delivery: current.delivery,
+            configuration: previous.configuration == current.configuration ? nil : safeConfiguration(current.configuration)
         )
     }
 
@@ -899,7 +902,8 @@ enum RemoteConversationWirePolicy {
                 : currentCapabilities,
             permission: current.permission.map(safePermission),
             questions: safeQuestions(current.questions),
-            delivery: current.delivery
+            delivery: current.delivery,
+            configuration: previous.configuration == current.configuration ? nil : safeConfiguration(current.configuration)
         )
     }
 
@@ -937,7 +941,9 @@ enum RemoteConversationWirePolicy {
             hasEarlier: snapshot.hasEarlier,
             delivery: snapshot.delivery?.allowingInput(
                 authorization.principal == .ownerDevice && authorization.capability == .interact && canWrite
-            )
+            ),
+            configuration: authorization.principal == .ownerDevice
+                ? snapshot.configuration : nil
         )
     }
 
@@ -962,8 +968,16 @@ enum RemoteConversationWirePolicy {
             hasEarlier: delta.hasEarlier,
             delivery: delta.delivery?.allowingInput(
                 authorization.principal == .ownerDevice && authorization.capability == .interact && canWrite
-            )
+            ),
+            configuration: authorization.principal == .ownerDevice
+                ? delta.configuration : nil
         )
+    }
+
+    private static func safeConfiguration(
+        _ configuration: RemoteConversationConfigurationDTO?
+    ) -> RemoteConversationConfigurationDTO? {
+        configuration.map { $0.isValid ? $0 : .init(controls: []) }
     }
 
     static func safeQuestions(_ questions: [RemoteQuestionRequestDTO]) -> [RemoteQuestionRequestDTO] {

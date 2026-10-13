@@ -3106,6 +3106,15 @@ first new item, latest reply or pending decision. Your reading position stays wh
 Result cards beneath the latest completed reply open the current working-tree review, images
 and other attachments, or the active browser tab.
 
+The iPhone chat keeps its pinned status, delivery choices and composer on a separate themed
+background with a border above it, so this area stays distinct from the scrolling messages.
+On your own paired device, the composer also shows **Model**, **Effort**, **Permissions** and
+**Speed** when the current provider supports them. Tap a control to change the same session
+setting as on the Mac. Controls stay visible while temporarily unavailable. Permission choices
+say when they apply; some providers require the chat to restart. Claude has no live effort
+control, so that control is absent for a running Claude chat. Shared participants cannot change
+these owner settings. Both apps need a version that supports the controls.
+
 While a capable Mac is working, choose **After this task** to queue a follow-up or **Send now**
 to join the current task when the provider supports it. The delivery row shows **Queued**,
 **Delivered to agent**, or **Working on this**, using the Mac's actual receipts. Tap the row to

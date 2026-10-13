@@ -2,6 +2,51 @@ import XCTest
 @testable import ThreadingRemoteKit
 
 final class RemoteConversationStateTests: XCTestCase {
+    func testConfigurationDeltasPreserveRowsAndOlderSnapshotsRemoveUnsupportedControls() throws {
+        let controls = RemoteConversationConfigurationDTO(controls: [
+            .init(setting: .effort, title: "High", isEnabled: true,
+                  choices: [.init(title: "High", value: "high", isSelected: true)])
+        ])
+        let row = RemoteConversationRowDTO(id: "settled", kind: .assistant, text: "Keep my position.")
+        let snapshot = RemoteConversationSnapshotDTO(rows: [row], canSend: true, revision: 1, configuration: controls)
+        let encoded = try JSONEncoder().encode(snapshot)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteConversationSnapshotDTO.self, from: encoded).configuration, controls)
+        var state = RemoteConversationState()
+        state.apply(snapshot)
+        XCTAssertEqual(state.apply(.init(baseRevision: 1, revision: 2, streamingText: "", canSend: true)), .unchanged)
+        XCTAssertEqual(state.configuration, controls)
+        let disabled = RemoteConversationConfigurationDTO(controls: [
+            .init(setting: .effort, title: "High", isEnabled: false, choices: controls.controls[0].choices)
+        ])
+        XCTAssertEqual(state.apply(.init(baseRevision: 2, revision: 3, streamingText: "", canSend: true,
+                                        configuration: disabled)), .changed(inserted: [], updated: []))
+        XCTAssertEqual(state.rows, [row])
+        XCTAssertEqual(state.configuration, disabled)
+        let old = try JSONDecoder().decode(RemoteConversationSnapshotDTO.self, from: Data(#"{"canSend":true}"#.utf8))
+        state.apply(old)
+        XCTAssertNil(state.configuration)
+    }
+
+    func testSettingsCatalogueHasAnAggregateContentBound() {
+        let choices = (0..<100).map { index in
+            RemoteConversationConfigurationDTO.Choice(title: "Choice \(index)", detail: String(repeating: "x", count: 2_048), value: String(index))
+        }
+        let configuration = RemoteConversationConfigurationDTO(controls: [
+            .init(setting: .model, title: "Model", isEnabled: true, choices: choices)
+        ])
+        XCTAssertFalse(configuration.isValid)
+        var state = RemoteConversationState()
+        state.apply(.init(rows: [], canSend: true, configuration: configuration))
+        XCTAssertNil(state.configuration)
+    }
+
+    func testInvalidSettingsCataloguesAreNotPresented() {
+        let control = RemoteConversationConfigurationDTO.Control(setting: .model, title: "Model", isEnabled: true, choices: [])
+        var state = RemoteConversationState()
+        state.apply(.init(rows: [], canSend: true, configuration: .init(controls: [control, control])))
+        XCTAssertNil(state.configuration)
+    }
+
     func testOlderSnapshotDefaultsPaginationMetadata() throws {
         let data = Data(#"{"type":"conversation","rows":[],"canSend":true}"#.utf8)
         let snapshot = try JSONDecoder().decode(RemoteConversationSnapshotDTO.self, from: data)

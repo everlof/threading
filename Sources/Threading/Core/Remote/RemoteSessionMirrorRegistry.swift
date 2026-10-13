@@ -3007,6 +3007,23 @@ final class RemoteSessionMirrorRegistry {
         return status
     }
 
+    func configureConversation(
+        sessionID: SessionID, setting: RemoteConversationConfigurationDTO.Setting,
+        value: String?, authorization: RemoteAuthorization,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard authorization.principal == .ownerDevice, authorization.capability == .interact,
+              authorization.scope.covers(sessionID), !authorization.isExpired,
+              RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
+              canWrite(sessionID: sessionID, authorization: authorization),
+              let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID) else {
+            completion(.failure(NSError(domain: "RemoteConversationConfiguration", code: 1,
+                                        userInfo: [NSLocalizedDescriptionKey: "This chat’s settings are unavailable right now."])))
+            return
+        }
+        conversation.configureRemoteConversation(setting: setting, value: value, completion: completion)
+    }
+
     /// Called after the native timeline changes. Provider-specific events are still folded only
     /// once on the Mac; the remote wire derives append/result deltas from that normalized state.
     /// Streaming providers can call this for every token, so updates are coalesced to one frame
@@ -3090,6 +3107,7 @@ final class RemoteSessionMirrorRegistry {
             && lhs.composerCapabilities == rhs.composerCapabilities
             && lhs.permission == rhs.permission
             && lhs.questions == rhs.questions
+            && lhs.configuration == rhs.configuration
             && lhs.delivery == rhs.delivery
             && lhs.hasEarlier == rhs.hasEarlier
     }

@@ -26,6 +26,12 @@ protocol RemoteConversationSurface: AnyObject {
     var isRunning: Bool { get }
     var remoteProjection: RemoteConversationProjection { get }
 
+    func configureRemoteConversation(
+        setting: RemoteConversationConfigurationDTO.Setting,
+        value: String?,
+        completion: @escaping (Result<Void, Error>) -> Void
+    )
+
     func answerRemoteQuestion(id: String, answers: [String: String]?) -> Bool
 
     func sendRemoteFollowup(
@@ -42,6 +48,15 @@ protocol RemoteConversationSurface: AnyObject {
 }
 
 extension RemoteConversationSurface {
+    func configureRemoteConversation(
+        setting: RemoteConversationConfigurationDTO.Setting,
+        value: String?,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        completion(.failure(NSError(domain: "RemoteConversationConfiguration", code: 1,
+                                    userInfo: [NSLocalizedDescriptionKey: "Conversation settings are unavailable."])))
+    }
+
     func sendRemoteFollowup(
         _ text: String, context: [ConversationContextAttachment],
         mode: RemoteConversationDeliveryMode, authorization: RemoteAuthorization

@@ -705,6 +705,12 @@ introduces no presentation slot or extension data authority. Proxy client approv
 settings revocation row are also host-only: Threading owns pending connections, one-time/capture
 grants, persisted exact-IP scope, expiry, dismissal and revocation. Extensions cannot approve clients.
 
+The iPhone conversation's pinned composer dock and model, effort, permission and speed controls
+are host-only. Themes supply the existing ground, control material, ink and border. Threading
+retains current provider capabilities, owner-device and Focused input authority, catalogue value
+validation, live-versus-restart timing, provider acknowledgement and persistence. No extension
+slot or new permission grant is introduced.
+
 The iPhone chat's activity summaries, catch-up marker, result navigation, delivery selector,
 dictation control and image-markup editor are deliberately host-only surfaces for one paired
 host/session. Themes supply the existing mobile palette and reading plates. Threading retains

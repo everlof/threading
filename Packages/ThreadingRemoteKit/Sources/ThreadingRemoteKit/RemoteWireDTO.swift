@@ -4426,6 +4426,7 @@ public struct RemoteConversationRowDTO: Codable, Equatable, Identifiable, Sendab
 /// make reconnect, replay, tool-result attachment, and streamed-placeholder replacement one
 /// idempotent operation for every client.
 public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
+    public let configuration: RemoteConversationConfigurationDTO?
     public let delivery: RemoteConversationDeliveryDTO?
     public let type: String
     public let rows: [RemoteConversationRowDTO]
@@ -4448,9 +4449,11 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
         questions: [RemoteQuestionRequestDTO] = [],
         revision: Int = 0,
         hasEarlier: Bool = false,
-        delivery: RemoteConversationDeliveryDTO? = nil
+        delivery: RemoteConversationDeliveryDTO? = nil,
+        configuration: RemoteConversationConfigurationDTO? = nil
     ) {
         type = "conversation"
+        self.configuration = configuration
         self.delivery = delivery
         self.rows = rows
         self.streamingText = streamingText
@@ -4464,12 +4467,13 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case type, rows, streamingText, canSend, composerCapabilities, permission, revision
-        case hasEarlier, questions, delivery
+        case hasEarlier, questions, delivery, configuration
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         type = try container.decodeIfPresent(String.self, forKey: .type) ?? "conversation"
+        configuration = try container.decodeIfPresent(RemoteConversationConfigurationDTO.self, forKey: .configuration)
         delivery = try container.decodeIfPresent(RemoteConversationDeliveryDTO.self, forKey: .delivery)
         rows = try container.decodeIfPresent(
             [RemoteConversationRowDTO].self,
@@ -4500,6 +4504,7 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
 /// those two operations directly. Full snapshots remain the recovery path when a client's base
 /// revision no longer matches.
 public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
+    public let configuration: RemoteConversationConfigurationDTO?
     public let delivery: RemoteConversationDeliveryDTO?
     public let type: String
     public let baseRevision: Int
@@ -4526,9 +4531,11 @@ public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
         permission: RemotePermissionRequestDTO? = nil,
         questions: [RemoteQuestionRequestDTO]? = nil,
         hasEarlier: Bool? = nil,
-        delivery: RemoteConversationDeliveryDTO? = nil
+        delivery: RemoteConversationDeliveryDTO? = nil,
+        configuration: RemoteConversationConfigurationDTO? = nil
     ) {
         type = "conversationDelta"
+        self.configuration = configuration
         self.delivery = delivery
         self.baseRevision = baseRevision
         self.revision = revision

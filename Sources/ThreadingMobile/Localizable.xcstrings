@@ -2924,6 +2924,17 @@
         }
       }
     },
+    "Changing conversation settings…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändrar chattinställningar…"
+          }
+        }
+      }
+    },
     "Chat" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13773,6 +13784,17 @@
         }
       }
     },
+    "The setting change wasn’t confirmed. Check the current settings before trying again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändringen av inställningen bekräftades inte. Kontrollera de aktuella inställningarna innan du försöker igen."
+          }
+        }
+      }
+    },
     "The support report could not be prepared." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14579,6 +14601,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här sessionens arkivstatus håller redan på att ändras."
+          }
+        }
+      }
+    },
+    "This setting cannot be changed right now." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här inställningen kan inte ändras just nu."
           }
         }
       }

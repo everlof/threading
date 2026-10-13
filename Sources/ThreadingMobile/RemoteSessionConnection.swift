@@ -696,6 +696,7 @@ final class RemoteSessionConnection: ObservableObject {
         isTerminalHydrating = session.surface == .terminal
         terminalTheme = session.terminalTheme
         deviceID = RemoteDeviceIdentity.current
+        conversationStore.onConfigurationChange = { [weak self] in self?.objectWillChange.send() }
         conversationStore.onDecisionChange = { [weak self] in self?.objectWillChange.send() }
         conversationStore.onCanSendChange = { [weak self] canSend in
             self?.conversationCanSend = canSend
@@ -868,6 +869,7 @@ final class RemoteSessionConnection: ObservableObject {
     }
 
     func disconnect(markEnded: Bool = true) {
+        finishConfiguration(error: MobileL10n.string("The setting change wasn’t confirmed. Check the current settings before trying again."))
         reportTyping(false)
         finishSessionResume(result: "cancelled")
         finishTerminalInputProbe(result: "cancelled")
@@ -1654,6 +1656,60 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
 
+    private var pendingConfigurationRequestID: String?
+    private var configurationTimeout: Task<Void, Never>?
+    @Published private(set) var isConfigurationPending = false
+    @Published private(set) var configurationNotice: String?
+
+    func configureConversation(setting: RemoteConversationConfigurationDTO.Setting, value: String?) {
+        guard phase == .connected, capability == .interact, inputControl?.canWrite != false,
+              !isConfigurationPending,
+              let control = conversationStore.state.configuration?.controls.first(where: { $0.setting == setting }),
+              control.isEnabled, control.choices.contains(where: { $0.value == value }) else { return }
+#if DEBUG
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "conversation-chat-polish" {
+            let controls: [RemoteConversationConfigurationDTO.Control] = conversationStore.state.configuration?.controls.map { control in
+                guard control.setting == setting else { return control }
+                return RemoteConversationConfigurationDTO.Control(
+                    setting: setting, title: control.choices.first(where: { $0.value == value })?.title ?? control.title,
+                    isEnabled: true, choices: control.choices.map {
+                        .init(title: $0.title, detail: $0.detail, value: $0.value, isSelected: $0.value == value)
+                    }
+                )
+            } ?? []
+            let state = conversationStore.state
+            _ = conversationStore.apply(.init(baseRevision: state.revision, revision: state.revision + 1,
+                                              streamingText: state.streamingText, canSend: state.canSend,
+                                              permission: state.permission, questions: state.questions,
+                                              delivery: state.delivery, configuration: .init(controls: controls)))
+            return
+        }
+#endif
+        let requestID = UUID().uuidString
+        pendingConfigurationRequestID = requestID
+        isConfigurationPending = true
+        configurationNotice = nil
+        do {
+            try send(.init(type: "conversationConfigure", text: value, state: setting.rawValue, requestID: requestID))
+            configurationTimeout = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(45))
+                guard !Task.isCancelled, self?.pendingConfigurationRequestID == requestID else { return }
+                self?.finishConfiguration(error: MobileL10n.string("The setting change wasn’t confirmed. Check the current settings before trying again."))
+            }
+        } catch {
+            finishConfiguration(error: error.localizedDescription)
+        }
+    }
+
+    private func finishConfiguration(error: String?) {
+        guard pendingConfigurationRequestID != nil else { return }
+        configurationTimeout?.cancel()
+        configurationTimeout = nil
+        pendingConfigurationRequestID = nil
+        isConfigurationPending = false
+        configurationNotice = error
+    }
+
     func decidePermission(_ permission: RemotePermissionRequestDTO, allow: Bool) {
         guard phase == .connected, capability == .interact, permission.canDecide else { return }
         let decision: RemotePermissionDecision = allow ? .allow : .deny
@@ -2221,6 +2277,11 @@ final class RemoteSessionConnection: ObservableObject {
                 conversationStore.replace(with: snapshot)
                 composerCapabilities = snapshot.composerCapabilities
             }
+        case "conversationConfigurationResult":
+            if let result = try? JSONDecoder().decode(RemoteConversationConfigurationResultDTO.self, from: data),
+               result.requestID == pendingConfigurationRequestID {
+                finishConfiguration(error: result.error)
+            }
         case "conversationDelta":
             if let delta = try? JSONDecoder().decode(
                 RemoteConversationDeltaDTO.self,
@@ -2471,6 +2532,7 @@ final class RemoteSessionConnection: ObservableObject {
         code: String? = nil,
         httpStatus: Int? = nil
     ) {
+        finishConfiguration(error: MobileL10n.string("The setting change wasn’t confirmed. Check the current settings before trying again."))
         let failedPhase = phase == .connected ? "session" : "hello"
         let failureCode = code ?? "connection.\(failure.cause.rawValue)"
         finishSessionResume(result: "failed", code: failureCode)
@@ -3291,6 +3353,9 @@ final class RemoteSessionConnection: ObservableObject {
         case "threading":
             connection.theme = RemoteAppModel.demoThreadingTheme
             connection.terminalTheme = RemoteAppModel.demoThreadingTerminalTheme
+        case "system-remote":
+            connection.theme = RemoteAppModel.demoSystemRemoteTheme
+            connection.terminalTheme = RemoteAppModel.demoTerminalTheme
         case let requestedTheme?:
             connection.theme = RemoteAppModel.demoCatalogThemes.first(where: {
                 $0.id == requestedTheme
@@ -3643,6 +3708,24 @@ final class RemoteSessionConnection: ObservableObject {
             delivery: deliveryFixture ? .init(canQueue: true, canSteer: true, messages: [
                 .init(id: "delivery-working", summary: "Check the larger text sizes too.", state: .working),
                 .init(id: "delivery-next", summary: "Then polish the image preview.", state: .queued)
+            ]) : nil,
+            configuration: demoMode == "conversation-chat-polish" ? .init(controls: [
+                .init(setting: .model, title: "GPT-6.1 Sol", isEnabled: !deliveryFixture, choices: [
+                    .init(title: "GPT-6.1 Sol", value: nil, isSelected: true),
+                    .init(title: "GPT-6 Sol", value: "gpt-6-sol")
+                ]),
+                .init(setting: .effort, title: "High", isEnabled: !deliveryFixture, choices: [
+                    .init(title: "High", value: "high", isSelected: true),
+                    .init(title: "Medium", value: "medium")
+                ]),
+                .init(setting: .permissions, title: "Never ask", isEnabled: true, choices: [
+                    .init(title: "Never ask", detail: "Applies when the chat restarts", value: "bypassPermissions", isSelected: true),
+                    .init(title: "Ask", detail: "Applies when the chat restarts", value: "default")
+                ]),
+                .init(setting: .speed, title: "Standard", isEnabled: !deliveryFixture, choices: [
+                    .init(title: "Standard", value: "false", isSelected: true),
+                    .init(title: "Fast", value: "true")
+                ])
             ]) : nil
         )
         connection.conversationStore.replace(with: conversationSnapshot)
