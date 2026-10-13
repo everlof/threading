@@ -4197,6 +4197,18 @@ The file can also describe what spans packets:
 - **`logs:` rules** link the app's own log lines to the packets they describe. With both tabs shown,
   selecting such a line in **Device Logs** selects its packet in **Bluetooth**, and the reverse.
 
+Firmware updates are followed as **timelines**. With `include: [nordic-dfu]` (or
+`nordic-legacy-dfu`, or `procedures:` of your own), each try becomes one story:
+- The device rebooting into its bootloader one address up is recognised as the same device, and
+  its rows read `Kronaby (bootloader)`.
+- Every step, link event, error, transfer progress and checksum check is collected in order.
+- A row says how the try ended and why: completed with the firmware before and after, failed with
+  the device's answer, or abandoned where it stopped. The image checks compare what the device
+  says it received with what was sent, which catches packets lost on the way.
+
+**Timelines** beside the **?** lists every try, newest first, kept across captures. **Copy All**
+copies them for an issue, and agents read them with `timelines`.
+
 Even without a file, the link's own events read as words under subsystem **Link**:
 - connection parameters, data length, PHY and encryption;
 - why a link ended, for example `Disconnected Kronaby: Connection Timeout`;

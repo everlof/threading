@@ -43,6 +43,8 @@ public final class BluetoothLogRowSource: BufferedDeviceLogSource, @unchecked Se
 
     /// Drops every remembered GATT table, in memory and on disk.
     func forgetRememberedGATTTables() { worker.forgetRememberedGATTTables() }
+    /// Drops every recorded procedure attempt, in memory and on disk.
+    func clearProcedureHistory() { worker.clearProcedureHistory() }
     deinit { worker.stop() }
 }
 
@@ -76,6 +78,8 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
     private var savedLearnedRevision = 0
     var gattStoreURL = BluetoothGATTTables.defaultURL
     private var savedGATTRevision = 0
+    var procedureStoreURL = BluetoothProcedureHistory.defaultURL
+    private var savedProcedureRevision = 0
     private var report = BluetoothDefinitionReport(status: .noCheckout)
     private var onDefinitions: (@Sendable (BluetoothDefinitionReport) -> Void)?
     private var ticksUntilDefinitionCheck = 0
@@ -102,6 +106,8 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
             decoder.gatt = BluetoothGATTTables.load(from: gattStoreURL)
             decoder.phoneIdentity = phoneIdentity
             savedGATTRevision = decoder.gattRevision
+            decoder.procedureHistory = BluetoothProcedureHistory.load(from: procedureStoreURL)
+            savedProcedureRevision = decoder.procedureRevision
             self.definitionsCheckout = definitionsCheckout
             self.onDefinitions = onDefinitions
             reloadDefinitions()
@@ -165,6 +171,10 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
             savedGATTRevision = decoder.gattRevision
             try? decoder.gatt.save(to: gattStoreURL)
         }
+        if decoder.procedureRevision != savedProcedureRevision {
+            savedProcedureRevision = decoder.procedureRevision
+            try? decoder.procedureHistory.save(to: procedureStoreURL)
+        }
         if decoder.learnedRevision != savedLearnedRevision {
             savedLearnedRevision = decoder.learnedRevision
             try? decoder.learned.save(to: learnedStoreURL)
@@ -188,6 +198,14 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
             try? FileManager.default.removeItem(at: gattStoreURL)
             report.gatt = nil
             onDefinitions?(report)
+        }
+    }
+
+    func clearProcedureHistory() {
+        queue.async { [self] in
+            decoder.clearProcedureHistory()
+            savedProcedureRevision = decoder.procedureRevision
+            try? FileManager.default.removeItem(at: procedureStoreURL)
         }
     }
 

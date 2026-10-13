@@ -563,6 +563,23 @@ operation, key values), and `DeviceLogWorkspaceViewController` links a selection
 nearest matching row of the other through `BluetoothLogLinker`, a binary search to the time window
 and a scan bounded by it.
 
+**Identities and procedures** (`BluetoothProcedures.swift`). A connection has a *family* (the
+device it belongs to) and an optional *role*. An `identities:` rule arms a watch when its `after:`
+fires; the next LE Connection Complete whose address fits (`+1` on the lowest byte without carry,
+as fw-pascal's `gap_address_change` and Nordic's SDK do) and whose advertising agrees joins that
+family, so `Kronaby (bootloader)` and the reconnect after the update are one device. Procedures
+are a per-family state machine fed by `Signal`s from the session: app values, link events
+(connected, disconnected, encryption failed, Service Changed, firmware changed) and notes
+(everything else worth a timeline). Attempts live in `BluetoothProcedureHistory`, saved by the
+capture worker beside the other stores and read off the main actor by the Timelines panel and the
+`timelines` tool. Time-based endings (idle, settle) are decided by the next packet's time, which a
+quiet link can delay, so an abandoned try ends at its last activity rather than at the deadline.
+Replaying the 13 Oct capture through app-mono's FOTA procedure gave one try with every page, the
+watch's page bitmap after each, and the image's real pace (about 23 s per 4 KiB page), abandoned
+where the capture stopped. Stream `verify:` compares the device's reported offset and CRC with the
+bytes seen; `info:` with an offset resumes from the device's own account, continuing the CRC-32
+register from its value (`~crc`).
+
 **Remembered GATT tables.** Discovery (Read By Group Type, Read By Type 0x2803 with properties,
 Find Information) is written through to `BluetoothGATTTables`, keyed by device identity, or under
 `phone:<udid>` for the iPhone's own database. Lookup order is live discovery, then the connection's

@@ -70,6 +70,14 @@ final class PlatformRoutingSimulatorControl: SimulatorControlling, @unchecked Se
         try await control(for: lease.device.id).release(lease)
     }
 
+    func launchApp(_ launch: SimulatorAppLaunch, on deviceID: SimulatorDeviceID) async throws -> SimulatorLaunchReceipt {
+        try await control(for: deviceID).launchApp(launch, on: deviceID)
+    }
+
+    func openAppLink(_ link: SimulatorAppLink, on deviceID: SimulatorDeviceID) async throws {
+        try await control(for: deviceID).openAppLink(link, on: deviceID)
+    }
+
     private static func result<Value: Sendable>(
         _ body: @Sendable () async throws -> Value
     ) async -> Result<Value, Error> {

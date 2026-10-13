@@ -14,6 +14,7 @@ public enum DeviceLogToolNames {
     public static let visible = "visible"
     public static let bluetooth = "bluetooth"
     public static let linked = "linked"
+    public static let timelines = "timelines"
 }
 
 /// How many rows a tool will put in one answer.

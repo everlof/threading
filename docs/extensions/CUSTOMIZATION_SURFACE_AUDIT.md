@@ -716,7 +716,9 @@ The cross-packet sections (`transactions:`, `streams:`, `logs:`, `advertising:`,
 declarative data under the same interpreter: they add rows and row levels but no controls, run no
 code, and `logs:` regular expressions are compiled and bounded by Threading. Linking a selection
 between the Regular Logs and Bluetooth tabs is host-owned workspace behaviour, and the agent's
-`linked` tool reads only the rows the tabs already hold.
+`linked` tool reads only the rows the tabs already hold. `identities:` and `procedures:` are
+declarative too; the Timelines panel (shared popover, text view and buttons, themed) and the
+attempt history in Application Support are host-owned, bounded and never written to the project.
 
 **Proxy debugging commands** are deliberately host-only. The existing Tools settings group and
 session MCP transport expose bounded HTTP(S) capture. Threading owns exact TLS scope, CA key

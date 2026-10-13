@@ -173,6 +173,18 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                     """
             ),
             PluginTool(
+                name: DeviceLogToolNames.timelines,
+                title: "Bluetooth logs",
+                detail: "Read a paired iPhone's Bluetooth packets",
+                symbol: "timeline.selection",
+                summary: """
+                    Timelines of recorded tries of firmware updates (DFU) and other procedures the project's Bluetooth definitions declare (include: [nordic-dfu] or procedures:), newest first. Each starts with how the try ended and why, then the firmware before and after, the steps reached, and every step, link event (connection parameters, disconnection reasons, the device coming back as its bootloader under another address), error, transfer progress and checksum check, with offsets from the start. Kept across captures on this Mac. Use it to explain a failed update.
+                    """,
+                inputSchemaJSON: """
+                    {"type":"object","properties":{ "last":{"type":"integer","description":"How many of the most recent tries to return (default 5)."}}}
+                    """
+            ),
+            PluginTool(
                 name: DeviceLogToolNames.bluetooth,
                 title: "Bluetooth logs",
                 detail: "Read a paired iPhone's Bluetooth packets",
@@ -210,6 +222,15 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 completion("Starting Bluetooth capture for \(deviceID). Use visible to check for packets or setup errors.", false)
             case DeviceLogToolNames.search:
                 search(arguments, pane: pane, completion: completion)
+            case DeviceLogToolNames.timelines:
+                let last = min(max((arguments["last"] as? Int) ?? 5, 1), BluetoothProcedureHistory.Limits.attempts)
+                // The worker saves within a second; read the file off the main actor.
+                Task.detached(priority: .userInitiated) {
+                    let text = BluetoothProcedureFormatting.all(BluetoothProcedureHistory.load(), last: last)
+                    completion(text.isEmpty
+                        ? "No procedure tries recorded. Firmware updates are recorded when the project's .threading/bluetooth.yaml includes nordic-dfu or nordic-legacy-dfu, or declares procedures:, while a Bluetooth capture runs."
+                        : text, false)
+                }
             case DeviceLogToolNames.linked:
                 guard let text = arguments["text"] as? String, !text.isEmpty, let workspace else {
                     return completion("Give text from the row to link from.", true)

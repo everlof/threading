@@ -61,6 +61,7 @@ A `message`, `rx`, `tx`, field `type` or `cases` value may be a built-in type, a
 | `type` | `u8 u16 u24 u32 u64`, `s8 … s64`, `f32 f64`: little-endian; append `be` (`u16be`) for big-endian. `bool` (one byte), `bytes`, `str` (UTF-8), `msgpack` (one MessagePack value), a type name, an inline type, or a `switch-on`. |
 | `enum` | Integer only. Shows the case name, or `7?` for an unknown value. On a `msgpack` field it names integer map keys. |
 | `scale`, `unit` | Multiply an integer or float; append a unit (`unit: " m"`). |
+| `hex` | `hex: true` shows an integer as `0x` and its full width in hex — checksums, addresses, tokens. |
 | `flags` | Integer only. `{ name: bit }`; shows the set names joined by `|`, or `none`. |
 | `bits` | Integer only. `{ command: 0-7, token: { bits: 8-15, enum: Token } }` splits the value into named bit ranges, shown as `{command=… token=…}`. Each part is a value of its own (`word.command`) for `switch-on`, `if` and flows. |
 | `if` | The field is present only when this holds for earlier fields: a flag name (`if: wideRate`), its negation (`if: "!wideRate"`), an integer field or bit part (non-zero), or a comparison (`if: "op == START"`, `if: "result != 1"`). |
@@ -375,6 +376,28 @@ Endpoints read their values through named roles: `data` (bytes or text), `offset
 `crc32`, `crc16`; each defaults to a value of the same name. `start:` begins a transfer, `info:`
 supplies a total or checksum later without restarting, `end:` finishes one that has no total.
 
+`info:` with an `offset:` is the device's own account of what it already holds: a resumed transfer
+continues counting from there, and with a `crc32:` too the running checksum continues from the
+device's. `verify:` is the device reporting what it received; the packet's row ends in
+`✓ device has all 12 KiB sent, crc32 matches`, and a disagreement is an error row —
+`✗ the device has 8 KiB but 12 KiB were sent — packets were lost or corrupted on the way` — the
+failure that write-without-response at a high rate produces and nothing else shows:
+
+```yaml
+  - name: Secure DFU image
+    data: { characteristic: Secure DFU Packet, op: write, data: data }
+    verify:
+      characteristic: Secure DFU Control Point
+      where:
+        request: CALCULATE_CHECKSUM
+        Secure DFU Control Point.type: DATA     # another characteristic's last value
+      offset: offset
+      crc32: crc
+```
+
+A `where:` (in any endpoint) may test another characteristic's last value by
+`Characteristic.field`, as a `switch-on:` does.
+
 With `lines: true`, the bytes are text: each complete line becomes a row `Device · firmware log · …`
 at the level of the first matching token among its first four (`levels:`), else Info. Otherwise the
 stream is a transfer: rows report progress every 10 % of the total (or every 64 KiB without one) and
@@ -385,6 +408,77 @@ incrementally (CRC-32 as zlib, CRC-16/CCITT-FALSE as Nordic's legacy DFU), so no
 `key` keeps up to 8 transfers per stream apart.
 
 Flow rows have subsystem `App`, so **App packets only** keeps them.
+
+## Identities and timelines
+
+A firmware update is a dozen exchanges over two or three links, and a Nordic bootloader comes back
+under the application's address plus one, so iOS does not reuse its cached GATT table. Two
+sections make that one story.
+
+### Identities
+
+```yaml
+identities:
+  - name: bootloader                   # the role the device comes back as
+    after: { characteristic: Buttonless DFU, op: indicate, where: { request: ENTER_BOOTLOADER, result: SUCCESS } }
+    address: +1                        # same, +1 (lowest byte, no carry), or any
+    advertises: [FE59]                 # service UUIDs it advertises; or advertised-name: DfuTarg*
+    within: 60s
+```
+
+After the `after:` packet (or `{ event: disconnected }`), the next connection that fits joins the
+device: rows say `Kronaby (bootloader)`, the connection row says
+`the same device at …:2B (was …:2A)`, and procedures follow it. With `address: any`, advertising is
+required; with an address rule, advertising must agree when the capture saw any.
+
+### Procedures
+
+```yaml
+procedures:
+  - name: DFU
+    start:                                   # what begins a try
+      - { characteristic: Buttonless DFU, op: write, where: { op: ENTER_BOOTLOADER } }
+      - { characteristic: Secure DFU Control Point, op: write }
+    steps:                                   # recorded when seen, with their own lines
+      - { name: bootloader, event: connected, as: bootloader }
+      - { name: image, characteristic: Secure DFU Control Point, op: write, where: { op: CREATE, type: DATA } }
+      - { name: executed, characteristic: Secure DFU Control Point, op: notify, where: { request: EXECUTE, result: SUCCESS }, after: image }
+    success:
+      - { event: connected, as: device, after: executed }
+      - { event: firmware-changed, after: executed }
+    failure:
+      - { characteristic: Secure DFU Control Point, op: notify, where: { result: "!SUCCESS" } }
+    idle: 2min                               # no activity this long: abandoned (default 2 min)
+    settle: 30s                              # after success, keep collecting (default 30 s)
+```
+
+A trigger is an endpoint, or an `event:` — `connected`, `disconnected`, `firmware-changed`,
+`encryption-failed`, `service-changed` — optionally `as:` a role (`device` is the device's own
+address) and `after:` a step already seen in the try.
+
+Each try is an **attempt** with a timeline. Besides its start and steps, everything about the
+device's connections while it runs joins automatically: connections and disconnections with their
+reasons, connection parameters, data length, PHY, encryption, ATT errors, warnings and errors from
+your definitions, unanswered requests, transfer progress and checksum verdicts, Service Changed,
+and every firmware read. A try ends as:
+
+- **completed** — `DFU #4 · Kronaby · completed in 3 min 12 s — firmware 1.0.0 → 1.1.0`. If the
+  firmware was read before and after and did not change, it is **completed, but the firmware did
+  not change**. A completed try that saw no GATT discovery afterwards adds a warning that the phone
+  may still be using its cached table.
+- **failed** — a failure trigger: `failed after 3.0 s — … EXECUTE INVALID_OBJECT`.
+- **abandoned** — idle too long: `abandoned after 2 min — stopped at image: … CREATE DATA 4096 B,
+  nothing for 2 min · last error: …`.
+
+Start and end are rows in the Bluetooth tab. **Timelines** beside the **?** shows every try,
+newest first, with the headline in its outcome's colour, the firmware before and after, the steps
+reached and the full timeline with offsets from the start; **Copy All** copies it as text for an
+issue. Attempts are kept in
+`~/Library/Application Support/codes.threading/DeviceLogs/bluetooth-procedures.json` across captures
+(64 tries, 256 entries each — the middle of a longer one is elided, never its start or end); a try
+still open when a capture ends reads as abandoned. The agent's `timelines` tool returns the same
+text. `include: [nordic-dfu]` and `[nordic-legacy-dfu]` declare their identities, procedures and
+image checks already.
 
 ## Linking app log lines
 
@@ -469,6 +563,6 @@ The row is logged at `Warning`, keeps the fields that decoded and adds `⚠ body
 Per value: 16 levels of nested types, 20,000 field reads, 4,096 repeat items, 1,024 rendered
 characters, 32 bytes shown per `bytes` field, 128 named values kept for flows. Per file: 512 types,
 256 fields per type, 512 characteristics, 4,096 enum cases, 32 bit fields per field, 64
-transactions, 64 streams, 64 `logs:` rules. Per connection: 16 open requests per transaction, 8
+transactions, 64 streams, 64 `logs:` rules, 64 procedures and identities. Per connection: 16 open requests per transaction, 8
 transfers per stream, one 4 KiB partial line per stream, 256 remembered context values. Decoding
 runs on the capture worker.

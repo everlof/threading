@@ -25,7 +25,7 @@ final class BluetoothLinkHealthTests: XCTestCase {
         XCTAssertEqual(session.event(event(0x3e, [0x0c, 0x00, 0x40, 0x00, 0x02, 0x02]))?.text,
                        "PHY C4:7C:8D:6A:4F:2A · tx 2M · rx 2M")
         let failedEncryption = session.event(event(0x08, [0x06, 0x40, 0x00, 0x00]))
-        XCTAssertEqual(failedEncryption, .init(text: "Encryption failed C4:7C:8D:6A:4F:2A: PIN or Key Missing", error: true))
+        XCTAssertEqual(failedEncryption, .init(text: "Encryption failed C4:7C:8D:6A:4F:2A: PIN or Key Missing — the phone's bond no longer matches the device's keys", error: true))
         let timeout = session.event(event(0x05, [0x00, 0x40, 0x00, 0x08]))
         XCTAssertEqual(timeout, .init(text: "Disconnected C4:7C:8D:6A:4F:2A: Connection Timeout", warning: true))
         XCTAssertEqual(session.event(event(0x05, [0x00, 0x40, 0x00, 0x13]))?.warning, false)

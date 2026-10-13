@@ -52,6 +52,8 @@ enum SimulatorPaneSymbols {
     static let controlDenied = "cursorarrow.slash"
     static let appearance = "circle.lefthalf.filled"
     static let logs = "list.bullet.rectangle"
+    /// States the app under development declares for itself: screens with a play mark.
+    static let scenarios = "play.rectangle.on.rectangle"
 }
 
 /// A session's adopted CoreSimulator device inside the right display pane.
@@ -3692,4 +3694,36 @@ final class SimulatorPaneViewController: NSViewController {
     }
     func performScreenPrimaryActionForTesting() -> Bool { screenView.performPrimaryAction() }
     func retryForTesting() { retry() }
+}
+
+// MARK: - Scenarios
+
+/// A scenario drives the member through the same lease and the same rule for public device
+/// mutations as an agent's install: starting the app quiesces the direct stream for the bounded
+/// `simctl`/`am` transaction and reconnects after it. A step's link is not a device mutation (see
+/// `SimctlSimulatorControl.openAppLink`), so the stream keeps running and the transition is seen.
+extension SimulatorPaneViewController: SimulatorScenarioTarget {
+    var scenarioDeviceID: SimulatorDeviceID? { lease?.device.id }
+    var scenarioDeviceName: String { workspaceDeviceName }
+
+    func launchScenarioApp(_ launch: SimulatorAppLaunch, appearance: SimulatorScenarioAppearance?) async throws {
+        guard let deviceID = lease?.device.id else { throw SimulatorScenarioError.noDevice }
+        if let appearance {
+            try await control.setAppearance(dark: appearance == .dark, on: deviceID)
+            appearanceIsDark = appearance == .dark
+        }
+        stopTransport()
+        SimulatorDeviceTransactions.shared.begin(on: deviceID)
+        defer {
+            SimulatorDeviceTransactions.shared.end(on: deviceID)
+            if !wantsFrames, agentCommandTasks.isEmpty { scheduleHiddenTransportRelease() }
+        }
+        _ = try await control.launchApp(launch, on: deviceID)
+        guard lease?.device.id == deviceID else { throw SimulatorScenarioError.deviceNotInWorkspace }
+    }
+
+    func openScenarioLink(_ link: SimulatorAppLink) async throws {
+        guard let deviceID = lease?.device.id else { throw SimulatorScenarioError.noDevice }
+        try await control.openAppLink(link, on: deviceID)
+    }
 }

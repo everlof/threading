@@ -199,6 +199,22 @@ These protocol rows need no definitions:
 - **CCCD writes** are tracked per handle. A notification or indication on a characteristic whose
   CCCD this capture saw disabled is flagged.
 
+### 10. Firmware updates as timelines (added 2026-10-13)
+
+A Nordic bootloader comes back under the application's address plus one (fw-pascal
+`bootloader/nrf_dfu_ble_override.c:801`, `addr.addr[0] += 1`), so a DFU looked like a new device
+and its story was scattered over three connections.
+- `identities:` follows the device across the change.
+- `procedures:` turn each try into an attempt with steps, success, failure and idle timeouts. Link
+  events, errors, progress and checksum verdicts on the device are collected automatically, and the
+  history is kept across captures.
+- Stream `verify:` compares the device's reported offset and CRC with what was sent.
+- The Timelines panel and the `timelines` tool read the history back.
+
+The Nordic profiles declare all of it, and app-mono's YAML adds its own FOTA procedure.
+**Implemented 2026-10-13.** The end-to-end tests are synthetic; it awaits a capture of a real watch
+DFU, successful and failing.
+
 ## Order of work
 
 1. Pipe structured values out of the decoder (`Decoded.values`) and add severity, which everything

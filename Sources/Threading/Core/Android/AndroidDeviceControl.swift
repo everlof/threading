@@ -115,34 +115,53 @@ final class AndroidDeviceControl: SimulatorControlling, @unchecked Sendable {
             let serial = try target(for: deviceID, cancellation: cancellation).serial
             _ = try run(["-s", serial, "install", "-r", "-t", applicationURL.path], operation: "install",
                         deviceID: deviceID, timeout: AndroidControlDefaults.installTimeout, cancellation: cancellation)
-            let resolved = try run(
-                ["-s", serial, "shell", "cmd", "package", "resolve-activity", "--brief",
-                 "-c", "android.intent.category.LAUNCHER", AndroidShellQuoting.quote(package)],
-                operation: "launch", deviceID: deviceID, timeout: AndroidControlDefaults.launchTimeout,
-                cancellation: cancellation
-            )
-            guard let component = Self.launchComponent(from: resolved, package: package) else {
-                throw SimulatorControlError.invalidApplication("\(package) has no launcher activity to start.")
-            }
-            var start = ["-s", serial, "shell", "am", "start", "-W", "-S", "-n", AndroidShellQuoting.quote(component)]
+            let component = try launcherComponent(package, serial: serial, deviceID: deviceID, cancellation: cancellation)
+            var extras: [String] = []
             for (index, argument) in arguments.enumerated() {
-                start += ["--es", AndroidShellQuoting.quote(AndroidControlDefaults.launchArgumentExtraPrefix + "\(index)"),
-                          AndroidShellQuoting.quote(argument)]
+                extras += ["--es", AndroidShellQuoting.quote(AndroidControlDefaults.launchArgumentExtraPrefix + "\(index)"),
+                           AndroidShellQuoting.quote(argument)]
             }
-            let output = try run(start, operation: "launch", deviceID: deviceID,
+            return try startActivity(component, package: package, extras: extras, serial: serial, deviceID: deviceID,
+                                     cancellation: cancellation)
+        }
+    }
+
+    func launchApp(_ launch: SimulatorAppLaunch, on deviceID: SimulatorDeviceID) async throws -> SimulatorLaunchReceipt {
+        guard case .android(let package, let activity, let extras) = launch else {
+            throw SimulatorControlError.unsupportedPlatformRequest
+        }
+        return try await perform { [self] cancellation in
+            let package = try Self.validatedPackageName(package)
+            let extraArguments = try Self.extraArguments(extras)
+            let serial = try target(for: deviceID, cancellation: cancellation).serial
+            try requireInstalled(package, serial: serial, deviceID: deviceID, cancellation: cancellation)
+            let component = try activity.map { try Self.component(package: package, activity: $0) }
+                ?? launcherComponent(package, serial: serial, deviceID: deviceID, cancellation: cancellation)
+            return try startActivity(component, package: package, extras: extraArguments, serial: serial,
+                                     deviceID: deviceID, cancellation: cancellation)
+        }
+    }
+
+    /// A `VIEW` intent with `FLAG_ACTIVITY_SINGLE_TOP`, so the activity already on top receives it
+    /// in `onNewIntent` and changes state in place rather than starting again.
+    func openAppLink(_ link: SimulatorAppLink, on deviceID: SimulatorDeviceID) async throws {
+        guard case .android(let package, let activity, let url) = link else {
+            throw SimulatorControlError.unsupportedPlatformRequest
+        }
+        try await perform { [self] cancellation in
+            let package = try Self.validatedPackageName(package)
+            let serial = try target(for: deviceID, cancellation: cancellation).serial
+            var start = ["-s", serial, "shell", "am", "start", "-W", "-a", "android.intent.action.VIEW",
+                         "-d", AndroidShellQuoting.quote(url.absoluteString),
+                         "-f", AndroidControlDefaults.singleTopFlag]
+            if let activity {
+                start += ["-n", AndroidShellQuoting.quote(try Self.component(package: package, activity: activity))]
+            } else {
+                start += ["-p", AndroidShellQuoting.quote(package)]
+            }
+            let output = try run(start, operation: "link", deviceID: deviceID,
                                  timeout: AndroidControlDefaults.launchTimeout, cancellation: cancellation)
-            let text = String(decoding: output, as: UTF8.self)
-            if text.contains("Error:") {
-                throw SimulatorControlError.commandFailed(operation: "launch", detail: text.trimmingCharacters(in: .whitespacesAndNewlines))
-            }
-            let pid = try? run(["-s", serial, "shell", "pidof", AndroidShellQuoting.quote(package)], operation: "launch",
-                               deviceID: deviceID, timeout: AndroidControlDefaults.propertyTimeout, cancellation: cancellation)
-            return SimulatorLaunchReceipt(
-                deviceID: deviceID, bundleIdentifier: package,
-                processIdentifier: pid.flatMap { output in
-                    String(decoding: output, as: UTF8.self).split(whereSeparator: \.isWhitespace).first.flatMap { Int32($0) }
-                }
-            )
+            try Self.refuseActivityManagerError(output, operation: "link")
         }
     }
 
@@ -323,6 +342,109 @@ final class AndroidDeviceControl: SimulatorControlling, @unchecked Sendable {
         let output = try run(["-s", serial, "shell", "getprop", "ro.build.version.sdk"], operation: "device discovery",
                              timeout: AndroidControlDefaults.propertyTimeout, capture: .standardOutput, cancellation: cancellation)
         return Int(String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    // MARK: - Starting apps
+
+    private func launcherComponent(
+        _ package: String, serial: String, deviceID: SimulatorDeviceID, cancellation: SimulatorCommandCancellation
+    ) throws -> String {
+        let resolved = try run(
+            ["-s", serial, "shell", "cmd", "package", "resolve-activity", "--brief",
+             "-c", "android.intent.category.LAUNCHER", AndroidShellQuoting.quote(package)],
+            operation: "launch", deviceID: deviceID, timeout: AndroidControlDefaults.launchTimeout,
+            cancellation: cancellation
+        )
+        guard let component = Self.launchComponent(from: resolved, package: package) else {
+            throw SimulatorControlError.invalidApplication("\(package) has no launcher activity to start.")
+        }
+        return component
+    }
+
+    /// `pm path` prints the package's APKs, and nothing with a failing status when it is absent.
+    private func requireInstalled(
+        _ package: String, serial: String, deviceID: SimulatorDeviceID, cancellation: SimulatorCommandCancellation
+    ) throws {
+        let output: Data
+        do {
+            output = try run(["-s", serial, "shell", "pm", "path", AndroidShellQuoting.quote(package)],
+                             operation: "app lookup", deviceID: deviceID,
+                             timeout: AndroidControlDefaults.propertyTimeout, capture: .standardOutput,
+                             cancellation: cancellation)
+        } catch SimulatorControlError.commandFailed {
+            throw SimulatorControlError.applicationNotInstalled(package)
+        }
+        guard String(decoding: output, as: UTF8.self).contains("package:") else {
+            throw SimulatorControlError.applicationNotInstalled(package)
+        }
+    }
+
+    private func startActivity(
+        _ component: String, package: String, extras: [String], serial: String, deviceID: SimulatorDeviceID,
+        cancellation: SimulatorCommandCancellation
+    ) throws -> SimulatorLaunchReceipt {
+        let start = ["-s", serial, "shell", "am", "start", "-W", "-S", "-n", AndroidShellQuoting.quote(component)] + extras
+        let output = try run(start, operation: "launch", deviceID: deviceID,
+                             timeout: AndroidControlDefaults.launchTimeout, cancellation: cancellation)
+        try Self.refuseActivityManagerError(output, operation: "launch")
+        let pid = try? run(["-s", serial, "shell", "pidof", AndroidShellQuoting.quote(package)], operation: "launch",
+                           deviceID: deviceID, timeout: AndroidControlDefaults.propertyTimeout, cancellation: cancellation)
+        return SimulatorLaunchReceipt(
+            deviceID: deviceID, bundleIdentifier: package,
+            processIdentifier: pid.flatMap { output in
+                String(decoding: output, as: UTF8.self).split(whereSeparator: \.isWhitespace).first.flatMap { Int32($0) }
+            }
+        )
+    }
+
+    /// `am start` exits 0 and reports a refused intent on its output.
+    private static func refuseActivityManagerError(_ output: Data, operation: String) throws {
+        let text = String(decoding: output, as: UTF8.self)
+        if text.contains("Error:") {
+            throw SimulatorControlError.commandFailed(operation: operation, detail: text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+    }
+
+    /// `package/activity`, from an activity relative to the package (`.Main`) or fully qualified.
+    static func component(package: String, activity: String) throws -> String {
+        let name = activity.hasPrefix(".") ? String(activity.dropFirst()) : activity
+        guard activity.count <= AndroidControlDefaults.maximumPackageNameCharacters, isJavaName(name) else {
+            throw SimulatorControlError.invalidApplication("“\(activity)” is not an activity name.")
+        }
+        return "\(package)/\(activity)"
+    }
+
+    /// `am start` flags for typed extras, each key and value quoted for the device shell.
+    static func extraArguments(_ extras: [SimulatorLaunchExtra]) throws -> [String] {
+        guard extras.count <= AndroidControlDefaults.maximumLaunchArgumentCount else {
+            throw SimulatorControlError.tooManyLaunchArguments(maximum: AndroidControlDefaults.maximumLaunchArgumentCount)
+        }
+        return try extras.flatMap { extra -> [String] in
+            guard !extra.key.isEmpty, extra.key.count <= AndroidControlDefaults.maximumExtraKeyCharacters,
+                  extra.key.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "._-".unicodeScalars.contains($0)) }) else {
+                throw SimulatorControlError.invalidApplication("“\(extra.key)” is not an intent extra name.")
+            }
+            let key = AndroidShellQuoting.quote(extra.key)
+            switch extra.value {
+            case .string(let value):
+                guard value.count <= AndroidControlDefaults.maximumLaunchArgumentCharacters, !value.contains("\0") else {
+                    throw SimulatorControlError.launchArgumentTooLong(maximum: AndroidControlDefaults.maximumLaunchArgumentCharacters)
+                }
+                return ["--es", key, AndroidShellQuoting.quote(value)]
+            case .boolean(let value):
+                return ["--ez", key, value ? "true" : "false"]
+            case .integer(let value):
+                return [Int32(exactly: value) == nil ? "--el" : "--ei", key, String(value)]
+            }
+        }
+    }
+
+    private static func isJavaName(_ name: String) -> Bool {
+        let segments = name.split(separator: ".", omittingEmptySubsequences: false)
+        return !segments.isEmpty && segments.allSatisfy { segment in
+            guard let first = segment.unicodeScalars.first, CharacterSet.letters.contains(first) || first == "_" else { return false }
+            return segment.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "_" || $0 == "$") }
+        }
     }
 
     // MARK: - Boot

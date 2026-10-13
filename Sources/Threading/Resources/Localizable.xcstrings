@@ -14551,6 +14551,17 @@
         }
       }
     },
+    "Clear History" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rensa historik"
+          }
+        }
+      }
+    },
     "Clear Search" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17482,6 +17493,17 @@
         }
       }
     },
+    "Copied." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopierat."
+          }
+        }
+      }
+    },
     "Copy" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17500,6 +17522,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera agentprompt"
+          }
+        }
+      }
+    },
+    "Copy All" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera allt"
           }
         }
       }
@@ -23077,6 +23110,17 @@
         }
       }
     },
+    "Every try of a firmware update or other procedure your definitions declare, newest first: how it ended and why, then each step, link event, error and checksum check. Kept on this Mac across captures." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Varje försök till en firmwareuppdatering eller annan procedur som dina definitioner beskriver, nyast först: hur det slutade och varför, sedan varje steg, länkhändelse, fel och kontrollsumma. Sparas på den här Macen mellan inspelningar."
+          }
+        }
+      }
+    },
     "Everyone in this chat" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25040,6 +25084,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Slutför"
+          }
+        }
+      }
+    },
+    "Firmware updates and other procedures, one timeline per try: how each ended and why." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Firmwareuppdateringar och andra procedurer, en tidslinje per försök: hur varje försök slutade och varför."
           }
         }
       }
@@ -27347,6 +27402,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Högst av %lld avläsningar"
+          }
+        }
+      }
+    },
+    "History cleared." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Historiken rensad."
           }
         }
       }
@@ -37040,6 +37106,17 @@
         }
       }
     },
+    "Nothing recorded yet. Firmware updates are recorded when the definitions include nordic-dfu or nordic-legacy-dfu, or declare procedures: of their own." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget inspelat än. Firmwareuppdateringar spelas in när definitionerna inkluderar nordic-dfu eller nordic-legacy-dfu, eller beskriver egna procedures:."
+          }
+        }
+      }
+    },
     "Nothing to Capture" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41544,6 +41621,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Problem rapporterat från Threading"
+          }
+        }
+      }
+    },
+    "Procedure timelines" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidslinjer för procedurer"
           }
         }
       }
@@ -65544,6 +65632,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tidszon: %@"
+          }
+        }
+      }
+    },
+    "Timelines" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidslinjer"
           }
         }
       }

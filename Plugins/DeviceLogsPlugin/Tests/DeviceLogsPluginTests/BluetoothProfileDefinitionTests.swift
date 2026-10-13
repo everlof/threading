@@ -53,7 +53,7 @@ final class BluetoothProfileDefinitionTests: XCTestCase {
         session.time = 1.02
         let selected = session.acl(BluetoothFlowTests.att([0x1b, 0x10, 0x00, 0x60, 0x06, 0x01]
             + [0x00, 0x02, 0, 0] + [0, 0, 0, 0] + [0, 0, 0, 0]), incoming: true)
-        XCTAssertTrue(selected.text.hasSuffix("SELECT SUCCESS max 512 offset 0 crc32 0 ↩ Secure DFU: SELECT COMMAND · 20 ms"), selected.text)
+        XCTAssertTrue(selected.text.hasSuffix("SELECT SUCCESS max 512 offset 0 crc32 0x00000000 ↩ Secure DFU: SELECT COMMAND · 20 ms"), selected.text)
         XCTAssertEqual(selected.level, .info)
         _ = session.acl(BluetoothFlowTests.att([0x12, 0x10, 0x00, 0x01, 0x02, 0x00, 0x10, 0, 0]), incoming: false)
         let refused = session.acl(BluetoothFlowTests.att([0x1b, 0x10, 0x00, 0x60, 0x01, 0x04]), incoming: true)
@@ -88,7 +88,7 @@ final class BluetoothProfileDefinitionTests: XCTestCase {
         XCTAssertTrue(sizes.text.contains("application=40"), sizes.text)
         _ = write(0x10, [0x02, 0x00])
         let initPacket = write(0x12, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x00, 0xfe, 0xff, UInt8(crc & 0xff), UInt8(crc >> 8)])
-        XCTAssertTrue(initPacket.text.contains("softdevices [65534] crc16 \(crc)"), initPacket.text)
+        XCTAssertTrue(initPacket.text.contains("softdevices [65534] crc16 0x\(String(format: "%04X", crc))"), initPacket.text)
         _ = write(0x10, [0x03])
         _ = session.takeFlowRows()
         _ = write(0x12, Array(image[0..<20]))

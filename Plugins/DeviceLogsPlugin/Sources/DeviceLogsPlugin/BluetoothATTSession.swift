@@ -45,6 +45,8 @@ struct BluetoothATTSession {
     /// What a row whose bytes did not fit their definition says before the reason.
     static let problemMarker = " ⚠ "
 
+    private static let unnamedPeer = "peripheral"
+
     /// The capturing iPhone's side of every row; the capture is always taken on the phone.
     static let localName = "iPhone"
 
@@ -100,6 +102,11 @@ struct BluetoothATTSession {
         var context: [String: BluetoothValue] = [:]
         /// Per database, a characteristic's value handle → what its CCCD was last set to.
         var subscriptions: [BluetoothGATTServer: [Int: UInt16]] = [:]
+        /// The role this connection plays for a device that came back as something else
+        /// (`bootloader`), the device's key, and its name, from an `identities:` rule.
+        var role: String?
+        var family: String?
+        var familyName: String?
 
         /// Who taught a learned enum: the address when the connection was seen, else the name.
         var identity: String? { address ?? deviceName.map { "name:\($0)" } }
@@ -122,6 +129,22 @@ struct BluetoothATTSession {
     private(set) var learnedRevision = 0
     /// The device and build most recently identified, for the footer's learned-enum line.
     private(set) var learnedFirmware: (identity: String?, firmware: String?) = (nil, nil)
+
+    /// Procedures in progress and what earlier ones recorded; the history is loaded and saved
+    /// by the capture worker.
+    var procedures = BluetoothProcedureState()
+
+    /// A device expected to come back under another identity.
+    private struct IdentityWatch {
+        let rule: BluetoothPacketDefinitions.IdentityRule
+        let family: String
+        let name: String
+        let address: String?
+        let deadline: Double
+    }
+    private var identityWatches: [IdentityWatch] = []
+    /// Service UUIDs each address advertised, for `identities:` that recognise a successor by them.
+    private var advertisedServices: [String: Set<String>] = [:]
 
     private var connections: [Int: Connection] = [:]
     private var order: [Int] = []
@@ -146,7 +169,7 @@ struct BluetoothATTSession {
 
     /// `incoming` is the capture's direction: true when the phone received the packet.
     mutating func acl(_ payload: [UInt8], incoming: Bool) -> Summary {
-        expireRequests()
+        advance()
         guard payload.count >= 4, word(payload, 2) == payload.count - 4 else {
             return Summary(protocolName: "ACL", text: "Malformed ACL Data", error: true)
         }
@@ -250,6 +273,8 @@ struct BluetoothATTSession {
         if opcode == 0x1d, let attribute, pdu.count >= 7, uuid(attribute) == Self.serviceChangedUUID {
             let range = word(pdu, 3)...max(word(pdu, 3), word(pdu, 5))
             database.live.drop(range)
+            signal(.event(.serviceChanged), connection: connection,
+                   text: "Service Changed: handles \(hex(range.lowerBound))–\(hex(range.upperBound)) changed", level: .warning)
             if let key = deviceKey(connection, server: server) {
                 gatt.update(key, isPhone: server == .phone) { $0.table.drop(range) }
                 gattRevision += 1
@@ -286,6 +311,7 @@ struct BluetoothATTSession {
                 }
             }
             text += " request=\(hex(Int(request))) attribute=\(hex(handle)) error=\(hex(Int(pdu[4])))"
+                + (Self.attErrors[pdu[4]].map { " (\($0))" } ?? "")
             if let definitions, !definitions.transactions.isEmpty,
                let operation: BluetoothPacketDefinitions.Operation = [0x0a, 0x0c].contains(request) ? .read
                     : [0x12, 0x16, 0x18].contains(request) ? .write : nil,
@@ -293,6 +319,9 @@ struct BluetoothATTSession {
                let note = connection.flows.refused(definitions: definitions, characteristic: characteristic.name, operation: operation) {
                 text += " " + note
             }
+            let refused = definitions.flatMap { matched($0, handle, server: server, database: database, connection: connection) }
+            signal(.note, connection: connection, text: "ATT error \(hex(Int(pdu[4]))) refusing "
+                + (refused?.name ?? "attribute \(hex(handle))") + (Self.attErrors[pdu[4]].map { ": \($0)" } ?? ""), level: .error)
             return Summary(protocolName: "ATT", text: text, error: true)
         case 0x02 where pdu.count >= 3:
             connection.requestedMTU = word(pdu, 1)
@@ -408,7 +437,7 @@ struct BluetoothATTSession {
             }
         }
         let tables = enums.isEmpty ? [:] : learned.tables(for: connection.identity, firmware: connection.firmware, enums: enums)
-        let decoded = definitions.decode(value, as: type, learned: tables, context: connection.context)
+        var decoded = definitions.decode(value, as: type, learned: tables, context: connection.context)
         // `firmware:` names the characteristic whose value identifies the build, when it is not
         // the standard Firmware Revision String.
         if incoming, definitions.firmwareCharacteristic == characteristic.name {
@@ -423,12 +452,11 @@ struct BluetoothATTSession {
             let key = "\(characteristic.name).\(id)"
             if connection.context[key] != nil || connection.context.count < Limits.contextValues { connection.context[key] = found }
         }
-        let peer = connection.deviceName
-            ?? connection.address.flatMap { advertisedNames[$0] }
-            ?? (server == .device ? connection.gattChoice.flatMap { gatt[$0]?.name } : nil)
-            ?? characteristic.service
-            ?? connection.address
-            ?? "peripheral"
+        // Flows and procedures may also test another characteristic's last value
+        // (`Secure DFU Control Point.type: DATA`), so they see the connection's context too.
+        for (key, found) in connection.context where decoded.values[key] == nil { decoded.values[key] = found }
+        let peer = label(connection, fallback: (server == .device ? connection.gattChoice.flatMap { gatt[$0]?.name } : nil)
+            ?? characteristic.service)
         let route = incoming ? "\(peer) → \(Self.localName)" : "\(Self.localName) → \(peer)"
         var text = "\(route) · \(characteristic.name) \(verb) · \(decoded.text)"
         if let problem = decoded.problem { text += Self.problemMarker + problem }
@@ -446,6 +474,21 @@ struct BluetoothATTSession {
             )
             if let note = flows.note { text += " " + note }
             addFlowRows(flows.rows)
+            for row in flows.rows { signal(.note, connection: connection, text: row.text, level: row.level) }
+        }
+        if !definitions.procedures.isEmpty || !definitions.identities.isEmpty {
+            let operation = BluetoothPacketDefinitions.Operation(verb: verb)
+            let shown = "\(characteristic.name) \(verb) · \(decoded.text)" + (decoded.problem.map { Self.problemMarker + $0 } ?? "")
+            let level = decoded.problem != nil ? BluetoothSeverity.warning : decoded.level ?? .info
+            let words = decoded.wordEnums
+            let resolve: (Int64) -> String? = { number in
+                for name in words { if let found = tables[name]?[number] ?? definitions.enums[name]?[number] { return found } }
+                return nil
+            }
+            let names: (String, Int64) -> String? = { name, number in tables[name]?[number] ?? definitions.enums[name]?[number] }
+            let kind = BluetoothProcedureState.Signal.Kind.value(characteristic: characteristic.name, operation: operation, decoded: decoded)
+            watchForSuccessors(after: kind, connection: connection, text: shown, resolve: resolve, names: names)
+            signal(kind, connection: connection, text: shown, level: level, resolve: resolve, names: names)
         }
         let link = definitions.logLinks.isEmpty ? nil : definitions.packetLink(
             characteristic: characteristic.name, operation: BluetoothPacketDefinitions.Operation(verb: verb), values: decoded.values
@@ -454,6 +497,92 @@ struct BluetoothATTSession {
             protocolName: Self.appProtocolName, text: text, warning: decoded.problem != nil,
             level: decoded.level, link: link, preview: value
         )
+    }
+
+    // MARK: Identities and procedures
+
+    /// The device a connection belongs to, across the identities it comes back as.
+    private func family(_ connection: Connection) -> String {
+        connection.family ?? connection.identity ?? connection.gattChoice ?? "this capture"
+    }
+
+    /// The name rows use: the device's, with the role it is playing (`Kronaby (bootloader)`).
+    private func label(_ connection: Connection, fallback: String? = nil) -> String {
+        let base = connection.familyName ?? connection.deviceName
+            ?? connection.address.flatMap { advertisedNames[$0] } ?? fallback ?? connection.address ?? Self.unnamedPeer
+        return connection.role.map { "\(base) (\($0))" } ?? base
+    }
+
+    /// Tells the procedures something happened on this connection's device.
+    private mutating func signal(
+        _ kind: BluetoothProcedureState.Signal.Kind, connection: Connection, text: String, level: BluetoothSeverity,
+        resolve: (Int64) -> String? = { _ in nil }, names: (String, Int64) -> String? = { _, _ in nil }
+    ) {
+        guard let definitions, !definitions.procedures.isEmpty else { return }
+        let signal = BluetoothProcedureState.Signal(
+            kind: kind, family: family(connection), device: connection.familyName ?? label(connection),
+            role: connection.role, text: text, level: level, time: time
+        )
+        addFlowRows(procedures.observe(signal, definitions: definitions, resolve: resolve, names: names))
+    }
+
+    /// An `identities:` rule whose `after:` just happened: the device may come back as that role.
+    private mutating func watchForSuccessors(
+        after kind: BluetoothProcedureState.Signal.Kind, connection: Connection, text: String,
+        resolve: (Int64) -> String? = { _ in nil }, names: (String, Int64) -> String? = { _, _ in nil }
+    ) {
+        guard let definitions, !definitions.identities.isEmpty else { return }
+        let signal = BluetoothProcedureState.Signal(
+            kind: kind, family: family(connection), device: label(connection), role: connection.role,
+            text: text, level: .info, time: time
+        )
+        identityWatches.removeAll { $0.deadline < time }
+        for rule in definitions.identities where rule.after.fires(on: signal, resolve: resolve, names: names) {
+            identityWatches.removeAll { $0.rule.name == rule.name && $0.family == signal.family }
+            identityWatches.append(IdentityWatch(
+                rule: rule, family: signal.family, name: connection.familyName ?? label(connection),
+                address: connection.address, deadline: time + rule.within
+            ))
+            if identityWatches.count > BluetoothProcedureState.Limits.identityWatches { identityWatches.removeFirst() }
+        }
+    }
+
+    /// A new connection that is a watched device come back: it joins that device's family.
+    private mutating func joinFamily(_ connection: inout Connection) -> IdentityWatch? {
+        guard let address = connection.address else { return nil }
+        let services = advertisedServices[address] ?? []
+        let name = advertisedNames[address]
+        guard let index = identityWatches.firstIndex(where: { watch in
+            guard watch.deadline >= time else { return false }
+            let rule = watch.rule
+            switch rule.address {
+            case .same: guard watch.address == address else { return false }
+            case .plusOne: guard watch.address.map(Self.incremented) == address else { return false }
+            case .any: break
+            }
+            // Advertising identifies it: by a service it lists, or by its name.
+            let byService = !services.isDisjoint(with: rule.advertises)
+            let byName = rule.advertisedName.map { pattern in name.map { MessagePackPattern.glob(pattern, matches: $0) } ?? false } ?? false
+            let hasCriteria = !rule.advertises.isEmpty || rule.advertisedName != nil
+            // With any address, advertising is all there is. With an address rule, advertising must
+            // agree when the capture saw any — it often starts after the advertisement.
+            if rule.address == .any { return hasCriteria && (byService || byName) }
+            if hasCriteria, !services.isEmpty || name != nil { return byService || byName }
+            return true
+        }) else { return nil }
+        let watch = identityWatches.remove(at: index)
+        connection.role = watch.rule.name
+        connection.family = watch.family
+        connection.familyName = watch.name
+        return watch
+    }
+
+    /// Nordic's bootloader adds one to the address's least significant byte, without carry.
+    static func incremented(_ address: String) -> String {
+        var parts = address.split(separator: ":").map(String.init)
+        guard let last = parts.last, let byte = UInt8(last, radix: 16) else { return address }
+        parts[parts.count - 1] = String(format: "%02X", byte &+ 1)
+        return parts.joined(separator: ":")
     }
 
     /// Rows transactions and streams added, in order, since the last call.
@@ -466,6 +595,14 @@ struct BluetoothATTSession {
         flowRows += rows.prefix(max(0, Limits.pendingRows - flowRows.count))
     }
 
+    /// What time alone decides, by the next packet of any kind: overdue requests, idle tries.
+    private mutating func advance() {
+        expireRequests()
+        if let definitions, !definitions.procedures.isEmpty {
+            addFlowRows(procedures.tick(definitions: definitions, time: time))
+        }
+    }
+
     /// Requests whose answer is overdue, on every connection, reported by the next packet.
     private mutating func expireRequests() {
         guard let definitions, !definitions.transactions.isEmpty else { return }
@@ -475,6 +612,7 @@ struct BluetoothATTSession {
             guard !rows.isEmpty else { continue }
             connections[handle] = connection
             addFlowRows(rows)
+            for row in rows { signal(.note, connection: connection, text: row.text, level: row.level) }
         }
     }
 
@@ -596,28 +734,41 @@ struct BluetoothATTSession {
     /// the facts that explain a slow transfer or a dropped watch, and no app definition is needed.
     @discardableResult
     mutating func event(_ payload: [UInt8]) -> EventSummary? {
+        advance()
         guard payload.count >= 3, Int(payload[1]) == payload.count - 2 else { return nil }
         switch payload[0] {
         case 0x05 where payload.count >= 6:
             let handle = word(payload, 3) & 0x0fff
             let who = peerName(handle)
             let reason = payload[5]
-            if payload[2] == 0 { forget(handle) }
             let name = Self.disconnectReasons[reason] ?? "reason \(hex(Int(reason)))"
-            return EventSummary(
+            let summary = EventSummary(
                 text: "Disconnected \(who): \(name)", error: payload[2] != 0,
                 warning: !Self.ordinaryDisconnects.contains(reason)
             )
+            if let connection = connections[handle] {
+                let level: BluetoothSeverity = summary.error ? .error : summary.warning ? .warning : .info
+                watchForSuccessors(after: .event(.disconnected), connection: connection, text: summary.text)
+                signal(.event(.disconnected), connection: connection, text: summary.text, level: level)
+            }
+            if payload[2] == 0 { forget(handle) }
+            return summary
         case 0x08 where payload.count >= 6:
             let handle = word(payload, 3) & 0x0fff
             let status = payload[2]
             guard status == 0 else {
-                return EventSummary(text: "Encryption failed \(peerName(handle)): \(Self.disconnectReasons[status] ?? hex(Int(status)))", error: true)
+                // PIN or Key Missing right after a reboot is the classic lost bond.
+                let summary = EventSummary(text: "Encryption failed \(peerName(handle)): \(Self.disconnectReasons[status] ?? hex(Int(status)))"
+                    + (status == 0x06 ? " — the phone's bond no longer matches the device's keys" : ""), error: true)
+                if let connection = connections[handle] {
+                    signal(.event(.encryptionFailed), connection: connection, text: summary.text, level: .error)
+                }
+                return summary
             }
-            return EventSummary(text: "Encryption \(payload[5] == 0 ? "off" : "on") \(peerName(handle))")
+            return note(EventSummary(text: "Encryption \(payload[5] == 0 ? "off" : "on") \(peerName(handle))"), handle)
         case 0x30 where payload.count >= 5:
             let handle = word(payload, 3) & 0x0fff
-            return EventSummary(text: "Encryption key refreshed \(peerName(handle))", error: payload[2] != 0)
+            return note(EventSummary(text: "Encryption key refreshed \(peerName(handle))", error: payload[2] != 0), handle)
         case 0x3e:
             switch payload[2] {
             case 0x01, 0x0a, 0x29:
@@ -632,34 +783,40 @@ struct BluetoothATTSession {
                 forget(handle)
                 var connection = Connection()
                 connection.address = Self.address(payload[8..<14])
+                let joined = joinFamily(&connection)
                 store(connection, for: handle)
                 let parameters = payload[2] == 0x01 ? 14 : 26
                 var text = "Connected \(peerName(handle)) · \(Self.localName) is \(payload[6] == 0 ? "central" : "peripheral")"
+                if let joined, let address = connection.address {
+                    text += " · the same device at \(address)"
+                    if let previous = joined.address, previous != address { text += " (was \(previous))" }
+                }
                 if payload.count >= parameters + 6 { text += " · " + Self.parameters(payload, at: parameters) }
+                signal(.event(.connected), connection: connection, text: text, level: .info)
                 return EventSummary(text: text)
             case 0x03 where payload.count >= 12:
                 let handle = word(payload, 4) & 0x0fff
                 guard payload[3] == 0 else {
                     return EventSummary(text: "Connection update failed \(peerName(handle)): \(hex(Int(payload[3])))", error: true)
                 }
-                return EventSummary(text: "Connection parameters \(peerName(handle)) · " + Self.parameters(payload, at: 6))
+                return note(EventSummary(text: "Connection parameters \(peerName(handle)) · " + Self.parameters(payload, at: 6)), handle)
             case 0x07 where payload.count >= 13:
                 let handle = word(payload, 3) & 0x0fff
-                return EventSummary(text: "Data length \(peerName(handle)) · tx \(word(payload, 5)) B / \(word(payload, 7)) µs"
-                    + " · rx \(word(payload, 9)) B / \(word(payload, 11)) µs")
+                return note(EventSummary(text: "Data length \(peerName(handle)) · tx \(word(payload, 5)) B / \(word(payload, 7)) µs"
+                    + " · rx \(word(payload, 9)) B / \(word(payload, 11)) µs"), handle)
             case 0x0c where payload.count >= 8:
                 let handle = word(payload, 4) & 0x0fff
                 guard payload[3] == 0 else {
                     return EventSummary(text: "PHY update failed \(peerName(handle)): \(hex(Int(payload[3])))", error: true)
                 }
-                return EventSummary(text: "PHY \(peerName(handle)) · tx \(Self.phy(payload[6])) · rx \(Self.phy(payload[7]))")
+                return note(EventSummary(text: "PHY \(peerName(handle)) · tx \(Self.phy(payload[6])) · rx \(Self.phy(payload[7]))"), handle)
             case 0x05 where payload.count >= 5:
                 return EventSummary(text: "Long-term key requested \(peerName(word(payload, 3) & 0x0fff))")
             case 0x06 where payload.count >= 13:
                 let handle = word(payload, 3) & 0x0fff
                 let interval = "\(Self.decimal(Double(word(payload, 5)) * 1.25))–\(Self.decimal(Double(word(payload, 7)) * 1.25)) ms"
-                return EventSummary(text: "\(peerName(handle)) asks for interval \(interval) latency \(word(payload, 9))"
-                    + " timeout \(word(payload, 11) * 10) ms")
+                return note(EventSummary(text: "\(peerName(handle)) asks for interval \(interval) latency \(word(payload, 9))"
+                    + " timeout \(word(payload, 11) * 10) ms"), handle)
             case 0x02:
                 // Legacy reports: only a single report has an unambiguous layout.
                 guard payload.count >= 13, payload[3] == 1 else { return nil }
@@ -694,11 +851,21 @@ struct BluetoothATTSession {
         }
     }
 
-    /// The best name the capture has for a connection: the device's own, its advertised one, its
-    /// address, else the handle.
+    /// The best name the capture has for a connection: the device's own (with the role it is
+    /// playing), its advertised one, its address, else the handle.
     private func peerName(_ handle: Int) -> String {
         guard let connection = connections[handle] else { return "handle \(hex(handle))" }
-        return connection.deviceName ?? connection.address.flatMap { advertisedNames[$0] } ?? connection.address ?? "handle \(hex(handle))"
+        let named = label(connection)
+        return named == Self.unnamedPeer ? "handle \(hex(handle))" : named
+    }
+
+    /// A link fact goes into the timeline of a procedure running on that device.
+    private mutating func note(_ summary: EventSummary, _ handle: Int) -> EventSummary {
+        if let connection = connections[handle] {
+            signal(.note, connection: connection, text: summary.text,
+                   level: summary.error ? .error : summary.warning ? .warning : .info)
+        }
+        return summary
     }
 
     /// interval(2) latency(2) timeout(2), in the units HCI uses: 1.25 ms and 10 ms.
@@ -748,6 +915,18 @@ struct BluetoothATTSession {
             switch type {
             case 0x09: complete = Self.name(value) ?? complete
             case 0x08: shortened = Self.name(value) ?? shortened
+            case 0x02, 0x03, 0x06, 0x07:
+                // Lists of 16-bit or 128-bit service UUIDs.
+                let width = type <= 0x03 ? 2 : 16
+                var start = value.startIndex
+                var found = advertisedServices[address] ?? []
+                while start + width <= value.endIndex {
+                    if let uuid = BluetoothUUID.canonical(wire: value[start..<(start + width)]) { found.insert(uuid) }
+                    start += width
+                }
+                if !found.isEmpty, advertisedServices[address] != nil || advertisedServices.count < Limits.advertisedNames {
+                    advertisedServices[address] = found
+                }
             case 0xff where value.count >= 2:
                 let company = Int(value[value.startIndex]) | Int(value[value.startIndex + 1]) << 8
                 if let entry = definitions?.advertising.first(where: { $0.company == company }) {
@@ -790,6 +969,11 @@ struct BluetoothATTSession {
 
     /// The device's build, from the Firmware Revision String or the `firmware:` characteristic.
     private mutating func noteFirmware(_ firmware: String, connection: inout Connection) {
+        if definitions?.procedures.isEmpty == false {
+            let changed = procedures.noteFirmware(firmware, family: family(connection))
+            signal(changed ? .event(.firmwareChanged) : .note, connection: connection,
+                   text: (changed ? "firmware changed to " : "firmware ") + firmware, level: .info)
+        }
         connection.firmware = firmware
         learnedFirmware = (connection.identity, firmware)
         if let identity = connection.identity, learned.adopt(identity: identity, firmware: firmware) { learnedRevision += 1 }
@@ -885,6 +1069,7 @@ struct BluetoothATTSession {
             if let firmware { device.firmware = firmware }
         }
         if server == .device {
+            procedures.noteDiscovery(family: family(connection))
             // This connection is this device now; nothing left to guess.
             connection.gattChoice = key
             connection.gattCandidates = [key]
@@ -985,6 +1170,18 @@ struct BluetoothATTSession {
         Int(bytes[index]) | (Int(bytes[index + 1]) << 8)
     }
     private func hex(_ value: Int) -> String { String(format: "0x%04x", value) }
+
+    /// Core Specification Vol 3 Part F 3.4.1.1; 0x80–0x9F are the application's own.
+    static let attErrors: [UInt8: String] = [
+        0x01: "Invalid Handle", 0x02: "Read Not Permitted", 0x03: "Write Not Permitted", 0x04: "Invalid PDU",
+        0x05: "Insufficient Authentication", 0x06: "Request Not Supported", 0x07: "Invalid Offset",
+        0x08: "Insufficient Authorization", 0x09: "Prepare Queue Full", 0x0a: "Attribute Not Found",
+        0x0b: "Attribute Not Long", 0x0c: "Insufficient Key Size", 0x0d: "Invalid Attribute Value Length",
+        0x0e: "Unlikely Error", 0x0f: "Insufficient Encryption", 0x10: "Unsupported Group Type",
+        0x11: "Insufficient Resources", 0x12: "Database Out of Sync", 0x13: "Value Not Allowed",
+        0xfc: "Write Request Rejected", 0xfd: "CCCD Improperly Configured", 0xfe: "Procedure Already in Progress",
+        0xff: "Out of Range",
+    ]
 
     private static let verbs: [UInt8: String] = [
         0x12: "write", 0x52: "write", 0xd2: "signed write",

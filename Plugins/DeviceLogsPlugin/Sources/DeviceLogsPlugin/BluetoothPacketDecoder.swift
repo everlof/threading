@@ -45,6 +45,13 @@ struct BluetoothPacketDecoder {
         set { session.gatt = newValue }
     }
     var gattRevision: Int { session.gattRevision }
+    /// Procedure attempts, recorded and remembered; loaded and saved by the capture worker.
+    var procedureHistory: BluetoothProcedureHistory {
+        get { session.procedures.history }
+        set { session.procedures.history = newValue }
+    }
+    var procedureRevision: Int { session.procedures.revision }
+    mutating func clearProcedureHistory() { session.procedures.clear() }
     var gattSummary: String? { session.gattSummary }
     var phoneIdentity: String? {
         get { session.phoneIdentity }
@@ -143,7 +150,7 @@ private enum BluetoothPacketSummary {
             time: time, level: summary.error ? "Error" : summary.warning ? "Warning" : summary.level?.level ?? "Info",
             process: "Bluetooth",
             subsystem: summary.protocolName,
-            message: "\(direction) \(summary.text) · \(payload.count) bytes"
+            message: "\(direction) \(summary.text) · \(payload.count) \(payload.count == 1 ? "byte" : "bytes")"
                 + (truncated ? " (capture truncated)" : "") + " | \(preview)\(suffix)",
             timestamp: Date(timeIntervalSince1970: Double(seconds) + Double(microseconds) / 1_000_000),
             link: summary.link
@@ -155,7 +162,7 @@ private enum BluetoothPacketSummary {
         DeviceLogRow(
             time: clock(seconds, microseconds), level: flow.level.level, process: "Bluetooth",
             subsystem: BluetoothATTSession.appProtocolName,
-            message: (flow.incoming ? "RX " : "TX ") + flow.text,
+            message: (flow.procedure ? "" : flow.incoming ? "RX " : "TX ") + flow.text,
             timestamp: Date(timeIntervalSince1970: Double(seconds) + Double(microseconds) / 1_000_000)
         )
     }

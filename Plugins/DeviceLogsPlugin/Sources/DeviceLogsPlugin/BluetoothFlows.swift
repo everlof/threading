@@ -104,8 +104,12 @@ extension BluetoothPacketDefinitions {
 
         let name: String
         let start: Endpoint?
-        /// Supplies a total or checksum later, without starting over.
+        /// Supplies a total or checksum later, without starting over. With `offset:` it is the
+        /// device's own account of what it holds (a resumed transfer), and with a checksum too
+        /// the running one continues from it.
         let info: Endpoint?
+        /// The device reports what it received (`offset:`, `crc32:`); compared with what was sent.
+        let verify: Endpoint?
         let data: Endpoint
         let end: Endpoint?
         /// Joined bytes are text, emitted a line at a time.
@@ -158,6 +162,9 @@ struct BluetoothFlowState {
         let text: String
         let level: BluetoothSeverity
         let incoming: Bool
+        /// A procedure's start or ending: the story of a try rather than something on the air, so
+        /// it carries no direction. It stays under the app's subsystem so "App packets only" keeps it.
+        var procedure = false
     }
 
     private struct Request {
@@ -189,7 +196,7 @@ struct BluetoothFlowState {
         decoded: BluetoothPacketDefinitions.Decoded, incoming: Bool, peer: String, time: Double,
         resolve: (Int64) -> String?, names: (String, Int64) -> String? = { _, _ in nil }
     ) -> (note: String?, rows: [Row]) {
-        var note: String?
+        var notes: [String] = []
         var rows: [Row] = []
         let summary = String(decoded.text.prefix(Limits.summaryCharacters))
 
@@ -214,11 +221,11 @@ struct BluetoothFlowState {
                     let request = requests[position]
                     let elapsed = Self.duration(time - request.time)
                     if pending {
-                        note = note ?? "↩ \(transaction.name) pending: \(request.summary) · \(elapsed)"
+                        notes.append("↩ \(transaction.name) pending: \(request.summary) · \(elapsed)")
                     } else {
                         requests.remove(at: position)
                         open[index] = requests
-                        note = note ?? "↩ \(transaction.name): \(request.summary) · \(elapsed)"
+                        notes.append("↩ \(transaction.name): \(request.summary) · \(elapsed)")
                     }
                 }
             }
@@ -246,7 +253,7 @@ struct BluetoothFlowState {
                 if let crc = start.value("crc32", in: values)?.integer { transfer.expected = (.crc32, UInt32(truncatingIfNeeded: crc)) }
                 else if let crc = start.value("crc16", in: values)?.integer { transfer.expected = (.crc16, UInt32(truncatingIfNeeded: crc)) }
                 store(transfer, stream: index, key: key)
-                note = note ?? "\(stream.name) starts" + (transfer.total.map { " · \(Self.size($0))" } ?? "")
+                notes.append("\(stream.name) starts" + (transfer.total.map { " · \(Self.size($0))" } ?? ""))
             }
             if let info = stream.info, let values = info.evaluate(
                 characteristic: characteristic, operation: operation, decoded: decoded, resolve: resolve, names: names
@@ -254,8 +261,25 @@ struct BluetoothFlowState {
                 let key = info.value("key", in: values)?.display ?? ""
                 var transfer = transfers[index]?[key] ?? Transfer(started: time, touched: time)
                 if let total = info.value("total", in: values)?.integer { transfer.total = Int(clamping: total) }
-                if let crc = info.value("crc32", in: values)?.integer { transfer.expected = (.crc32, UInt32(truncatingIfNeeded: crc)) }
-                else if let crc = info.value("crc16", in: values)?.integer { transfer.expected = (.crc16, UInt32(truncatingIfNeeded: crc)) }
+                if let offset = info.value("offset", in: values)?.integer.map({ Int(clamping: $0) }) {
+                    // The device's own account of what it already holds: a resumed transfer
+                    // continues from there, and its checksum continues from the device's.
+                    if offset != transfer.received {
+                        if offset > 0 { notes.append("\(stream.name) resumes at \(Self.size(offset))") }
+                        transfer.received = offset
+                        transfer.reportedBytes = offset
+                        if let crc = info.value("crc32", in: values)?.integer {
+                            transfer.crc32 = ~UInt32(truncatingIfNeeded: crc)
+                            transfer.contiguous = true
+                        } else {
+                            transfer.contiguous = offset == 0
+                        }
+                    }
+                } else if let crc = info.value("crc32", in: values)?.integer {
+                    transfer.expected = (.crc32, UInt32(truncatingIfNeeded: crc))
+                } else if let crc = info.value("crc16", in: values)?.integer {
+                    transfer.expected = (.crc16, UInt32(truncatingIfNeeded: crc))
+                }
                 store(transfer, stream: index, key: key)
             }
             if let values = stream.data.evaluate(
@@ -299,6 +323,20 @@ struct BluetoothFlowState {
                 }
                 store(transfer, stream: index, key: key)
             }
+            if let verify = stream.verify, let values = verify.evaluate(
+                characteristic: characteristic, operation: operation, decoded: decoded, resolve: resolve, names: names
+            ) {
+                let key = verify.value("key", in: values)?.display ?? ""
+                if let transfer = transfers[index]?[key] {
+                    let (verdict, level) = Self.verify(transfer, values: values, endpoint: verify)
+                    if level == .error {
+                        rows.append(Row(text: "\(peer) · \(stream.name)\(Self.label(key)) " + verdict, level: .error, incoming: incoming))
+                    } else {
+                        // First, so the verdict is never what the row's width cuts off.
+                        notes.insert(verdict, at: 0)
+                    }
+                }
+            }
             if let end = stream.end, let values = end.evaluate(
                 characteristic: characteristic, operation: operation, decoded: decoded, resolve: resolve, names: names
             ) {
@@ -309,7 +347,7 @@ struct BluetoothFlowState {
                 }
             }
         }
-        return (note, rows)
+        return (notes.isEmpty ? nil : notes.joined(separator: " · "), rows)
     }
 
     /// An ATT Error Response: the read or write it refuses fails the transaction waiting on it.
@@ -428,7 +466,35 @@ struct BluetoothFlowState {
 
     private static func label(_ key: String) -> String { key.isEmpty ? "" : " \(key)" }
 
-    private static func hex(_ value: UInt32, _ width: Int) -> String { "0x" + String(format: "%0\(width)x", value) }
+    /// The device says how much it has and, often, its checksum; we know what was sent.
+    private static func verify(
+        _ transfer: Transfer, values: [String: BluetoothValue], endpoint: BluetoothPacketDefinitions.Endpoint
+    ) -> (String, BluetoothSeverity) {
+        let offset = endpoint.value("offset", in: values)?.integer.map { Int(clamping: $0) }
+        var problems: [String] = []
+        var facts: [String] = []
+        if let offset {
+            if offset == transfer.received { facts.append("has all \(size(offset)) sent") }
+            else { problems.append("has \(size(offset)) but \(size(transfer.received)) were sent") }
+        }
+        for kind in [BluetoothPacketDefinitions.Stream.Check.crc32, .crc16] {
+            guard let reported = endpoint.value(kind.rawValue, in: values)?.integer.map({ UInt32(truncatingIfNeeded: $0) }) else { continue }
+            guard transfer.contiguous, offset.map({ $0 == transfer.received }) ?? true else {
+                facts.append("\(kind.rawValue) not comparable")
+                continue
+            }
+            let sent = kind == .crc32 ? ~transfer.crc32 : UInt32(transfer.crc16)
+            let width = kind == .crc32 ? 8 : 4
+            if reported == sent { facts.append("\(kind.rawValue) matches") }
+            else { problems.append("\(kind.rawValue) \(hex(reported, width)) but what was sent is \(hex(sent, width))") }
+        }
+        if !problems.isEmpty {
+            return ("✗ the device " + problems.joined(separator: "; ") + " — packets were lost or corrupted on the way", .error)
+        }
+        return ("✓ device " + facts.joined(separator: ", "), .info)
+    }
+
+    private static func hex(_ value: UInt32, _ width: Int) -> String { "0x" + String(format: "%0\(width)X", value) }
 
     private static func rate(_ transfer: Transfer, time: Double) -> String {
         let seconds = time - transfer.started
@@ -443,7 +509,8 @@ struct BluetoothFlowState {
     static func duration(_ seconds: Double) -> String {
         if seconds < 1 { return "\(Int((seconds * 1_000).rounded())) ms" }
         if seconds < 60 { return String(format: "%.1f s", seconds) }
-        return "\(Int(seconds) / 60) min \(Int(seconds) % 60) s"
+        let whole = Int(seconds)
+        return whole % 60 == 0 ? "\(whole / 60) min" : "\(whole / 60) min \(whole % 60) s"
     }
 }
 

@@ -360,7 +360,7 @@ final class BluetoothPacketDefinitionTests: XCTestCase {
         let write = [UInt8(2)] + Self.att([0x52] + le(0x25, 2) + [7])
         let row = try XCTUnwrap(decoder.append(BluetoothPacketTests.header() + BluetoothPacketTests.packet(write)).first)
         XCTAssertEqual(row.subsystem, "App")
-        XCTAssertTrue(row.message.hasPrefix("TX iPhone → peripheral · Ping write · n=7 · 1 bytes | 07"), row.message)
+        XCTAssertTrue(row.message.hasPrefix("TX iPhone → peripheral · Ping write · n=7 · 1 byte | 07"), row.message)
     }
 
     // MARK: The file
@@ -394,7 +394,7 @@ final class BluetoothPacketDefinitionTests: XCTestCase {
         // Everything a newcomer can use is in the prompt, and the advanced snippet compiles.
         for construct in ["type: msgpack", "match:", "learn:", "names: Command", "shapes:", "server: phone",
                           "highlight:", "`visible`", "packets: \"app\"", "transactions:", "streams:", "logs:",
-                          "include: [gatt", "level:", "`linked`"] {
+                          "include: [gatt", "level:", "`linked`", "procedures:", "identities:", "verify:", "`timelines`"] {
             XCTAssertTrue(prompt.contains(construct), construct)
         }
         let advanced = try BluetoothPacketDefinitions.compile(BluetoothDefinitionsGuide.advancedExample)

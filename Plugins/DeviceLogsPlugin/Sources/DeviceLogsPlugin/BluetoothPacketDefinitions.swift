@@ -111,6 +111,8 @@ struct BluetoothPacketDefinitions: Sendable {
         var bits: [BitField] = []
         /// `if:` — the field is present only when this holds for earlier fields.
         var condition: Condition? = nil
+        /// `hex: true` — an integer shown as `0x` and its full width in hex, as a checksum is read.
+        var hex = false
     }
 
     /// `token: { bits: 8-15, enum: Token }` — bits `low...high` of an integer, counted from 0.
@@ -206,6 +208,10 @@ struct BluetoothPacketDefinitions: Sendable {
     var advertising: [Advertisement] = []
     /// `logs:` — app log lines that describe packets.
     var logLinks: [BluetoothLogLink] = []
+    /// `procedures:` — multi-step operations told as one timeline per try.
+    var procedures: [Procedure] = []
+    /// `identities:` — how a device comes back under another address.
+    var identities: [IdentityRule] = []
 
     struct Advertisement: Sendable {
         let company: Int
@@ -392,6 +398,9 @@ extension BluetoothPacketDefinitions {
         merged.firmwareCharacteristic = other.firmwareCharacteristic ?? firmwareCharacteristic
         merged.advertising = other.advertising + advertising
         merged.logLinks = logLinks + other.logLinks
+        // A project's procedure or identity of the same name replaces the profile's.
+        merged.procedures = procedures.filter { mine in !other.procedures.contains { $0.name == mine.name } } + other.procedures
+        merged.identities = identities.filter { mine in !other.identities.contains { $0.name == mine.name } } + other.identities
         return merged
     }
 }
@@ -402,14 +411,14 @@ private struct Compiler {
 
     private static let rootKeys: Set<String> = [
         "version", "services", "types", "enums", "highlight", "shapes", "transactions", "streams",
-        "include", "firmware", "logs", "advertising",
+        "include", "firmware", "logs", "advertising", "identities", "procedures",
     ]
     private static let serviceKeys: Set<String> = ["name", "uuid", "characteristics"]
     private static let characteristicKeys: Set<String> = ["name", "uuid", "handle", "server", "message", "rx", "tx"]
     private static let typeKeys: Set<String> = ["seq", "summary"]
     private static let fieldKeys: Set<String> = [
         "id", "type", "enum", "scale", "unit", "flags", "size", "repeat", "hidden", "doc", "match", "values",
-        "bits", "if",
+        "bits", "if", "hex",
     ]
     private static let switchKeys: Set<String> = ["switch-on", "cases"]
 
@@ -624,6 +633,20 @@ private struct Compiler {
                 throw Failure(line: node.line, message: "more than \(BluetoothLogLink.Limits.rules) logs: rules")
             }
             definitions.logLinks = try items.map { try logLink($0, characteristics: names) }
+        }
+        if let node = value("identities", in: entries) {
+            let items = try sequence(node, what: "identities")
+            guard items.count <= Definitions.Limits.flows else {
+                throw Failure(line: node.line, message: "more than \(Definitions.Limits.flows) identities")
+            }
+            definitions.identities = try items.map { try identity($0, characteristics: names) }
+        }
+        if let node = value("procedures", in: entries) {
+            let items = try sequence(node, what: "procedures")
+            guard items.count <= Definitions.Limits.flows else {
+                throw Failure(line: node.line, message: "more than \(Definitions.Limits.flows) procedures")
+            }
+            definitions.procedures = try items.map { try procedure($0, characteristics: names) }
         }
         if let entry = entries.first(where: { $0.key == "firmware" }) {
             guard let name = scalar(entry.value), names.contains(name) else {
@@ -924,11 +947,15 @@ private struct Compiler {
             condition = try self.condition(text, earlier: earlier, integerFields: integerFields, label: label, line: line("if"), context: context)
         }
         let hidden = value("hidden", in: entries).flatMap(scalar).map { $0 == "true" || $0 == "yes" } ?? false
+        let hex = value("hex", in: entries).flatMap(scalar).map { $0 == "true" || $0 == "yes" } ?? false
+        if hex {
+            guard case .primitive(.integer) = type else { throw Failure(line: line("hex"), message: "\(label): hex applies to integers only") }
+        }
         return .init(
             id: id, type: type, enumName: enumName, scale: scale,
             unit: value("unit", in: entries).flatMap(scalar),
             flags: flags, size: size, repetition: repetition, hidden: hidden,
-            match: rules, captureEnums: captureEnums, values: shapeSet, bits: bits, condition: condition
+            match: rules, captureEnums: captureEnums, values: shapeSet, bits: bits, condition: condition, hex: hex
         )
     }
 
@@ -1041,7 +1068,7 @@ private struct Compiler {
     // MARK: Transactions and streams
 
     private static let transactionKeys: Set<String> = ["name", "request", "response", "key", "pending", "timeout", "within"]
-    private static let streamKeys: Set<String> = ["name", "start", "info", "data", "end", "lines", "levels"]
+    private static let streamKeys: Set<String> = ["name", "start", "info", "data", "verify", "end", "lines", "levels"]
     private static let endpointKeys: Set<String> = [
         "characteristic", "op", "where", "match", "data", "offset", "total", "key", "crc32", "crc16",
     ]
@@ -1097,6 +1124,7 @@ private struct Compiler {
             name: name,
             start: try value("start", in: fields).map { try endpoint($0, characteristics: characteristics, what: "\(what) start") },
             info: try value("info", in: fields).map { try endpoint($0, characteristics: characteristics, what: "\(what) info") },
+            verify: try value("verify", in: fields).map { try endpoint($0, characteristics: characteristics, what: "\(what) verify") },
             data: try endpoint(data, characteristics: characteristics, what: "\(what) data"),
             end: try value("end", in: fields).map { try endpoint($0, characteristics: characteristics, what: "\(what) end") },
             lines: value("lines", in: fields).flatMap(scalar).map { $0 == "true" || $0 == "yes" } ?? false,
@@ -1208,6 +1236,112 @@ private struct Compiler {
         }
         return BluetoothLogLink(expression: expression, source: source, characteristic: characteristic,
                                 operation: operation, key: key, window: window)
+    }
+
+    // MARK: Procedures and identities
+
+    private static let triggerKeys: Set<String> = ["event", "as", "after", "name"]
+
+    /// A packet endpoint or `{ event: disconnected }`, either with `as:` (a role) and `after:` (a step).
+    private func trigger(_ node: YAMLNode, characteristics: Set<String>, what: String, allowName: Bool = false) throws -> Definitions.Trigger {
+        let fields = try mapping(node, what: what)
+        func line(_ key: String) -> Int { fields.first { $0.key == key }?.line ?? node.line }
+        if !allowName, fields.contains(where: { $0.key == "name" }) {
+            throw Failure(line: line("name"), message: "\(what): name: belongs to a step")
+        }
+        let role = value("as", in: fields).flatMap(scalar)
+        let after = value("after", in: fields).flatMap(scalar)
+        if let text = value("event", in: fields).flatMap(scalar) {
+            try rejectUnknown(fields, allowed: Self.triggerKeys, in: what)
+            guard let event = Definitions.ProcedureEvent(rawValue: text) else {
+                throw Failure(line: line("event"), message: "\(what): event is "
+                    + Definitions.ProcedureEvent.allCases.map(\.rawValue).joined(separator: ", "))
+            }
+            return .init(endpoint: nil, event: event, role: role, after: after, label: text + (role.map { " (\($0))" } ?? ""))
+        }
+        let rest = fields.filter { !Self.triggerKeys.contains($0.key) }
+        let endpoint = try self.endpoint(YAMLNode(line: node.line, value: .mapping(rest)), characteristics: characteristics, what: what)
+        var label = endpoint.characteristic
+        if let operation = endpoint.operation { label += " \(operation.rawValue)" }
+        let conditions = endpoint.conditions.map { "\($0.name) \($0.negated ? "≠" : "=") \($0.values.joined(separator: "|"))" }
+        if !conditions.isEmpty { label += " " + conditions.joined(separator: ", ") }
+        return .init(endpoint: endpoint, event: nil, role: role, after: after, label: label)
+    }
+
+    private func triggers(_ node: YAMLNode?, characteristics: Set<String>, what: String) throws -> [Definitions.Trigger] {
+        guard let node else { return [] }
+        if case .sequence(let items) = node.value {
+            return try items.map { try trigger($0, characteristics: characteristics, what: what) }
+        }
+        return [try trigger(node, characteristics: characteristics, what: what)]
+    }
+
+    private func procedure(_ node: YAMLNode, characteristics: Set<String>) throws -> Definitions.Procedure {
+        let fields = try mapping(node, what: "a procedure")
+        try rejectUnknown(fields, allowed: ["name", "start", "steps", "success", "failure", "idle", "settle"], in: "a procedure")
+        func line(_ key: String) -> Int { fields.first { $0.key == key }?.line ?? node.line }
+        guard let name = value("name", in: fields).flatMap(scalar) else {
+            throw Failure(line: node.line, message: "a procedure needs name:, such as DFU")
+        }
+        let what = "procedure \(name)"
+        let start = try triggers(value("start", in: fields), characteristics: characteristics, what: "\(what) start")
+        guard !start.isEmpty else { throw Failure(line: node.line, message: "\(what) needs start: — what begins a try") }
+        var steps: [(String, Definitions.Trigger)] = []
+        if let node = value("steps", in: fields) {
+            for item in try sequence(node, what: "\(what) steps") {
+                guard case .mapping(let entries) = item.value, let step = value("name", in: entries).flatMap(scalar) else {
+                    throw Failure(line: item.line, message: "\(what) steps: each step needs name:")
+                }
+                steps.append((step, try trigger(item, characteristics: characteristics, what: "\(what) step \(step)", allowName: true)))
+            }
+        }
+        let known = Set(steps.map(\.0))
+        let success = try triggers(value("success", in: fields), characteristics: characteristics, what: "\(what) success")
+        let failure = try triggers(value("failure", in: fields), characteristics: characteristics, what: "\(what) failure")
+        for trigger in start + steps.map(\.1) + success + failure {
+            if let after = trigger.after, !known.contains(after) {
+                throw Failure(line: node.line, message: "\(what): after: \(after) is not one of its steps")
+            }
+        }
+        let idle = try value("idle", in: fields).flatMap(scalar).map { try seconds($0, line: line("idle"), what: what) } ?? 120
+        let settle = try value("settle", in: fields).flatMap(scalar).map { try seconds($0, line: line("settle"), what: what) } ?? 30
+        return .init(name: name, start: start, steps: steps, success: success, failure: failure, idle: idle, settle: settle)
+    }
+
+    private func identity(_ node: YAMLNode, characteristics: Set<String>) throws -> Definitions.IdentityRule {
+        let fields = try mapping(node, what: "an identity")
+        try rejectUnknown(fields, allowed: ["name", "after", "address", "advertises", "advertised-name", "within"], in: "an identity")
+        func line(_ key: String) -> Int { fields.first { $0.key == key }?.line ?? node.line }
+        guard let name = value("name", in: fields).flatMap(scalar), name != Definitions.deviceRole else {
+            throw Failure(line: node.line, message: "an identity needs name: — the role it plays, such as bootloader")
+        }
+        guard let afterNode = value("after", in: fields) else {
+            throw Failure(line: node.line, message: "identity \(name) needs after: — the packet or event after which it appears")
+        }
+        let after = try trigger(afterNode, characteristics: characteristics, what: "identity \(name) after")
+        var address = Definitions.IdentityRule.Address.any
+        if let text = value("address", in: fields).flatMap(scalar) {
+            guard let parsed = Definitions.IdentityRule.Address(rawValue: text) else {
+                throw Failure(line: line("address"), message: "identity \(name): address is same, +1 or any")
+            }
+            address = parsed
+        }
+        var advertises: [String] = []
+        if let node = value("advertises", in: fields) {
+            let texts: [String] = if case .sequence(let items) = node.value { items.compactMap(scalar) } else { scalar(node).map { [$0] } ?? [] }
+            advertises = try texts.map { text in
+                guard let uuid = BluetoothUUID.canonical(text) else {
+                    throw Failure(line: line("advertises"), message: "identity \(name): advertises takes service UUIDs such as FE59")
+                }
+                return uuid
+            }
+        }
+        let advertisedName = value("advertised-name", in: fields).flatMap(scalar)
+        guard address != .any || !advertises.isEmpty || advertisedName != nil else {
+            throw Failure(line: node.line, message: "identity \(name): with address: any, say what it advertises (advertises: or advertised-name:)")
+        }
+        let within = try value("within", in: fields).flatMap(scalar).map { try seconds($0, line: line("within"), what: "identity \(name)") } ?? 60
+        return .init(name: name, after: after, address: address, advertises: advertises, advertisedName: advertisedName, within: within)
     }
 
     /// `30s`, `500ms`, `2 min` or a bare number of seconds.
@@ -1494,12 +1628,14 @@ private struct ValueReader {
             return depth == 1 ? text : "{\(text)}"
         }
         let values = Dictionary(rendered.map { ($0.id, $0.text) }, uniquingKeysWith: { first, _ in first })
-        return summary.map {
+        // A one-line summary leaves out what is not there: no `<>` for an empty payload.
+        let text = summary.map {
             switch $0 {
             case .text(let text): return text
-            case .field(let id): return values[id] ?? ""
+            case .field(let id): return values[id].flatMap { $0 == "<>" ? nil : $0 } ?? ""
             }
         }.joined()
+        return depth == 1 ? text.trimmingCharacters(in: .whitespaces) : text
     }
 
     private func holds(_ condition: BluetoothPacketDefinitions.Condition, scope: [String: Scalar]) -> Bool {
@@ -1590,6 +1726,10 @@ private struct ValueReader {
                 scope[field.id] = Scalar(number: number, enumName: enumName)
                 keep(.number(number, name: enumName), path: path, id: field.id)
                 guard !field.bits.isEmpty else {
+                    if field.hex, field.enumName == nil, field.flags.isEmpty {
+                        return "0x" + String(String(UInt64(bitPattern: number), radix: 16, uppercase: true)
+                            .suffix(width * 2)).leftPadded(to: width * 2)
+                    }
                     return format(number: number, signed: signed, field: field, enumName: enumName)
                 }
                 var parts: [String] = []
@@ -1851,5 +1991,11 @@ private struct ValueReader {
         while text.hasSuffix("0") { text.removeLast() }
         if text.hasSuffix(".") { text.removeLast() }
         return text == "-0" ? "0" : text
+    }
+}
+
+private extension String {
+    func leftPadded(to width: Int) -> String {
+        count >= width ? self : String(repeating: "0", count: width - count) + self
     }
 }

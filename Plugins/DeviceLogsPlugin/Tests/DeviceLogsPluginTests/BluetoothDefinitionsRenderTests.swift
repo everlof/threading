@@ -143,6 +143,80 @@ final class BluetoothDefinitionsRenderTests: XCTestCase {
         try render(pane.view, width: 1_180, height: 460, name: "bluetooth-flows")
     }
 
+    /// A whole Secure DFU as the Bluetooth tab shows it: the watch named through its bootloader one
+    /// address up, the checksum check, and the try's one-line ending.
+    func testRendersAFirmwareUpdate() async throws {
+        var decoder = BluetoothPacketDecoder()
+        decoder.definitions = try BluetoothPacketDefinitions.compile(BluetoothProcedureTests.yaml)
+        func le32(_ value: UInt32) -> [UInt8] { (0..<4).map { UInt8((value >> ($0 * 8)) & 0xff) } }
+        func event(_ code: UInt8, _ parameters: [UInt8]) -> [UInt8] { [0x04, code, UInt8(parameters.count)] + parameters }
+        func advertise(_ address: [UInt8], _ ad: [UInt8]) -> [UInt8] {
+            event(0x3e, [0x02, 0x01, 0x00, 0x01] + address + [UInt8(ad.count)] + ad + [0xc0])
+        }
+        func connect(_ handle: UInt8, _ address: [UInt8]) -> [UInt8] {
+            event(0x3e, [0x01, 0x00, handle, 0x00, 0x00, 0x00] + address + [0x06, 0x00, 0x00, 0x00, 0x90, 0x01, 0x00])
+        }
+        func disconnect(_ handle: UInt8, _ reason: UInt8) -> [UInt8] { event(0x05, [0x00, handle, 0x00, reason]) }
+        func att(_ handle: Int, _ pdu: [UInt8]) -> [UInt8] { [0x02] + BluetoothFlowTests.att(pdu, connection: handle) }
+        let image = (0..<40).map { UInt8(($0 * 13) % 256) }
+        let initPacket: [UInt8] = [0x12, 0x34, 0x56, 0x78]
+        let named = [0x08, 0x09] + Array("Kronaby".utf8)
+        let packets: [([UInt8], Bool, Double)] = [
+            (advertise(BluetoothProcedureTests.app, named), true, 0),
+            (connect(0x40, BluetoothProcedureTests.app), true, 0.2),
+            (att(0x40, [0x0a, 0x30, 0x00]), false, 0.3),
+            (att(0x40, [0x0b] + Array("1.0.0".utf8)), true, 0.32),
+            (att(0x40, [0x12, 0x10, 0x00, 0x01]), false, 1),
+            (att(0x40, [0x1d, 0x10, 0x00, 0x20, 0x01, 0x01]), true, 1.05),
+            (disconnect(0x40, 0x13), true, 1.2),
+            (advertise(BluetoothProcedureTests.bootloader, [0x03, 0x03, 0x59, 0xfe, 0x08, 0x09] + Array("DfuTarg".utf8)), true, 2),
+            (connect(0x41, BluetoothProcedureTests.bootloader), true, 2.5),
+            (att(0x41, [0x12, 0x20, 0x00, 0x06, 0x01]), false, 3),
+            (att(0x41, [0x1b, 0x20, 0x00, 0x60, 0x06, 0x01] + le32(512) + le32(0) + le32(0)), true, 3.02),
+            (att(0x41, [0x12, 0x20, 0x00, 0x01, 0x01] + le32(4)), false, 3.04),
+            (att(0x41, [0x1b, 0x20, 0x00, 0x60, 0x01, 0x01]), true, 3.06),
+            (att(0x41, [0x12, 0x22, 0x00] + initPacket), false, 3.08),
+            (att(0x41, [0x12, 0x20, 0x00, 0x03]), false, 3.1),
+            (att(0x41, [0x1b, 0x20, 0x00, 0x60, 0x03, 0x01] + le32(4) + le32(~CRC.crc32(initPacket, CRC.crc32Seed))), true, 3.12),
+            (att(0x41, [0x12, 0x20, 0x00, 0x04]), false, 3.14),
+            (att(0x41, [0x1b, 0x20, 0x00, 0x60, 0x04, 0x01]), true, 3.2),
+            (att(0x41, [0x12, 0x20, 0x00, 0x06, 0x02]), false, 4),
+            (att(0x41, [0x1b, 0x20, 0x00, 0x60, 0x06, 0x01] + le32(4096) + le32(0) + le32(0)), true, 4.02),
+            (att(0x41, [0x12, 0x20, 0x00, 0x01, 0x02] + le32(40)), false, 4.04),
+            (att(0x41, [0x1b, 0x20, 0x00, 0x60, 0x01, 0x01]), true, 4.06),
+            (att(0x41, [0x12, 0x22, 0x00] + image[0..<20]), false, 4.1),
+            (att(0x41, [0x12, 0x22, 0x00] + image[20..<40]), false, 4.2),
+            (att(0x41, [0x12, 0x20, 0x00, 0x03]), false, 4.3),
+            (att(0x41, [0x1b, 0x20, 0x00, 0x60, 0x03, 0x01] + le32(40) + le32(~CRC.crc32(image, CRC.crc32Seed))), true, 4.32),
+            (att(0x41, [0x12, 0x20, 0x00, 0x04]), false, 4.4),
+            (att(0x41, [0x1b, 0x20, 0x00, 0x60, 0x04, 0x01]), true, 5),
+            (disconnect(0x41, 0x13), true, 6),
+            (connect(0x42, BluetoothProcedureTests.app), true, 8),
+            (att(0x42, [0x0a, 0x30, 0x00]), false, 8.5),
+            (att(0x42, [0x0b] + Array("1.1.0".utf8)), true, 8.52),
+            (att(0x42, [0x0a, 0x30, 0x00]), false, 40),
+            (att(0x42, [0x0b] + Array("1.1.0".utf8)), true, 40.02),
+        ]
+        var data = BluetoothPacketTests.header()
+        for packet in packets {
+            data.append(Self.record(packet.0, incoming: packet.1, seconds: 43_200 + Int(packet.2),
+                                    microseconds: Int(((packet.2 - Double(Int(packet.2))) * 1_000_000).rounded())))
+        }
+        let rows = try decoder.append(data)
+        XCTAssertTrue(rows.contains { $0.message.contains("DFU #1") && $0.message.contains("completed") },
+                      rows.map(\.message).joined(separator: "\n"))
+        let pane = DeviceLogPaneViewController(owningSessionID: UUID().uuidString, stream: .bluetooth)
+        pane.loadView()
+        let phone = DeviceLogSourceOption.Machine(id: "phone", title: "iPhone", isSimulator: false)
+        pane.acceptSources([DeviceLogSourceOption(machine: phone, title: "Bluetooth (USB)",
+            kind: .bluetooth(udid: phone.id, overNetwork: false, toolPath: nil))])
+        pane.installRowsForTesting(rows)
+        for _ in 0..<200 where pane.isProjectingForTesting { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(200))
+        pane.applyDefinitionStatusForTesting(.loaded(file, characteristics: 4, types: 6), names: [])
+        try render(pane.view, width: 1_280, height: 900, name: "bluetooth-dfu")
+    }
+
     func testRendersTheHelpPanelWithALoadedFile() throws {
         let help = BluetoothDefinitionsHelpViewController(status: .loaded(file, characteristics: 2, types: 3))
         help.loadView()

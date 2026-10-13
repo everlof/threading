@@ -238,6 +238,6 @@ final class BluetoothDefinitionsHelpViewController: NSViewController {
 }
 
 /// Takes the keyboard so Escape has somewhere to arrive from and focus can return.
-private final class FocusableView: NSView {
+final class FocusableView: NSView {
     override var acceptsFirstResponder: Bool { true }
 }

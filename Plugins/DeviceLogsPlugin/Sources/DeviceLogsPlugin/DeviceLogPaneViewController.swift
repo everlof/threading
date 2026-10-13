@@ -99,6 +99,16 @@ public final class DeviceLogPaneViewController: NSViewController {
         title: L10n.string("Set Up…"), target: self, action: #selector(toggleBluetoothSetup)
     )
     private var bluetoothSetupDeviceID: String?
+    /// Every recorded try of a firmware update or other declared procedure. Bluetooth only.
+    private lazy var timelinesButton: ThemedButton = {
+        let button = ThemedButton(title: L10n.string("Timelines"), target: self, action: #selector(toggleTimelines))
+        button.setAccessibilityIdentifier("bluetooth-timelines-button")
+        button.toolTip = L10n.string("Firmware updates and other procedures, one timeline per try: how each ended and why.")
+        return button
+    }()
+    private var timelinesPopover: ThemedPopover?
+    private var timelineLoadGeneration = 0
+
     /// The "?" beside Set Up…: how to describe the app's own packets. Bluetooth only.
     private lazy var definitionsButton: ThemedIconButton = {
         let button = ThemedIconButton(
@@ -527,7 +537,8 @@ public final class DeviceLogPaneViewController: NSViewController {
         bluetoothSetupButton.setAccessibilityIdentifier("bluetooth-profile-setup")
         bluetoothProfileSetup.isHidden = true
         definitionsButton.isHidden = true
-        let bar = NSStackView(views: [devicePopUp, sourcePopUp, routePopUp, bluetoothSetupButton, definitionsButton, rescan, clear])
+        timelinesButton.isHidden = true
+        let bar = NSStackView(views: [devicePopUp, sourcePopUp, routePopUp, bluetoothSetupButton, definitionsButton, timelinesButton, rescan, clear])
         bar.setAccessibilityIdentifier("device-log-source-bar")
         bar.orientation = .horizontal
         bar.spacing = Design.Spacing.small
@@ -544,7 +555,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         filters.spacing = Design.Spacing.small
         filters.alignment = .centerY
         filters.edgeInsets = bar.edgeInsets
-        for control in [devicePopUp, sourcePopUp, routePopUp, levelPopUp, processPopUp, packetPopUp, contextPopUp] as [NSView] + [bluetoothSetupButton, rescan, clear, filterField] {
+        for control in [devicePopUp, sourcePopUp, routePopUp, levelPopUp, processPopUp, packetPopUp, contextPopUp] as [NSView] + [bluetoothSetupButton, timelinesButton, rescan, clear, filterField] {
             control.heightAnchor.constraint(equalToConstant: Metrics.controlHeight).isActive = true
         }
 
@@ -741,6 +752,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         }
         bluetoothSetupButton.isHidden = setupTarget == nil
         definitionsButton.isHidden = !isBluetooth
+        timelinesButton.isHidden = !isBluetooth
         definitionsLabel.isHidden = !isBluetooth
         if isBluetooth, definitionStatus == nil { loadDefinitionStatus() }
         if bluetoothSetupDeviceID != setupTarget?.deviceID || !isBluetooth {
@@ -791,6 +803,47 @@ public final class DeviceLogPaneViewController: NSViewController {
         // The reader reports changes while it runs; without one, read the file now so the panel
         // describes the file as it is rather than as it was.
         loadDefinitionStatus()
+    }
+
+    // MARK: Timelines
+
+    @objc private func toggleTimelines() {
+        if let timelinesPopover, timelinesPopover.isShown {
+            timelinesPopover.close()
+            return
+        }
+        timelineLoadGeneration += 1
+        let generation = timelineLoadGeneration
+        Task { [weak self] in
+            // The worker saves within a second of a change; reading the file off the main actor
+            // is what a capture that is not running has too.
+            let history = await Task.detached(priority: .userInitiated) { BluetoothProcedureHistory.load() }.value
+            guard let self, self.timelineLoadGeneration == generation else { return }
+            self.presentTimelines(history)
+        }
+    }
+
+    private func presentTimelines(_ history: BluetoothProcedureHistory) {
+        let panel = BluetoothTimelineViewController(history: history)
+        panel.onClear = { [weak self] in self?.clearProcedureHistory() }
+        let popover = ThemedPopover()
+        popover.behavior = .transient
+        popover.contentViewController = panel
+        popover.initialFirstResponder = panel.view
+        popover.onClose = { [weak self] in self?.timelinesPopover = nil }
+        timelinesPopover = popover
+        popover.show(relativeTo: timelinesButton.bounds, of: timelinesButton, preferredEdge: .maxY)
+    }
+
+    /// Forgets every recorded try: on the running capture's worker, else the file off the main actor.
+    func clearProcedureHistory() {
+        if let bluetooth = source as? BluetoothLogRowSource {
+            bluetooth.clearProcedureHistory()
+        } else {
+            Task.detached(priority: .utility) {
+                try? FileManager.default.removeItem(at: BluetoothProcedureHistory.defaultURL)
+            }
+        }
     }
 
     /// Drops what earlier captures taught about devices' GATT tables. A running capture forgets

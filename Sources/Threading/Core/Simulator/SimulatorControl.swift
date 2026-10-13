@@ -14,12 +14,26 @@ protocol SimulatorControlling: Sendable {
     func screenshot(of deviceID: SimulatorDeviceID) async throws -> Data
     func setAppearance(dark: Bool, on deviceID: SimulatorDeviceID) async throws
     func release(_ lease: SimulatorDeviceLease) async throws
+    /// Starts an app that is already installed, terminating a running copy first.
+    func launchApp(_ launch: SimulatorAppLaunch, on deviceID: SimulatorDeviceID) async throws -> SimulatorLaunchReceipt
+    /// Hands a link to the running app without relaunching it.
+    func openAppLink(_ link: SimulatorAppLink, on deviceID: SimulatorDeviceID) async throws
 }
 
 extension SimulatorControlling {
     // Default no-op keeps test doubles that only exercise the lease/stream paths simple; the real
     // simctl control overrides it.
     func setAppearance(dark: Bool, on deviceID: SimulatorDeviceID) async throws {}
+
+    // Refusals rather than no-ops: a double that never meant to start apps must not report that
+    // it did. The real controls override both.
+    func launchApp(_ launch: SimulatorAppLaunch, on deviceID: SimulatorDeviceID) async throws -> SimulatorLaunchReceipt {
+        throw SimulatorControlError.unsupportedPlatformRequest
+    }
+
+    func openAppLink(_ link: SimulatorAppLink, on deviceID: SimulatorDeviceID) async throws {
+        throw SimulatorControlError.unsupportedPlatformRequest
+    }
 }
 
 enum SimulatorDeviceBootOwnership: String, Equatable, Codable, Sendable {
@@ -71,6 +85,9 @@ enum SimulatorControlError: LocalizedError, Equatable, Sendable {
     case tooManyLaunchArguments(maximum: Int)
     case launchArgumentTooLong(maximum: Int)
     case invalidScreenshot
+    case applicationNotInstalled(String)
+    case unsupportedPlatformRequest
+    case invalidAppLink(String)
 
     var errorDescription: String? {
         switch self {
@@ -105,6 +122,11 @@ enum SimulatorControlError: LocalizedError, Equatable, Sendable {
             return "A Simulator launch argument exceeds \(maximum) characters."
         case .invalidScreenshot:
             return "CoreSimulator did not return a valid PNG screenshot."
+        case .applicationNotInstalled(let identifier):
+            return L10n.format("%@ is not installed on this device. Build and install it first.", identifier)
+        case .unsupportedPlatformRequest:
+            return L10n.string("This device cannot run that request.")
+        case .invalidAppLink(let detail): return detail
         }
     }
 
@@ -216,25 +238,53 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
                 using: runner,
                 cancellation: cancellation
             )
-            let output = try Self.run(
-                [
-                    "launch",
-                    "--terminate-running-process",
-                    deviceID.rawValue,
-                    bundleIdentifier
-                ] + arguments,
-                operation: "launch",
+            return try Self.launch(
+                bundleIdentifier, arguments: arguments, on: deviceID, using: runner, cancellation: cancellation
+            )
+        }
+    }
+
+    func launchApp(_ launch: SimulatorAppLaunch, on deviceID: SimulatorDeviceID) async throws -> SimulatorLaunchReceipt {
+        guard case .iOS(let bundleIdentifier, let arguments) = launch else {
+            throw SimulatorControlError.unsupportedPlatformRequest
+        }
+        return try await perform { runner, cancellation in
+            let bundleIdentifier = try Self.validatedBundleIdentifier(bundleIdentifier)
+            try Self.validateLaunchArguments(arguments)
+            // `simctl launch` of a missing app fails with an FBSOpenApplicationService error that
+            // never says the app is missing; asking for its bundle first names the problem.
+            _ = try Self.appContainer(
+                bundleIdentifier, kind: "app", on: deviceID, using: runner, cancellation: cancellation
+            )
+            return try Self.launch(
+                bundleIdentifier, arguments: arguments, on: deviceID, using: runner, cancellation: cancellation
+            )
+        }
+    }
+
+    /// Writes the link into the app's temporary directory and rings the app inside the device
+    /// (`SimulatorAppLinkDrop`). Neither step is a CoreSimulator mutation of the device, and both
+    /// returned in under 0.2 s while the pane's direct helper kept streaming, so the stream stays
+    /// up and the person watches the app change.
+    func openAppLink(_ link: SimulatorAppLink, on deviceID: SimulatorDeviceID) async throws {
+        guard case .iOS(let bundleIdentifier, let url) = link else {
+            throw SimulatorControlError.unsupportedPlatformRequest
+        }
+        try await perform { runner, cancellation in
+            let bundleIdentifier = try Self.validatedBundleIdentifier(bundleIdentifier)
+            let container = try Self.appContainer(
+                bundleIdentifier, kind: "data", on: deviceID, using: runner, cancellation: cancellation
+            )
+            try SimulatorAppLinkDrop.write(url, into: container, deviceID: deviceID)
+            _ = try Self.run(
+                ["spawn", deviceID.rawValue, "notifyutil", "-p", SimulatorAppLinkDrop.notificationName],
+                operation: "link",
                 deviceID: deviceID,
-                timeout: SimulatorControlDefaults.launchTimeout,
+                timeout: SimulatorControlDefaults.linkTimeout,
                 maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
                 capture: .combined,
                 using: runner,
                 cancellation: cancellation
-            )
-            return SimulatorLaunchReceipt(
-                deviceID: deviceID,
-                bundleIdentifier: bundleIdentifier,
-                processIdentifier: Self.processIdentifier(fromLaunchOutput: output)
             )
         }
     }
@@ -436,6 +486,63 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
         }
     }
 
+    private static func launch(
+        _ bundleIdentifier: String,
+        arguments: [String],
+        on deviceID: SimulatorDeviceID,
+        using runner: any SimulatorCommandRunning,
+        cancellation: SimulatorCommandCancellation
+    ) throws -> SimulatorLaunchReceipt {
+        let output = try run(
+            ["launch", "--terminate-running-process", deviceID.rawValue, bundleIdentifier] + arguments,
+            operation: "launch",
+            deviceID: deviceID,
+            timeout: SimulatorControlDefaults.launchTimeout,
+            maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
+            capture: .combined,
+            using: runner,
+            cancellation: cancellation
+        )
+        return SimulatorLaunchReceipt(
+            deviceID: deviceID,
+            bundleIdentifier: bundleIdentifier,
+            processIdentifier: processIdentifier(fromLaunchOutput: output)
+        )
+    }
+
+    /// The installed app's bundle (`app`) or data container (`data`). Any refusal other than the
+    /// device itself being gone means the app is not installed there.
+    private static func appContainer(
+        _ bundleIdentifier: String,
+        kind: String,
+        on deviceID: SimulatorDeviceID,
+        using runner: any SimulatorCommandRunning,
+        cancellation: SimulatorCommandCancellation
+    ) throws -> URL {
+        let output: Data
+        do {
+            output = try run(
+                ["get_app_container", deviceID.rawValue, bundleIdentifier, kind],
+                operation: "app lookup",
+                deviceID: deviceID,
+                timeout: SimulatorControlDefaults.linkTimeout,
+                maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
+                capture: .standardOutput,
+                using: runner,
+                cancellation: cancellation
+            )
+        } catch SimulatorControlError.commandFailed {
+            throw SimulatorControlError.applicationNotInstalled(bundleIdentifier)
+        }
+        guard let path = String(decoding: output, as: UTF8.self)
+            .split(whereSeparator: \.isNewline)
+            .map({ $0.trimmingCharacters(in: .whitespaces) })
+            .last(where: { $0.hasPrefix("/") }) else {
+            throw SimulatorControlError.applicationNotInstalled(bundleIdentifier)
+        }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
     private static func validateApplication(_ url: URL) throws {
         var isDirectory: ObjCBool = false
         guard url.isFileURL,
@@ -497,6 +604,7 @@ enum SimulatorControlDefaults {
     static let bootTimeout: TimeInterval = 120
     static let installTimeout: TimeInterval = 120
     static let launchTimeout: TimeInterval = 30
+    static let linkTimeout: TimeInterval = 15
     static let screenshotTimeout: TimeInterval = 15
     static let shutdownTimeout: TimeInterval = 30
     static let pngSignature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])

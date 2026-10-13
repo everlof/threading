@@ -42,6 +42,17 @@ final class SimulatorWorkspaceViewController: NSViewController {
     private let events = AppEventObservations()
     private var menuSession: AnyObject?
     private var headerIsCompact = false
+    /// The checkout's scenarios and the one on show. See `SimulatorScenarioController`.
+    let scenarios: SimulatorScenarioController
+    private let scenarioCheckout: @MainActor () -> URL?
+    /// Says which step is on show, with Back, Next and Play, between the header and the devices.
+    private var scenarioBand: PaneNoticeView?
+    /// A refusal from the scenario menu, shown in the band until dismissed.
+    private var scenarioNotice: String?
+    private var scenarioHelpPopover: ThemedPopover?
+    private lazy var canvasTop = canvas.topAnchor.constraint(
+        equalTo: headerRow.bottomAnchor, constant: Design.Spacing.medium
+    )
 
     /// Installed devices that are not members yet, from the selected member's catalogue.
     private var addableDevices: [SimulatorDevice] {
@@ -103,13 +114,35 @@ final class SimulatorWorkspaceViewController: NSViewController {
         button.onPress = { [weak self] in self?.showAddMenu() }
         return button
     }()
+    /// The checkout's scenarios: a menu of states the app's debug build can open, or the setup
+    /// help when the checkout has none yet.
+    private lazy var scenarioButton: ThemedIconButton = {
+        let button = ThemedIconButton(symbolName: SimulatorPaneSymbols.scenarios,
+                                      accessibility: L10n.string("Scenarios"),
+                                      target: .inline, inkSource: .chrome)
+        button.presentsMenu = true
+        button.toolTip = L10n.string("Open the app in a state from this project's scenarios")
+        button.setAccessibilityIdentifier("simulator.workspace.scenarios")
+        button.onPress = { [weak self] in self?.showScenarioMenu() }
+        return button
+    }()
     private let headerRow = ControlRowView()
 
-    init(state: SimulatorWorkspaceState, factory: @escaping (SimulatorDeviceID?) -> SimulatorPaneViewController) {
+    /// `scenarioCheckout` names the session's working directory; nil offers no scenarios.
+    init(
+        state: SimulatorWorkspaceState,
+        scenarioCheckout: @escaping @MainActor () -> URL? = { nil },
+        scenarioLoader: @escaping @Sendable (URL) async -> SimulatorScenarioCatalog = SimulatorScenarioController.loadDetached,
+        factory: @escaping (SimulatorDeviceID?) -> SimulatorPaneViewController
+    ) {
         self.state = state
         self.factory = factory
+        self.scenarioCheckout = scenarioCheckout
+        self.scenarios = SimulatorScenarioController(checkout: scenarioCheckout, loader: scenarioLoader)
         super.init(nibName: nil, bundle: nil)
         for member in state.members { makeMember(member) }
+        scenarios.targets = { [weak self] in self?.simulators ?? [] }
+        scenarios.onChange = { [weak self] in self?.refreshScenarioBand() }
     }
 
     @available(*, unavailable)
@@ -134,7 +167,7 @@ final class SimulatorWorkspaceViewController: NSViewController {
             headerRow.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Design.Spacing.inset),
             headerRow.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Design.Spacing.inset),
             hardwareHeight!,
-            canvas.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: Design.Spacing.medium),
+            canvasTop,
             canvas.leadingAnchor.constraint(equalTo: headerRow.leadingAnchor),
             canvas.trailingAnchor.constraint(equalTo: headerRow.trailingAnchor),
             canvas.bottomAnchor.constraint(equalTo: hardwareHost.topAnchor, constant: -Design.Spacing.medium),
@@ -364,6 +397,11 @@ final class SimulatorWorkspaceViewController: NSViewController {
 
     var canvasForTesting: SimulatorWorkspaceCanvas { canvas }
     var headerForTesting: ControlRowView { headerRow }
+    var scenarioButtonForTesting: ThemedIconButton { scenarioButton }
+    var scenarioBandForTesting: PaneNoticeView? { scenarioBand }
+    var scenarioHelpForTesting: SimulatorScenarioHelpViewController? {
+        scenarioHelpPopover?.contentViewController as? SimulatorScenarioHelpViewController
+    }
 
     // MARK: - Private
 
@@ -456,7 +494,11 @@ final class SimulatorWorkspaceViewController: NSViewController {
         // a narrow pane keeps it in the options menu instead.
         let showsLayout = state.members.count > 1 && !headerIsCompact
         selected.workspaceHeaderShowsLayout = showsLayout
-        let leading: [NSView] = showsLayout ? [deviceChip, addButton, layoutChip] : [deviceChip, addButton]
+        // A session with a checkout always offers Scenarios: with no file yet, the button opens
+        // the help that sets one up, which is how a project finds out the feature exists.
+        var leading: [NSView] = [deviceChip, addButton]
+        if scenarioCheckout() != nil { leading.append(scenarioButton) }
+        if showsLayout { leading.append(layoutChip) }
         let trailing = [selected.workspaceActions]
         if !headerRow.leadingViews.elementsEqual(leading, by: ===)
             || !headerRow.trailingViews.elementsEqual(trailing, by: ===) {
@@ -522,5 +564,214 @@ final class SimulatorWorkspaceViewController: NSViewController {
             controller.setPresented(presented && visible.contains(member.id))
             if !presented || !visible.contains(member.id) { controller.relinquishUnwatchedTransport() }
         }
+    }
+}
+
+// MARK: - Scenarios
+
+extension SimulatorWorkspaceViewController {
+    /// Reads the checkout's file again, then offers it: the scenarios the members can open, or the
+    /// setup help when the checkout has no file yet.
+    func showScenarioMenu() {
+        Task { [weak self] in
+            guard let self else { return }
+            guard let catalog = await self.scenarios.reload(), catalog.fileExists else {
+                self.showScenarioHelp()
+                return
+            }
+            self.presentScenarioMenu(catalog)
+        }
+    }
+
+    /// Opens a scenario on every member that can show it, as the menu does.
+    func openScenario(_ id: String) {
+        scenarioNotice = nil
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await self.scenarios.open(id)
+            } catch {
+                self.scenarioNotice = error.localizedDescription
+                self.refreshScenarioBand()
+            }
+        }
+    }
+
+    /// What the setup help says about this checkout's file.
+    var scenarioHelpStatus: SimulatorScenarioHelpViewController.Status {
+        guard let catalog = scenarios.catalog else {
+            return scenarioCheckout() == nil ? .noCheckout : .reading
+        }
+        guard catalog.fileExists else { return .missing(catalog.fileURL) }
+        if catalog.scenarios.isEmpty, let problem = catalog.diagnostics.first {
+            return .failed(catalog.fileURL, problem.message)
+        }
+        return .loaded(catalog.fileURL, scenarios: catalog.scenarios.count, problems: catalog.diagnostics.count)
+    }
+
+    func showScenarioHelp() {
+        if let popover = scenarioHelpPopover, popover.isShown { popover.close() }
+        let help = SimulatorScenarioHelpViewController(status: scenarioHelpStatus)
+        help.onFileCreated = { [weak self] in self?.reloadScenarioHelp() }
+        let popover = ThemedPopover()
+        popover.behavior = .transient
+        popover.contentViewController = help
+        popover.initialFirstResponder = help.view
+        popover.onClose = { [weak self] in self?.scenarioHelpPopover = nil }
+        scenarioHelpPopover = popover
+        popover.show(relativeTo: scenarioButton.bounds, of: scenarioButton, preferredEdge: .maxY)
+        reloadScenarioHelp()
+    }
+
+    /// Groups become submenus once there is more than one; scenarios that share a title within a
+    /// group are one row whose submenu lists their variants, in file order.
+    static func scenarioEntries(
+        _ scenarios: [SimulatorScenario], selectedID: String?, open: @escaping (SimulatorScenario) -> Void
+    ) -> [ThemedMenuEntry] {
+        func item(_ scenario: SimulatorScenario, title: String) -> ThemedMenuItem {
+            ThemedMenuItem(
+                title: title,
+                subtitle: scenario.hasSteps ? L10n.format("%lld steps", Int64(scenario.steps.count)) : nil,
+                isSelected: scenario.id == selectedID,
+                onChoose: { open(scenario) }
+            )
+        }
+        func rows(_ members: [SimulatorScenario]) -> [ThemedMenuEntry] {
+            orderedGroups(members, by: \.title).map { title, variants in
+                guard variants.count > 1 else { return .item(item(variants[0], title: variants[0].displayTitle)) }
+                return .item(ThemedMenuItem(
+                    title: title,
+                    isSelected: variants.contains { $0.id == selectedID },
+                    submenu: variants.map { .item(item($0, title: $0.variant ?? $0.title)) }
+                ))
+            }
+        }
+        let groups = orderedGroups(scenarios, by: \.group)
+        guard groups.count > 1 else { return rows(groups.first?.members ?? []) }
+        return groups.map { group, members in
+            .item(ThemedMenuItem(title: group, isSelected: members.contains { $0.id == selectedID }, submenu: rows(members)))
+        }
+    }
+
+    private static func orderedGroups(
+        _ scenarios: [SimulatorScenario], by key: KeyPath<SimulatorScenario, String>
+    ) -> [(name: String, members: [SimulatorScenario])] {
+        var order: [String] = []
+        var members: [String: [SimulatorScenario]] = [:]
+        for scenario in scenarios {
+            let name = scenario[keyPath: key]
+            if members[name] == nil { order.append(name) }
+            members[name, default: []].append(scenario)
+        }
+        return order.map { ($0, members[$0] ?? []) }
+    }
+
+    private func presentScenarioMenu(_ catalog: SimulatorScenarioCatalog) {
+        var entries = Self.scenarioEntries(scenarios.offeredScenarios, selectedID: scenarios.session?.scenario.id) {
+            [weak self] scenario in self?.openScenario(scenario.id)
+        }
+        if entries.isEmpty, catalog.diagnostics.isEmpty {
+            entries.append(.item(ThemedMenuItem(title: L10n.string("No scenario opens on these devices"), isEnabled: false)))
+        }
+        if !catalog.diagnostics.isEmpty {
+            if !entries.isEmpty { entries.append(.separator) }
+            entries.append(.header(L10n.format("Problems in %@", SimulatorScenarioDefaults.relativePath)))
+            entries += catalog.diagnostics.map { .item(ThemedMenuItem(title: $0.message, help: $0.message, isEnabled: false)) }
+        }
+        entries += [.separator, .item(ThemedMenuItem(
+            title: L10n.string("Scenario Help…"), onChoose: { [weak self] in self?.showScenarioHelp() }
+        ))]
+        menuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: Self.deviceMenuWidth),
+            from: scenarioButton, selectedEntryIndex: nil, onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.menuSession = nil }
+        )
+    }
+
+    private func reloadScenarioHelp() {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.scenarios.reload()
+            self.scenarioHelpForTesting?.apply(self.scenarioHelpStatus)
+        }
+    }
+
+    /// The band follows the scenario: rebuilt on each change, which is a small fixed band and
+    /// announces the new step to VoiceOver as it arrives. Keyboard focus on one of its buttons
+    /// moves to the same button of the new band.
+    func refreshScenarioBand() {
+        guard isViewLoaded else { return }
+        let focused = scenarioBand?.actionControls.firstIndex { $0 === view.window?.firstResponder }
+        scenarioBand?.removeFromSuperview()
+        scenarioBand = nil
+        guard let band = makeScenarioBand() else {
+            canvasTop.isActive = true
+            return
+        }
+        view.addSubview(band)
+        canvasTop.isActive = false
+        NSLayoutConstraint.activate([
+            band.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            band.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            band.topAnchor.constraint(equalTo: headerRow.bottomAnchor, constant: Design.Spacing.medium),
+            canvas.topAnchor.constraint(equalTo: band.bottomAnchor, constant: Design.Spacing.medium),
+        ])
+        scenarioBand = band
+        if let focused, band.actionControls.indices.contains(focused) {
+            let control = band.actionControls[focused]
+            view.window?.makeFirstResponder(control.isEnabled ? control : band.dismissControl)
+        }
+    }
+
+    private func makeScenarioBand() -> PaneNoticeView? {
+        guard let session = scenarios.session else {
+            guard let notice = scenarioNotice else { return nil }
+            let band = PaneNoticeView(tone: .attention, message: notice, actions: [], onDismiss: { [weak self] in
+                self?.scenarioNotice = nil
+                self?.refreshScenarioBand()
+            })
+            band.setAccessibilityIdentifier("simulator.workspace.scenarioBand")
+            return band
+        }
+        let scenario = session.scenario
+        let message: String
+        if session.isOpening {
+            message = L10n.string("Starting the app…")
+        } else if let failure = session.failure {
+            message = failure
+        } else if scenario.hasSteps {
+            message = L10n.format(
+                "Step %lld of %lld: %@", Int64(session.step + 1), Int64(scenario.steps.count), scenario.steps[session.step].title
+            )
+        } else {
+            return nil
+        }
+        var actions: [PaneNoticeAction] = []
+        let steps = scenario.hasSteps && !session.isOpening
+        if steps {
+            actions = [
+                PaneNoticeAction(title: L10n.string("Back")) { [weak self] in self?.scenarios.previous() },
+                PaneNoticeAction(title: L10n.string("Next")) { [weak self] in self?.scenarios.next() },
+                PaneNoticeAction(title: session.isPlaying ? L10n.string("Pause") : L10n.string("Play")) { [weak self] in
+                    self?.scenarios.togglePlay()
+                },
+            ]
+        } else if session.failure != nil {
+            actions = [PaneNoticeAction(title: L10n.string("Try Again")) { [weak self] in self?.openScenario(scenario.id) }]
+        }
+        let band = PaneNoticeView(
+            tone: session.failure == nil ? .informational : .attention,
+            title: scenario.displayTitle,
+            message: message,
+            actions: actions,
+            dismissTitle: L10n.string("Close Scenario"),
+            onDismiss: { [weak self] in self?.scenarios.close() }
+        )
+        if steps {
+            band.actionControls[0].isEnabled = !session.isAtFirstStep
+            band.actionControls[1].isEnabled = !session.isAtLastStep
+        }
+        band.setAccessibilityIdentifier("simulator.workspace.scenarioBand")
+        return band
     }
 }

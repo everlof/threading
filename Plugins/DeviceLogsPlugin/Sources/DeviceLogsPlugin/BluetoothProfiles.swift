@@ -241,7 +241,14 @@ enum BluetoothProfiles {
             uuid: FE59
             characteristics:
               - { name: Secure DFU Control Point, uuid: 8EC90001-F315-4F60-9FB8-838830DAEA50, tx: NordicDfuRequest, rx: NordicDfuResponse }
-              - { name: Secure DFU Packet, uuid: 8EC90002-F315-4F60-9FB8-838830DAEA50, message: NordicDfuPacket }
+              # Bytes of the object the control point last created or selected: the init packet, or image.
+              - name: Secure DFU Packet
+                uuid: 8EC90002-F315-4F60-9FB8-838830DAEA50
+                message:
+                  switch-on: Secure DFU Control Point.type
+                  cases:
+                    COMMAND: { summary: "init packet {init}", seq: [{ id: init, type: bytes }] }
+                    _: NordicDfuPacket
               - { name: Buttonless DFU, uuid: 8EC90003-F315-4F60-9FB8-838830DAEA50, tx: NordicButtonlessRequest, rx: NordicButtonlessResponse }
               - { name: Buttonless DFU (bonded), uuid: 8EC90004-F315-4F60-9FB8-838830DAEA50, tx: NordicButtonlessRequest, rx: NordicButtonlessResponse }
 
@@ -270,8 +277,8 @@ enum BluetoothProfiles {
                 type:
                   switch-on: request
                   cases:
-                    SELECT: { summary: " max {maxSize} offset {offset} crc32 {crc}", seq: [{ id: maxSize, type: u32 }, { id: offset, type: u32 }, { id: crc, type: u32 }] }
-                    CALCULATE_CHECKSUM: { summary: " offset {offset} crc32 {crc}", seq: [{ id: offset, type: u32 }, { id: crc, type: u32 }] }
+                    SELECT: { summary: " max {maxSize} offset {offset} crc32 {crc}", seq: [{ id: maxSize, type: u32 }, { id: offset, type: u32 }, { id: crc, type: u32, hex: true }] }
+                    CALCULATE_CHECKSUM: { summary: " offset {offset} crc32 {crc}", seq: [{ id: offset, type: u32 }, { id: crc, type: u32, hex: true }] }
                     MTU_GET: { summary: " mtu {mtu}", seq: [{ id: mtu, type: u16 }] }
                     PING: { summary: " #{id}", seq: [{ id: id, type: u8 }] }
                     _: bytes
@@ -342,8 +349,61 @@ enum BluetoothProfiles {
 
         streams:
           # Objects are created and executed one at a time, so the image has no single total here.
+          # The device reports its offset and running CRC-32 after each object: that is compared
+          # with what was sent, and a resumed update continues from what the device says it holds.
           - name: Secure DFU image
-            data: { characteristic: Secure DFU Packet, op: write }
+            info:
+              characteristic: Secure DFU Control Point
+              op: notify
+              where:
+                request: SELECT
+                result: SUCCESS
+                Secure DFU Control Point.type: DATA
+              offset: offset
+              crc32: crc
+            data: { characteristic: Secure DFU Packet, op: write, data: data }
+            verify:
+              characteristic: Secure DFU Control Point
+              op: notify
+              where:
+                request: CALCULATE_CHECKSUM
+                result: SUCCESS
+                Secure DFU Control Point.type: DATA
+              offset: offset
+              crc32: crc
+
+        # Unbonded, the bootloader advertises one address up (Nordic's gap_address_change), so iOS
+        # does not reuse the application's cached GATT table; bonded, it keeps the address.
+        identities:
+          - name: bootloader
+            after: { characteristic: Buttonless DFU, op: indicate, where: { request: ENTER_BOOTLOADER, result: SUCCESS } }
+            address: +1
+            advertises: [FE59]
+            within: 60s
+          - name: bootloader
+            after: { characteristic: Buttonless DFU (bonded), op: indicate, where: { request: ENTER_BOOTLOADER, result: SUCCESS } }
+            address: same
+            within: 60s
+
+        procedures:
+          - name: DFU
+            start:
+              - { characteristic: Buttonless DFU, op: write, where: { op: ENTER_BOOTLOADER } }
+              - { characteristic: Buttonless DFU (bonded), op: write, where: { op: ENTER_BOOTLOADER } }
+              - { characteristic: Secure DFU Control Point, op: write }
+            steps:
+              - { name: bootloader, event: connected, as: bootloader }
+              - { name: init packet, characteristic: Secure DFU Control Point, op: write, where: { op: CREATE, type: COMMAND } }
+              - { name: image, characteristic: Secure DFU Control Point, op: write, where: { op: CREATE, type: DATA } }
+              - { name: executed, characteristic: Secure DFU Control Point, op: notify, where: { request: EXECUTE, result: SUCCESS }, after: image }
+            success:
+              - { event: connected, as: device, after: executed }
+              - { event: firmware-changed, after: executed }
+            failure:
+              - { characteristic: Secure DFU Control Point, op: notify, where: { result: "!SUCCESS" } }
+              - { characteristic: Buttonless DFU, op: indicate, where: { result: "!SUCCESS" } }
+              - { characteristic: Buttonless DFU (bonded), op: indicate, where: { result: "!SUCCESS" } }
+            idle: 2min
         """
 
     /// nRF5 SDK 11 and earlier. The packet characteristic carries three different things, told
@@ -387,7 +447,7 @@ enum BluetoothProfiles {
               - { id: applicationVersion, type: u32 }
               - { id: softdeviceCount, type: u16, hidden: true }
               - { id: softdevices, type: u16, repeat: softdeviceCount }
-              - { id: crc, type: u16 }
+              - { id: crc, type: u16, hex: true }
 
         enums:
           NordicLegacyOp:
@@ -423,5 +483,30 @@ enum BluetoothProfiles {
             start: { characteristic: Legacy DFU Packet, total: application }
             info:  { characteristic: Legacy DFU Packet, crc16: crc }
             data:  { characteristic: Legacy DFU Packet, data: image }
+            verify: { characteristic: Legacy DFU Control Point, where: { op: PACKET_RESPONSE }, offset: received }
+
+        # The bootloader advertises the DFU service, often as DfuTarg, under an address that may
+        # or may not be the application's.
+        identities:
+          - name: bootloader
+            after: { characteristic: Legacy DFU Control Point, op: write, where: { op: START_DFU } }
+            address: any
+            advertises: [00001530-1212-EFDE-1523-785FEABCD123]
+            advertised-name: DfuTarg*
+            within: 60s
+
+        procedures:
+          - name: Legacy DFU
+            start: { characteristic: Legacy DFU Control Point, op: write, where: { op: START_DFU } }
+            steps:
+              - { name: bootloader, event: connected, as: bootloader }
+              - { name: init packet, characteristic: Legacy DFU Control Point, op: write, where: { op: INIT_PARAMS } }
+              - { name: image, characteristic: Legacy DFU Control Point, op: write, where: { op: RECEIVE_IMAGE } }
+              - { name: validated, characteristic: Legacy DFU Control Point, op: notify, where: { request: VALIDATE, status: SUCCESS } }
+            success:
+              - { characteristic: Legacy DFU Control Point, op: write, where: { op: ACTIVATE_AND_RESET }, after: validated }
+            failure:
+              - { characteristic: Legacy DFU Control Point, op: notify, where: { op: RESPONSE, status: "!SUCCESS" } }
+            idle: 2min
         """
 }

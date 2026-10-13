@@ -56,6 +56,9 @@ enum AndroidControlDefaults {
     static let pollInterval: TimeInterval = 1
     /// The extras an `am start` launch argument is delivered under: `threading.argument.0`, …
     static let launchArgumentExtraPrefix = "threading.argument."
+    static let maximumExtraKeyCharacters = 128
+    /// `Intent.FLAG_ACTIVITY_SINGLE_TOP`: a link reaches the activity already on top.
+    static let singleTopFlag = "0x20000000"
 }
 
 /// What Threading knows about one Android device it can reach right now.

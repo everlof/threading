@@ -100,6 +100,9 @@ final class BluetoothCaptureReplayTests: XCTestCase {
         }
         print("Replay: skipped \(skipped) rows without whole bytes; \(unresolved) ATT rows after restart had no UUID")
         print("Replay: GATT line: \(session.gattSummary ?? "none")")
+        for attempt in session.procedures.history.attempts {
+            print("Replay timeline:\n" + BluetoothProcedureFormatting.timeline(attempt))
+        }
         for (name, count) in decoded.sorted(by: { $0.value > $1.value }) {
             print("Replay: \(count) × \(name)")
             for sample in samples[name] ?? [] { print("    \(sample)") }
