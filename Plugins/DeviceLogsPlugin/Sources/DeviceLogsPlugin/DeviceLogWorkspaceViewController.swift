@@ -147,6 +147,7 @@ final class DeviceLogWorkspaceViewController: NSViewController {
         pane.captureManagedByWorkspace = true
         pane.sourceFactory = sourceFactory
         pane.requestDiscovery = { [weak self] in self?.reloadSources() }
+        pane.onRowSelected = { [weak self] row in self?.revealLinked(to: row, from: stream) }
         panes[stream] = pane
         addChild(pane)
         let child = pane.view
@@ -162,6 +163,28 @@ final class DeviceLogWorkspaceViewController: NSViewController {
         }
         if let discoveredSources { pane.acceptSources(discoveredSources) }
         return pane
+    }
+
+    /// The row in the other tab that the given one is about, by the Bluetooth definitions'
+    /// `logs:` rules: an app log line's packet, or a packet's app log line.
+    func linkedRow(to row: DeviceLogRow, from stream: Stream) -> (stream: Stream, index: Int, row: DeviceLogRow)? {
+        guard let bluetooth = panes[.bluetooth], let regular = panes[.regular], !bluetooth.logLinks.isEmpty else { return nil }
+        switch stream {
+        case .regular:
+            let packets = bluetooth.heldRows
+            return BluetoothLogLinker.packet(for: row, rules: bluetooth.logLinks, in: packets).map { (.bluetooth, $0, packets[$0]) }
+        case .bluetooth:
+            let logs = regular.heldRows
+            return BluetoothLogLinker.log(for: row, rules: bluetooth.logLinks, in: logs).map { (.regular, $0, logs[$0]) }
+        }
+    }
+
+    /// Selecting a linked row in one tab selects its partner in the other, when both are shown.
+    @discardableResult
+    func revealLinked(to row: DeviceLogRow, from stream: Stream) -> DeviceLogRow? {
+        guard let linked = linkedRow(to: row, from: stream), let pane = panes[linked.stream],
+              pane.reveal(heldRow: linked.index) else { return nil }
+        return linked.row
     }
 
     private func reloadSources() {

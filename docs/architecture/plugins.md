@@ -535,14 +535,55 @@ fill `BluetoothLearnedEnums` from received values before decoding them, per devi
 Application Support at start, saves it at most once per definition check and on stop, and reports
 its summary and every enum name through `BluetoothDefinitionReport`; the pane colours those names
 with `NameColor` (FNV-1a hue, theme keyword lightness/chroma in OKLCH, `legible(on:)` the ground,
-resolved at draw time). Two panes capturing at once each save their own view; the last save wins. When the session's checkout has `.threading/bluetooth.yaml`, matching ATT
+resolved at draw time). Two panes capturing at once each save their own view; the last save wins.
+
+**Across packets** (`BluetoothFlows.swift`, draft
+[`bluetooth-protocol-understanding.md`](../feature-drafts/bluetooth-protocol-understanding.md)).
+A decode now leaves named values behind (`Decoded.values`: field ids, paths, `bits:` parts, pattern
+captures, at most 128), the first MessagePack value it parsed, and a level. `BluetoothFlowState`,
+per connection, feeds them to `transactions:` (request/response pairing by key, window, pending
+pattern and timeout; an ATT Error Response fails the waiting request) and `streams:` (lines from a
+byte stream; transfers with progress and incremental CRC-32/CRC-16). Flow rows are queued on the
+session and collected by the decoder after each packet, at the packet's time; an unanswered
+request is reported by the first packet after its deadline, on any connection. The same values,
+keyed `Characteristic.field`, are the context a `switch-on` on another characteristic reads.
+Replaying the 13 Oct capture against a YAML with these sections paired 45 FOTA responses and 13
+command reads and reported the one read that never got an answer (`map_buildinfo`) — the lead an
+earlier session found by reading rows by hand. Two lessons from that replay are in the code: a
+response must carry the transaction's key to pair (an `ancs_filter` re-read after a write had
+paired with the unanswered read), and a request answered by silence on success (a FOTA data chunk)
+must be left out of the request endpoint, which is why `where:` takes lists and `"!VALUE"`.
+
+`include:` compiles `BluetoothProfiles` (SIG GATT, ANCS, Nordic Secure and legacy DFU) before the
+project's file and merges with the project winning. Learned enums are kept per firmware build
+(version 2 of the store; version 1 reads as the device's current build). `session.event` returns
+an `EventSummary` for link-health events (subsystem `Link`) and decoded advertising. `logs:` rules
+are `NSRegularExpression`s compiled with the file; app rows carry `DeviceLogRow.link` (characteristic,
+operation, key values), and `DeviceLogWorkspaceViewController` links a selection in one tab to the
+nearest matching row of the other through `BluetoothLogLinker`, a binary search to the time window
+and a scan bounded by it.
+
+**Remembered GATT tables.** Discovery (Read By Group Type, Read By Type 0x2803 with properties,
+Find Information) is written through to `BluetoothGATTTables`, keyed by device identity, or under
+`phone:<udid>` for the iPhone's own database. Lookup order is live discovery, then the connection's
+remembered table, then a YAML pin — the reverse of the first version, where a pin beat discovery and
+went stale silently. A connection without an identity narrows candidate tables packet by packet by
+handle presence and property fit, and is rejected outright when none fits: in the 13 Oct capture
+that is what keeps a second watch's indications on 0x002e from being read as the paired watch's
+read/write Anima Command. Replayed with every pin removed and a restart at 15:08, the post-restart
+traffic decoded 2,498 FOTA RX writes, 39 FOTA TX notifications and 63 Anima rows. Long reads are now
+joined without definitions too, because a 26-byte Firmware Revision recorded as its first 22 bytes
+made the next full read look like a firmware change. When the session's checkout has `.threading/bluetooth.yaml`, matching ATT
 values are interpreted by `BluetoothPacketDefinitions` — a Kaitai-flavoured, bounded interpreter
 over our own YAML subset (`YAMLSubset`, no dependency) — and the row's subsystem becomes `App`. The
 plugin learns the checkout from the existing `checkoutPath` placement argument; no contract
 change. The capture worker stats the file once a second and recompiles on change, so a save takes
 effect on the next packet; compile errors carry a line and appear in the footer, the "?" panel and
-the agent `visible` answer. A value whose bytes do not fit is logged at Warning, which is what
-the filter bar's "Fully decoded only" excludes (`LogFocus.maximumSeverity`). Decoded rows name the
+the agent `visible` answer. A value whose bytes do not fit is logged at Warning and carries ` ⚠ `
+(`BluetoothATTSession.problemMarker`), which is what the filter bar's "Fully decoded only" excludes
+(`LogFocus.excluding`). It excluded by severity first; once definitions could give rows their own
+levels (`22: { name: BATTERY_OK, level: info }`, `level: error` on a match rule), a well-formed
+error packet would have been hidden as "not fully decoded". Decoded rows name the
 peer from HCI events and GATT as well — Device Name read, else advertised local name tied by the
 connection-complete address, else the definitions' service name — with advertised names capped at
 256 addresses and dropped per handle on disconnection. The message column is coloured by `LogMessageHighlighter`, a pure UTF-16 tokenizer run per

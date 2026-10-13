@@ -5262,6 +5262,9 @@ final class RemoteAppModel: ObservableObject {
             ].flatMap(Int.init) ?? 1_000
             return dashboardStressResponse(rowCount: max(1, requestedRows))
         }
+        if mode == MobileDemoFixture.sessionsManyProjects.rawValue {
+            return dashboardManyProjectsResponse()
+        }
         let response = MobileDemoFixture.isMarketing(mode)
             ? marketingResponse(forMode: mode)
             : demoResponse
@@ -5328,6 +5331,181 @@ final class RemoteAppModel: ObservableObject {
             archivedSessions: [],
             newSessionCatalog: response.newSessionCatalog,
             features: response.features
+        )
+    }
+
+    /// A Mac shaped the way one in daily use is, for reviewing how the dashboard *reads*: a dozen
+    /// projects with work in them among thirty that have sat for weeks, chats that share a title
+    /// across checkouts, several logins, a long title, and every state a row can show — working,
+    /// needs attention, usage limit, pinned, dormant. `sessions-scroll-stress` owns cardinality;
+    /// this owns "can I tell which chat is which". Every name is invented.
+    private static func dashboardManyProjectsResponse() -> RemoteMeDTO {
+        struct Chat {
+            let title: String
+            let agentKind: String
+            let state: RemoteSessionActivity
+            let account: RemoteSessionAccountDTO?
+            let age: TimeInterval
+            var isPinned = false
+        }
+        struct Project {
+            let name: String
+            let chats: [Chat]
+            let hasTerminal: Bool
+        }
+
+        let response = demoResponse
+        let now = Date().timeIntervalSince1970
+        let minute: TimeInterval = 60
+        let hour: TimeInterval = 60 * minute
+        let day: TimeInterval = 24 * hour
+        let work = RemoteSessionAccountDTO(name: "work01", glyph: "W", isEmoji: false, hue: 0.08)
+        let staging = RemoteSessionAccountDTO(name: "work02", glyph: "W", isEmoji: false, hue: 0.58)
+        let personal = RemoteSessionAccountDTO(name: "personal", glyph: "P", isEmoji: false, hue: 0.33)
+        let vera = RemoteSessionAccountDTO(name: "Vera Keller", glyph: "V", isEmoji: false, hue: 0.72)
+
+        let active = [
+            Project(name: "mobile-app", chats: [
+                Chat(title: "BLUETOOTH", agentKind: "claude", state: .working, account: work, age: 0),
+                Chat(title: "NOTIFICATIONS", agentKind: "claude", state: .idle, account: staging,
+                     age: 2 * hour),
+                Chat(title: "FAILURE", agentKind: "codex", state: .idle, account: nil, age: 2 * hour),
+                Chat(title: "ONBOARDING", agentKind: "claude", state: .dormant, account: work,
+                     age: 6 * day),
+            ], hasTerminal: true),
+            Project(name: "firmware", chats: [
+                Chat(title: "SYNC", agentKind: "claude", state: .needsAttention, account: staging,
+                     age: 3 * minute),
+                Chat(title: "BLUETOOTH", agentKind: "claude", state: .idle, account: staging,
+                     age: 2 * hour),
+            ], hasTerminal: false),
+            Project(name: "AnotherTerminal", chats: [
+                Chat(title: "MOBILE", agentKind: "claude", state: .idle, account: personal,
+                     age: 7 * minute),
+                Chat(title: "SHIMS", agentKind: "codex", state: .dormant, account: nil, age: 4 * day),
+                Chat(title: "LINUX APP KIT", agentKind: "claude", state: .dormant, account: work,
+                     age: 6 * day),
+            ], hasTerminal: true),
+            Project(name: "parking", chats: [
+                Chat(title: "PARKING", agentKind: "codex", state: .needsAttention, account: nil,
+                     age: 39 * minute),
+                Chat(title: "PRESERVE", agentKind: "codex", state: .idle, account: nil, age: 2 * hour),
+            ], hasTerminal: true),
+            Project(name: "design-system", chats: [
+                Chat(title: "WORDWRAP", agentKind: "claude", state: .needsAttention, account: vera,
+                     age: 53 * minute),
+                Chat(title: "DND", agentKind: "claude", state: .needsAttention, account: vera,
+                     age: 53 * minute),
+                Chat(title: "AGE", agentKind: "codex", state: .idle, account: nil, age: hour),
+            ], hasTerminal: false),
+            Project(name: "billing-api", chats: [
+                Chat(title: "INFRA", agentKind: "claude", state: .limitReached, account: work,
+                     age: hour),
+                Chat(title: "LOCALHOST", agentKind: "claude", state: .idle, account: staging,
+                     age: 18 * hour),
+                Chat(title: "CLEANUP", agentKind: "codex", state: .dormant, account: nil,
+                     age: 19 * hour),
+                Chat(title: "MIGRATIONS", agentKind: "claude", state: .dormant, account: work,
+                     age: 3 * day),
+                Chat(title: "WEBHOOKS", agentKind: "codex", state: .dormant, account: nil,
+                     age: 4 * day),
+                Chat(title: "RATE LIMITS", agentKind: "claude", state: .dormant, account: work,
+                     age: 9 * day),
+            ], hasTerminal: true),
+            Project(name: "emulator", chats: [
+                Chat(title: "CARMINE", agentKind: "claude", state: .working, account: work, age: 0),
+            ], hasTerminal: false),
+            Project(name: "data-pipeline", chats: [
+                Chat(title: "Build the project with incremental data loading and resumable jobs",
+                     agentKind: "claude", state: .needsAttention, account: work, age: 2 * hour),
+            ], hasTerminal: false),
+            Project(name: "voice-notes", chats: [
+                Chat(title: "VOICE", agentKind: "claude", state: .needsAttention, account: staging,
+                     age: 2 * hour),
+            ], hasTerminal: false),
+            Project(name: "web-dashboard", chats: [
+                Chat(title: "REDESIGN", agentKind: "claude", state: .needsAttention, account: vera,
+                     age: 2 * hour),
+                Chat(title: "DEPLOY", agentKind: "codex", state: .dormant, account: nil, age: day),
+            ], hasTerminal: false),
+            Project(name: "receipts", chats: [
+                Chat(title: "RECEIPTS", agentKind: "claude", state: .needsAttention, account: personal,
+                     age: 2 * hour, isPinned: true),
+                Chat(title: "MATCHING", agentKind: "codex", state: .dormant, account: nil,
+                     age: 19 * hour),
+            ], hasTerminal: false),
+            Project(name: "billing-api-hotfix", chats: [
+                Chat(title: "TRIAGE", agentKind: "claude", state: .dormant, account: work, age: 2 * day),
+            ], hasTerminal: false),
+        ]
+        let staleTitles = [
+            "SIMULATION", "RELEASE", "BRANCHES", "HOSTING", "MARBLES", "PROFILE", "REVIEW",
+            "LAUNCH", "ANSIBLE", "GREETING", "PARSER", "SPIKE", "UPGRADE", "CACHE", "EXPORT",
+        ]
+        let staleAccounts = [work, staging, nil, personal]
+        let stale = [
+            "analytics-etl", "android-client", "api-gateway", "auth-service", "blog",
+            "browser-extension", "cli-tools", "courier", "crm-sync", "docs-site",
+            "email-templates", "feature-flags", "geo-search", "image-pipeline", "infra-terraform",
+            "invoice-pdf", "kiosk", "landing-page", "lottie-player", "macos-builders",
+            "marketing-site", "ml-experiments", "pdf-renderer", "push-relay", "release-scripts",
+            "slack-status", "sso-bridge", "telemetry", "translations", "watch-app",
+        ].enumerated().map { index, name in
+            let chats = (0..<(index.isMultiple(of: 3) ? 2 : 1)).map { offset in
+                Chat(
+                    title: staleTitles[(index + offset * 7) % staleTitles.count],
+                    agentKind: (index + offset).isMultiple(of: 2) ? "codex" : "claude",
+                    state: .dormant,
+                    account: staleAccounts[(index + offset) % staleAccounts.count],
+                    age: Double(5 + (index * 13 + offset * 5) % 55) * day
+                )
+            }
+            return Project(name: name, chats: chats, hasTerminal: index.isMultiple(of: 4))
+        }
+
+        let projects = active + stale
+        let sessions = projects.flatMap { project in
+            project.chats.enumerated().map { index, chat in
+                RemoteSessionSummaryDTO(
+                    id: "many-projects-\(project.name)-\(index)",
+                    title: chat.title,
+                    agentKind: chat.agentKind,
+                    surface: .terminal,
+                    state: chat.state,
+                    projectName: project.name,
+                    isAvailable: chat.state != .dormant,
+                    lastActiveAt: now - chat.age,
+                    isPinned: chat.isPinned,
+                    account: chat.account
+                )
+            }
+        }
+        let terminals = projects.filter(\.hasTerminal).map { project in
+            let isRecent = (project.chats.map(\.age).min() ?? .infinity) < day
+            return RemoteProjectTerminalSummaryDTO(
+                id: "many-projects-terminal-\(project.name)",
+                title: project.name,
+                projectName: project.name,
+                state: isRecent ? .idle : .dormant,
+                isAvailable: isRecent,
+                createdAt: now - 30 * day
+            )
+        }
+        var features = response.features ?? []
+        if !features.contains(RemoteRESTFeature.universalSearch.rawValue) {
+            features.append(RemoteRESTFeature.universalSearch.rawValue)
+        }
+        return RemoteMeDTO(
+            serverProtocol: response.serverProtocol,
+            share: response.share,
+            sessions: sessions,
+            terminals: terminals,
+            host: response.host,
+            theme: response.theme,
+            themeCatalog: response.themeCatalog,
+            archivedSessions: [],
+            newSessionCatalog: response.newSessionCatalog,
+            features: features
         )
     }
 

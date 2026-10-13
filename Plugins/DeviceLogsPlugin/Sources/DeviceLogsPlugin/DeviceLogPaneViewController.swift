@@ -121,8 +121,17 @@ public final class DeviceLogPaneViewController: NSViewController {
     private var definitionLearned: String?
     /// Enum case names, declared and learned, drawn in a colour of their own.
     private var definitionNames: Set<String> = []
+    /// The connection's GATT table: discovered live, remembered (assumed, stale), or none fitting.
+    private var definitionGATT: String?
+    /// The definitions' `logs:` rules; the workspace links this tab's rows to the other tab's.
+    private(set) var logLinks: [BluetoothLogLink] = []
+    /// A reader selected one row (not a fold); the workspace reveals its partner in the other tab.
+    var onRowSelected: ((DeviceLogRow) -> Void)?
+    /// Set while revealing a linked row, so the selection it makes is not linked back.
+    private var revealingLinked = false
     private var definitionSummary: String {
         (definitionStatus?.summary ?? "") + (definitionLearned.map { " · " + $0 } ?? "")
+            + (definitionGATT.map { " · " + $0 } ?? "")
     }
     /// Footer line naming the definitions file and whether it loaded: the standing hint of where
     /// the file goes, so it is discoverable without opening anything.
@@ -217,7 +226,7 @@ public final class DeviceLogPaneViewController: NSViewController {
             context: DeviceLogLimits.foldContext,
             process: selectedProcess,
             subsystem: packetFilter == .all ? nil : BluetoothATTSession.appProtocolName,
-            maximumSeverity: packetFilter == .complete ? BluetoothPacketFilter.completeMaximumSeverity : nil
+            excluding: packetFilter == .complete ? BluetoothPacketFilter.problemMarker : nil
         )
     }
     private var drainTimer: Timer?
@@ -770,6 +779,7 @@ public final class DeviceLogPaneViewController: NSViewController {
             ))
         )
         help.onFileCreated = { [weak self] in self?.loadDefinitionStatus() }
+        help.onForgetRememberedTables = { [weak self] in self?.forgetRememberedGATTTables() }
         let popover = ThemedPopover()
         popover.behavior = .transient
         popover.contentViewController = help
@@ -781,6 +791,20 @@ public final class DeviceLogPaneViewController: NSViewController {
         // The reader reports changes while it runs; without one, read the file now so the panel
         // describes the file as it is rather than as it was.
         loadDefinitionStatus()
+    }
+
+    /// Drops what earlier captures taught about devices' GATT tables. A running capture forgets
+    /// on its worker; otherwise the file is removed off the main actor.
+    func forgetRememberedGATTTables() {
+        definitionGATT = nil
+        definitionsLabel.stringValue = definitionSummary
+        if let bluetooth = source as? BluetoothLogRowSource {
+            bluetooth.forgetRememberedGATTTables()
+        } else {
+            Task.detached(priority: .utility) {
+                try? FileManager.default.removeItem(at: BluetoothGATTTables.defaultURL)
+            }
+        }
     }
 
     /// Reads the file off the main actor; the reader's own reports stay authoritative while it runs.
@@ -795,21 +819,25 @@ public final class DeviceLogPaneViewController: NSViewController {
                 let learned = enums.isEmpty ? BluetoothLearnedEnums() : BluetoothLearnedEnums.load()
                 return BluetoothDefinitionReport(
                     status: status, highlights: definitions?.highlights ?? [:],
-                    learned: learned.summary(enums: enums), names: learned.names(definitions: definitions)
+                    learned: learned.summary(enums: enums), names: learned.names(definitions: definitions),
+                    logLinks: definitions?.logLinks ?? []
                 )
             }.value
             guard let self, self.definitionLoadGeneration == generation else { return }
+            self.logLinks = report.logLinks
             self.applyDefinitionStatus(report.status, highlights: report.highlights, learned: report.learned,
-                                       names: report.names)
+                                       names: report.names, gatt: report.gatt)
         }
     }
 
     private func applyDefinitionStatus(
         _ status: BluetoothDefinitionStatus, highlights: [String: BluetoothHighlightColor] = [:],
-        learned: String? = nil, names: Set<String> = []
+        learned: String? = nil, names: Set<String> = [], gatt: String? = nil
     ) {
         definitionStatus = status
         definitionLearned = learned
+        // The off-main file load knows nothing of the capture's tables; keep the worker's line.
+        if gatt != nil || source == nil { definitionGATT = gatt }
         if highlights != definitionHighlights || names != definitionNames {
             definitionHighlights = highlights
             definitionNames = names
@@ -827,11 +855,24 @@ public final class DeviceLogPaneViewController: NSViewController {
         bluetoothProfileSetup.showBrowserForTesting()
     }
 
+    func setLogLinksForTesting(_ links: [BluetoothLogLink]) { logLinks = links }
+
+    var selectedHeldRowForTesting: DeviceLogRow? {
+        let selected = table.selectedRow
+        guard entries.indices.contains(selected), case .row(let index) = entries[selected] else { return nil }
+        return heldRows.indices.contains(index) ? heldRows[index] : nil
+    }
+
+    func selectHeldRowAsReaderForTesting(_ index: Int) {
+        guard let position = entries.firstIndex(where: { if case .row(index) = $0 { return true } else { return false } }) else { return }
+        table.selectRowIndexes(IndexSet(integer: position), byExtendingSelection: false)
+    }
+
     func applyDefinitionStatusForTesting(
         _ status: BluetoothDefinitionStatus, highlights: [String: BluetoothHighlightColor] = [:],
-        learned: String? = nil, names: Set<String> = []
+        learned: String? = nil, names: Set<String> = [], gatt: String? = nil
     ) {
-        applyDefinitionStatus(status, highlights: highlights, learned: learned, names: names)
+        applyDefinitionStatus(status, highlights: highlights, learned: learned, names: names, gatt: gatt)
     }
     #endif
 
@@ -978,8 +1019,9 @@ public final class DeviceLogPaneViewController: NSViewController {
             bluetooth.definitionsCheckout = definitionsCheckout
             let apply: @MainActor @Sendable (BluetoothDefinitionReport) -> Void = { [weak self] report in
                 guard let self, self.sourceGeneration == generation else { return }
+                self.logLinks = report.logLinks
                 self.applyDefinitionStatus(report.status, highlights: report.highlights, learned: report.learned,
-                                       names: report.names)
+                                       names: report.names, gatt: report.gatt)
             }
             bluetooth.onDefinitionsChanged = { report in
                 DispatchQueue.main.async { MainActor.assumeIsolated { apply(report) } }
@@ -1192,6 +1234,30 @@ public final class DeviceLogPaneViewController: NSViewController {
     }
 
     /// The rows currently visible, newest last, for a tool asked what is on screen.
+    /// Every row this tab holds, in time order: the ring the reader can scroll.
+    var heldRows: [DeviceLogRow] { projectedRows ?? rows }
+
+    /// Selects and scrolls to a held row — opening the fold it is in — without linking it back.
+    @discardableResult
+    func reveal(heldRow index: Int) -> Bool {
+        let displayed = projectedRows ?? rows
+        guard displayed.indices.contains(index) else { return false }
+        let offset = projectedRows == nil ? rowOffset : projectedRowOffset
+        if let position = displayIndex(containing: index), case .gap(let range) = entries[position] {
+            expandedGaps.insert(range.lowerBound + offset)
+            entries = LogFocusLayout.entries(rows: displayed, focus: focus, expanded: expandedGaps(at: offset))
+            table.reloadData()
+        }
+        guard let position = displayIndex(containing: index), case .row = entries[position] else { return false }
+        revealingLinked = true
+        defer { revealingLinked = false }
+        isFollowing = false
+        table.selectRowIndexes(IndexSet(integer: position), byExtendingSelection: false)
+        table.scrollRowToVisible(position)
+        updateFollowAffordance()
+        return true
+    }
+
     public func visibleRowsForTools(limit: Int) -> [DeviceLogRow] {
         let displayed = projectedRows ?? rows
         return entries.suffix(limit).compactMap { entry in
@@ -1651,9 +1717,15 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
     public func tableViewSelectionDidChange(_ notification: Notification) {
         guard !updatingTable else { return }
         let selected = table.selectedRow
-        guard entries.indices.contains(selected), case .gap(let range) = entries[selected] else {
+        guard entries.indices.contains(selected) else { return }
+        if case .row(let index) = entries[selected] {
+            let displayed = projectedRows ?? rows
+            if !revealingLinked, table.selectedRowIndexes.count == 1, displayed.indices.contains(index) {
+                onRowSelected?(displayed[index])
+            }
             return
         }
+        guard case .gap(let range) = entries[selected] else { return }
         let offset = projectedRows == nil ? rowOffset : projectedRowOffset
         expandedGaps.insert(range.lowerBound + offset)
         let displayed = projectedRows ?? rows
@@ -1728,8 +1800,8 @@ enum BluetoothPacketFilter: Int, CaseIterable, Sendable {
     /// Decoded rows whose bytes fit their definition exactly: a misfit is logged at Warning.
     case complete
 
-    /// Info's `DeviceLogRow.severity`.
-    static let completeMaximumSeverity = 1
+    /// What a row whose bytes did not fit its definition says, and what "Fully decoded only" hides.
+    static let problemMarker = BluetoothATTSession.problemMarker
 
     var title: String {
         switch self {

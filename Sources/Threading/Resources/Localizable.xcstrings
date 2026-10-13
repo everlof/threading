@@ -25524,6 +25524,17 @@
         }
       }
     },
+    "Forget Remembered Tables" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Glöm sparade tabeller"
+          }
+        }
+      }
+    },
     "Forget Saved IPs" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44466,6 +44477,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ändra terminalens kortkommandon"
+          }
+        }
+      }
+    },
+    "Remembered GATT tables forgotten." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparade GATT-tabeller har glömts."
           }
         }
       }
@@ -64950,6 +64972,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading läser vilka konton som finns under ~/.claude och ~/.codex för att kunna koppla en session till ett av dem. En inloggningsuppgift läses bara för liveanvändnings-reglaget nedan, och först efter att du tillåtit det i nyckelringsfrågan."
+          }
+        }
+      }
+    },
+    "Threading remembers each device's GATT table from captures that saw discovery, so later captures decode without handle pins. This forgets them on this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading sparar varje enhets GATT-tabell från inspelningar som såg upptäckten, så att senare inspelningar avkodas utan fästa handtag. Detta glömmer dem på den här Macen."
           }
         }
       }

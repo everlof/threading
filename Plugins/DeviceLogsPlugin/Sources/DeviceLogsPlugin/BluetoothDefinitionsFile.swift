@@ -16,6 +16,10 @@ struct BluetoothDefinitionReport: Sendable, Equatable {
     var learned: String?
     /// Every enum case name, declared or learned, so the pane colours each by its name.
     var names: Set<String> = []
+    /// "GATT: Kronaby (fw …) remembered 13 Oct 15:06 · 14 characteristics", when known.
+    var gatt: String?
+    /// `logs:` rules, for linking app log lines to packets across the two tabs.
+    var logLinks: [BluetoothLogLink] = []
 }
 
 enum BluetoothDefinitionStatus: Sendable, Equatable {

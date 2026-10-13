@@ -45,11 +45,12 @@ final class NativePluginToolRoutingTests: XCTestCase {
             groups.first { $0.id == "codes.threading.plugin.devicelogs" },
             "the plugin's tools did not reach the provider; groups: \(groups.map(\.id))"
         )
-        XCTAssertEqual(devicelogs.tools.count, 6)
+        XCTAssertEqual(devicelogs.tools.count, 7)
         let names = Set(devicelogs.tools.map(\.name))
         XCTAssertTrue(names.contains("plugin__devicelogs__search"), "found \(names.sorted())")
         XCTAssertTrue(names.contains("plugin__devicelogs__focus"))
         XCTAssertTrue(names.contains("plugin__devicelogs__bluetooth"))
+        XCTAssertTrue(names.contains("plugin__devicelogs__linked"))
         for tool in devicelogs.tools {
             // A schema that did not survive the JSON crossing leaves a tool the agent cannot call
             // while everything else still works.

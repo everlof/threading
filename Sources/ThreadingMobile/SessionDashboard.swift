@@ -58,6 +58,49 @@ enum SessionOrganization: String, CaseIterable {
         case .type: return "square.grid.2x2"
         }
     }
+
+    /// Whether each row has to name its project itself. Only the by-project arrangement puts a
+    /// project heading over its rows, and a project's own page is one project, so everywhere else
+    /// a row without the name reads as a chat from nowhere — two "BLUETOOTH"s in two checkouts
+    /// look like the same chat.
+    func rowsNameTheirProject(insideProject: Bool) -> Bool {
+        !insideProject && self != .project
+    }
+}
+
+/// What a chat row's caption spells after its glyphs: the state when no glyph carries it, the
+/// project when no heading above the row names it, then the login. The UIKit cell and the
+/// SwiftUI row both read it, so the two cannot disagree about what a row says, and the project
+/// leads the login because the login is the part a narrow row can afford to truncate.
+struct DashboardSessionCaption: Equatable {
+    struct Part: Equatable {
+        let text: String
+        let isWarning: Bool
+    }
+
+    let parts: [Part]
+
+    static func resolve(
+        _ session: RemoteSessionSummaryDTO,
+        isCatalogueLive: Bool,
+        showsProjectName: Bool
+    ) -> DashboardSessionCaption {
+        var parts: [Part] = []
+        if isCatalogueLive, !session.isArchived {
+            if session.wokeAt != nil {
+                parts.append(Part(text: MobileL10n.string("Woke"), isWarning: true))
+            } else if session.isAvailable, session.state == .limitReached {
+                parts.append(Part(text: MobileL10n.string("Usage limit reached"), isWarning: true))
+            }
+        }
+        if showsProjectName, !session.projectName.isEmpty {
+            parts.append(Part(text: session.projectName, isWarning: false))
+        }
+        if let account = session.account {
+            parts.append(Part(text: account.visibleName, isWarning: false))
+        }
+        return DashboardSessionCaption(parts: parts)
+    }
 }
 
 enum DashboardContentType: String, Hashable {
@@ -2031,17 +2074,12 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
         theme: RemoteThemePalette
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
-        if !session.isArchived,
-           configuration?.isCatalogueLive == true,
-           session.wokeAt != nil || (session.isAvailable && session.state == .limitReached) {
-            result.append(NSAttributedString(
-                string: session.wokeAt != nil
-                    ? MobileL10n.string("Woke")
-                    : MobileL10n.string("Usage limit reached"),
-                attributes: [.foregroundColor: theme.uiWarning]
-            ))
-        }
-        if let account = session.account {
+        let caption = DashboardSessionCaption.resolve(
+            session,
+            isCatalogueLive: configuration?.isCatalogueLive == true,
+            showsProjectName: configuration?.showsProjectName == true
+        )
+        for part in caption.parts {
             if result.length > 0 {
                 result.append(NSAttributedString(
                     string: " · ",
@@ -2049,8 +2087,10 @@ private final class DashboardRowCollectionCell: UICollectionViewCell,
                 ))
             }
             result.append(NSAttributedString(
-                string: account.visibleName,
-                attributes: [.foregroundColor: theme.uiSecondaryLabel]
+                string: part.text,
+                attributes: [.foregroundColor: part.isWarning
+                    ? theme.uiWarning
+                    : theme.uiSecondaryLabel]
             ))
         }
         result.addAttribute(
@@ -3295,6 +3335,10 @@ struct SessionDashboard: View {
         SessionOrganization(rawValue: organizationRaw) ?? .project
     }
 
+    private var rowsNameTheirProject: Bool {
+        organization.rowsNameTheirProject(insideProject: projectName != nil)
+    }
+
     private var typeDirection: SessionTypeDirection {
         SessionTypeDirection(rawValue: typeDirectionRaw) ?? .chatsFirst
     }
@@ -3711,13 +3755,14 @@ struct SessionDashboard: View {
                     session: session,
                     isArchived: showsArchived,
                     isCatalogueLive: model.dashboardCatalogue?.isLive == true,
+                    showsProjectName: rowsNameTheirProject,
                     showsActions: model.canManageSessions,
                     action: perform
                 )
             case .terminal(let terminal):
                 TerminalListItem(
                     terminal: terminal,
-                    showsProjectName: projectName == nil,
+                    showsProjectName: rowsNameTheirProject,
                     isCatalogueLive: model.dashboardCatalogue?.isLive == true
                 )
             }
@@ -3739,7 +3784,7 @@ struct SessionDashboard: View {
                 theme: theme,
                 isArchived: false,
                 isCatalogueLive: model.dashboardCatalogue?.isLive == true,
-                showsProjectName: projectName == nil,
+                showsProjectName: rowsNameTheirProject,
                 activate: {
                     guard model.navigationPath.last != .terminal(terminal.id) else { return }
                     model.navigationPath.append(.terminal(terminal.id))
@@ -3770,7 +3815,7 @@ struct SessionDashboard: View {
                 theme: theme,
                 isArchived: showsArchived,
                 isCatalogueLive: model.dashboardCatalogue?.isLive == true,
-                showsProjectName: false,
+                showsProjectName: rowsNameTheirProject,
                 activate: canActivate ? {
                     MobileSessionNavigationTransition.push(session, onto: model)
                 } : nil,
@@ -5026,6 +5071,7 @@ struct MobileLiftedSessionRow: View {
     let width: CGFloat?
     let theme: RemoteThemePalette
     var isCatalogueLive = true
+    var showsProjectName = false
 
     /// The outline the theme lifts a row in: the group plate's own corners, square — within a
     /// point — when the theme's panels are square.
@@ -5035,7 +5081,11 @@ struct MobileLiftedSessionRow: View {
 
     var body: some View {
         let shape = Self.shape(for: theme)
-        SessionRow(session: session, isCatalogueLive: isCatalogueLive)
+        SessionRow(
+            session: session,
+            isCatalogueLive: isCatalogueLive,
+            showsProjectName: showsProjectName
+        )
             .frame(width: width)
             .background(theme.panel, in: shape)
             .overlay {
@@ -5051,6 +5101,7 @@ private struct SessionListItem: View {
     let session: RemoteSessionSummaryDTO
     let isArchived: Bool
     let isCatalogueLive: Bool
+    let showsProjectName: Bool
     let showsActions: Bool
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
     @EnvironmentObject private var model: RemoteAppModel
@@ -5085,7 +5136,8 @@ private struct SessionListItem: View {
             session: session,
             width: rowWidth,
             theme: theme,
-            isCatalogueLive: isCatalogueLive
+            isCatalogueLive: isCatalogueLive,
+            showsProjectName: showsProjectName
         )
     }
 
@@ -5103,10 +5155,18 @@ private struct SessionListItem: View {
     private var sessionRow: some View {
         let row: AnyView
         if isArchived {
-            row = AnyView(SessionRow(session: session, isCatalogueLive: isCatalogueLive))
+            row = AnyView(SessionRow(
+                session: session,
+                isCatalogueLive: isCatalogueLive,
+                showsProjectName: showsProjectName
+            ))
         } else {
             row = AnyView(
-                SessionRow(session: session, isCatalogueLive: isCatalogueLive)
+                SessionRow(
+                    session: session,
+                    isCatalogueLive: isCatalogueLive,
+                    showsProjectName: showsProjectName
+                )
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isLink)
                     .accessibilityAction(.default) { openSession() }
@@ -5467,8 +5527,8 @@ struct MobileTerminalRowPresentation: Equatable {
 }
 
 /// One standalone terminal in the dashboard list: the same row as a chat, with the terminal mark
-/// where a chat shows its runtime's, and its project's name in the caption when the list spans
-/// projects. It has no login, no surface choice and no last-active time of its own, so its caption
+/// where a chat shows its runtime's, and its project's name in the caption when no project heading
+/// stands over it. It has no login, no surface choice and no last-active time of its own, so its caption
 /// and trailing column carry only what it has.
 private struct TerminalRow: View {
     let terminal: RemoteProjectTerminalSummaryDTO
@@ -5558,6 +5618,7 @@ private struct TerminalListItem: View {
 private struct SessionRow: View {
     let session: RemoteSessionSummaryDTO
     let isCatalogueLive: Bool
+    var showsProjectName = false
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
@@ -5629,16 +5690,16 @@ private struct SessionRow: View {
         isCatalogueLive && session.isAvailable && !session.isArchived && session.state == .working
     }
 
-    /// The caption's words: the state only when no glyph carries it, then the login when it is
-    /// not the CLI's default one. One `Text`, so a long account name truncates the line rather
-    /// than pushing the age out of the row; nil when there is nothing to say.
+    /// The caption's words, as `DashboardSessionCaption` lists them. One `Text`, so a long account
+    /// name truncates the line rather than pushing the age out of the row; nil when there is
+    /// nothing to say.
     private var metaText: Text? {
-        var parts: [Text] = []
-        if let word = spelledStateLabel {
-            parts.append(Text(word).foregroundStyle(theme.warning))
-        }
-        if let account = session.account {
-            parts.append(Text(account.visibleName).foregroundStyle(theme.secondaryLabel))
+        let parts = DashboardSessionCaption.resolve(
+            session,
+            isCatalogueLive: isCatalogueLive,
+            showsProjectName: showsProjectName
+        ).parts.map { part in
+            Text(part.text).foregroundStyle(part.isWarning ? theme.warning : theme.secondaryLabel)
         }
         guard let first = parts.first else { return nil }
         return parts.dropFirst().reduce(first) { line, part in
@@ -5669,18 +5730,6 @@ private struct SessionRow: View {
         if session.wokeAt != nil { return MobileL10n.string("Woke") }
         if session.isSnoozed() { return MobileL10n.string("Snoozed") }
         return session.isAvailable ? stateLabel : MobileL10n.string("Disconnected")
-    }
-
-    /// The states worth a word in the caption: the ones no glyph on the row carries. Archived and
-    /// snoozed rows live in lists whose header already says so.
-    private var spelledStateLabel: String? {
-        guard isCatalogueLive else { return nil }
-        if session.isArchived { return nil }
-        if session.wokeAt != nil { return MobileL10n.string("Woke") }
-        if session.isAvailable, session.state == .limitReached {
-            return MobileL10n.string("Usage limit reached")
-        }
-        return nil
     }
 
     /// What you are looking at, not who is talking — the mark already says that. A terminal surface

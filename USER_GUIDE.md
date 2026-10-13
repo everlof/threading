@@ -3286,6 +3286,8 @@ It preserves your saved pairing credentials; you do not need to pair again.
 steering an ongoing turn, and finishing work update that time. The age beside each chat uses the
 same time. Restarting an idle agent process alone does not move a chat up the list. Older records
 use their latest recorded turn start, or process activity if no work timestamp is available.
+In **Most recent** and **By type**, no project heading stands over the rows, so each chat and
+terminal names its project in its caption, before the account.
 
 Choose a project heading to open that project. This screen contains only the project's chats;
 its title keeps the connection status visible, and the **+** in the navigation bar starts a chat
@@ -4158,26 +4160,54 @@ in the file colours your own words, for example `LOCATION: green`; see the forma
 
 The Bluetooth filter bar's first menu chooses which packets to show: **All packets**, **App packets
 only** (everything your definitions decoded), or **Fully decoded only**, which also leaves out
-packets whose bytes did not fit their definition. Those are logged at **Warning** with a `⚠` saying
-what was missing or left over. It is a view filter: everything is still recorded and searchable,
+packets whose bytes did not fit their definition. Those end in a `⚠` saying what was missing or
+left over. It is a view filter: everything is still recorded and searchable,
 and **All packets** brings the rest back. If nothing shows, the footer says whether no definitions are
 loaded or none of their characteristics has matched yet.
 
-Characteristics are matched by an explicit `handle:` or by UUID. A UUID is matched to its handle
-from the GATT discovery seen in the capture; iOS caches discovery for known accessories, so when a
-capture starts after it, add the `handle:` shown in the ATT row. The accessory and the iPhone each
+Characteristics are matched by UUID. Threading learns which handle is which from the GATT discovery
+seen in a capture and **remembers each device's table**, so a later capture that starts after the
+app connected — iOS rarely rediscovers bonded devices — still decodes. Without a connection event
+it uses the remembered table the traffic fits (marked `assumed` when several do) and leaves a
+connection raw when none fits. Service Changed and a new Database Hash invalidate a table; a new
+firmware marks it stale. Rows named from memory end in `(remembered)`, the footer says which table
+is in use, and **Forget Remembered Tables** in the **?** panel clears them. A `handle:` pin is only
+needed for a device whose discovery was never captured, and the footer names a pin that disagrees
+with the device's table. The accessory and the iPhone each
 have their own attribute handles, so a handle pin means the accessory's unless the characteristic
 says `server: phone`. Long reads and long writes are joined before decoding, and `type: msgpack`
 renders MessagePack values. A msgpack field can `match:` patterns such as `{ $cmd: $value }` and
 print a summary like `datetime {year=2026 …}`. When a device publishes its own command table, an
 enum's `learn:` block picks the names up from the traffic and Threading remembers them per device
 for later captures, so a capture after pairing still reads by name. The footer shows what was
-learned. Enum names are drawn in a colour derived from the name, so a command looks the same in
-every row. The format reference is
+learned; learned names are kept per firmware build, so a device on a new build reads raw until it
+teaches its tables again. Enum names are drawn in a colour derived from the name, so a command looks
+the same in every row.
+
+The file can also describe what spans packets:
+
+- **Transactions** pair a request with its answer. The answer's row ends in `↩` naming the request
+  and how long it took, and a request that never got one becomes a warning row
+  (`no response within 30 s to read map_buildinfo`).
+- **Streams** join a log channel the device sends in pieces into one row per line, at the line's own
+  level. They also follow a file or firmware transfer with progress rows and a final CRC verdict.
+- **Levels** on enum entries say which values are errors: `22: { name: BATTERY_OK, level: info }`.
+- **Built-in profiles** (`include: [gatt, ancs, nordic-dfu, nordic-legacy-dfu]`) decode the
+  standard services without describing them.
+- **`logs:` rules** link the app's own log lines to the packets they describe. With both tabs shown,
+  selecting such a line in **Device Logs** selects its packet in **Bluetooth**, and the reverse.
+
+Even without a file, the link's own events read as words under subsystem **Link**:
+- connection parameters, data length, PHY and encryption;
+- why a link ended, for example `Disconnected Kronaby: Connection Timeout`;
+- a notification the phone had switched off.
+
+The format reference is
 [`docs/bluetooth-packet-definitions.md`](docs/bluetooth-packet-definitions.md).
 
 Agents can select it with `plugin__devicelogs__bluetooth` using the exact iPhone hardware UDID,
-then read it with the existing `visible`, `search` and `time_range` tools. Hiding the pane stops
+then read it with the existing `visible`, `search` and `time_range` tools; `linked` finds the
+packet an app log line is about, or the reverse. Hiding the pane stops
 capture. To keep a full raw capture for PacketLogger or Wireshark, use the external tool separately:
 `idevicebtlogger -u <UDID> -x -f pcap capture.pcap` (add `-n` for Wi-Fi).
 

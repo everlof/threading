@@ -710,6 +710,13 @@ text. Themes style the panel through the shared popover, button and text-view co
 Enum entries a device teaches (`learn:`) are host-owned state in Application Support, keyed per
 device, bounded and never written back to the project; enum names are coloured from the theme's own
 syntax keyword lightness and chroma, so a theme restyles them without a new seam.
+Remembered GATT tables follow the same rule: host-owned, per device, bounded, cleared by the panel's
+Forget Remembered Tables button, and never written into the project file.
+The cross-packet sections (`transactions:`, `streams:`, `logs:`, `advertising:`, `include:`) stay
+declarative data under the same interpreter: they add rows and row levels but no controls, run no
+code, and `logs:` regular expressions are compiled and bounded by Threading. Linking a selection
+between the Regular Logs and Bluetooth tabs is host-owned workspace behaviour, and the agent's
+`linked` tool reads only the rows the tabs already hold.
 
 **Proxy debugging commands** are deliberately host-only. The existing Tools settings group and
 session MCP transport expose bounded HTTP(S) capture. Threading owns exact TLS scope, CA key

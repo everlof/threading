@@ -349,6 +349,8 @@ enum MobileDemoFixture: String, CaseIterable {
     case sessionsConnecting = "sessions-connecting"
     case sessionsOffline = "sessions-offline"
     case sessionsScrollStress = "sessions-scroll-stress"
+    /// Forty projects, most of them weeks old, for reviewing how the list reads at that size.
+    case sessionsManyProjects = "sessions-many-projects"
     case projectSessions = "project-sessions"
 
     /// The issue report, presented over whatever the root already shows.

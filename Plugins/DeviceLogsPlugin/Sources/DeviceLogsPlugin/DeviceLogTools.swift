@@ -13,6 +13,7 @@ public enum DeviceLogToolNames {
     public static let timeRange = "time_range"
     public static let visible = "visible"
     public static let bluetooth = "bluetooth"
+    public static let linked = "linked"
 }
 
 /// How many rows a tool will put in one answer.

@@ -25,9 +25,10 @@ public struct LogFocus: Equatable, Sendable {
     /// Exact subsystem, so "App packets only" in the Bluetooth tab cannot also match a packet whose
     /// message happens to contain the letters.
     public let subsystem: String?
-    /// Rows above this `severity` are not matches; nil means no ceiling. "Fully decoded only"
-    /// uses it to drop app packets whose bytes did not fit their definition (level Warning).
-    public let maximumSeverity: Int?
+    /// Rows whose message contains this (case-insensitively) are not matches. "Fully decoded
+    /// only" uses it to drop app packets whose bytes did not fit their definition: their level
+    /// cannot say so, because an app's own definitions may rightly call a packet an error.
+    public let excluding: String?
 
     /// The pattern folded to lowercase bytes, once.
     ///
@@ -36,23 +37,25 @@ public struct LogFocus: Equatable, Sendable {
     /// field allocated three Strings a row and took 57 ms, and `range(of:options:.caseInsensitive)`
     /// bridges into ICU and took 158 ms. A log line is bytes.
     private let needle: [UInt8]
+    private let excludedNeedle: [UInt8]?
 
     public init(
         pattern: String = "", minimumSeverity: Int = 0, context: Int = 2,
-        process: String? = nil, subsystem: String? = nil, maximumSeverity: Int? = nil
+        process: String? = nil, subsystem: String? = nil, excluding: String? = nil
     ) {
         self.pattern = pattern
         self.minimumSeverity = minimumSeverity
         self.context = context
         self.process = process
         self.subsystem = subsystem
-        self.maximumSeverity = maximumSeverity
+        self.excluding = excluding
         self.needle = Array(pattern.lowercased().utf8)
+        self.excludedNeedle = excluding.map { Array($0.lowercased().utf8) }
     }
 
     /// Nothing is folded when nothing has been asked for.
     public var isActive: Bool {
-        !pattern.isEmpty || minimumSeverity > 0 || process != nil || subsystem != nil || maximumSeverity != nil
+        !pattern.isEmpty || minimumSeverity > 0 || process != nil || subsystem != nil || excluding != nil
     }
 
     /// Whether this row is one of the ones being looked for — which is also what gets highlighted.
@@ -61,7 +64,7 @@ public struct LogFocus: Equatable, Sendable {
         guard process == nil || row.process == process else { return false }
         guard subsystem == nil || row.subsystem == subsystem else { return false }
         guard minimumSeverity == 0 || row.severity >= minimumSeverity else { return false }
-        guard maximumSeverity.map({ row.severity <= $0 }) ?? true else { return false }
+        if let excludedNeedle, Self.contains(row.message, excludedNeedle) { return false }
         guard !pattern.isEmpty else { return true }
         return Self.contains(row.message, needle)
             || Self.contains(row.process, needle)

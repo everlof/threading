@@ -17,6 +17,12 @@ final class BluetoothCaptureReplayTests: XCTestCase {
         let definitions = try BluetoothPacketDefinitions.compile(String(contentsOfFile: yamlPath, encoding: .utf8))
         var session = BluetoothATTSession()
         session.definitions = definitions
+        session.phoneIdentity = "replay"
+        // `THREADING_BT_REPLAY_RESTART=15:08` starts a new session at that clock, carrying only
+        // what Threading remembers across captures — as a capture restarted mid-connection would.
+        var restart = environment["THREADING_BT_REPLAY_RESTART"]
+        var phase = ""
+        var unresolved = 0
         var connection = 0x40
         var decoded: [String: Int] = [:]
         var samples: [String: [String]] = [:]
@@ -25,7 +31,30 @@ final class BluetoothCaptureReplayTests: XCTestCase {
             let columns = line.split(separator: "\t", maxSplits: 2).map(String.init)
             guard columns.count == 3, columns[2].count > 3 else { continue }
             let (clock, subsystem, message) = (columns[0], columns[1], columns[2])
+            if let at = restart, clock >= at {
+                var next = BluetoothATTSession()
+                next.definitions = definitions
+                next.phoneIdentity = "replay"
+                next.gatt = session.gatt
+                next.learned = session.learned
+                session = next
+                restart = nil
+                phase = "after restart: "
+                print("Replay: restarted at \(clock) with \(session.gatt.devices.count) remembered tables")
+            }
             let incoming = message.hasPrefix("RX")
+            let clockParts = clock.split(separator: ":").compactMap { Double($0) }
+            if clockParts.count == 3 { session.time = clockParts[0] * 3_600 + clockParts[1] * 60 + clockParts[2] }
+            defer {
+                for row in session.takeFlowRows() {
+                    let key = "flow \(row.level.level): " + row.text.components(separatedBy: " · ").prefix(2).joined(separator: " · ")
+                        .components(separatedBy: CharacterSet.decimalDigits).first!
+                    decoded[key, default: 0] += 1
+                    if samples[key, default: []].count < (Int(environment["THREADING_BT_REPLAY_SAMPLES"] ?? "") ?? 3) {
+                        samples[key, default: []].append("\(clock) \(row.text.prefix(300))")
+                    }
+                }
+            }
             guard let bar = message.range(of: " | ", options: .backwards), !message.contains("omitted)") else {
                 skipped += 1
                 continue
@@ -34,7 +63,11 @@ final class BluetoothCaptureReplayTests: XCTestCase {
             let summary: BluetoothATTSession.Summary
             switch subsystem {
             case "HCI" where message.contains("HCI Event"):
-                session.event(bytes)
+                if let event = session.event(bytes) {
+                    let key = "link: " + event.text.components(separatedBy: CharacterSet(charactersIn: " ·")).prefix(2).joined(separator: " ")
+                    decoded[key, default: 0] += 1
+                    if samples[key, default: []].count < 3 { samples[key, default: []].append("\(clock) \(event.text)") }
+                }
                 continue
             case "ATT", "L2CAP", "ACL":
                 // An App row does not say its connection; the last ATT exchange's is the best guess.
@@ -52,12 +85,21 @@ final class BluetoothCaptureReplayTests: XCTestCase {
             default:
                 continue
             }
-            guard summary.protocolName == BluetoothATTSession.appProtocolName else { continue }
-            let name = summary.text.components(separatedBy: " · ").dropFirst().first ?? "?"
+            guard summary.protocolName == BluetoothATTSession.appProtocolName else {
+                if !phase.isEmpty, summary.text.contains(" attribute="), !summary.text.contains("uuid=") {
+                    unresolved += 1
+                    if unresolved <= 10 { print("Replay: no UUID \(clock) \(summary.text.prefix(120))") }
+                }
+                continue
+            }
+            var name = phase + (summary.text.components(separatedBy: " · ").dropFirst().first ?? "?")
+            if summary.text.contains(" ↩ ") { name += " (paired)" }
+            if let level = summary.level, level != .info { name += " [\(level.level)]" }
             decoded[name, default: 0] += 1
             if samples[name, default: []].count < (Int(environment["THREADING_BT_REPLAY_SAMPLES"] ?? "") ?? 3) { samples[name, default: []].append("\(clock) \(summary.text.prefix(Int(environment["THREADING_BT_REPLAY_WIDTH"] ?? "") ?? 300))") }
         }
-        print("Replay: skipped \(skipped) rows without whole bytes")
+        print("Replay: skipped \(skipped) rows without whole bytes; \(unresolved) ATT rows after restart had no UUID")
+        print("Replay: GATT line: \(session.gattSummary ?? "none")")
         for (name, count) in decoded.sorted(by: { $0.value > $1.value }) {
             print("Replay: \(count) × \(name)")
             for sample in samples[name] ?? [] { print("    \(sample)") }

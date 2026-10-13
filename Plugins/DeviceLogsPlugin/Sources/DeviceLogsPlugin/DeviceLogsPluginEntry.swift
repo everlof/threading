@@ -161,6 +161,18 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 inputSchemaJSON: #"{"type":"object","properties":{}}"#
             ),
             PluginTool(
+                name: DeviceLogToolNames.linked,
+                title: "Device logs",
+                detail: "Search, focus and fold the live log stream",
+                symbol: "link",
+                summary: """
+                    Find the row in the other Device Logs tab that a row is about, by the logs: rules in the project's .threading/bluetooth.yaml: an app log line's Bluetooth packet, or a packet's app log line. Give text from the row in the selected tab; the newest held row containing it is used. Both rows are returned and the partner is selected in its tab. Rows link only when the rule's characteristic, direction and key agree, nearest in time within the rule's window.
+                    """,
+                inputSchemaJSON: """
+                    {"type":"object","properties":{ "text":{"type":"string","description":"Substring of the row to link from, in the selected tab."}}, "required":["text"]}
+                    """
+            ),
+            PluginTool(
                 name: DeviceLogToolNames.bluetooth,
                 title: "Bluetooth logs",
                 detail: "Read a paired iPhone's Bluetooth packets",
@@ -198,6 +210,21 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 completion("Starting Bluetooth capture for \(deviceID). Use visible to check for packets or setup errors.", false)
             case DeviceLogToolNames.search:
                 search(arguments, pane: pane, completion: completion)
+            case DeviceLogToolNames.linked:
+                guard let text = arguments["text"] as? String, !text.isEmpty, let workspace else {
+                    return completion("Give text from the row to link from.", true)
+                }
+                let needle = Array(text.lowercased().utf8)
+                guard let row = pane.heldRows.last(where: { LogFocus.contains($0.message, needle) }) else {
+                    return completion("No row in this tab contains \u{201C}\(text)\u{201D}.", true)
+                }
+                guard let linked = workspace.revealLinked(to: row, from: workspace.selectedStream) else {
+                    let reason = workspace.panes[.bluetooth]?.logLinks.isEmpty != false
+                        ? "The Bluetooth definitions have no logs: rules, so nothing links."
+                        : "No row in the other tab matches it by the logs: rules within their window."
+                    return completion("Found:\n" + DeviceLogToolFormatting.lines([row]) + "\n" + reason, false)
+                }
+                completion("Linked:\n" + DeviceLogToolFormatting.lines([row, linked]), false)
             case DeviceLogToolNames.timeRange:
                 timeRange(arguments, pane: pane, completion: completion)
             case DeviceLogToolNames.focus:

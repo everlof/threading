@@ -38,6 +38,11 @@ reshuffling it is a line move.
 
 ### Now — in active design
 
+- [Bluetooth protocol understanding](bluetooth-protocol-understanding.md) — reading Bluetooth
+  traffic across packets: request/response transactions, streams and transfers with CRC checks,
+  bit fields and conditional fields, built-in SIG/Nordic profiles, per-firmware learned enums with
+  severity, link-health rows, advertising, and linking app log lines to packets. Product-neutral
+  YAML constructs for the Device Logs Bluetooth tab; **implemented** 2026-10-13, three follow-ups open.
 - [Linked Workrooms](linked-workrooms.md) — shared questions and decisions around an objective,
   with optional links to tickets, documents, PRs and other context. Agents use scoped MCP tools;
   people answer in an authenticated portal. The first Sonda pilot includes a room without a

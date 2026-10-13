@@ -643,6 +643,60 @@ final class SessionDashboardTests: XCTestCase {
 
     /// The by-type headings name each kind with the symbol its direction picker uses, so the
     /// heading over a plate and the choice that put it there read as the same thing.
+    /// Only the by-project arrangement and a project's own page have a heading that names the
+    /// project; every other arrangement leaves a row to say it, chat or terminal alike.
+    func testRowsNameTheirProjectOnlyWhereNoHeadingDoes() {
+        XCTAssertTrue(SessionOrganization.recent.rowsNameTheirProject(insideProject: false))
+        XCTAssertTrue(SessionOrganization.type.rowsNameTheirProject(insideProject: false))
+        XCTAssertFalse(SessionOrganization.project.rowsNameTheirProject(insideProject: false))
+        for organization in SessionOrganization.allCases {
+            XCTAssertFalse(organization.rowsNameTheirProject(insideProject: true))
+        }
+    }
+
+    /// The project goes between the state word and the login: the state is a reason to look, and
+    /// the login is what truncates first on a narrow row.
+    func testChatCaptionNamesTheProjectBeforeTheLogin() {
+        let limited = RemoteSessionSummaryDTO(
+            id: "limited",
+            title: "INFRA",
+            agentKind: "claude",
+            surface: .terminal,
+            state: .limitReached,
+            projectName: "sonda",
+            account: RemoteSessionAccountDTO(name: "Sonda01", glyph: "C", isEmoji: false, hue: nil)
+        )
+
+        XCTAssertEqual(
+            DashboardSessionCaption.resolve(limited, isCatalogueLive: true, showsProjectName: true),
+            DashboardSessionCaption(parts: [
+                .init(text: MobileL10n.string("Usage limit reached"), isWarning: true),
+                .init(text: "sonda", isWarning: false),
+                .init(text: "Sonda01", isWarning: false),
+            ])
+        )
+        XCTAssertEqual(
+            DashboardSessionCaption.resolve(limited, isCatalogueLive: true, showsProjectName: false)
+                .parts.map(\.text),
+            [MobileL10n.string("Usage limit reached"), "Sonda01"],
+            "under a project heading the row does not repeat the project"
+        )
+        XCTAssertEqual(
+            DashboardSessionCaption.resolve(limited, isCatalogueLive: false, showsProjectName: true)
+                .parts.map(\.text),
+            ["sonda", "Sonda01"],
+            "a cached catalogue spells no state it cannot vouch for, but still names the project"
+        )
+
+        let unnamed = session(id: "unnamed", title: "Scratch")
+        XCTAssertEqual(
+            DashboardSessionCaption.resolve(unnamed, isCatalogueLive: true, showsProjectName: true)
+                .parts.map(\.text),
+            ["AnotherTerminal"],
+            "a chat on the CLI's default login still says where it is"
+        )
+    }
+
     func testTypeHeadingsMatchTheDirectionPickerSymbols() {
         XCTAssertEqual(DashboardContentType.chats.symbol, SessionTypeDirection.chatsFirst.symbol)
         XCTAssertEqual(
@@ -1425,6 +1479,8 @@ final class MobileDemoSceneTests: XCTestCase {
             case .sessionsOffline: expected = ("sessions-offline", .shippingRoot)
             case .sessionsScrollStress:
                 expected = ("sessions-scroll-stress", .shippingRoot)
+            case .sessionsManyProjects:
+                expected = ("sessions-many-projects", .shippingRoot)
             case .projectSessions: expected = ("project-sessions", .shippingRoot)
             case .report: expected = ("report", .shippingRoot)
             case .reportScreenshot: expected = ("report-screenshot", .shippingRoot)

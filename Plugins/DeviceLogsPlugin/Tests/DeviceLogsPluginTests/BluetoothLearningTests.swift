@@ -181,6 +181,34 @@ final class BluetoothLearningTests: XCTestCase {
         XCTAssertTrue(BluetoothLearnedEnums.load(from: url).devices.isEmpty, "a damaged file is an empty store")
     }
 
+    func testTablesAreKeptPerFirmwareAndAnotherBuildDecodesRaw() throws {
+        var store = BluetoothLearnedEnums()
+        _ = store.learn([(20, "datetime")], enumName: "AnimaCommand", identity: "C4:7C", name: "Kronaby", firmware: nil, limit: 100)
+        XCTAssertTrue(store.adopt(identity: "C4:7C", firmware: "1.0"), "learned before the revision was read")
+        _ = store.learn([(20, "alarm")], enumName: "AnimaCommand", identity: "C4:7C", name: nil, firmware: "2.0", limit: 100)
+        XCTAssertEqual(store.tables(for: "C4:7C", firmware: "1.0", enums: ["AnimaCommand"])["AnimaCommand"]?[20], "datetime")
+        XCTAssertEqual(store.tables(for: "C4:7C", firmware: "2.0", enums: ["AnimaCommand"])["AnimaCommand"]?[20], "alarm")
+        XCTAssertEqual(store.tables(for: "C4:7C", enums: ["AnimaCommand"])["AnimaCommand"]?[20], "alarm", "the latest build")
+        XCTAssertTrue(store.tables(for: "C4:7C", firmware: "3.0", enums: ["AnimaCommand"]).isEmpty)
+        XCTAssertEqual(store.summary(enums: ["AnimaCommand"], identity: "C4:7C", firmware: "3.0"),
+                       "AnimaCommand: nothing learned from fw 3.0 yet — numbers show raw until the device teaches them")
+        for build in 3...7 {
+            _ = store.learn([(1, "x")], enumName: "AnimaCommand", identity: "C4:7C", name: nil, firmware: "\(build).0", limit: 100)
+        }
+        XCTAssertTrue(store.tables(for: "C4:7C", firmware: "1.0", enums: ["AnimaCommand"]).isEmpty, "the oldest build is forgotten")
+    }
+
+    func testAVersionOneStoreReadsAsTheDevicesCurrentBuild() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("""
+            { "version": 1, "devices": { "C4:7C": { "name": "Kronaby", "firmware": "1.0",
+              "updated": "2026-10-13T12:00:00Z", "enums": { "AnimaCommand": { "20": "datetime" } } } } }
+            """.utf8).write(to: url)
+        let store = BluetoothLearnedEnums.load(from: url)
+        XCTAssertEqual(store.tables(for: "C4:7C", firmware: "1.0", enums: ["AnimaCommand"])["AnimaCommand"]?[20], "datetime")
+    }
+
     // MARK: Colour by name
 
     func testANameIsAlwaysTheSameLegibleColour() throws {

@@ -21,7 +21,7 @@ enum BluetoothDefinitionsGuide {
             characteristics:
               - name: Messages
                 uuid: 6E400003-B5A3-F393-E0A9-E50E24DCCA9E
-                # handle: 0x0025   # set it when the capture missed discovery
+                # handle: 0x0025   # only if discovery was never captured
                 message: Frame       # both directions; or rx: / tx: for one each
               - name: Battery Level
                 uuid: 2A19
@@ -75,13 +75,20 @@ enum BluetoothDefinitionsGuide {
         .init(term: "Characteristic", detail: "name, uuid and/or handle (server: phone for the iPhone's own), then message: (or rx: / tx:)."),
         .init(term: "Numbers", detail: "u8 u16 u24 u32 u64, s8 … s64, f32 f64 — little-endian; add be (u16be) for big-endian."),
         .init(term: "Other types", detail: "bool, bytes, str, msgpack, or any name under types:."),
-        .init(term: "Field keys", detail: "id, type, enum, scale, unit, flags, size, repeat, hidden."),
+        .init(term: "Include", detail: "include: [gatt, ancs, nordic-dfu, nordic-legacy-dfu] adds the standard services; yours win."),
+        .init(term: "Field keys", detail: "id, type, enum, scale, unit, flags, bits, if, size, repeat, hidden."),
+        .init(term: "Bits and if", detail: "bits: { command: 0-7, token: 8-15 } splits an integer; if: flag (or \"op == START\") makes a field optional."),
         .init(term: "Sizes", detail: "size: 4, size: rest, or size: an earlier integer field. repeat: eos, a count, or a field."),
-        .init(term: "Choices", detail: "type: { switch-on: kind, cases: { NAME: Type, 0x05: Type, _: bytes } }."),
+        .init(term: "Choices", detail: "type: { switch-on: kind, cases: { NAME: Type, 0x05: Type, _: bytes } }; switch-on: Other Characteristic.op reads another's last value."),
         .init(term: "Summary", detail: "summary: \"{kind} #{seq}\" prints a type as one line; otherwise id=value pairs."),
         .init(term: "MessagePack", detail: "type: msgpack, with match: [{ pattern: \"{ $cmd: $value }\", summary: \"{cmd} {value}\" }] and enum: { cmd: Commands }."),
         .init(term: "Learned enums", detail: "learn: { from: <characteristic>, pattern: \"{ map_*: { $number: $name } }\" } under an enum: the device's own table, remembered per device."),
         .init(term: "Shapes", detail: "shapes: { Values: { datetime: [year, month, date] } } with values: Values names array positions by command."),
+        .init(term: "Levels", detail: "22: { name: BATTERY_OK, level: info } in an enum, or level: error on a match rule, sets the row's level."),
+        .init(term: "Transactions", detail: "transactions: pair a request with its response (key:, pending:, timeout:, within:); rows end in ↩ request · 42 ms."),
+        .init(term: "Streams", detail: "streams: join values across packets — lines: true for a log, or a transfer with total:, offset: and crc32:/crc16:."),
+        .init(term: "Logs", detail: "logs: [{ match: 'Write -> cmd: \"(?<key>.+)\"', packet: { characteristic: Command, op: write, key: cmd } }] links app log lines."),
+        .init(term: "Advertising", detail: "advertising: [{ company: 0x004C, name: …, message: Type }] decodes manufacturer data."),
         .init(term: "Highlight", detail: "highlight: { LOCATION: green, accuracy: orange } colours a word, or a field's value."),
     ]
 
@@ -89,11 +96,15 @@ enum BluetoothDefinitionsGuide {
     /// working construct, and a test compiles the whole snippet.
     static let advancedExample = """
         # A self-describing protocol: MessagePack, with the device's own command table.
+        include: [gatt]                      # Device Information, Battery, CCCD, … decoded already
         services:
           - name: Example Watch
             characteristics:
               - name: Command
                 uuid: 6E401980-B5A3-F393-E0A9-E6414D494E41
+                message: CommandMessage
+              - name: Events
+                uuid: 6E401981-B5A3-F393-E0A9-E6414D494E41
                 message: CommandMessage
               - name: ANCS Source            # a characteristic the iPhone hosts
                 uuid: 9FBF120D-6301-42D9-8C58-25E699A21DBD
@@ -106,15 +117,17 @@ enum BluetoothDefinitionsGuide {
               - id: value
                 type: msgpack                # one MessagePack value
                 match:                       # first pattern that fits renders the row
+                  - { pattern: "{ error: $code:int }", summary: "error {code}", level: error }
                   - { pattern: "{ $cmd: $value }", summary: "{cmd} {value}" }
                   - { pattern: "[ $cmd:int, ...$args ]", summary: "read {cmd} {args}" }
                   - { pattern: "$cmd:int", summary: "read {cmd}" }
-                enum: { cmd: Command }       # name the $cmd capture with an enum
+                enum: { cmd: Command, code: Error }   # name captures with enums
                 values: CommandValues        # shape $value by the command's name
 
         shapes:
           CommandValues:
             datetime: [year, month, date, hour, minute, second]
+            alarm: [hours, minutes, days, ...]   # ... repeats the group
 
         enums:
           Command:
@@ -127,6 +140,36 @@ enum BluetoothDefinitionsGuide {
               from: Command
               pattern: "{ map_settings: { $number:int: $name:str } }"
               names: Command                 # map_settings is a Command name
+          Error:
+            4: OUT_OF_MEMORY
+            22: { name: BATTERY_OK, level: info }   # an "error" that is not one
+
+        # Across packets: which response answers which request.
+        transactions:
+          - name: read
+            request:  { characteristic: Command, op: write, match: ["$cmd:int", "[$cmd:int, ...]"] }
+            response: { characteristic: Command, op: read, match: ["{ $cmd: _ }", "[]"] }
+            key: cmd                         # both sides bind it; a response without it is not an answer
+            pending: "[]"                    # "not ready yet"
+            timeout: 30s                     # a row says so when no answer came
+          - name: error
+            request:  { characteristic: Command, op: write }
+            response: { characteristic: Events, match: "{ error: $code }", where: { code: "!BATTERY_OK" } }
+            within: 2s                       # the latest write inside the window
+
+        # Values that span packets: a firmware log split at arbitrary bytes, a file in chunks.
+        streams:
+          - name: firmware log
+            data: { characteristic: Events, where: { cmd: live_logs }, data: value }
+            lines: true
+            levels: { E: Error, W: Warning }
+          - name: file
+            data: { characteristic: Command, match: "{ file: [$key:str, $total:int, $offset:int, $data:bin, ...] }" }
+
+        # App log lines about packets: selecting one selects the other in the next tab.
+        logs:
+          - match: 'Write -> cmd: "(?<key>[^"]+)"'
+            packet: { characteristic: Command, op: write, key: cmd }
         """
 
     static let explanation = L10n.string("Threading decodes Bluetooth down to ATT: which attribute was written or notified, and its raw bytes. What those bytes mean is your app's protocol, so your project describes it in a small YAML file and every matching row shows decoded fields instead of hex.")
@@ -141,15 +184,16 @@ enum BluetoothDefinitionsGuide {
 
         \(example)
 
-        Rules: numbers are little-endian unless suffixed `be`; `size:` and `repeat:` take a number, `rest`/`eos`, or an earlier integer field id; `switch-on:` names an earlier integer field and `cases:` keys are enum names, numbers, or `_`; `scale:` multiplies; `flags:` names bits; `hidden: true` keeps length fields out of the row; `summary:` with {field} placeholders gives one readable line. Use `rx:`/`tx:` when the two directions differ. Add `handle: 0x00NN` only when a captured row shows the attribute handle and no discovery happened; add `server: phone` to a characteristic the iPhone itself hosts (ANCS, Current Time). Long reads and long writes are joined before decoding.
+        Rules: numbers are little-endian unless suffixed `be`; `size:` and `repeat:` take a number, `rest`/`eos`, or an earlier integer field id; `switch-on:` names an earlier integer field and `cases:` keys are enum names, numbers, or `_`; `scale:` multiplies; `flags:` names bits; `hidden: true` keeps length fields out of the row; `summary:` with {field} placeholders gives one readable line. Use `rx:`/`tx:` when the two directions differ. Do not add `handle:` pins as a rule: Threading remembers each device's GATT table from any capture that saw discovery (pairing, or reinstalling the app) and decodes later captures through it. Pin `handle: 0x00NN` only for a device whose discovery was never captured; a pin that disagrees with the device's table is reported as stale. Add `server: phone` to a characteristic the iPhone itself hosts (ANCS, Current Time). Long reads and long writes are joined before decoding.
 
         3. If a characteristic carries MessagePack, or the device assigns its own command numbers at runtime (it publishes a number → name table the app reads and caches), use these instead of fixed layouts:
 
         \(advancedExample)
 
         Pattern grammar: `{ K: V }` matches a map entry by entry (one rendered part per entry); `[a, b, ...$rest]` an array; `$name` binds anything, `$name:int` (or str, float, bool, nil, bin, map, array) binds one kind; `_` matches anything; a bare word matches a string or an integer's enum name, with `*` as a wildcard (`map_*`); numbers and "quoted strings" match literally. A `learn:` pattern must bind `$number` and `$name`; learned names win over fixed ones, are remembered per device across captures, and may differ per firmware, so describe values by command *name* (shapes, summaries), never by number. Use `names:` when the pattern's words come from another enum.
-        4. Prefer the app's own names for messages, enums, commands and fields. Do not guess layouts you cannot find in the code; leave them as `bytes` (or plain `msgpack`) with a comment. Optionally add `highlight: { WORD: green }` for words worth spotting (colours: red orange yellow green teal blue purple pink gray).
-        5. Save the file. Threading reloads it within a second. Check it with the Device Logs tools: `visible` answers with a `Packet definitions: … characteristics, … types` line (plus what devices taught, e.g. `Command: 149 learned`) or a line-numbered error to fix; `search` for "App" rows, or focus with `packets: "app"`, shows decoded packets, and rows ending in ⚠ name the field whose bytes did not fit.
+        4. Describe what spans packets, so Threading can answer "which command failed" and "did the transfer finish": `transactions:` pair requests with responses (an unanswered request becomes a warning row; an ATT error fails the request it refuses), `streams:` join a log channel into lines or a file/firmware transfer into progress rows with a CRC verdict, `logs:` regexes link the app's own log lines to the packets they describe, and enum entries with `level:` (or `level:` on a match rule) say which values are errors. Use `include: [gatt, ancs, nordic-dfu, nordic-legacy-dfu]` instead of describing standard services, `switch-on: Other Characteristic.field` when a value's layout depends on another characteristic's last value, `bits:` and `if:` for packed integers and optional fields, and `advertising:` for manufacturer data. If the firmware has a schema of its own (command lists, packed C structs, generated tables), write a small script that generates these sections rather than copying by hand, and say how to rerun it in a comment.
+        5. Prefer the app's own names for messages, enums, commands and fields. Do not guess layouts you cannot find in the code; leave them as `bytes` (or plain `msgpack`) with a comment. Optionally add `highlight: { WORD: green }` for words worth spotting (colours: red orange yellow green teal blue purple pink gray).
+        6. Save the file. Threading reloads it within a second. Check it with the Device Logs tools: `visible` answers with a `Packet definitions: … characteristics, … types` line (plus what devices taught, e.g. `Command: 149 learned`) or a line-numbered error to fix; `search` for "App" rows, or focus with `packets: "app"`, shows decoded packets, and rows ending in ⚠ name the field whose bytes did not fit; `search` for "↩" finds paired answers and "no response" unanswered requests; `linked` finds the packet for an app log line (or the reverse).
         """
     }
 }

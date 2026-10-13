@@ -32,6 +32,7 @@ public final class BluetoothLogRowSource: BufferedDeviceLogSource, @unchecked Se
             toolPath: toolPath,
             arguments: Self.arguments(udid: udid, overNetwork: overNetwork),
             definitionsCheckout: definitionsCheckout,
+            phoneIdentity: udid,
             onDefinitions: onDefinitionsChanged,
             onRows: { [weak self] in self?.enqueue($0) },
             onEnd: { [weak self] in self?.onStreamEnded?($0) }
@@ -39,6 +40,9 @@ public final class BluetoothLogRowSource: BufferedDeviceLogSource, @unchecked Se
     }
 
     public override func stop() { worker.stop() }
+
+    /// Drops every remembered GATT table, in memory and on disk.
+    func forgetRememberedGATTTables() { worker.forgetRememberedGATTTables() }
     deinit { worker.stop() }
 }
 
@@ -70,6 +74,8 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
     /// Where learned enums are kept; tests point it elsewhere.
     var learnedStoreURL = BluetoothLearnedEnums.defaultURL
     private var savedLearnedRevision = 0
+    var gattStoreURL = BluetoothGATTTables.defaultURL
+    private var savedGATTRevision = 0
     private var report = BluetoothDefinitionReport(status: .noCheckout)
     private var onDefinitions: (@Sendable (BluetoothDefinitionReport) -> Void)?
     private var ticksUntilDefinitionCheck = 0
@@ -77,6 +83,7 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
     func start(
         toolPath: String?, arguments: [String],
         definitionsCheckout: String?,
+        phoneIdentity: String? = nil,
         onDefinitions: (@Sendable (BluetoothDefinitionReport) -> Void)?,
         onRows: @escaping @Sendable ([DeviceLogRow]) -> Void,
         onEnd: @escaping @Sendable (String) -> Void
@@ -92,6 +99,9 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
             decoder = BluetoothPacketDecoder()
             decoder.learned = BluetoothLearnedEnums.load(from: learnedStoreURL)
             savedLearnedRevision = decoder.learnedRevision
+            decoder.gatt = BluetoothGATTTables.load(from: gattStoreURL)
+            decoder.phoneIdentity = phoneIdentity
+            savedGATTRevision = decoder.gattRevision
             self.definitionsCheckout = definitionsCheckout
             self.onDefinitions = onDefinitions
             reloadDefinitions()
@@ -142,6 +152,7 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
         decoder.definitions = definitions
         report.status = status
         report.highlights = definitions?.highlights ?? [:]
+        report.logLinks = definitions?.logLinks ?? []
         report.learned = decoder.learned.summary(enums: definitions?.learnedEnumNames ?? [])
         report.names = decoder.learned.names(definitions: definitions)
         onDefinitions?(report)
@@ -150,15 +161,34 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
     /// Saves what devices taught since the last save and tells the pane. On the worker, at most
     /// once per definition check, so a map exchange of hundreds of pages is one write.
     private func persistLearned() {
-        guard decoder.learnedRevision != savedLearnedRevision else { return }
-        savedLearnedRevision = decoder.learnedRevision
-        try? decoder.learned.save(to: learnedStoreURL)
-        let summary = decoder.learned.summary(enums: decoder.definitions?.learnedEnumNames ?? [])
-        let names = decoder.learned.names(definitions: decoder.definitions)
-        guard summary != report.learned || names != report.names else { return }
-        report.learned = summary
-        report.names = names
+        if decoder.gattRevision != savedGATTRevision {
+            savedGATTRevision = decoder.gattRevision
+            try? decoder.gatt.save(to: gattStoreURL)
+        }
+        if decoder.learnedRevision != savedLearnedRevision {
+            savedLearnedRevision = decoder.learnedRevision
+            try? decoder.learned.save(to: learnedStoreURL)
+        }
+        var next = report
+        let current = decoder.learnedFirmware
+        next.learned = decoder.learned.summary(
+            enums: decoder.definitions?.learnedEnumNames ?? [], identity: current.identity, firmware: current.firmware
+        )
+        next.names = decoder.learned.names(definitions: decoder.definitions)
+        next.gatt = decoder.gattSummary
+        guard next != report else { return }
+        report = next
         onDefinitions?(report)
+    }
+
+    func forgetRememberedGATTTables() {
+        queue.async { [self] in
+            decoder.gatt = BluetoothGATTTables()
+            savedGATTRevision = decoder.gattRevision
+            try? FileManager.default.removeItem(at: gattStoreURL)
+            report.gatt = nil
+            onDefinitions?(report)
+        }
     }
 
     private func tick() {

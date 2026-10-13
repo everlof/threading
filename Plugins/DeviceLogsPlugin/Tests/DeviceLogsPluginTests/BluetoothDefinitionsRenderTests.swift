@@ -39,7 +39,8 @@ final class BluetoothDefinitionsRenderTests: XCTestCase {
     func testRendersLearnedCommandsInTheirOwnColours() async throws {
         var decoder = BluetoothPacketDecoder()
         let definitions = try BluetoothPacketDefinitions.compile(BluetoothDefinitionsGuide.advancedExample
-            .replacingOccurrences(of: "message: CommandMessage", with: "handle: 0x002e\n        message: CommandMessage"))
+            .replacingOccurrences(of: "6E401980-B5A3-F393-E0A9-E6414D494E41\n        message: CommandMessage",
+                                  with: "6E401980-B5A3-F393-E0A9-E6414D494E41\n        handle: 0x002e\n        message: CommandMessage"))
         decoder.definitions = definitions
         func att(_ pdu: [UInt8]) -> [UInt8] {
             let l2cap = [UInt8(pdu.count), 0, 0x04, 0x00] + pdu
@@ -81,6 +82,65 @@ final class BluetoothDefinitionsRenderTests: XCTestCase {
             learned: decoder.learned.summary(enums: definitions.learnedEnumNames),
             names: decoder.learned.names(definitions: definitions))
         try render(pane.view, width: 1_180, height: 330, name: "bluetooth-learned-commands")
+    }
+
+    /// Rows that read across packets: the link's own events, an answered and an unanswered
+    /// request, an error that is not one, an error that is, and a firmware log joined into lines.
+    func testRendersTransactionsStreamsAndTheLink() async throws {
+        var decoder = BluetoothPacketDecoder()
+        decoder.definitions = try BluetoothPacketDefinitions.compile(BluetoothFlowTests.commandYAML
+            .replacingOccurrences(of: "Error: { 4: OUT_OF_MEMORY }", with: "Error: { 4: OUT_OF_MEMORY, 22: { name: BATTERY_OK, level: info } }") + """
+
+            streams:
+              - name: firmware log
+                data: { characteristic: Events, where: { cmd: live_logs }, data: value }
+                lines: true
+                levels: { E: Error, W: Warning }
+            """)
+        let address: [UInt8] = [0x2a, 0x4f, 0x6a, 0x8d, 0x7c, 0xc4]
+        let name = Array("Pulse 4F2A".utf8)
+        let ad: [UInt8] = [UInt8(name.count + 1), 0x09] + name
+        func event(_ parameters: [UInt8]) -> [UInt8] { [0x3e, UInt8(parameters.count)] + parameters }
+        func logs(_ text: String) -> [UInt8] { [0x81, 0x04, 0xc4, UInt8(text.utf8.count)] + Array(text.utf8) }
+        let packets: [(UInt8, [UInt8], Bool, Double)] = [
+            (4, event([0x02, 0x01, 0x00, 0x01] + address + [UInt8(ad.count)] + ad + [0xc4]), true, 0),
+            (4, event([0x01, 0x00, 0x40, 0x00, 0x00, 0x00] + address + [0x18, 0x00, 0x00, 0x00, 0x58, 0x02, 0x00]), true, 0.2),
+            (2, Self.att([0x12, 0x30 + 1, 0x00, 0x01, 0x00]), false, 0.4),
+            (2, Self.att([0x1b, 0x30, 0x00, 0x81, 0x01, 0x16]), true, 0.45),
+            (4, event([0x03, 0x00, 0x40, 0x00, 0x06, 0x00, 0x04, 0x00, 0xc8, 0x00]), true, 0.6),
+            (2, Self.att([0x12, 0x2e, 0x00, 0x02]), false, 1.0),
+            (2, Self.att([0x0a, 0x2e, 0x00]), false, 1.01),
+            (2, Self.att([0x0b, 0x90]), true, 1.02),
+            (2, Self.att([0x0a, 0x2e, 0x00]), false, 1.05),
+            (2, Self.att([0x0b, 0x81, 0x02, 0x5a]), true, 1.062),
+            (2, Self.att([0x12, 0x2e, 0x00, 0x92, 0x03, 0x01]), false, 1.5),
+            (2, Self.att([0x12, 0x2e, 0x00, 0x81, 0x03, 0x00]), false, 2.0),
+            (2, Self.att([0x1b, 0x30, 0x00, 0x81, 0x01, 0x04]), true, 2.3),
+            (2, Self.att([0x1b, 0x30, 0x00] + logs("12:00:03.120 I [BT] dnd off\n12:00:03.1")), true, 3.1),
+            (2, Self.att([0x1b, 0x30, 0x00] + logs("40 E [FS] write failed: -28\n")), true, 3.2),
+            (2, Self.att([0x1b, 0x30, 0x00, 0x81, 0x02, 0x59]), true, 7.0),
+            (4, [0x05, 0x04, 0x00, 0x40, 0x00, 0x08], true, 9.0),
+        ]
+        var data = BluetoothPacketTests.header()
+        for packet in packets {
+            let seconds = 43_200 + Int(packet.3)
+            data.append(Self.record([packet.0] + packet.1, incoming: packet.2, seconds: seconds,
+                                    microseconds: Int((packet.3 - Double(Int(packet.3))) * 1_000_000)))
+        }
+        let rows = try decoder.append(data)
+        XCTAssertTrue(rows.contains { $0.message.contains("↩ read: read battery · 62 ms") }, rows.map(\.message).joined(separator: "\n"))
+        XCTAssertTrue(rows.contains { $0.message.contains("no response within 5.0 s to read dnd [1]") })
+        XCTAssertTrue(rows.contains { $0.message.contains("firmware log · 12:00:03.140 E [FS] write failed: -28") && $0.level == "Error" })
+        let pane = DeviceLogPaneViewController(owningSessionID: UUID().uuidString, stream: .bluetooth)
+        pane.loadView()
+        let phone = DeviceLogSourceOption.Machine(id: "phone", title: "iPhone", isSimulator: false)
+        pane.acceptSources([DeviceLogSourceOption(machine: phone, title: "Bluetooth (USB)",
+            kind: .bluetooth(udid: phone.id, overNetwork: false, toolPath: nil))])
+        pane.installRowsForTesting(rows)
+        for _ in 0..<200 where pane.isProjectingForTesting { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(200))
+        pane.applyDefinitionStatusForTesting(.loaded(file, characteristics: 2, types: 1), names: ["battery", "dnd", "error", "live_logs", "OUT_OF_MEMORY", "BATTERY_OK"])
+        try render(pane.view, width: 1_180, height: 460, name: "bluetooth-flows")
     }
 
     func testRendersTheHelpPanelWithALoadedFile() throws {

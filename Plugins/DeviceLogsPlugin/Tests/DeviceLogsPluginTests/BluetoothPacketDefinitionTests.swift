@@ -210,7 +210,7 @@ final class BluetoothPacketDefinitionTests: XCTestCase {
             + BluetoothPacketTests.packet(fits, incoming: true) + BluetoothPacketTests.packet(short, incoming: true))
         XCTAssertEqual(rows.map(\.level), ["Info", "Warning"])
         XCTAssertEqual(rows.map(\.subsystem), ["App", "App"])
-        let complete = LogFocus(subsystem: "App", maximumSeverity: BluetoothPacketFilter.completeMaximumSeverity)
+        let complete = LogFocus(subsystem: "App", excluding: BluetoothPacketFilter.problemMarker)
         XCTAssertEqual(rows.filter(complete.matches).count, 1)
     }
 
@@ -393,11 +393,15 @@ final class BluetoothPacketDefinitionTests: XCTestCase {
         XCTAssertTrue(prompt.contains("switch-on: kind"))
         // Everything a newcomer can use is in the prompt, and the advanced snippet compiles.
         for construct in ["type: msgpack", "match:", "learn:", "names: Command", "shapes:", "server: phone",
-                          "highlight:", "`visible`", "packets: \"app\""] {
+                          "highlight:", "`visible`", "packets: \"app\"", "transactions:", "streams:", "logs:",
+                          "include: [gatt", "level:", "`linked`"] {
             XCTAssertTrue(prompt.contains(construct), construct)
         }
         let advanced = try BluetoothPacketDefinitions.compile(BluetoothDefinitionsGuide.advancedExample)
         XCTAssertEqual(advanced.learners.map(\.enumName), ["Command", "Setting"])
+        XCTAssertEqual(advanced.transactions.map(\.name), ["read", "error"])
+        XCTAssertEqual(advanced.streams.map(\.name), ["firmware log", "file"])
+        XCTAssertEqual(advanced.logLinks.count, 1)
     }
 
     // MARK: Fixtures

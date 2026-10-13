@@ -24,6 +24,7 @@ final class BluetoothDefinitionsHelpViewController: NSViewController {
         static let primary = "bluetooth-definitions-create"
         static let copyExample = "bluetooth-definitions-copy-example"
         static let copyPrompt = "bluetooth-definitions-copy-prompt"
+        static let forgetTables = "bluetooth-definitions-forget-tables"
     }
 
     private(set) var status: BluetoothDefinitionStatus
@@ -38,6 +39,11 @@ final class BluetoothDefinitionsHelpViewController: NSViewController {
     )
     /// Asks the owner to load the file again after this panel wrote it.
     var onFileCreated: (() -> Void)?
+    /// Asks the owner to drop every remembered GATT table.
+    var onForgetRememberedTables: (() -> Void)?
+    private lazy var forgetTablesButton = ThemedButton(
+        title: L10n.string("Forget Remembered Tables"), target: self, action: #selector(forgetRememberedTables)
+    )
 
     init(status: BluetoothDefinitionStatus) {
         self.status = status
@@ -99,13 +105,15 @@ final class BluetoothDefinitionsHelpViewController: NSViewController {
         primaryButton.setAccessibilityIdentifier(Identifiers.primary)
         copyExampleButton.setAccessibilityIdentifier(Identifiers.copyExample)
         copyPromptButton.setAccessibilityIdentifier(Identifiers.copyPrompt)
+        forgetTablesButton.setAccessibilityIdentifier(Identifiers.forgetTables)
+        forgetTablesButton.toolTip = L10n.string("Threading remembers each device's GATT table from captures that saw discovery, so later captures decode without handle pins. This forgets them on this Mac.")
         feedback.font = Design.Typography.caption()
         feedback.textColor = Design.Text.secondary
         let actions = NSStackView(views: [primaryButton, copyExampleButton, copyPromptButton, feedback])
         actions.spacing = Design.Spacing.small
         actions.alignment = .centerY
 
-        let stack = NSStackView(views: [title, explanation, statusLabel, reference, exampleTitle, example, actions])
+        let stack = NSStackView(views: [title, explanation, statusLabel, reference, exampleTitle, example, actions, forgetTablesButton])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.medium
@@ -166,6 +174,11 @@ final class BluetoothDefinitionsHelpViewController: NSViewController {
         case .noCheckout:
             break
         }
+    }
+
+    @objc private func forgetRememberedTables() {
+        onForgetRememberedTables?()
+        feedback.stringValue = L10n.string("Remembered GATT tables forgotten.")
     }
 
     @objc private func copyExample() {

@@ -48,7 +48,7 @@ final class DeviceLogToolsTests: XCTestCase {
     /// in a way nothing else would catch — the plugin still loads and the pane still draws.
     func testEveryToolDeclaresReadableJSONSchema() throws {
         let tools = try XCTUnwrap(DeviceLogsPlugin().pluginTools)
-        XCTAssertEqual(tools.count, 6)
+        XCTAssertEqual(tools.count, 7)
         for tool in tools {
             let data = Data(tool.inputSchemaJSON.utf8)
             let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]

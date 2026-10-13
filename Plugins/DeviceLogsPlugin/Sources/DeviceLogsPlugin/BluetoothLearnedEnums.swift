@@ -12,34 +12,54 @@ import ThreadingDesignKit
 /// A device is identified by the most stable thing the capture says about it: its address from the
 /// connection, else its name. A capture that starts mid-connection has neither, so lookups fall
 /// back to the device that taught that enum most recently — right for the usual one-watch desk.
+///
+/// Tables are kept per firmware build, because a build may renumber: a firmware that numbers every
+/// name from one counter renumbers whenever a build compiles in a different set of features.
 struct BluetoothLearnedEnums: Sendable, Equatable {
     enum Limits {
         static let devices = 64
+        /// Firmware builds remembered per device; the oldest is forgotten first.
+        static let builds = 4
         static let bytes = 4 * 1_024 * 1_024
     }
 
     struct Device: Sendable, Equatable {
         var name: String?
+        /// The build most recently seen; its tables are the device's current ones.
         var firmware: String?
         var updated: Date
-        var enums: [String: [Int64: String]] = [:]
+        /// Firmware revision ("" when the capture never read one) → enum → number → name. A new
+        /// build may renumber everything, so one build's names never decode another's numbers.
+        var builds: [String: [String: [Int64: String]]] = [:]
+        var buildOrder: [String] = []
+
+        var enums: [String: [Int64: String]] {
+            builds[firmware ?? ""] ?? buildOrder.last.flatMap { builds[$0] } ?? [:]
+        }
     }
 
     private(set) var devices: [String: Device] = [:]
 
-    /// The tables to decode with for a device, falling back as described above.
-    func tables(for identity: String?, enums: [String]) -> [String: [Int64: String]] {
-        if let identity, let device = devices[identity], !device.enums.isEmpty { return device.enums }
+    /// The tables to decode with for a device, falling back as described above. A device on a
+    /// firmware it has not taught yet gets none: raw numbers are better than wrong names.
+    func tables(for identity: String?, firmware: String? = nil, enums: [String]) -> [String: [Int64: String]] {
+        if let identity, let device = devices[identity] {
+            if let firmware { return device.builds[firmware] ?? [:] }
+            if !device.enums.isEmpty { return device.enums }
+        }
         return latest(having: enums)?.enums ?? [:]
     }
 
-    /// Adds entries; returns whether anything changed.
+    /// Adds entries under the device's firmware (the one it last reported when the capture did
+    /// not read it); returns whether anything changed.
     mutating func learn(
         _ entries: [(number: Int64, name: String)], enumName: String, identity: String,
         name: String?, firmware: String?, limit: Int, now: Date = Date()
     ) -> Bool {
         var device = devices[identity] ?? Device(name: name, firmware: firmware, updated: now)
-        var table = device.enums[enumName] ?? [:]
+        let build = firmware ?? device.firmware ?? ""
+        var tables = device.builds[build] ?? [:]
+        var table = tables[enumName] ?? [:]
         var changed = false
         for entry in entries where table[entry.number] != entry.name {
             guard table[entry.number] != nil || table.count < limit else { break }
@@ -49,7 +69,11 @@ struct BluetoothLearnedEnums: Sendable, Equatable {
         if let name, device.name != name { device.name = name; changed = true }
         if let firmware, device.firmware != firmware { device.firmware = firmware; changed = true }
         guard changed else { return false }
-        device.enums[enumName] = table
+        tables[enumName] = table
+        device.builds[build] = tables
+        device.buildOrder.removeAll { $0 == build }
+        device.buildOrder.append(build)
+        while device.buildOrder.count > Limits.builds { device.builds[device.buildOrder.removeFirst()] = nil }
         device.updated = now
         devices[identity] = device
         if devices.count > Limits.devices, let oldest = devices.min(by: { $0.value.updated < $1.value.updated })?.key {
@@ -58,10 +82,32 @@ struct BluetoothLearnedEnums: Sendable, Equatable {
         return true
     }
 
-    /// One line for the footer: what the most recent device taught.
-    func summary(enums: [String]) -> String? {
-        guard let device = latest(having: enums) else { return nil }
-        let counts = enums.compactMap { name in device.enums[name].map { "\(name): \($0.count) learned" } }
+    /// Tables learned before the capture read the device's firmware belong to that firmware:
+    /// the capture only learns the revision later. Returns whether anything moved.
+    mutating func adopt(identity: String, firmware: String) -> Bool {
+        guard var device = devices[identity], let unknown = device.builds[""], device.builds[firmware] == nil else {
+            return false
+        }
+        device.builds[""] = nil
+        device.builds[firmware] = unknown
+        device.buildOrder = device.buildOrder.map { $0 == "" ? firmware : $0 }
+        device.firmware = firmware
+        devices[identity] = device
+        return true
+    }
+
+    /// One line for the footer: what the device being captured taught, or — when its firmware
+    /// has not taught anything yet — that its numbers show raw until it does.
+    func summary(enums: [String], identity: String? = nil, firmware: String? = nil) -> String? {
+        if let identity, let firmware, let device = devices[identity], device.builds[firmware] == nil,
+           let known = device.buildOrder.last.flatMap({ device.builds[$0] }), !known.isEmpty {
+            let names = enums.filter { known[$0] != nil }.joined(separator: ", ")
+            return "\(names): nothing learned from fw \(firmware) yet — numbers show raw until the device teaches them"
+        }
+        let device = identity.flatMap { devices[$0] }.flatMap { $0.enums.isEmpty ? nil : $0 } ?? latest(having: enums)
+        guard let device else { return nil }
+        let current = device.enums
+        let counts = enums.compactMap { name in current[name].map { "\(name): \($0.count) learned" } }
         guard !counts.isEmpty else { return nil }
         let who = [device.name, device.firmware.map { "fw \($0)" }].compactMap { $0 }.joined(separator: ", ")
         return counts.joined(separator: ", ") + (who.isEmpty ? "" : " (\(who))")
@@ -94,15 +140,24 @@ struct BluetoothLearnedEnums: Sendable, Equatable {
             .appendingPathComponent("bluetooth-learned-enums.json")
     }
 
+    /// Enum → number (as text, so the file reads as a table) → name.
+    private typealias FileTables = [String: [String: String]]
+
     private struct File: Codable {
         struct Device: Codable {
             var name: String?
             var firmware: String?
             var updated: Date
-            /// Enum → number (as text, so the file reads as a table) → name.
-            var enums: [String: [String: String]]
+            /// Version 2: per firmware, oldest first.
+            var builds: [Build]?
+            /// Version 1: one set of tables, read as the device's current firmware's.
+            var enums: FileTables?
         }
-        var version = 1
+        struct Build: Codable {
+            var firmware: String
+            var enums: FileTables
+        }
+        var version = 2
         var devices: [String: Device]
     }
 
@@ -110,17 +165,26 @@ struct BluetoothLearnedEnums: Sendable, Equatable {
     static func load(from url: URL = defaultURL) -> BluetoothLearnedEnums {
         guard let data = try? BoundedFileReader.read(url, maximumBytes: Limits.bytes),
               let file = try? decoder.decode(File.self, from: data) else { return .init() }
-        var store = BluetoothLearnedEnums()
-        for (identity, device) in file.devices.prefix(Limits.devices) {
+        func tables(_ file: FileTables) -> [String: [Int64: String]] {
             var enums: [String: [Int64: String]] = [:]
-            for (name, table) in device.enums.prefix(BluetoothPacketDefinitions.Limits.learners) {
+            for (name, table) in file.prefix(BluetoothPacketDefinitions.Limits.learners) {
                 var entries: [Int64: String] = [:]
                 for (number, value) in table.prefix(BluetoothPacketDefinitions.Limits.enumCases) {
                     if let number = Int64(number) { entries[number] = value }
                 }
                 enums[name] = entries
             }
-            store.devices[identity] = Device(name: device.name, firmware: device.firmware, updated: device.updated, enums: enums)
+            return enums
+        }
+        var store = BluetoothLearnedEnums()
+        for (identity, saved) in file.devices.prefix(Limits.devices) {
+            var device = Device(name: saved.name, firmware: saved.firmware, updated: saved.updated)
+            let builds = saved.builds ?? saved.enums.map { [File.Build(firmware: saved.firmware ?? "", enums: $0)] } ?? []
+            for build in builds.suffix(Limits.builds) {
+                device.builds[build.firmware] = tables(build.enums)
+                device.buildOrder.append(build.firmware)
+            }
+            store.devices[identity] = device
         }
         return store
     }
@@ -129,8 +193,12 @@ struct BluetoothLearnedEnums: Sendable, Equatable {
         let file = File(devices: devices.mapValues { device in
             File.Device(
                 name: device.name, firmware: device.firmware, updated: device.updated,
-                enums: device.enums.mapValues { table in
-                    Dictionary(uniqueKeysWithValues: table.map { (String($0.key), $0.value) })
+                builds: device.buildOrder.compactMap { firmware in
+                    device.builds[firmware].map { tables in
+                        File.Build(firmware: firmware, enums: tables.mapValues { table in
+                            Dictionary(uniqueKeysWithValues: table.map { (String($0.key), $0.value) })
+                        })
+                    }
                 }
             )
         })

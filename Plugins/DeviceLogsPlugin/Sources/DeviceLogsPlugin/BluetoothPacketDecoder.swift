@@ -37,6 +37,19 @@ struct BluetoothPacketDecoder {
         set { session.learned = newValue }
     }
     var learnedRevision: Int { session.learnedRevision }
+    /// The device and firmware most recently identified, for the learned-enum summary.
+    var learnedFirmware: (identity: String?, firmware: String?) { session.learnedFirmware }
+    /// Remembered GATT tables; loaded and saved by the capture worker.
+    var gatt: BluetoothGATTTables {
+        get { session.gatt }
+        set { session.gatt = newValue }
+    }
+    var gattRevision: Int { session.gattRevision }
+    var gattSummary: String? { session.gattSummary }
+    var phoneIdentity: String? {
+        get { session.phoneIdentity }
+        set { session.phoneIdentity = newValue }
+    }
     var bufferedBytes: Int { buffer.count }
 
     mutating func append(_ data: Data) throws -> [DeviceLogRow] {
@@ -81,12 +94,16 @@ struct BluetoothPacketDecoder {
             guard direction <= 1 else { throw DecodeError.invalid("invalid HCI direction") }
             let packetType = buffer[start + 4]
             let payload = Array(buffer[start + Limits.hciHeaderBytes..<end])
-            if packetType == 4 { session.event(payload) }
+            session.time = Double(seconds) + Double(microseconds) / 1_000_000
+            let event = packetType == 4 ? session.event(payload) : nil
             let acl = packetType == 2 ? session.acl(payload, incoming: direction == 1) : nil
             rows.append(BluetoothPacketSummary.row(
-                type: packetType, incoming: direction == 1, payload: payload, acl: acl,
+                type: packetType, incoming: direction == 1, payload: payload, acl: acl, event: event,
                 seconds: seconds, microseconds: microseconds, truncated: captured < original
             ))
+            for flow in session.takeFlowRows() {
+                rows.append(BluetoothPacketSummary.row(flow, seconds: seconds, microseconds: microseconds))
+            }
             consumed = end
         }
         return rows
@@ -106,26 +123,46 @@ struct BluetoothPacketDecoder {
 private enum BluetoothPacketSummary {
     static func row(
         type: UInt8, incoming: Bool, payload: [UInt8], acl: BluetoothATTSession.Summary?,
-        seconds: Int, microseconds: Int, truncated: Bool
+        event: BluetoothATTSession.EventSummary? = nil, seconds: Int, microseconds: Int, truncated: Bool
     ) -> DeviceLogRow {
         let direction = incoming ? "RX" : "TX"
         let summary = acl.map {
-            Summary(protocolName: $0.protocolName, text: $0.text, error: $0.error, warning: $0.warning)
+            Summary(protocolName: $0.protocolName, text: $0.text, error: $0.error, warning: $0.warning, level: $0.level, link: $0.link)
+        } ?? event.map {
+            // The link's own events read as words under their own subsystem, so a filter on
+            // "Link" is the connection's story without the packets.
+            Summary(protocolName: BluetoothATTSession.linkProtocolName, text: $0.text, error: $0.error, warning: $0.warning)
         } ?? decode(type: type, payload: payload)
-        let clock = seconds % 86_400
-        let time = String(format: "%02d:%02d:%02d.%06d", clock / 3_600, clock / 60 % 60, clock % 60, microseconds)
+        let time = clock(seconds, microseconds)
         let payload = acl?.preview ?? payload
         let preview = payload.prefix(BluetoothPacketDecoder.Limits.previewBytes)
             .map { String(format: "%02x", $0) }.joined(separator: " ")
         let omitted = payload.count - min(payload.count, BluetoothPacketDecoder.Limits.previewBytes)
         let suffix = omitted > 0 ? " … (\(omitted) bytes omitted)" : ""
         return DeviceLogRow(
-            time: time, level: summary.error ? "Error" : summary.warning ? "Warning" : "Info", process: "Bluetooth",
+            time: time, level: summary.error ? "Error" : summary.warning ? "Warning" : summary.level?.level ?? "Info",
+            process: "Bluetooth",
             subsystem: summary.protocolName,
             message: "\(direction) \(summary.text) · \(payload.count) bytes"
                 + (truncated ? " (capture truncated)" : "") + " | \(preview)\(suffix)",
+            timestamp: Date(timeIntervalSince1970: Double(seconds) + Double(microseconds) / 1_000_000),
+            link: summary.link
+        )
+    }
+
+    /// A row a transaction or stream added: no packet of its own, so no bytes.
+    static func row(_ flow: BluetoothFlowState.Row, seconds: Int, microseconds: Int) -> DeviceLogRow {
+        DeviceLogRow(
+            time: clock(seconds, microseconds), level: flow.level.level, process: "Bluetooth",
+            subsystem: BluetoothATTSession.appProtocolName,
+            message: (flow.incoming ? "RX " : "TX ") + flow.text,
             timestamp: Date(timeIntervalSince1970: Double(seconds) + Double(microseconds) / 1_000_000)
         )
+    }
+
+    private static func clock(_ seconds: Int, _ microseconds: Int) -> String {
+        let clock = seconds % 86_400
+        return String(format: "%02d:%02d:%02d.%06d", clock / 3_600, clock / 60 % 60, clock % 60, microseconds)
     }
 
     private struct Summary {
@@ -133,6 +170,8 @@ private enum BluetoothPacketSummary {
         let text: String
         var error = false
         var warning = false
+        var level: BluetoothSeverity?
+        var link: String?
     }
 
     private static func decode(type: UInt8, payload: [UInt8]) -> Summary {

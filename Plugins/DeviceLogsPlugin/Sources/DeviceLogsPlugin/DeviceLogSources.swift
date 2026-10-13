@@ -31,14 +31,20 @@ public struct DeviceLogRow: Sendable {
     /// A stamp naming no zone is read as UTC by convention; see `TimestampParser`.
     public let timestamp: Date?
 
+    /// A Bluetooth app packet's link for `logs:` rules (characteristic, operation, key values);
+    /// nil for every other row. See `BluetoothLogLink`.
+    public var link: String?
+
     public init(
         time: String,
         level: String,
         process: String,
         subsystem: String?,
         message: String,
-        timestamp: Date? = nil
+        timestamp: Date? = nil,
+        link: String? = nil
     ) {
+        self.link = link
         self.time = time
         self.level = level
         self.process = process
