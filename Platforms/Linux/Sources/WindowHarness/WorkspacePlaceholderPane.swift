@@ -80,10 +80,7 @@ final class WorkspacePlaceholderPane {
 
     init(hasProjects: Bool, onAction: @escaping () -> Void,
          onSubmit: @escaping () -> Void) {
-        NSImage.systemSymbolProvider = { name, _ in
-            Design.Symbol.image(name, slot: PlaceholderDefaults.iconSize,
-                                pointSize: 36, weight: .regular)
-        }
+        LinuxSymbols.install()
         placeholderRoot.onAction = onAction
         composerRoot.addSubview(composerHero)
         composerRoot.addSubview(composerEditor)

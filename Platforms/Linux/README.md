@@ -265,8 +265,9 @@ transcript. The shared `PermissionPolicy` answers read-only tools and commands, 
 and the session's mode first. Codex questions appear as the production question card, and an
 editable `NSTextField` edits through an AppKit-style field editor. `tests/native_permission_smoke.py`
 checks policy auto-allow, Deny, Allow for Session, that Return in the composer never answers a
-card, and a two-page question answered by choice and by typed text. Claude's hook-based
-permission route, full tool-row interaction, other providers' workspace launch routes and
+card, a production tool row opened and closed with the pointer, and a two-page question answered
+by choice and by typed text. Claude's hook-based
+permission route, chart cards, other providers' workspace launch routes and
 the complete production conversation controller remain open. A wrapping label reports its
 single-line natural width, as AppKit does, and an automatic-height row is re-measured when a
 worker result changes a label's size. The full-height native evidence shows right-aligned bubbles

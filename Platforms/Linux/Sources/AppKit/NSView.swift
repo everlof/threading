@@ -220,6 +220,19 @@ open class NSView: NSResponder, NSLayoutItem {
     }
     open var identifier: NSUserInterfaceItemIdentifier?
     open var toolTip: String?
+    public private(set) var gestureRecognizers: [NSGestureRecognizer] = []
+
+    open func addGestureRecognizer(_ recognizer: NSGestureRecognizer) {
+        recognizer.view?.removeGestureRecognizer(recognizer)
+        recognizer.view = self
+        gestureRecognizers.append(recognizer)
+    }
+
+    open func removeGestureRecognizer(_ recognizer: NSGestureRecognizer) {
+        guard recognizer.view === self else { return }
+        gestureRecognizers.removeAll { $0 === recognizer }
+        recognizer.view = nil
+    }
     open var alignmentRectInsets: NSEdgeInsets { NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
 
     /// An explicit appearance overrides the inherited one. AppKit calls the hook for each
@@ -676,6 +689,8 @@ open class NSView: NSResponder, NSLayoutItem {
 
     open func updateTrackingAreas() {}
     open func resetCursorRects() {}
+
+    open var trackingAreas: [NSTrackingArea] { installedTrackingAreas }
 
     open func addTrackingArea(_ area: NSTrackingArea) {
         guard !installedTrackingAreas.contains(where: { $0 === area }) else { return }

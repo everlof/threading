@@ -131,8 +131,9 @@ that ask through `ConversationPermissionDecision` (Codex and ACP). Claude asks t
 `PreToolUse` hook and Threading's HTTP listener, which the Linux host does not run yet; there a
 headless Claude blocks the tools it would have asked about. Provider questions
 (`QuestionAskingConversation`) mount the production `ConversationQuestionCard` in the same
-trailing block, answered through the shim's AppKit-style field editor. Full tool disclosures and
-the other provider launch routes remain open.
+trailing block, answered through the shim's AppKit-style field editor. Tool calls mount the
+production `ToolCallView`, opened and closed by its click recognizer, with open rows kept across
+recycling. Chart cards and the other provider launch routes remain open.
 
 `ConversationCallbackDelivery` makes the host's UI executor explicit. The Mac default keeps
 MainActor tasks for deferred lifecycle callbacks and main-queue delivery for worker results.

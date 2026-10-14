@@ -15,6 +15,10 @@ extension Design {
         static var bubbleFill: NSColor { LinuxTheme.color("accentMuted") }
         static let blockSpacing = Design.Spacing.small
         static let arrivalRise = Design.Spacing.medium
+        // The production tool row: nothing at rest, the control face under the pointer or open.
+        static let toolIconWidth: CGFloat = 16
+        static var toolRowResting: NSColor { .clear }
+        static var toolRowActive: NSColor { LinuxTheme.color("controlResting") }
     }
 }
 extension Design.Typography {

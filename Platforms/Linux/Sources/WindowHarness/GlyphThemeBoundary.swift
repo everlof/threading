@@ -109,7 +109,8 @@ public enum Design {
         public static func image(_ name: String, slot: CGFloat, pointSize: CGFloat,
                                  weight: NSFont.Weight) -> NSImage? {
             precondition(name == "ellipsis" || name == "plus" || name == "terminal"
-                         || name == "chevron.down" || name == "folder" || name == "doc.text"
+                         || name == "chevron.down" || name == "chevron.right"
+                         || name == "folder" || name == "doc.text"
                          || name == "text.bubble" || name == "hand.raised"
                          || name == "questionmark.bubble" || name == "circle"
                          || name == "checkmark.circle.fill",
@@ -254,14 +255,25 @@ public enum Design {
                            width: span, height: stroke).fill()
                     NSRect(x: canvas.midX - stroke / 2, y: canvas.midY - span / 2,
                            width: stroke, height: span).fill()
+                } else if name == "chevron.right" {
+                    // A collapsed tool row's disclosure: `chevron.down` turned to point along the row.
+                    let chevron = NSBezierPath()
+                    chevron.move(to: NSPoint(x: origin + side * 0.39, y: origin + side * 0.22))
+                    chevron.line(to: NSPoint(x: origin + side * 0.65, y: origin + side * 0.5))
+                    chevron.line(to: NSPoint(x: origin + side * 0.39, y: origin + side * 0.78))
+                    chevron.lineWidth = max(1.5, side * 0.15 * weightFactor)
+                    NSColor.white.setStroke()
+                    chevron.stroke()
                 } else if name == "chevron.down" {
+                    // The canvas is unflipped, so the point sits below the arms. It was drawn the
+                    // other way up, and every chip's menu chevron pointed up.
                     let chevron = NSBezierPath()
                     chevron.move(to: NSPoint(x: origin + side * 0.22,
-                                              y: origin + side * 0.39))
+                                              y: origin + side * 0.61))
                     chevron.line(to: NSPoint(x: origin + side * 0.5,
-                                              y: origin + side * 0.65))
+                                              y: origin + side * 0.35))
                     chevron.line(to: NSPoint(x: origin + side * 0.78,
-                                              y: origin + side * 0.39))
+                                              y: origin + side * 0.61))
                     // ChipView asks for semibold at a nine-point slot. The provider is
                     // materialized before image configuration, so author that weight here.
                     chevron.lineWidth = max(1.5, side * 0.15 * weightFactor)

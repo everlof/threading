@@ -6404,3 +6404,54 @@ On the Mac, all 242 `ThemedControlTests` pass, including the gallery catalogue t
   They also fail on master `9d4abe35b`, run in a separate worktree on this machine, and this
   branch does not touch the simulator recording code.
 Because the Mac half failed, the iOS half did not start.
+
+## 192. Production tool rows and symbols drawn for their size
+
+Linux had flattened every native tool call into one muted notice line, with its result appended
+as text. The pane now mounts the production `ToolCallView`, as the Mac factory does. A tool call
+is one quiet row: its glyph, the tool and its subject, and a size line such as "3 lines". A click
+opens it to the output and closes it again. `DocumentRowSource` keeps which rows are open by entry
+identity, so a recycled host rebuilds an open row open, and the table re-measures the row
+whenever it opens or closes.
+
+The view links with the established Linux branch for its click recognizer. Its Threading MCP
+action names come from the Mac's built-in registry, which Linux does not compile, so that
+lookup is guarded out there. The Linux host serves no Threading MCP tools, so every MCP tool is
+named by its own tool name. A chart call has no Linux chart card yet and shows as its tool row.
+
+The shim gained `NSClickGestureRecognizer` and its delegate. A press is offered to the
+recognizers of the view it hits and that view's ancestors, after their delegates agree. The
+press still reaches the view, so selectable text inside keeps working. The click fires on a
+release inside the recognizer's view once the pointer has moved no more than AppKit's
+four-point hysteresis. The tool row's delegate turns down presses in its open body, so its
+output stays selectable. The shim also gained `NSView.trackingAreas`, and the Linux theme gained
+the three tool-row tokens and `Design.Text.quaternary`.
+
+The first open row drew a large, heavy chevron pointing up. There were two causes:
+- **Size.** The symbol provider was a global that the placeholder pane installed at its
+  36-point hero size. Every symbol was rasterized there and then only rescaled, and
+  `NSImageView` ignored `symbolConfiguration`.
+- **Direction.** The `chevron.down` artwork had its point above its arms on an unflipped
+  canvas, so every chip's menu chevron had always pointed up (visible in §191's composer
+  evidence).
+
+Symbol images now keep their name, and `withSymbolConfiguration` asks the host to redraw them at
+that point size and weight. `NSImageView` applies its `symbolConfiguration` the same way, which
+also sets its intrinsic size. `LinuxSymbols` installs the provider once at window startup. An
+unconfigured symbol still draws on the large canvas, so the placeholder hero stays sharp. The
+chevron points down, and `chevron.right` has artwork. The glyph-view harness now asks a recording
+provider for a configured symbol. It also checks that an image view's configuration sets its
+size.
+
+The decision journey's first turn now carries a real Codex `commandExecution` item for `ls -la`,
+with Unicode output. The pointer opens its production row, checks that it grew, and closes it
+from its header (out/llk-perm/tool-row-open.png). From a Release build the composer, decision,
+both native workspace, document, user bubble and short user row journeys pass, as do the 20
+harness lanes. On the
+Mac, the view's change is its original code under the `#else` and `canImport(ObjectiveC)`
+branches; 204 focused showcase, permission card, conversation render, extension renderer and tool
+identity tests pass, and the build ran the repository boundaries. `scripts/test.sh all` then ran
+10,744 Mac tests with one failure, `testClosingThePaneFinishesARunningRecording`, which also
+fails on master (§191). The disk filled after the Mac half finished, which is what the run's
+exit reports; the iOS half would not have started after a Mac failure in any case. An approved
+storage cleanup reclaimed 20.7 GB.

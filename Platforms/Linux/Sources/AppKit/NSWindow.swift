@@ -25,6 +25,8 @@ public final class NSWindow: NSResponder {
     /// its bounds. Keep this weak so rebuilding a sidebar row cannot retain an obsolete view;
     /// an application-scope release monitor may still finish that detached control's action.
     private weak var pressedView: NSView?
+    /// The recognizers the current press was offered to, nearest view first.
+    private var pressedRecognizers: [NSGestureRecognizer] = []
     // Pointer motion is frequent. The diagnostic native host mounts at most 32 visible rows
     // (normally eight at 480px), with at most three text/control fragments each. A future
     // 32-row/96-claim stress viewport stays O(attached visible views), not all saved sessions;
@@ -178,9 +180,12 @@ public final class NSWindow: NSResponder {
         case .leftMouseDown:
             let target = pointerTarget(at: delivered.locationInWindow)
             pressedView = target
+            pressedRecognizers = recognizers(from: root?.hitTest(delivered.locationInWindow), for: delivered)
+            pressedRecognizers.forEach { $0.pressBegan(delivered) }
             target?.mouseDown(with: delivered)
             return target
         case .leftMouseDragged:
+            pressedRecognizers.forEach { $0.pressMoved(delivered) }
             if let pressedView, pressedView.window === self {
                 pressedView.mouseDragged(with: delivered)
             }
@@ -188,6 +193,9 @@ public final class NSWindow: NSResponder {
             if let pressedView, pressedView.window === self {
                 pressedView.mouseUp(with: delivered)
             }
+            let recognizers = pressedRecognizers
+            pressedRecognizers = []
+            recognizers.forEach { $0.pressEnded(delivered) }
         case .rightMouseDown:
             pointerTarget(at: delivered.locationInWindow)?.rightMouseDown(with: delivered)
         case .scrollWheel:
@@ -210,8 +218,20 @@ public final class NSWindow: NSResponder {
     /// press was superseded, then leaves tracking and cursor state outside the content tree.
     public func cancelPointerGesture() {
         pressedView = nil
+        pressedRecognizers = []
         _ = dispatch(NSEvent(type: .leftMouseDown, window: self,
                              locationInWindow: NSPoint(x: -1, y: -1)))
+    }
+
+    /// The recognizers on the hit view and its ancestors that take part in this press.
+    private func recognizers(from hit: NSView?, for event: NSEvent) -> [NSGestureRecognizer] {
+        var result: [NSGestureRecognizer] = []
+        var ancestor = hit
+        while let view = ancestor {
+            result += view.gestureRecognizers.filter { $0.accepts(event) }
+            ancestor = view.superview
+        }
+        return result
     }
 
     /// A decorative glyph inside a control is part of that control's hit target. Dispatching

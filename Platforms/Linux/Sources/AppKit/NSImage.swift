@@ -20,8 +20,11 @@ public enum NSImageRep {
 public final class NSImage {
     /// The host supplies platform artwork for SF Symbol names. Keeping lookup here gives
     /// production views the AppKit initializer without baking a diagnostic glyph catalogue
-    /// into the graphics shim.
-    @MainActor public static var systemSymbolProvider: ((String, String?) -> NSImage?)?
+    /// into the graphics shim. A nil configuration asks for the host's unconfigured image; a
+    /// configuration asks for artwork drawn at that point size and weight, because a symbol is
+    /// redrawn for its size in AppKit rather than scaled from one raster.
+    @MainActor public static var systemSymbolProvider:
+        ((String, String?, SymbolConfiguration?) -> NSImage?)?
 
     /// Symbol sizing requested by a view. The Linux symbol provider remains app-owned; decoded
     /// artwork keeps its own dimensions, while the configuration travels with the image view.
@@ -44,6 +47,8 @@ public final class NSImage {
     }
     public var isTemplate = false
     public var accessibilityDescription: String?
+    /// The SF Symbol name this image was made from, so a configuration can redraw it.
+    public private(set) var symbolName: String?
     private let width: Int
     private let height: Int
     private let rgba: [UInt8]
@@ -68,18 +73,29 @@ public final class NSImage {
     @MainActor public convenience init?(systemSymbolName: String,
                                         accessibilityDescription: String?) {
         guard let symbol = Self.systemSymbolProvider?(systemSymbolName,
-                                                      accessibilityDescription) else { return nil }
+                                                      accessibilityDescription, nil) else { return nil }
         self.init(validatedRGBA: symbol.rgba, width: symbol.width, height: symbol.height,
                   size: symbol.size)
         isTemplate = symbol.isTemplate
         self.accessibilityDescription = accessibilityDescription
+        symbolName = systemSymbolName
     }
 
-    /// Preserve the provider's raster artwork while applying the requested point-size canvas.
-    /// The host authors supported symbol weights in its raster artwork.
+    /// A symbol image is redrawn by the host at the configured size and weight. Other artwork
+    /// keeps its raster and takes the requested point-size canvas.
+    @MainActor
     public func withSymbolConfiguration(_ configuration: SymbolConfiguration) -> NSImage {
         precondition(configuration.pointSize.isFinite && configuration.pointSize > 0,
                      "invalid symbol configuration")
+        if let symbolName,
+           let symbol = Self.systemSymbolProvider?(symbolName, accessibilityDescription, configuration) {
+            let image = NSImage(validatedRGBA: symbol.rgba, width: symbol.width, height: symbol.height,
+                                size: symbol.size)
+            image.isTemplate = symbol.isTemplate
+            image.accessibilityDescription = accessibilityDescription
+            image.symbolName = symbolName
+            return image
+        }
         let image = NSImage(validatedRGBA: rgba, width: width, height: height,
                             size: NSSize(width: configuration.pointSize,
                                          height: configuration.pointSize))

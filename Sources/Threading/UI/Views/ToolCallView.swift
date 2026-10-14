@@ -1,4 +1,7 @@
 import AppKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 /// One tool call and its result, as a single collapsible row on a quiet surface.
 ///
@@ -114,7 +117,11 @@ final class ToolCallView: NSView {
             enableExpansion()
         }
 
+#if os(Linux)
+        let click = NSClickGestureRecognizer(target: self, action: { [weak self] in self?.toggle() })
+#else
         let click = NSClickGestureRecognizer(target: self, action: #selector(toggle))
+#endif
         click.delegate = self
         addGestureRecognizer(click)
     }
@@ -299,7 +306,10 @@ final class ToolCallView: NSView {
         ])
     }
 
-    @objc private func toggle() {
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func toggle() {
         setExpanded(!isExpanded)
     }
 
@@ -385,11 +395,13 @@ enum ToolGlyph {
     /// The built-in catalogue already owns the user-facing names. Keep an exact lookup so a
     /// foreign server or an unrecognised future Threading tool retains its original identity.
     /// Rows can number in the hundreds, so descriptor discovery is paid once, not per view.
+#if !os(Linux)
     private static let threadingActions: [String: String] = Dictionary(
         uniqueKeysWithValues: MCPBuiltInToolRegistry.descriptors.map {
             ($0.definition.name, $0.presentation.title)
         }
     )
+#endif
 
     /// Overrides the identity glyph when a call fails — t3code's destructive-✗ cascade. `✓`
     /// is not its counterpart here: it already means Todo in this column, and success stays
@@ -427,11 +439,14 @@ enum ToolGlyph {
         case .taskList, .taskGet:
             return Style(symbol: "•", label: tool.rawName)
         case .mcp(let name):
+#if !os(Linux)
+            // The Linux host serves no Threading MCP tools, so it names every server's tool alike.
             let prefix = "mcp__\(MCPDefaults.serverName)__"
             if name.hasPrefix(prefix),
                let action = threadingActions[String(name.dropFirst(prefix.count))] {
                 return Style(symbol: "◇", label: "Threading", action: action)
             }
+#endif
             return Style(symbol: "◇", label: name.components(separatedBy: "__").last ?? name)
         case .notebookEdit, .notebookRead, .todoRead, .toolSearch, .plan:
             return Style(symbol: "•", label: tool.rawName)

@@ -78,7 +78,13 @@ while True:
         if turn in plans:
             for command in plans[turn]:
                 serial += 1
+                item = {'type': 'commandExecution', 'id': 'command-' + str(serial), 'command': command}
+                if command == 'ls -la':
+                    note('item/started', {'threadId': thread, 'turnId': tid, 'item': item})
                 decisions.append(approve(command, serial, tid))
+                if command == 'ls -la':
+                    note('item/completed', {'threadId': thread, 'turnId': tid, 'item': dict(item,
+                         status='completed', exitCode=0, aggregatedOutput='alpha.txt\nbeta.txt\n日本語.txt')})
         else:
             serial += 1
             decisions = [value['answers'][0] for value in ask(serial, tid).values()]
@@ -204,6 +210,30 @@ try:
     eventually(lambda: ready(1) and card() is None, 'card retired after denial')
     capture('permission-denied.png')
 
+    def tool_rows():
+        lines = frames()
+        last = max(index for index, line in enumerate(lines) if line.startswith('CONVERSATION_FRAME '))
+        block = []
+        for line in reversed(lines[:last]):
+            if line.startswith('CONVERSATION_FRAME '):
+                break
+            if line.startswith('TOOL_FRAME '):
+                point, height, opened = line.split()[1:]
+                block.append((tuple(map(int, point.split(','))), int(height.split('=')[1]), int(opened.split('=')[1])))
+        return block
+    rows = eventually(tool_rows, 'collapsed tool row')
+    assert len(rows) == 1 and rows[0][2] == 0, rows
+    collapsed = rows[0][1]
+    click(rows[0][0])
+    opened = eventually(lambda: (lambda r: r and r[0][2] == 1 and r[0][1] > collapsed + 20 and r)(tool_rows()),
+                        'tool row opened by a click')
+    capture('tool-row-open.png')
+    # The open body takes clicks for its own text selection; the header closes the row. The
+    # logged centre is in window pixels and the height in points, so the top is centre - height.
+    (x, y), height, _ = opened[0]
+    click((x, y - height + 18))
+    eventually(lambda: (lambda r: r and r[0][2] == 0 and r[0][1] == collapsed)(tool_rows()), 'tool row closed again')
+
     # The production button takes the keyboard when clicked, as on the Mac, and its card has
     # left; return to the composer as a person would. 1120x900 puts it at this point.
     click((720, 736))
@@ -239,7 +269,7 @@ try:
     assert answered == {'answers': {'color': {'answers': ['Blue']}, 'name': {'answers': ['Fixture 日本語 café']}}}, answered
     eventually(lambda: ready(3) and question() is None, 'question card retired')
     capture('question-answered.png')
-    print('PASS native decisions: policy auto-allow, permission card, Return stays a send, deny, allow for session, two-page question with choice and edited answer')
+    print('PASS native decisions: policy auto-allow, permission card, Return stays a send, deny, allow for session, production tool row opened and closed, two-page question with choice and edited answer')
 finally:
     subprocess.run(['xdotool', 'key', 'alt+F4'], check=False)
     try: process.wait(timeout=8)

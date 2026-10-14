@@ -177,6 +177,32 @@ struct GlyphViewHarness {
                 "image view tinted non-template artwork")
         imageView.image = nil
         require(imageView.intrinsicContentSize == .zero, "empty image view kept stale intrinsic size")
-        print("PASS real GlyphView and NSImageView: 1x/2x alignment, template alpha tint, artwork color/aspect and intrinsic size")
+
+        // A symbol is redrawn for its configuration, as AppKit's are: the provider is asked again
+        // at the configured point size and weight, and an image view's configuration applies.
+        var requests: [(String, CGFloat?, NSFont.Weight?)] = []
+        NSImage.systemSymbolProvider = { name, _, configuration in
+            requests.append((name, configuration?.pointSize, configuration?.weight))
+            let side = Int(configuration?.pointSize ?? 32)
+            let image = NSImage(rgba: [UInt8](repeating: 255, count: side * side * 4), width: side, height: side)
+            image?.isTemplate = true
+            return image
+        }
+        defer { NSImage.systemSymbolProvider = nil }
+        guard let symbol = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil) else {
+            fatalError("symbol provider returned no image")
+        }
+        require(symbol.symbolName == "chevron.right" && symbol.size == NSSize(width: 32, height: 32),
+                "an unconfigured symbol keeps the provider's default artwork")
+        let small = symbol.withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+        require(small.size == NSSize(width: 9, height: 9) && small.symbolName == "chevron.right"
+                && requests.last.map { $0.1 == 9 && $0.2 == .semibold } == true,
+                "a configured symbol is redrawn at its size and weight, not scaled: \(requests)")
+        let symbolView = NSImageView(frame: .zero)
+        symbolView.image = symbol
+        symbolView.symbolConfiguration = .init(pointSize: 11, weight: .regular)
+        require(symbolView.intrinsicContentSize == NSSize(width: 11, height: 11),
+                "an image view applies its symbol configuration: \(symbolView.intrinsicContentSize)")
+        print("PASS real GlyphView and NSImageView: 1x/2x alignment, template alpha tint, artwork color/aspect, intrinsic size and symbol configuration")
     }
 }

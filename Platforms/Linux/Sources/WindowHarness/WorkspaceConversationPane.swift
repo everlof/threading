@@ -251,6 +251,14 @@ final class WorkspaceConversationPane: WorkspacePane {
             let kind = card === permissionCard ? "PERMISSION_FRAME \(presentedPermission ?? 0)" : "QUESTION_FRAME"
             print("\(kind) \(controls.joined(separator: " "))")
         }
+        // Window-pixel centre and height of each mounted tool row, for journeys that open one.
+        func tools(_ view: NSView) -> [ToolCallView] {
+            ((view as? ToolCallView).map { [$0] } ?? []) + view.subviews.flatMap(tools)
+        }
+        for tool in tools(table) where !tool.visibleRect.isEmpty {
+            let point = tool.convert(NSPoint(x: tool.bounds.midX, y: tool.bounds.midY), to: root)
+            print("TOOL_FRAME \(originX + Int(point.x * 2)),\(WorkspacePaneChrome.headerPixelHeight + Int((size.height - point.y) * 2)) height=\(Int(tool.bounds.height)) open=\(rows.expandedTools.count)")
+        }
         print("CONVERSATION_FRAME \(runtime.id.uuidString) rows=\(table.numberOfRows) mounted=\(table.mountedViewCount) turns=\(runtime.completedTurns) prepared=\(prepared) dark=\(LinuxTheme.isDark) status=\(runtime.status)")
         fflush(nil)
     }

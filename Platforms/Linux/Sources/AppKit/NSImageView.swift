@@ -13,6 +13,7 @@ public enum NSImageScaling: Int, Sendable {
 open class NSImageView: NSView {
     open var image: NSImage? {
         didSet {
+            configuredImage = nil
             needsDisplay = true
             invalidateIntrinsicContentSize()
         }
@@ -20,8 +21,22 @@ open class NSImageView: NSView {
     open var imageScaling: NSImageScaling = .scaleProportionallyDown {
         didSet { needsDisplay = true }
     }
+    /// Applied to a symbol image as AppKit applies it: the symbol is drawn at this size and
+    /// weight, and that drawing is the view's intrinsic size.
     open var symbolConfiguration: NSImage.SymbolConfiguration? {
-        didSet { needsDisplay = true }
+        didSet {
+            configuredImage = nil
+            needsDisplay = true
+            invalidateIntrinsicContentSize()
+        }
+    }
+    private var configuredImage: NSImage?
+    private var displayedImage: NSImage? {
+        guard let image, let symbolConfiguration, image.symbolName != nil else { return image }
+        if let configuredImage { return configuredImage }
+        let configured = image.withSymbolConfiguration(symbolConfiguration)
+        configuredImage = configured
+        return configured
     }
     open var contentTintColor: NSColor? {
         didSet { needsDisplay = true }
@@ -37,10 +52,10 @@ open class NSImageView: NSView {
         setAccessibilityElement(false)
     }
 
-    open override var intrinsicContentSize: NSSize { image?.size ?? .zero }
+    open override var intrinsicContentSize: NSSize { displayedImage?.size ?? .zero }
 
     open override func draw(_ dirtyRect: NSRect) {
-        guard let image, image.size.width > 0, image.size.height > 0,
+        guard let image = displayedImage, image.size.width > 0, image.size.height > 0,
               bounds.width > 0, bounds.height > 0 else { return }
         let destination: NSRect
         switch imageScaling {

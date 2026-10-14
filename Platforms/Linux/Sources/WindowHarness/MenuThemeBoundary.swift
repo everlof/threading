@@ -76,6 +76,7 @@ extension Design {
         static var selected: NSColor { Design.Ink.selection.label }
         static var secondary: NSColor { chromeInk.secondary }
         static var tertiary: NSColor { chromeInk.tertiary }
+        static var quaternary: NSColor { chromeInk.quaternary }
     }
 
     @MainActor enum Status {

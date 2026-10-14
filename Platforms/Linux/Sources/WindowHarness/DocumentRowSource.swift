@@ -39,6 +39,8 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
     private(set) var live: Set<Int> = []
     private var activeDiffs: [Int: DiffView] = [:]
     private var expandedUsers: Set<Int> = []
+    /// Tool rows the reader opened. A recycled host rebuilds the row closed unless it is here.
+    private(set) var expandedTools: Set<Int> = []
     private var nativeLocations: [Int: (start: Int, count: Int)] = [:]
     private let identifier = NSUserInterfaceItemIdentifier("ConversationDiagnosticRow")
 
@@ -205,9 +207,19 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
             case .turnOutcome(let outcome): content = ConversationRowView.turnOutcome(outcome)
             case .notice(let text, let kind): content = ConversationRowView.notice(text, kind: kind)
             case .toolCall(let call):
-                let result = call.result.map { "\n" + $0.text } ?? ""
-                content = ConversationRowView.notice(call.name + " · " + call.summary + result,
-                    kind: call.result?.isError == true ? .error : .muted)
+                // The production row, collapsed to its one line until opened. Charts have no
+                // Linux card yet, so a chart call shows as its tool row.
+                let tool = ToolCallView(tool: call.tool, summary: call.summary, diff: call.diff)
+                if let result = call.result { tool.setResult(result.text, outcome: result.outcome) }
+                tool.setExpanded(expandedTools.contains(entry.id), notifying: false)
+                tool.onExpansionChanged = { [weak self, weak tableView, weak host] expanded in
+                    guard let self else { return }
+                    if expanded { expandedTools.insert(entry.id) } else { expandedTools.remove(entry.id) }
+                    guard let tableView, let host else { return }
+                    let row = tableView.row(for: host)
+                    if row >= 0 { tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row)) }
+                }
+                content = tool
             default: preconditionFailure("native row has a dedicated content case")
             }
         case .user(let text):
