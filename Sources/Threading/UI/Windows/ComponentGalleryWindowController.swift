@@ -122,6 +122,14 @@ final class ComponentGalleryViewController: NSViewController {
         "ColorPairSpecimenView",
         "ConversationChoiceRow",
         "ConversationContextRailView",
+        "ConversationVirtualRowHost",
+        "DiffView",
+        "PromptTextScrollView",
+        "PromptTextView",
+        "ThemedMenuRowView",
+        "ThemedProjectRowView",
+        "ThemedSessionRowContentView",
+        "ThemedTerminalRowContentView",
         "ConversationDecisionHeader",
         "ConversationHandoffView",
         "ConversationQuestionCard",
@@ -605,6 +613,7 @@ final class ComponentGalleryViewController: NSViewController {
             makeUsageAnalyticsSection(),
             makePresentationSection(),
             makeContainersSection(),
+            makeSharedAnatomySection(),
             makeBrowserChromeSection(),
             makeWindowChromeSection(),
             makeColourSection(),
@@ -5785,6 +5794,148 @@ final class ComponentGalleryViewController: NSViewController {
     /// third declines hit testing entirely unless it has been switched on. A story is the only
     /// place all of that can be driven without a browser — which is the argument the catalogue
     /// test makes for every component, and why it went red the moment these landed.
+    // MARK: Shared row anatomy
+
+    /// The production views conversation and navigator rows are assembled from, each shown
+    /// outside the controller or sidebar that normally hosts it.
+    private func makeSharedAnatomySection() -> NSView {
+        section(
+            "Shared row anatomy",
+            note: "The pieces conversation and navigator rows are built from, each shown without its usual host.",
+            rows: [
+                story(
+                    "PromptTextView & PromptTextScrollView",
+                    "The composer's text network on its own: the editor and the scroll view that "
+                        + "carries it, as a host mounts it directly. Type, select and scroll; "
+                        + "Return submits.",
+                    makePromptTextStory()
+                ),
+                story(
+                    "DiffView",
+                    "An edit as the conversation shows it, built from the same old and new text "
+                        + "a tool call carries. Select and copy any line.",
+                    makeDiffViewStory()
+                ),
+                story(
+                    "ConversationVirtualRowHost",
+                    "Two hosts stating different column widths. The content keeps its side "
+                        + "insets, centres in the column and stops at the readable measure; the "
+                        + "narrower one wraps rather than overflowing.",
+                    makeRowHostStory()
+                ),
+                story(
+                    "ThemedMenuRowView",
+                    "Rows from one menu plan: a checked choice, one with a shortcut and a "
+                        + "disabled one. Hover to highlight; click to choose.",
+                    makeMenuRowStory()
+                ),
+                story(
+                    "ThemedProjectRowView, ThemedSessionRowContentView & ThemedTerminalRowContentView",
+                    "The navigator's row shells — a project with its count, a checkout with its "
+                        + "actions shown, a conversation and a running terminal — outside the "
+                        + "sidebar that owns their selection and hover.",
+                    makeNavigatorRowStory()
+                )
+            ]
+        )
+    }
+
+    private func makePromptTextStory() -> NSView {
+        let editor = PromptTextView.scrollingPrompt()
+        editor.textView.placeholder = L10n.string("Type a prompt; Return submits")
+        editor.textView.onSubmit = { [weak self, weak editor] _ in
+            guard let text = editor?.textView.string else { return }
+            self?.showReceipt(L10n.format("PromptTextView submitted “%@”.", String(text.prefix(80))))
+        }
+        editor.applySurface(fill: Design.Surface.elevated, radius: .control)
+        editor.fixSize(width: 360, height: 72)
+        return editor
+    }
+
+    private func makeDiffViewStory() -> NSView {
+        // localization-ignore: sample source code shown in the diff.
+        let lines = EditDiff.lines(forTool: "Edit", input: [
+            "file_path": "/tmp/greeting.swift",
+            "old_string": "func greeting() -> String {\n    return \"Hello\"\n}\n",
+            "new_string": "func greeting() -> String {\n    // Unicode é and 👩🏽‍🚀\n    return \"Hello, gallery\"\n}\n"
+        ]) ?? []
+        let diff = DiffView(lines: lines, path: "greeting.swift")
+        diff.fixSize(width: 420)
+        return diff
+    }
+
+    private func makeRowHostStory() -> NSView {
+        func host(width: CGFloat) -> NSView {
+            let host = ConversationVirtualRowHost()
+            host.translatesAutoresizingMaskIntoConstraints = false
+            let text = NSTextField(wrappingLabelWithString: L10n.string(
+                "A row's content sits inside the column its host states, centred and capped at the readable measure."
+            ))
+            text.applyFont(.body, in: .conversation)
+            text.textColor = Design.Text.label
+            host.install(text, topInset: Design.Spacing.small, bottomInset: Design.Spacing.small, onRelease: nil)
+            host.setColumnWidth(width)
+            host.applySurface(fill: Design.Surface.elevated, radius: .control)
+            return host
+        }
+        let stack = NSStackView(views: [host(width: 420), host(width: 220)])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.medium
+        return stack
+    }
+
+    private func makeMenuRowStory() -> NSView {
+        let entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(title: L10n.string("Compact"), isSelected: true)),
+            .item(ThemedMenuItem(title: L10n.string("Expanded"),
+                                 shortcut: KeyboardShortcut(key: "e", modifiers: .command))),
+            .separator,
+            .item(ThemedMenuItem(title: L10n.string("Unavailable"), isEnabled: false))
+        ]
+        let plan = ThemedMenuRowPlan(entries: entries)
+        let rows = entries.indices.compactMap { index -> NSView? in
+            guard let row = plan.row(at: index) else { return nil }
+            row.onChoose = { [weak self] _, item in
+                self?.showReceipt(L10n.format("ThemedMenuRowView chose “%@”.", item.title))
+            }
+            row.fixSize(width: 240, height: plan.heights[index])
+            return row
+        }
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+        stack.applySurface(fill: Design.Surface.elevated, radius: .control)
+        return stack
+    }
+
+    private func makeNavigatorRowStory() -> NSView {
+        let project = ThemedProjectRowView(frame: .zero)
+        // localization-ignore: sample project name.
+        project.configure(.project(name: "Threading"), count: 3)
+        let checkout = ThemedProjectRowView(frame: .zero)
+        // localization-ignore: sample branch, project and path names.
+        checkout.configure(.checkout(branch: "linux-appkit", fallbackName: "Threading",
+                                     abbreviatedPath: "~/repo/Threading"), count: 1)
+        checkout.setHoverControlsVisible(true, animated: false)
+        let session = ThemedSessionRowContentView()
+        session.setTitle(L10n.string("Native conversation"))
+        session.setIcon(AgentBrandIcons.claude)
+        let terminal = ThemedTerminalRowContentView()
+        terminal.setTitle(L10n.string("Project terminal"))
+        terminal.setIcon(NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)?
+            .withSymbolConfiguration(Design.Symbol.configuration(SidebarRowDefaults.iconSize, weight: .regular)))
+        terminal.setInk(selected: false, running: true)
+        let rows: [NSView] = [project, checkout, session, terminal]
+        for row in rows { row.fixSize(width: 260, height: SidebarDefaults.rowHeight) }
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.hairline
+        return stack
+    }
+
     private func makeBrowserChromeSection() -> NSView {
         let findBar = BrowserFindBar()
         // The app's own name, which is a plausible query, the same word in every language, and

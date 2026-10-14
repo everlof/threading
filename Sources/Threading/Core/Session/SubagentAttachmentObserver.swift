@@ -4,7 +4,7 @@ import Foundation
 /// not a second parser or file-admission policy. Typical sessions have 1–8 children; at most 64
 /// recent children retain observers, each with one active scan and one coalesced rescan.
 @MainActor
-final class SubagentAttachmentObserver {
+final class SubagentAttachmentObserver: SubagentActivityObserving {
     struct Configuration {
         let kind: AgentKind
         let projectRoot: URL

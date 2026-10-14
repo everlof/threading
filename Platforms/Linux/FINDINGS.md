@@ -6348,3 +6348,59 @@ includes the Claude native workspace lane and this decision journey. Evidence:
 out/bundle-smoke/run.esDD4pFR, log out/llk-bundle-smoke5.log. Manifest:
 e775372e5872d311550e370f629b4763a3ad25a8, source_dirty=false. Debian SHA-256:
 003c6c8c4ed8523fa58b89628efa5be9aa3bb4330a11e13f3cfa876fb537e252.
+
+## 191. Integration with master and a complete component gallery
+
+The branch was rebased onto master `9d4abe35b` on 2026-10-14; it had fallen 44 commits behind.
+Shared documents were the only conflicts:
+- **`performance.md`.** Each side had added its own paragraphs under the same headings. The
+  base version confirmed that neither replaced the other's text, so both were kept.
+- **`CLAUDE.md`.** Master's build-system wording and the branch's Linux-preview sentence were
+  merged into one paragraph. The command list keeps every command.
+- **`ClaudeTranscript.swift`.** It keeps master's new `subagentURL(childID:root:)`. Its
+  `exists(sessionID:for:in:)` stays in the branch's `ClaudeTranscript+Host.swift`.
+
+Five core copies changed on master and were refreshed. Two of master's additions reached the
+portable core through host machinery, so each was split at the boundary the branch already uses:
+- **Attachment detection.** Its content policy, `assistantTexts(in:)`, stays in
+  `AttachmentDetection.swift` and joins CoreSlice. Recording a reference reaches the attachment
+  store and its resolver, so it moved, with the worker actor, to
+  `AttachmentDetection+Recording.swift`.
+- **Subagent observer.** `SubagentSessionState` now holds an `any SubagentActivityObserving`
+  instead of the concrete Mac attachment observer, which conforms. A host without attachments
+  supplies none.
+The manifest now holds 128 exact copies.
+
+The branch-only `ui-structure` ratchet then failed. A per-file report of the pre-rebase and
+post-rebase trees shows every new site came from master's own new code. Following the previous
+integration's practice, `application-structure.md` names each upstream addition and the ceilings
+moved to 103/125/3,208/107. The architecture, theme, mobile-theme and localization boundaries
+pass.
+
+The full Mac suite had one failure since §184: eight production views this branch moved into
+`UI/Design` had no Component Gallery story. Master's own Mermaid story arrived with the rebase.
+A new "Shared row anatomy" section mounts each extracted view as itself:
+- **`PromptTextView` and `PromptTextScrollView`.** The editor network, with a working submit.
+- **`DiffView`.** It is fed through the production `EditDiff` path.
+- **`ConversationVirtualRowHost`.** Two hosts at different stated column widths.
+- **`ThemedMenuRowView`.** Rows from one `ThemedMenuRowPlan`, with a receipt when chosen.
+- **The navigator row shells.** A project row, a checkout with its actions shown, a conversation
+  and a running terminal.
+Their 19 strings have Swedish entries in the catalogue's canonical layout. The stories first added
+10 constraint sites to the gallery, which sits outside `UI/Design`, and the ratchet refused them.
+They now state their sizes through `NSView.fixSize(width:height:)` in `UI/Design`, beside the
+existing `squareSizeConstraints`, so the ceiling stays at 3,208.
+
+After the rebase, the Linux build, all 20 harness lanes, both native workspace journeys, the
+decision journey, the document, user bubble and short user row journeys, the native delivery
+contract and the 12 runner contracts pass from Release. All 128 core copies and the AppKit vendor
+copies verify.
+
+On the Mac, all 242 `ThemedControlTests` pass, including the gallery catalogue test. A
+`scripts/test.sh all` run executed 10,744 tests with failures in four classes:
+- **Not reproducible.** `HookLifecycleTests`, `MainWindowSizingTests` and
+  `ThemedTabStripViewTests` passed when rerun by themselves.
+- **Pre-existing.** The two `SimulatorPaneControlsTests` recording cases time out every time.
+  They also fail on master `9d4abe35b`, run in a separate worktree on this machine, and this
+  branch does not touch the simulator recording code.
+Because the Mac half failed, the iOS half did not start.

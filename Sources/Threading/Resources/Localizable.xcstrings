@@ -5270,6 +5270,17 @@
         }
       }
     },
+    "A row's content sits inside the column its host states, centred and capped at the readable measure." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En rads innehåll ligger i den kolumn som dess värd anger, centrerat och begränsat till läsbar bredd."
+          }
+        }
+      }
+    },
     "A running recording over the device it records, and its stop control; saving refuses a second stop." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8556,6 +8567,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En tidig start. Låt oss använda den."
+          }
+        }
+      }
+    },
+    "An edit as the conversation shows it, built from the same old and new text a tool call carries. Select and copy any line." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En ändring så som konversationen visar den, byggd av samma gamla och nya text som ett verktygsanrop bär. Markera och kopiera valfri rad."
           }
         }
       }
@@ -12641,6 +12663,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anropa mail_send med to %@ — sessionen som den här sidokonversationen förgrenades från — och rapportera din slutsats: vad som hittades eller beslutades, i några meningar, inte transkriptet. Svara sedan här med en rad om vad du skickade."
+          }
+        }
+      }
+    },
+    "Call send_to_session with session_id %@ — the session this side chat was forked from — and report your conclusion: what was found or decided, in a few sentences, not the transcript. Then reply here with one line saying what you sent." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anropa send_to_session med session_id %@ — sessionen som den här sidokonversationen förgrenades från — och rapportera din slutsats: vad som hittades eller beslutades, i några meningar, inte transkriptet. Svara sedan här med en rad om vad du skickade."
           }
         }
       }
@@ -18078,6 +18111,17 @@
         }
       }
     },
+    "ConversationVirtualRowHost" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ConversationVirtualRowHost"
+          }
+        }
+      }
+    },
     "Conversations" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21796,6 +21840,17 @@
         }
       }
     },
+    "DiffView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DiffView"
+          }
+        }
+      }
+    },
     "Difference" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24476,6 +24531,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Utöka, kollapsa, markera och rulla en hierarki — markerade rader tematiseras av samma radvy som tabellen ovan använder."
+          }
+        }
+      }
+    },
+    "Expanded" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expanderad"
           }
         }
       }
@@ -31929,6 +31995,17 @@
         }
       }
     },
+    "Let a session list the project’s other sessions and send them messages." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låt en session lista projektets övriga sessioner och skicka meddelanden till dem."
+          }
+        }
+      }
+    },
     "Let agents ask domain experts structured questions and get their answers as mail." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35452,6 +35529,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inbyggd chatt"
+          }
+        }
+      }
+    },
+    "Native conversation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inbyggd konversation"
           }
         }
       }
@@ -43708,6 +43796,17 @@
         }
       }
     },
+    "Project terminal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projektterminal"
+          }
+        }
+      }
+    },
     "Project text" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43946,6 +44045,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "PromptCompletionPresenter"
+          }
+        }
+      }
+    },
+    "PromptTextView & PromptTextScrollView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PromptTextView & PromptTextScrollView"
+          }
+        }
+      }
+    },
+    "PromptTextView submitted “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PromptTextView skickade in “%@”."
           }
         }
       }
@@ -49198,6 +49319,17 @@
         }
       }
     },
+    "Rows from one menu plan: a checked choice, one with a shortcut and a disabled one. Hover to highlight; click to choose." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rader från en menyplan: ett markerat val, ett med kortkommando och ett inaktiverat. Hovra för att markera; klicka för att välja."
+          }
+        }
+      }
+    },
     "Rules (one per line)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53406,6 +53538,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gemensamt kontoutseende"
+          }
+        }
+      }
+    },
+    "Shared row anatomy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delad radanatomi"
           }
         }
       }
@@ -60804,6 +60947,17 @@
         }
       }
     },
+    "The composer's text network on its own: the editor and the scroll view that carries it, as a host mounts it directly. Type, select and scroll; Return submits." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inmatningsfältets textnätverk för sig självt: redigeraren och rullningsvyn som bär den, så som en värd monterar den direkt. Skriv, markera och rulla; Return skickar in."
+          }
+        }
+      }
+    },
     "The configured agent cannot guarantee a read-only assessment stage." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62491,6 +62645,17 @@
         }
       }
     },
+    "The navigator's row shells — a project with its count, a checkout with its actions shown, a conversation and a running terminal — outside the sidebar that owns their selection and hover." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Navigatorns radskal – ett projekt med sitt antal, en utcheckning med sina åtgärder synliga, en konversation och en körande terminal – utanför sidofältet som äger deras markering och hovring."
+          }
+        }
+      }
+    },
     "The new-session composer's ground: the theme's welcome backdrop — wash, picture and particles — beneath everything the composer holds, the extension plane included. This sample previews a wash in the theme's own roles with snow; Reduce Motion and the Theme animations setting leave the snow still." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62696,6 +62861,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bilden sparas i projektet under det namn du ger den. Agenten kan senare jämföra sidan mot den."
+          }
+        }
+      }
+    },
+    "The pieces conversation and navigator rows are built from, each shown without its usual host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delarna som konversations- och navigatorrader byggs av, var och en visad utan sin vanliga värd."
           }
         }
       }
@@ -65185,6 +65361,28 @@
         }
       }
     },
+    "ThemedMenuRowView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemedMenuRowView"
+          }
+        }
+      }
+    },
+    "ThemedMenuRowView chose “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemedMenuRowView valde “%@”."
+          }
+        }
+      }
+    },
     "ThemedMultilineTitleLabel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -65258,6 +65456,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ThemedProgressBar är %@."
+          }
+        }
+      }
+    },
+    "ThemedProjectRowView, ThemedSessionRowContentView & ThemedTerminalRowContentView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemedProjectRowView, ThemedSessionRowContentView & ThemedTerminalRowContentView"
           }
         }
       }
@@ -70063,6 +70272,17 @@
         }
       }
     },
+    "Two hosts stating different column widths. The content keeps its side insets, centres in the column and stops at the readable measure; the narrower one wraps rather than overflowing." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Två värdar som anger olika kolumnbredder. Innehållet behåller sina sidomarginaler, centreras i kolumnen och stannar vid läsbar bredd; den smalare radbryts i stället för att flöda över."
+          }
+        }
+      }
+    },
     "Two images as an interactive wipe/fade/difference; two text files as a diff." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -70147,6 +70367,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skriv ett kommando"
+          }
+        }
+      }
+    },
+    "Type a prompt; Return submits" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv en prompt; Return skickar in"
           }
         }
       }

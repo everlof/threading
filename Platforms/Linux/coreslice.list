@@ -143,3 +143,4 @@ Sources/Threading/Core/Agent/ConversationPreparedChild.swift
 
 Sources/Threading/Core/Agent/PermissionPolicy.swift
 Sources/Threading/Core/Agent/ShellCommandPolicy.swift
+Sources/Threading/Core/Session/AttachmentDetection.swift

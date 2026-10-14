@@ -676,6 +676,15 @@ enum SubagentDefaults {
     }
 }
 
+/// What a host observes in a session's child agents. The Mac's attachment detector is one such
+/// observer; a host that records no attachments supplies none.
+@MainActor
+protocol SubagentActivityObserving: AnyObject {
+    func apply(_ event: SubagentEvent, timeline: SubagentTimeline)
+    func stop()
+    func invalidate()
+}
+
 // MARK: - Shared Session State
 
 /// One session's child hierarchy, shared by its native and terminal renderers.
@@ -692,7 +701,7 @@ final class SubagentSessionState {
 
     /// At most one renderer is live for a session, so one change observer is sufficient.
     var onChange: (() -> Void)?
-    var attachmentObserver: SubagentAttachmentObserver?
+    var attachmentObserver: (any SubagentActivityObserving)?
     var attachmentTurnID: (() -> String?)?
 
     private let store: SubagentStateStore?
