@@ -4,9 +4,29 @@ import Foundation
 
 /// A tool call awaiting a decision.
 struct PermissionRequest: Sendable {
+
+    /// Who put the question, which decides whether Threading is the only one who can answer it.
+    enum Origin: Sendable, Equatable {
+        /// The runtime's own permission flow asked: a Codex app-server approval request or an ACP
+        /// `session/request_permission`. The runtime has already applied its mode and decided a
+        /// person should answer, so the answer has to be allow or deny.
+        case runtimeRequest
+
+        /// Threading's `PreToolUse` hook asked, before the runtime's own permission flow ran.
+        /// The hook fires for every tool call in every mode, so it can also stay out of the way
+        /// and leave the call to that flow (`PermissionDecision.deferToAgent`).
+        ///
+        /// `reportedMode` is the payload's own `permission_mode`, in the runtime's spelling: the
+        /// mode the running *process* is in. That is not always the session's record — a mode
+        /// chosen from the sidebar applies at the next launch — and only the process's mode says
+        /// what its permission flow will do with a call the hook leaves to it.
+        case toolHook(reportedMode: String?)
+    }
+
     let sessionID: SessionID
     let tool: ToolIdentity
     let input: [String: JSONValue]
+    let origin: Origin
 
     var toolName: String { tool.rawName }
 
@@ -17,14 +37,28 @@ struct PermissionRequest: Sendable {
         input.mapValues(\.foundationValue)
     }
 
-    init(sessionID: SessionID, tool: ToolIdentity, input: [String: JSONValue]) {
+    /// `origin` defaults to the runtime having asked, which is the conservative reading: such a
+    /// request is never left to the runtime, so forgetting to say it came from the hook costs a
+    /// question rather than an unasked-for action.
+    init(
+        sessionID: SessionID,
+        tool: ToolIdentity,
+        input: [String: JSONValue],
+        origin: Origin = .runtimeRequest
+    ) {
         self.sessionID = sessionID
         self.tool = tool
         self.input = input
+        self.origin = origin
     }
 
-    init(sessionID: SessionID, toolName: String, input: [String: JSONValue]) {
-        self.init(sessionID: sessionID, tool: ToolIdentity(toolName), input: input)
+    init(
+        sessionID: SessionID,
+        toolName: String,
+        input: [String: JSONValue],
+        origin: Origin = .runtimeRequest
+    ) {
+        self.init(sessionID: sessionID, tool: ToolIdentity(toolName), input: input, origin: origin)
     }
 
     /// A one-line description of what the tool would actually do, for the approval sheet.
@@ -192,16 +226,27 @@ enum PermissionDecision: Sendable {
     case allow(reason: String)
     case deny(reason: String)
 
-    /// The `PreToolUse` hook's reply shape. Returning this on stdout is what actually lets
-    /// the tool through — a hook that exits silently leaves the call to the normal permission
-    /// flow, which in a headless run means blocked.
-    var hookResponse: [String: Any] {
+    /// Threading has no objection and no question: the runtime's own permission flow decides,
+    /// as it would in its terminal. Only ever the answer to a `.toolHook` request — a runtime
+    /// that asked for itself has already deferred to us, and needs a yes or a no.
+    case deferToAgent(reason: String)
+
+    /// The `PreToolUse` hook's reply shape, or nil to print nothing.
+    ///
+    /// Returning a decision on stdout is what lets the tool through — a hook that exits silently
+    /// leaves the call to the runtime's normal permission flow, which in a headless Claude run
+    /// under Manual means blocked. That silence is exactly what `deferToAgent` wants: under Auto
+    /// the normal flow is Claude's own classifier, and Codex runs its approval policy after the
+    /// hook whatever the hook says. Nothing rather than `{}`, because nothing is the reply every
+    /// terminal Codex session already gets from the shared `hooks.json` entry.
+    var hookResponse: [String: Any]? {
         let decision: String
         let reason: String
 
         switch self {
         case .allow(let text): (decision, reason) = ("allow", text)
         case .deny(let text): (decision, reason) = ("deny", text)
+        case .deferToAgent: return nil
         }
 
         return [
@@ -423,13 +468,24 @@ enum PermissionBroker {
             return .allow(reason: "Allowed for this session by the user.")
         }
 
+        let session = ProjectStore.shared.session(withID: request.sessionID)
+
+        // Ahead of the standing decisions, because a hook that asks where the runtime would not
+        // have asked is the app overruling the runtime's own judgement — the Auto classifier, or
+        // a Codex reviewer — with a card.
+        if let kind = session?.kind,
+           let deferral = PermissionPolicy.agentDecision(for: request.origin, kind: kind) {
+            return deferral
+        }
+
+        let mode = session.flatMap(AgentLauncher.permissionMode(for:))
+
         // The session's permission mode, honoured here because the CLI does not honour it *for*
         // us: measured against 2.1.220, `PreToolUse` fires under `bypassPermissions` and
         // `dontAsk` exactly as it does under `manual`. Without this, a natively rendered session
         // in Bypass would still be stopped by Threading's own sheet — the app contradicting the
         // mode the user picked in it.
-        if let mode = permissionMode(for: request.sessionID),
-           let standing = PermissionPolicy.standingDecision(for: request.tool, in: mode) {
+        if let mode, let standing = PermissionPolicy.standingDecision(for: request.tool, in: mode) {
             return standing
         }
         return nil
@@ -477,12 +533,51 @@ enum PermissionPolicy {
         isAutoAllowed(ToolIdentity(toolName))
     }
 
+    /// Whether the runtime's own permission flow decides this call, so Threading should neither
+    /// allow nor ask. Nil means the call is Threading's to decide.
+    ///
+    /// Only a `toolHook` request can be left to the runtime: the hook fires before that flow on
+    /// every tool call, while a runtime's own request means the flow already ran and asked for a
+    /// person. Two cases, both measured:
+    ///
+    /// - **The process reports Auto.** Auto means the runtime decides for itself when to ask, and
+    ///   a card per tool call overruled exactly that. On Claude 2.1.296 a headless
+    ///   `--permission-mode auto` stream whose `PreToolUse` hook printed nothing ran a `Write` and
+    ///   a `Bash` with no denials, decided by its own classifier; the same run under `manual`
+    ///   denied both. The payload's `permission_mode` decides, never the session's record: a chat
+    ///   still running in Manual whose chip now says Auto would have its calls blocked, not
+    ///   decided, by a hook that fell silent.
+    /// - **Every mode, where the runtime owns its approvals** (`AgentCapabilities
+    ///   .runtimeOwnedApprovals`). Codex honours only a hook's `deny`, so a hook's allow granted
+    ///   nothing and its card either repeated the question Codex then asked over app-server or
+    ///   asked one Codex's configured posture would never have asked.
+    ///
+    /// Threading's own refusals are not affected: an unattended automation run and the macOS
+    /// grant briefing are both decided in `PermissionBroker.decide` before this is reached.
+    static func agentDecision(
+        for origin: PermissionRequest.Origin,
+        kind: AgentKind
+    ) -> PermissionDecision? {
+        guard case .toolHook(let reportedMode) = origin else { return nil }
+
+        if kind.supports(.runtimeOwnedApprovals) {
+            return .deferToAgent(
+                reason: "Left to \(kind.displayName)'s own approval policy, which asks if it needs to."
+            )
+        }
+        if let reportedMode, AgentPermissionMode(externalValue: reportedMode, for: kind) == .auto {
+            return .deferToAgent(reason: "Auto: left to \(kind.displayName)'s own permission check.")
+        }
+        return nil
+    }
+
     /// What the session's mode already decides, or nil to ask.
     ///
     /// Only the modes that *promise* something are answered here. `manual` asks by definition;
     /// `plan` and `auto` are enforced inside the CLI — plan by refusing to act, auto by its own
     /// classifier — and neither promises Threading's sheet will stay down, so asking remains both
-    /// honest and the conservative side to be wrong on.
+    /// honest and the conservative side to be wrong on. A hook's question under Auto never gets
+    /// this far: `agentDecision(for:kind:)` leaves it to the runtime first.
     ///
     /// `dontAsk` denies rather than allows. That is the mode's actual meaning in the CLI, whose
     /// fallback table reads `dontAsk → deny`: it promises never to interrupt, and keeps the

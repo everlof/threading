@@ -1772,6 +1772,21 @@ OpenCode keeps its richer per-tool policy in `opencode.json`; its `--auto` optio
 these six postures. OpenCode sessions therefore show no Threading Permission Mode control.
 Grok accepts all six postures directly; Manual is sent using Grok's spelling, `default`.
 
+In a Native chat, a permission card appears only where the agent itself would have stopped to
+ask:
+
+- **Claude** asks through Threading in Manual, Plan and Accept Edits (commands only). In
+  **Auto**, Claude's own checks decide and Threading shows no card. What counts is the mode the
+  running chat is in: a mode picked from the sidebar applies at the next launch, so until then
+  the chat keeps asking.
+- **Codex** asks only when its own approval policy says so, in every mode. **Auto (Approve for
+  me)** hands those questions to Codex's reviewer agent instead of you, and a chat that inherits
+  `approvals_reviewer = "auto_review"` from `config.toml` behaves the same way.
+- **Grok** and **Cursor** show a card each time the agent asks.
+
+Read-only commands never ask. An automation run never shows a card either: its approved
+allow-list answers instead.
+
 ### Conversation speed
 
 **Settings > Chats > Claude sessions start in** and **Codex sessions start in** choose how
@@ -2576,8 +2591,20 @@ third-party headless use; they no longer are, and the surface is offered again.
 Your messages sit in bubbles on the right; the agent's replies run down the left as formatted
 text — headings, lists, code blocks and inline `code` rendered rather than shown as raw
 markdown. A short instruction gets a small bubble; a long answer gets room to breathe. The
-column stops widening past a comfortable reading measure, so a wide window gives you margins
-rather than very long lines, and a rule marks where each new exchange begins.
+conversation is set a step larger than the rest of the window, with room between its lines and
+paragraphs, because it is read rather than scanned. The column stops widening past a comfortable
+reading measure, so a wide window gives you margins rather than very long lines, and a rule marks
+where each new exchange begins. The column is measured in the conversation's own text size, so
+**Settings ▸ Themes ▸ Fonts ▸ Text size** widens it along with the text.
+
+**Selecting text** works across the whole conversation, the way it does on a web page: drag from
+anywhere in one message into another and everything between is selected — headings, paragraphs,
+lists, code blocks and table cells, your messages and the agent's. Double-click selects a word,
+triple-click a paragraph or block, Shift-click extends the selection, and **Cmd+A** selects the
+whole conversation once you have clicked into it. **Cmd+C** copies the text as it reads: blank
+lines between paragraphs, table cells separated by tabs. Tool calls and other work rows are left
+out of what is copied. Holding a drag past the top or bottom edge scrolls, and a plain click lets
+the selection go — or follows the link under it.
 
 The reply box accepts images the same way as the new-session prompt: drop or paste one to see a
 removable thumbnail above your text. Click the thumbnail to open the media inspector; its
@@ -4105,6 +4132,11 @@ tunnel. Rows include process, severity, message, and the real `subsystem / categ
 existing filter, level chooser, folds and recorded-history tools work on physical-device logs too.
 Private unified-log values remain `<private>`.
 
+To read an app's own logs in full, as Xcode's console shows them, choose **‹App› — full app logs
+(restarts the app)** in the same source menu. It is listed for each app you build and install
+yourself. Threading relaunches the app the way Xcode's Run does, so every `os_log` and `Logger` line
+the app writes arrives readable, with its `subsystem / category`, instead of as `<private>`.
+
 To watch one app, select its exact name in **All processes** (for example, **Ananke**).
 This scopes new buffered and recorded rows to that process, including when other system services
 mention the app in their messages. Changing process starts a new live buffer. **Matches only** is
@@ -4122,8 +4154,12 @@ clearing the rows already on screen.
 Device Logs opens separate **Device Logs** and **Bluetooth** workspace tabs. Close Bluetooth
 if you do not need it; bringing Device Logs forward again does not reopen it. Device Logs keeps
 the system/app source selector; Bluetooth lists paired iPhones and their USB or Wi-Fi capture source.
+A running Bluetooth capture keeps recording while the tab is hidden — while you switch to another
+session or panel tab during a firmware update or a pairing, for example — and the packets that
+arrived meanwhile are there when you come back. It stops when you close the Bluetooth tab or the
+session. The system log, by contrast, stops while hidden.
 Dock the two tabs side by side to watch both streams. Switching or moving tabs keeps each reader,
-filter, scroll position and history; both readers stop when neither log tab is visible.
+filter, scroll position and history; the system log reader stops when neither log tab is visible.
 Bluetooth capture is created only when you first select its tab. Each tab has its own device
 selection, and Bluetooth initially follows the regular tab's phone when available.
 

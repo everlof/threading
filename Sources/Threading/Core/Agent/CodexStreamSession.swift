@@ -1166,6 +1166,9 @@ final class CodexStreamSession:
         switch decision {
         case .allow: allowed = true
         case .deny: allowed = false
+        // Never produced for an app-server approval, which is Codex itself asking
+        // (`PermissionRequest.Origin`); refusing cannot run something nobody approved.
+        case .deferToAgent: allowed = false
         }
 
         if method == "item/permissions/requestApproval" {

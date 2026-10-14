@@ -686,6 +686,13 @@ tool added in a future release prompts rather than slipping through unasked. Cla
 broker through its blocking `PreToolUse` hook; Codex app-server approval requests are answered
 over the same JSON-RPC connection.
 
+The hook and the runtime's own request are different questions, and `PermissionRequest.Origin`
+says which one arrived. A runtime's own request (app-server, ACP) has already applied its mode
+and wants a person, so it gets allow or deny. A hook call fires before the runtime's flow on every
+tool, so it can also be left to that flow — `deferToAgent`, an empty hook reply — when the process
+reports Auto or the runtime owns its approvals (Codex). That rule and its measurements live in
+[`sessions.md`](sessions.md).
+
 **Having nobody to ask is answered twice, at two different distances**, and the two rules live in
 different files because they are answerable in different processes:
 
@@ -1643,7 +1650,8 @@ same pattern.
 
 **The column cap is what makes it possible, and was worth doing anyway.** The conversation ran
 the full pane — 900pt of unbroken measure in a wide window, which `Design.Size.readableWidth`
-already exists to prevent and which the composer already respects. Capping it at 620 and
+already exists to prevent and which the composer already respects. Capping it (at 620 then;
+`Design.Chat.columnWidth` now, see [Reading typography](#reading-typography-and-the-column)) and
 centring it fixes the measure *and* leaves the gutter the rail lives in. Two problems, one
 change; the rail was blocked by a layout that was independently wrong.
 
@@ -1684,11 +1692,91 @@ stated width the way a split item holds it.
 
 **The reply box stands on the column too** (`ConversationDefaults.composerWidth`). It used to
 span the pane, which is how a single line of placeholder text came to be 1,400pt wide under a
-620pt conversation. It is the readable measure plus the box's own padding, so the line being
+620pt conversation. It is the column plus the box's own padding, so the line being
 typed lands on exactly the column the transcript is read on, and the status line above it is
 inset from the *box* rather than from the pane for the same reason. Below that width the box
 keeps the pane's inset and the row keeps the table's, which differ by a few points — a pane
 narrower than the reading measure has no column for the two to share.
+
+### Reading typography and the column
+
+The transcript was reported as "tiny" on a wide display, and measured against the agent apps it
+is used beside it was the smallest and densest of them: 13pt prose in AppKit's default ~1.2 line
+box, 6pt between paragraphs, 12pt code, all in a 620pt strip of a 1,700pt pane. The *measure* was
+never the problem — 620pt at 13pt holds about a hundred characters, the same as ChatGPT's and
+Claude's 768px column at 16px — so the fix is the type, with the column following it:
+
+| | Before | Now | Reference (2026-10-13, from shipped CSS/source) |
+|---|---|---|---|
+| Prose | 13pt, ~1.2 | `Chat.readingSize` 14pt, `readingLineHeight` 1.625 | Codex and t3code 14px/1.625; Claude, ChatGPT 16px/~1.65 |
+| Code | 12pt, 8pt padding | `readingCodeSize` 13pt, 1.45, `inset` padding | Codex, t3code 13px |
+| Paragraph gap | `small` (6) | `Chat.blockSpacing` = `inset` (12) | t3code 0.65rem, Codex 1em |
+| Above a heading | the ordinary gap | `Chat.headingLeading` = `large` (20) | — |
+| Column | 620pt | `columnMeasure` 52 reading ems = 728pt at default size | t3code 46rem@14px ≈ 52.6em; Claude/ChatGPT 48em; Codex ≈ 55em |
+
+- **Reading is its own role** (`Typography.reading`, `FontRole.reading`), not a larger `body` on
+  the `.conversation` surface. That surface also sets a scheduled message's one-line summary and
+  the rail's hover card inside chrome measured for 13pt; enlarging them pushed the scheduled row's
+  remove mark off the text it removes (`ComposerWindowFitTests`). The reply box uses `.reading`
+  when its surface is the conversation, so what is typed is set the way it will read.
+- **Leading goes between lines only** (`NSParagraphStyle.lineSpacing`, measured: AppKit adds none
+  after the last line), so a one-line row keeps its face's own height and the rhythm between rows
+  stays the rhythm's. `Chat.blockSpacing` has to stay larger than that inter-line spacing, or an
+  answer reads as one slab; `ConversationRhythmTests` holds it.
+- **Plain prose needs `ProseLabel`.** A user's bubble and the streaming reply are not Markdown,
+  and a label's recorded font role cannot state line spacing — while an attributed label is
+  exactly what the font sweep does not reach (assigning `font` leaves the runs' fonts alone).
+  `ProseLabel` owns its string and rebuilds the attributed value on the sweep, so a reply streams
+  in and settles into Markdown on the same line box.
+- **The column is counted in ems** (`Chat.columnWidth`), so it holds the same line at every text
+  size instead of shrinking in characters as the text grows. Everything that stood on the old
+  constant — the row host's cap, the reply box, the sticky step header, the rail's gutter — reads
+  it, and restates it in layout, because a text-size change moves it while the pane keeps its
+  width; the controller asks for that layout pass on `AppThemeDidChange`.
+- **Code still scrolls inside the column.** Only Codex lets content break out wider (to 56rem),
+  and only media and diagrams, not code; nobody surveyed widens code blocks. A wider column at a
+  larger size gives code about 88 columns before it scrolls.
+
+### Selecting text across rows
+
+Every paragraph, heading, list item, code block and table cell is its own label, and AppKit lets
+one label hold a selection at a time — the window has one field editor. A drag therefore stopped
+at the edge of the block it began in, and nothing spanning two blocks, let alone two messages,
+could be copied. Reported as "I can't select between sections in a native chat".
+
+`TranscriptTextSelection` owns the selection for the whole table instead:
+
+- **Who gets the press.** `ConversationVirtualRowHost.hitTest` answers a primary press on
+  transcript text with the host, which hands it to the selection; everything else keeps its
+  route — controls, a Control-click, and the scroll wheel over a code block (only
+  `.leftMouseDown` is redirected). Transcript text is opt-in by identifier
+  (`NSUserInterfaceItemIdentifier.transcriptText`, set by `MarkdownView`'s labels and code blocks
+  and by `ProseLabel`) plus the cells of a Markdown table; a label inside an `NSControl` never
+  counts, so a press on a tool row's or a card's own text stays with that control.
+- **Positions are item/segment/offset.** Segments are a row's text runs in reading order, found
+  by where they sit. A drag runs in an event-tracking loop with periodic autoscroll, so the
+  anchor's row may be recycled under it without losing the gesture. Double-click takes a word
+  (`NSAttributedString.doubleClick`), triple-click a block, Shift-click extends, ⌘A takes
+  everything, a click without a drag follows a link under it (through
+  `MarkdownExternalURLPolicy`) and otherwise lets go.
+- **The highlight is painted by the label.** The selected range gets
+  `ThemedTextSelection.attributes(over:)` — the same theme roles a text view's selection uses —
+  added to the label's own attributed string, and the original is given back on change. Only the
+  pointer-to-character mapping lays text out separately (TextKit 1, the cell's title-rect width,
+  two-point line-fragment padding: identical line breaks to `NSTextFieldCell` in 999 of 1,000
+  random paragraphs; one laid-out label is cached per drag).
+- **Bounded.** Highlighting touches visible rows only, and a row that joins the table inside the
+  range is painted in `tableView(_:didAdd:forRow:)`. Copying reads the views of rows that have
+  them and the model for whole rows that do not (`selectableText(ofItem:)`, through
+  `MarkdownPlainText`), so ⌘A then ⌘C costs the conversation's text once, on the explicit action,
+  and builds no views. The rows a range ends in are snapshotted while under the pointer, so a
+  partial end that scrolled away still copies the part that was chosen.
+- **What counts as said.** Tool calls, folds, dividers, cards and extension-rendered content hold
+  no transcript text: they are the record of the work, not the conversation, and copying across
+  them takes only the prose on either side.
+- **Item numbers are not identities.** A structural edit at or before the range's end (a fold
+  settling, an expansion, a replaced streaming row) lets the selection go rather than leave it
+  pointing at whatever moved into its numbers; an append past the end leaves it alone.
 
 `ConversationMinimap` holds the arithmetic, separately from the view, because the two rules
 worth protecting are invisible in a screenshot of a wide window:
@@ -1703,8 +1791,18 @@ worth protecting are invisible in a screenshot of a wide window:
 - **It belongs to the pane, not to the column** (`railLeading`). Anchored to the column's
   leading edge it looked right at 1000pt and wrong at 2000: the column is centred, so the rail
   drifted inward with it and ended up stranded mid-margin, attached to nothing the eye can
-  see. It rests at `Design.Spacing.pane` from the pane's own edge and gives that up only when
-  the gutter cannot hold both — clearance from the text is the one thing it never trades.
+  see. It rests at `Metrics.edgeInset` (`inset`, 12pt — t3code's 12, Codex's desktop 16) from
+  the pane's own edge and gives that up only when the gutter cannot hold both — clearance from
+  the text is the one thing it never trades.
+- **It is dense, quiet, and loud where you are.** It shipped with marks 20pt apart in tertiary
+  ink (secondary for turns on screen) hanging from a 40% hairline spine, 32pt into the margin,
+  and was reported as looking "really meagre": scattered ticks, a band of in-view marks one
+  barely visible step brighter than the rest, and a line competing with them. Read from the two
+  products' shipped source (2026-10-13): Codex packs 6×2pt marks 10pt apart with no spine and
+  lifts the on-screen band to 60% text over a 40% rest; t3code packs 8×2 marks 8pt apart and
+  lifts it to 90% over 35%. So `markerSpacing` is `medium` (10), the spine is gone, and turns on
+  screen are drawn in `Text.label` over a `Text.tertiary` rest — settling back as the pointer
+  opens the taper, as Codex's band does, so the mark being pointed at is the brightest one.
 
 That last one was found by *running the app*, not by the harness, which had only been asked
 for widths where the answer was not yet obviously wrong. The pane renders now include 1800pt

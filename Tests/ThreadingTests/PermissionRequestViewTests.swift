@@ -68,6 +68,7 @@ final class PermissionRequestViewTests: XCTestCase {
             switch decision {
             case .allow: decisions.append("allow")
             case .deny: decisions.append("deny")
+            case .deferToAgent: decisions.append("defer")
             }
         }
         let id = card.remoteRequest.id

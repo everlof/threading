@@ -388,7 +388,7 @@ final class SystemGrantForecastTests: XCTestCase {
 
     private func reason(of decision: PermissionDecision) -> String {
         switch decision {
-        case .allow(let text), .deny(let text): return text
+        case .allow(let text), .deny(let text), .deferToAgent(let text): return text
         }
     }
 }

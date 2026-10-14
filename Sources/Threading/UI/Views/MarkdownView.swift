@@ -15,12 +15,11 @@ enum MarkdownPresentation {
         }
     }
 
-    /// What a heading stands clear of the block before it, beyond the ordinary rhythm.
-    @MainActor var headingLeading: CGFloat? {
-        switch self {
-        case .conversation: nil
-        case .document: Design.Spacing.large
-        }
+    /// What a heading stands clear of the block before it, in place of the ordinary rhythm.
+    /// The same step in both: a document's heading levels differ in size, not in how firmly
+    /// each attaches to the section it names. See `Design.Chat.headingLeading`.
+    @MainActor var headingLeading: CGFloat {
+        Design.Chat.headingLeading
     }
 
     @MainActor func style(_ style: MarkdownStyle, headingLevel level: Int) -> MarkdownStyle {
@@ -122,12 +121,12 @@ final class MarkdownView: NSStackView {
 
                 var previous: NSView?
                 for source in pages[page] {
-                    let level = presentation == .document ? Markdown.headingLevel(ofSource: source) : nil
+                    let level = Markdown.headingLevel(ofSource: source)
                     let blockStyle = level.map { presentation.style(style, headingLevel: $0) } ?? style
                     for block in Markdown.parse(source, style: blockStyle) {
                         let view = Self.blockView(for: block, style: blockStyle)
-                        if level != nil, let previous, let leading = presentation.headingLeading {
-                            pageStack.setCustomSpacing(leading, after: previous)
+                        if level != nil, let previous {
+                            pageStack.setCustomSpacing(presentation.headingLeading, after: previous)
                         }
                         pageStack.addArrangedSubview(view)
                         NSLayoutConstraint.activate([
@@ -380,6 +379,7 @@ final class MarkdownView: NSStackView {
         let field = NSTextField(labelWithAttributedString: text)
         field.translatesAutoresizingMaskIntoConstraints = false
         field.isSelectable = true
+        field.identifier = .transcriptText
         field.lineBreakMode = .byWordWrapping
         field.maximumNumberOfLines = 0
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -442,7 +442,15 @@ final class MarkdownView: NSStackView {
         let field = NSTextField(labelWithString: code)
         field.font = style.codeFont
         field.textColor = style.codeColor
+        if let paragraphStyle = style.codeParagraphStyle {
+            field.attributedStringValue = NSAttributedString(string: code, attributes: [
+                .font: style.codeFont,
+                .foregroundColor: style.codeColor,
+                .paragraphStyle: paragraphStyle
+            ])
+        }
         field.isSelectable = true
+        field.identifier = .transcriptText
         field.maximumNumberOfLines = 0
         field.lineBreakMode = .byClipping
         field.translatesAutoresizingMaskIntoConstraints = false

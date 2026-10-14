@@ -1324,6 +1324,13 @@ differs is the *vocabulary* inside: the tool is `apply_patch` and its argument i
 `*** Begin Patch` envelope, which is the same mismatch `TranscriptReplay.normalised` and
 `CodexPatch` already exist to absorb.
 
+**Only the `deny` half is honoured.** 0.162.1 reports `permissionDecision: allow` and `ask` as
+unsupported, so a hook's allow grants nothing: Codex's sandbox, approval policy and reviewer still
+decide after it, and ask over app-server when they want a person. The broker therefore never asks
+a person from Codex's hook — it answers `deferToAgent`, an empty reply — and keeps the hook for
+Threading's own refusals (an automation run's allow-list, the macOS grant briefing). See
+"A card belongs where the runtime would have asked" in [`sessions.md`](sessions.md).
+
 `ToolIdentity` knows **both vocabularies**, which is what the type is for — a behaviour,
 independent of the provider spelling that introduced it. Codex's names were taken from 1008 real
 rollouts rather than from a list, which is the only reason the long tail was found:

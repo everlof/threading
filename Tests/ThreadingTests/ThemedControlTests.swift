@@ -7989,6 +7989,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "PanelListView",
                 "PromptCompletionPresenter",
                 "PromptView",
+                "ProseLabel",
                 "ProjectTextSearchPreviewViewController",
                 "RevealHighlightView",
                 "RunPlanDisclosureView",

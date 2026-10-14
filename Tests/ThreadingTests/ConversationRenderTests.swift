@@ -299,7 +299,7 @@ final class ConversationRenderTests: XCTestCase {
         turns: [ConversationTimeline.Turn],
         width: CGFloat
     ) -> NSView {
-        let stack = laidOut(rows, width: Design.Size.readableWidth)
+        let stack = laidOut(rows, width: Design.Chat.columnWidth)
         stack.removeFromSuperview()
         stack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -307,7 +307,7 @@ final class ConversationRenderTests: XCTestCase {
         minimap.translatesAutoresizingMaskIntoConstraints = false
         minimap.setTurns(turns)
         minimap.setAvailableWidth(
-            ConversationMinimap.railWidth(paneWidth: width, columnWidth: Design.Size.readableWidth),
+            ConversationMinimap.railWidth(paneWidth: width, columnWidth: Design.Chat.columnWidth),
             paneWidth: width
         )
         // The rail fades in rather than appearing, and a still image has no run loop to
@@ -321,19 +321,19 @@ final class ConversationRenderTests: XCTestCase {
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: host.topAnchor),
             stack.centerXAnchor.constraint(equalTo: host.centerXAnchor),
-            stack.widthAnchor.constraint(equalToConstant: min(width, Design.Size.readableWidth)),
+            stack.widthAnchor.constraint(equalToConstant: min(width, Design.Chat.columnWidth)),
 
             minimap.leadingAnchor.constraint(
                 equalTo: host.leadingAnchor,
                 constant: ConversationMinimap.railLeading(
-                    paneWidth: width, columnWidth: Design.Size.readableWidth
+                    paneWidth: width, columnWidth: Design.Chat.columnWidth
                 )
             ),
             minimap.topAnchor.constraint(equalTo: host.topAnchor),
             minimap.bottomAnchor.constraint(equalTo: host.bottomAnchor),
             minimap.widthAnchor.constraint(
                 equalToConstant: ConversationMinimap.railWidth(
-                    paneWidth: width, columnWidth: Design.Size.readableWidth
+                    paneWidth: width, columnWidth: Design.Chat.columnWidth
                 )
             )
         ])
@@ -365,7 +365,7 @@ final class ConversationRenderTests: XCTestCase {
         // stopped drawing entirely still passed — silently, having written nothing for anyone to
         // review. These renders exist to be looked at; producing none of them is the one outcome
         // that must fail rather than pass quietly.
-        for width in [Design.Size.readableWidth, 720, 1000, 1800] as [CGFloat] {
+        for width in [Design.Chat.columnWidth, 720, 1000, 1800] as [CGFloat] {
             let host = pane(rows: rows, turns: turns, width: width)
             let data = try XCTUnwrap(png(of: host), "the pane drew nothing at \(Int(width))pt")
             try data.write(to: directory.appendingPathComponent("pane-\(Int(width)).png"))
@@ -507,11 +507,11 @@ final class ConversationRenderTests: XCTestCase {
     /// sidebar in every window wider than the column — with the turn rail, placed for a centred
     /// column, sitting on the first character of every paragraph.
     func testTranscriptComposerAndRailStandOnOneCentredColumn() throws {
-        for width in [Design.Size.readableWidth, 720, 1000, 1418, 1800] as [CGFloat] {
+        for width in [Design.Chat.columnWidth, 720, 1000, 1418, 1800] as [CGFloat] {
             let (controller, _) = livePane(turns: 4, width: width)
             let pane = controller.view
             let expectedColumn = min(
-                Design.Size.readableWidth,
+                Design.Chat.columnWidth,
                 width - Design.Spacing.inset * 2
             )
 
@@ -578,10 +578,10 @@ final class ConversationRenderTests: XCTestCase {
             // Whatever else moves, the rail keeps its clearance from the words.
             let railTrailing = ConversationMinimap.railLeading(
                 paneWidth: width,
-                columnWidth: Design.Size.readableWidth
+                columnWidth: Design.Chat.columnWidth
             ) + ConversationMinimap.railWidth(
                 paneWidth: width,
-                columnWidth: Design.Size.readableWidth
+                columnWidth: Design.Chat.columnWidth
             )
             if let column = contentFrames.first {
                 XCTAssertLessThanOrEqual(
@@ -2472,7 +2472,7 @@ final class ConversationRenderTests: XCTestCase {
                 let host = NSView(frame: NSRect(
                     x: 0,
                     y: 0,
-                    width: Design.Size.readableWidth,
+                    width: Design.Chat.columnWidth,
                     height: 1
                 ))
                 host.appearance = appearance
@@ -2488,7 +2488,7 @@ final class ConversationRenderTests: XCTestCase {
                 host.layoutSubtreeIfNeeded()
 
                 XCTAssertGreaterThan(host.frame.height, 0)
-                XCTAssertLessThanOrEqual(divider.frame.maxX, Design.Size.readableWidth + 1)
+                XCTAssertLessThanOrEqual(divider.frame.maxX, Design.Chat.columnWidth + 1)
                 XCTAssertTrue(divider.accessibilityLabel()?.contains("Context handoff") == true)
                 payload = self.png(of: host)
             }
@@ -3763,7 +3763,7 @@ final class SubagentSummaryViewTests: XCTestCase {
             ]
         )
 
-        // The width a panel opens itself to — narrower than `Design.Size.readableWidth`, which
+        // The width a panel opens itself to — narrower than `Design.Chat.columnWidth`, which
         // is the case the row host has to survive.
         let paneWidth = DisplayPaneDefaults.defaultWidth
         let host = NSView(frame: NSRect(x: 0, y: 0, width: paneWidth, height: 720))
@@ -3812,7 +3812,7 @@ final class SubagentSummaryViewTests: XCTestCase {
             ]
         )
 
-        let paneWidth = Design.Size.readableWidth * 2
+        let paneWidth = Design.Chat.columnWidth * 2
         let host = NSView(frame: NSRect(x: 0, y: 0, width: paneWidth, height: 720))
         host.appearance = NSAppearance(named: .darkAqua)
 
@@ -3835,14 +3835,14 @@ final class SubagentSummaryViewTests: XCTestCase {
         let measures = contents.map { $0.alignmentRect(forFrame: $0.frame).width }
         for (content, measure) in zip(contents, measures) {
             XCTAssertLessThanOrEqual(
-                measure, Design.Size.readableWidth + 1,
+                measure, Design.Chat.columnWidth + 1,
                 "\(type(of: content)) ran to \(measure)pt of a \(paneWidth)pt pane"
             )
         }
         // The cap has to be reached, not merely respected: a row that stops short of it in a
         // wide pane is the same fault read from the other side.
         XCTAssertEqual(
-            measures.max() ?? 0, Design.Size.readableWidth, accuracy: 1,
+            measures.max() ?? 0, Design.Chat.columnWidth, accuracy: 1,
             "Prose no longer fills the readable column when the pane can hold it"
         )
     }

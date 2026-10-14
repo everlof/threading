@@ -16,8 +16,8 @@ final class ConversationRhythmTests: XCTestCase {
             "a bubble keeps its own step before the work that answers it"
         )
         XCTAssertEqual(Rhythm.gap(between: .work, and: .work), Design.Spacing.tight)
-        XCTAssertEqual(Rhythm.gap(between: .work, and: .answer), Design.Spacing.small)
-        XCTAssertEqual(Rhythm.gap(between: .answer, and: .work), Design.Spacing.small)
+        XCTAssertEqual(Rhythm.gap(between: .work, and: .answer), Design.Chat.blockSpacing)
+        XCTAssertEqual(Rhythm.gap(between: .answer, and: .work), Design.Chat.blockSpacing)
         XCTAssertEqual(Rhythm.gap(between: .answer, and: .boundary), Design.Chat.turnSpacing)
         XCTAssertEqual(Rhythm.gap(between: .boundary, and: .exchange), Design.Spacing.small)
         XCTAssertEqual(Rhythm.gap(between: .seam, and: .exchange), Design.Chat.turnSpacing)
@@ -30,6 +30,24 @@ final class ConversationRhythmTests: XCTestCase {
             MarkdownDefaults.blockSpacing,
             Design.Chat.blockSpacing,
             "a document's blocks and a split answer are spaced by one token"
+        )
+        XCTAssertEqual(
+            Rhythm.gap(between: .answer, and: .heading),
+            Design.Chat.headingLeading,
+            "a heading stands clear of the paragraph before it"
+        )
+        XCTAssertEqual(
+            Rhythm.gap(between: .heading, and: .answer),
+            Design.Chat.blockSpacing,
+            "and asks nothing extra of the section beneath it"
+        )
+        XCTAssertGreaterThan(
+            Design.Chat.blockSpacing,
+            Design.Chat.lineSpacing(
+                for: Design.Typography.reading(),
+                multiple: Design.Chat.readingLineHeight
+            ),
+            "paragraphs must stand further apart than the lines inside one"
         )
     }
 
@@ -124,10 +142,10 @@ final class ConversationRhythmTests: XCTestCase {
             Design.Chat.turnSpacing,    // heading → the bubble: the transcript opens under the seam
             Design.Spacing.medium,      // bubble → thinking: the bubble's own step, not the work's
             Design.Spacing.tight,       // thinking → the tool fold: work against work
-            Design.Spacing.small,       // fold → the answer's first block
+            Design.Chat.blockSpacing,   // fold → the answer's first block
             Design.Chat.blockSpacing,   // block → block of one answer
-            Design.Spacing.small,       // block → a lone tool call
-            Design.Spacing.small        // tool call → the final answer
+            Design.Chat.blockSpacing,   // block → a lone tool call
+            Design.Chat.blockSpacing    // tool call → the final answer
         ]
         XCTAssertEqual(
             (1..<transcript.items.count).map { transcript.gap(above: $0) },

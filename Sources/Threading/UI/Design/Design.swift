@@ -642,6 +642,13 @@ public enum Design {
         public static func emphasizedBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .semibold), surface: surface) }
         /// Strong body copy used only by legacy form section labels.
         public static func strongBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .bold), surface: surface) }
+        /// Prose that is *read* rather than scanned — a conversation's messages and the reply
+        /// being typed into it — at `Design.Chat.readingSize`.
+        ///
+        /// A role of its own rather than a larger `body` on the conversation surface: that
+        /// surface also sets one-line previews of a message (a scheduled message's summary, the
+        /// rail's hover card) inside chrome measured for 13pt, and those stay chrome-sized.
+        public static func reading(surface: FontSurface = .conversation) -> NSFont { prose(.systemFont(ofSize: scaled(Design.Chat.readingSize), weight: .regular), surface: surface) }
         /// The one-bit question mark drawn into a period requester's fixed-size indexed artwork.
         /// This is generated chrome rather than prose, so its source-matched face does not scale.
         public static func classicRequesterMark() -> NSFont {
@@ -795,6 +802,13 @@ public enum Design {
         /// Inline code that must share the body's line box.
         public static func inlineCode() -> NSFont {
             SystemFontFaces.monospaced(ofSize: scaled(12), weight: .regular)
+        }
+
+        /// Code in the conversation, inline and in blocks: one step under the reading size, the
+        /// way `inlineCode` sits one under the chrome's body, so a code span keeps sharing the
+        /// line box of the prose around it.
+        public static func readingCode() -> NSFont {
+            SystemFontFaces.monospaced(ofSize: scaled(Design.Chat.readingCodeSize), weight: .regular)
         }
 
         /// A code sample inside the compact theme-preview card.
@@ -1983,6 +1997,64 @@ public enum Design {
 
     /// The conversation surface: the user's turns as bubbles, the agent's as flowing text.
     public enum Chat {
+        /// The conversation's prose size, before the theme's and the user's text scale.
+        ///
+        /// One point over the chrome's 13, because the transcript is *read* — paragraphs at a
+        /// time — where the chrome around it is scanned. At 13 with AppKit's default line box the
+        /// conversation was reported as "tiny" on a wide display, and it was: set side by side
+        /// with the agent apps it is used beside, it was the smallest and the densest of them.
+        /// Codex and t3code set their transcripts at 14px; Claude and ChatGPT at 16px. The
+        /// reply box takes the same size (`FontRole.reading`), so the line being typed matches
+        /// the lines being read. See `Typography.reading`.
+        public static let readingSize: CGFloat = 14
+
+        /// Code in the conversation, one step under the prose — the step `inlineCode` keeps
+        /// under the chrome's body, and the one Codex and t3code keep (13 under 14).
+        public static let readingCodeSize: CGFloat = 13
+
+        /// Prose line height as a multiple of its point size: Codex's and t3code's 1.625.
+        ///
+        /// AppKit's default line box is about 1.2 — fine for a label, cramped for a paragraph.
+        /// The spacing goes *between* lines only (`NSParagraphStyle.lineSpacing`), so a one-line
+        /// row is exactly as tall as before and the rhythm between rows stays the rhythm's.
+        public static let readingLineHeight: CGFloat = 1.625
+
+        /// Code lines need less air than prose: a block is scanned down its left edge rather
+        /// than read across, and indentation, not leading, carries its structure.
+        public static let codeLineHeight: CGFloat = 1.45
+
+        /// How many reading-size ems the column is, so the measure is stated in *characters*
+        /// rather than points.
+        ///
+        /// A point width froze the measure at one text size: 620pt held about a hundred
+        /// characters at 13pt, but under a larger text size the same column held fewer and fewer
+        /// words while the window around it stayed empty. Stated in ems it holds the same line
+        /// at every size. 52 is t3code's lane at its own text size (46rem at 14px); Claude and
+        /// ChatGPT sit at 48, Codex at 55. Wider still would trade the rail's gutter for lines
+        /// past what an eye returns from comfortably.
+        public static let columnMeasure: CGFloat = 52
+
+        /// The conversation's column: `columnMeasure` ems at the reading size as resolved now —
+        /// 728pt at the default text size. A ceiling, never a request; see
+        /// `ConversationVirtualRowHost`. Computed, because the text size it follows can change
+        /// while the pane is open.
+        @MainActor public static var columnWidth: CGFloat {
+            (readingSize * Typography.scale * columnMeasure).rounded()
+        }
+
+        /// The extra space between two lines of `font` that brings its line box to `multiple`
+        /// of its point size. Never negative: a face whose own line box is already that tall
+        /// keeps it.
+        public static func lineSpacing(for font: NSFont, multiple: CGFloat) -> CGFloat {
+            let natural = (font.ascender - font.descender + font.leading).rounded(.up)
+            return max(0, (font.pointSize * multiple).rounded() - natural)
+        }
+
+        /// What a heading stands clear of the block before it. Spacing above a heading and not
+        /// below it is what attaches it to the section it names; with the ordinary block gap on
+        /// both sides it floated halfway between two paragraphs.
+        public static let headingLeading: CGFloat = Design.Spacing.large
+
         /// A user bubble never spans the pane — a short reply in a full-width box reads as
         /// shouting, and a wide box makes the eye travel for nothing.
         public static let bubbleMaxWidthFraction: CGFloat = 0.78
@@ -1997,7 +2069,11 @@ public enum Design {
 
         /// Between the blocks of one document, and between an answer and whatever stands beside
         /// it: one value, so an answer split into rows reads exactly like one document.
-        public static let blockSpacing: CGFloat = Design.Spacing.small
+        ///
+        /// `inset`, not `small`: once lines stand `readingLineHeight` apart, a six-point gap
+        /// between paragraphs was *less* than the gap between two lines of one paragraph, and an
+        /// answer read as one undivided slab.
+        public static let blockSpacing: CGFloat = Design.Spacing.inset
 
         /// A row's vertical rhythm: what it asks for above and below itself.
         ///
@@ -2039,6 +2115,14 @@ public enum Design {
             public static let answer = Rhythm(
                 above: Design.Chat.blockSpacing,
                 below: Design.Chat.blockSpacing
+            )
+
+            /// A heading inside an answer split into rows: `headingLeading` clear of what precedes
+            /// it — the same step an unsplit answer keeps — and asking nothing extra below, so the
+            /// section it names stands at the ordinary block gap beneath it.
+            public static let heading = Rhythm(
+                above: Design.Chat.headingLeading,
+                below: Design.Spacing.small
             )
 
             /// Thinking, a tool call, a run of them behind one disclosure: tight, so the work

@@ -247,7 +247,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             outcome: TurnOutcome
         )
         case retained(NSView)
-        case streaming(NSTextField)
+        case streaming(ProseLabel)
     }
 
     typealias PresentationID = ConversationTranscriptTable<ConversationViewController>.ItemID
@@ -298,6 +298,11 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         constraint.priority = ConversationDefaults.statedColumnPriority
         return constraint
     }()
+    /// The reply box's ceiling. Restated with the width, because the column it caps at is
+    /// measured in the reading size and moves when the text size does.
+    private lazy var composerColumnCap = promptContentContainer.widthAnchor.constraint(
+        lessThanOrEqualToConstant: ConversationDefaults.composerWidth
+    )
     private lazy var minimapLeading = minimap.leadingAnchor.constraint(equalTo: view.leadingAnchor)
 
     /// The transcript normally starts at the pane's content edge. While a limit refusal stands,
@@ -565,7 +570,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     ///
     /// Streaming text has no identity of its own: it is replaced wholesale once the finished
     /// message lands, which is the authoritative copy. The text itself lives on the timeline.
-    var streamingLabel: NSTextField?
+    var streamingLabel: ProseLabel?
 
     /// Words for the status line while a turn is in flight, one drawn per turn. Per session, so
     /// two conversations working at once are unlikely to be saying the same thing.
@@ -716,6 +721,12 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         appEvents.observe(CurfewSettingsDidChange.self) { [weak self] _ in
             self?.refreshLimitEscapeStrip()
             self?.refreshCurfewChip()
+        }
+        // The column is measured in the reading size, so a text-size change moves it while the
+        // pane keeps its width — and `viewDidLayout`, which states the column to the rows, the
+        // reply box and the rail, only runs when a pass is asked for.
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            self?.view.needsLayout = true
         }
         refreshLimitEscapeStrip()
     }
@@ -1492,9 +1503,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             // own width — see `ConversationDefaults.statedColumnPriority` for the two ways
             // that constraint fails, one of them by resizing the pane.
             promptContentContainer.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            promptContentContainer.widthAnchor.constraint(
-                lessThanOrEqualToConstant: ConversationDefaults.composerWidth
-            ),
+            composerColumnCap,
             composerColumnWidth,
             promptContentContainer.leadingAnchor.constraint(
                 greaterThanOrEqualTo: view.leadingAnchor,
@@ -1824,10 +1833,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// layout has already made satisfiable, so the box follows the pane and can never resize
     /// it — see `ConversationDefaults.statedColumnPriority`.
     private func updateComposerColumnWidth() {
-        let width = min(
-            ConversationDefaults.composerWidth,
-            view.bounds.width - Design.Spacing.inset * 2
-        )
+        let cap = ConversationDefaults.composerWidth
+        if abs(composerColumnCap.constant - cap) > 0.5 { composerColumnCap.constant = cap }
+        let width = min(cap, view.bounds.width - Design.Spacing.inset * 2)
         guard width > 0, abs(composerColumnWidth.constant - width) > 0.5 else { return }
         composerColumnWidth.constant = width
     }
@@ -1836,11 +1844,11 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     private func updateMinimapWidth() {
         let width = ConversationMinimap.railWidth(
             paneWidth: view.bounds.width,
-            columnWidth: Design.Size.readableWidth
+            columnWidth: Design.Chat.columnWidth
         )
         let leading = ConversationMinimap.railLeading(
             paneWidth: view.bounds.width,
-            columnWidth: Design.Size.readableWidth
+            columnWidth: Design.Chat.columnWidth
         )
 
         if minimapWidth.constant != width { minimapWidth.constant = width }

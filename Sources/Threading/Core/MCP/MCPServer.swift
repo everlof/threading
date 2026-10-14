@@ -589,8 +589,11 @@ final class MCPServer: @unchecked Sendable {
         token: String,
         respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
+        // An empty body is a deferral (`PermissionDecision.hookResponse`): curl prints nothing,
+        // the hook exits 0 and the runtime's own permission flow decides.
         @Sendable func reply(_ decision: PermissionDecision) {
-            let data = (try? JSONSerialization.data(withJSONObject: decision.hookResponse)) ?? Data()
+            let data = decision.hookResponse
+                .flatMap { try? JSONSerialization.data(withJSONObject: $0) } ?? Data()
             respond(.json(data))
         }
 
@@ -620,7 +623,8 @@ final class MCPServer: @unchecked Sendable {
         let permissionRequest = PermissionRequest(
             sessionID: sessionID,
             toolName: toolName,
-            input: input
+            input: input,
+            origin: .toolHook(reportedMode: hook["permission_mode"] as? String)
         )
 
         DispatchQueue.main.async {

@@ -48,7 +48,7 @@ final class UnattendedRunPermissionsTests: XCTestCase {
 
     private func reason(_ decision: PermissionDecision) -> String {
         switch decision {
-        case .allow(let reason), .deny(let reason): reason
+        case .allow(let reason), .deny(let reason), .deferToAgent(let reason): reason
         }
     }
 

@@ -9,7 +9,7 @@ import AppKit
 /// page: every mark is one exchange, hovering one says what was asked and what came of it, and
 /// clicking jumps to it.
 ///
-/// It lives in the gutter left by capping the column at `Design.Size.readableWidth`, and
+/// It lives in the gutter left by capping the column at `Design.Chat.columnWidth`, and
 /// `ConversationMinimap.railWidth` returns zero when a pane is too narrow to spare one — at
 /// which point this view hides rather than drawing over the text. That rule is the difference
 /// between a control that helps in a wide window and one that ruins a narrow one.
@@ -18,12 +18,9 @@ final class ConversationMinimapView: NSView {
     // MARK: - Metrics
 
     /// Drawing-only constants. The geometry that decides *where* anything goes lives in
-    /// `ConversationMinimap`, where it can be tested without a window; these are the two
-    /// numbers that only mean anything once something is being painted.
+    /// `ConversationMinimap`, where it can be tested without a window; this is the number that
+    /// only means anything once something is being painted.
     private enum Metrics {
-
-        /// How much of the spine's length each end spends fading out.
-        static let spineFadeFraction: CGFloat = 0.12
 
         /// How far the pointer must travel before the taper is redrawn.
         ///
@@ -166,7 +163,7 @@ final class ConversationMinimapView: NSView {
     func setAvailableWidth(_ width: CGFloat, paneWidth: CGFloat) {
         isPersistent = ConversationMinimap.isPersistent(
             paneWidth: paneWidth,
-            columnWidth: Design.Size.readableWidth
+            columnWidth: Design.Chat.columnWidth
         )
         updateVisibility()
     }
@@ -230,23 +227,9 @@ final class ConversationMinimapView: NSView {
         let top = railTop
         let height = railHeight
 
-        // The hairline the marks hang off, so the rail reads as one object when every mark is
-        // at its resting width.
-        //
-        // Faded at both ends rather than cut. A hairline that simply stops states a boundary
-        // the rail does not have — the conversation continues past the first and last mark, and
-        // a hard terminus reads as the end of the list rather than the end of the index.
-        let spine = NSRect(
-            x: 0, y: top - Design.Spacing.tight,
-            width: 1, height: height + Design.Spacing.small
-        )
-        let ink = Design.Surface.border.withAlphaComponent(0.4)
-        NSGradient(colorsAndLocations:
-            (ink.withAlphaComponent(0), 0),
-            (ink, Metrics.spineFadeFraction),
-            (ink, 1 - Metrics.spineFadeFraction),
-            (ink.withAlphaComponent(0), 1)
-        )?.draw(in: spine, angle: -90)
+        // No spine. One used to run behind the marks so that, spaced 20pt apart, they still read
+        // as one object; packed at `markerSpacing` the marks are that object themselves, and a
+        // line behind them only competed with them — Codex draws none, t3code one at 15%.
 
         let marks = markCount
         // Which marks have a turn on screen behind them. In the bucketed regime one mark can
@@ -277,9 +260,17 @@ final class ConversationMinimapView: NSView {
 
             // The mark's own state sets the tone it rests at; the taper lifts it from there
             // towards the foreground, on the same curve as the width.
+            //
+            // What is on screen stands in full ink against a quiet rest, so the band of marks
+            // behind the viewport says "you are here" from across the window. Secondary over
+            // tertiary was a step too small to see: t3code lifts the band to 90% foreground over
+            // a 35% rest, Codex to 60% text over a 40% one. While the pointer is on the rail the
+            // band settles back as the taper opens, as Codex's does, so the one mark being
+            // pointed at is the brightest thing there rather than one of several.
+            let restingInk = Design.Text.tertiary
             let base = visibleMarks.contains(index)
-                ? Design.Text.secondary
-                : Design.Text.tertiary
+                ? Design.Text.label.blended(withFraction: reach, of: restingInk) ?? restingInk
+                : restingInk
             let colour = base.blended(withFraction: emphasis, of: Design.Text.label) ?? base
             colour.setFill()
 

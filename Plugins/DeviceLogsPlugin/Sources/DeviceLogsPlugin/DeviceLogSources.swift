@@ -870,6 +870,10 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
 ///
 /// Its one real constraint is that `devicectl` must *launch* the app, so output starts at that
 /// launch. For watching a build you just made, which is the case, that is what Xcode does too.
+///
+/// The launch also sets `OS_ACTIVITY_DT_MODE`, as Xcode's Run does: the app's own `os_log` and
+/// `Logger` lines are then copied to `stderr` in full, so the values the unified log shows as
+/// `<private>` arrive here readable, with their subsystem and category.
 public final class DeviceConsoleLogSource: BufferedDeviceLogSource {
     private let reader = DeviceLogLineReader(label: "console")
     private let deviceID: String
@@ -900,7 +904,8 @@ public final class DeviceConsoleLogSource: BufferedDeviceLogSource {
             executable: "/usr/bin/xcrun",
             arguments: [
                 "devicectl", "device", "process", "launch", "--device", deviceID,
-                "--console", "--terminate-existing", bundleID,
+                "--console", "--terminate-existing",
+                "--environment-variables", Self.environment, bundleID,
             ],
             onLine: { [weak self] line in
                 guard let self, let row = self.decode(line) else { return }
@@ -912,19 +917,41 @@ public final class DeviceConsoleLogSource: BufferedDeviceLogSource {
 
     public override func stop() { reader.stop() }
 
-    /// Raw console output carries no timestamp, level or subsystem of its own, so the row is
-    /// stamped on arrival and attributed to the app. A line the app prefixed itself is left alone.
-    private func decode(_ line: ArraySlice<UInt8>) -> DeviceLogRow? {
+    /// What Xcode's Run sets so `os_log` is mirrored, unredacted, to the app's `stderr`.
+    static let environment = #"{"OS_ACTIVITY_DT_MODE": "enable"}"#
+
+    /// A mirrored `os_log` line: `2026-10-14 08:14:00.656123+0200 Ananke[423:9a1f] [sub:cat] text`.
+    /// The tag is absent for a logger without a subsystem.
+    private static let mirrored = try! NSRegularExpression(
+        pattern: #"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}\.\d{3})\d*[+-]\d{4} [^\[\s]+\[\d+:[0-9a-fx]+\] (?:\[([^\]]+)\] )?(.*)$"#
+    )
+
+    /// Plain console output carries no timestamp, level or subsystem of its own, so the row is
+    /// stamped on arrival and attributed to the app. A mirrored `os_log` line keeps its own time
+    /// and `subsystem:category`, so it filters like the same line in the system log.
+    func decode(_ line: ArraySlice<UInt8>) -> DeviceLogRow? {
         guard let text = String(bytes: line, encoding: .utf8) else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         guard !Self.preamble.contains(where: { trimmed.contains($0) }) else { return nil }
+        var time = Self.clock.string(from: Date())
+        var subsystem: String?
+        var message = trimmed
+        let whole = NSRange(trimmed.startIndex..., in: trimmed)
+        if let match = Self.mirrored.firstMatch(in: trimmed, range: whole) {
+            func group(_ index: Int) -> String? {
+                Range(match.range(at: index), in: trimmed).map { String(trimmed[$0]) }
+            }
+            time = group(1) ?? time
+            subsystem = group(2).map { $0.replacingOccurrences(of: ":", with: " / ") }
+            message = group(3) ?? trimmed
+        }
         return DeviceLogRow(
-            time: Self.clock.string(from: Date()),
-            level: trimmed.contains("[ERROR]") || trimmed.contains("error:") ? "Error" : "Default",
+            time: time,
+            level: message.contains("[ERROR]") || message.contains("error:") ? "Error" : "Default",
             process: appName,
-            subsystem: nil,
-            message: trimmed
+            subsystem: subsystem,
+            message: message
         )
     }
 }
@@ -1516,7 +1543,9 @@ public enum DeviceLogSourceCatalog {
                 for app in developerApps(deviceID: device.udid) {
                     options.append(DeviceLogSourceOption(
                         machine: machine,
-                        title: app.name,
+                        // Says what choosing it does: the app is restarted, and its own logs
+                        // arrive whole, which the system log above cannot offer.
+                        title: L10n.format("%@ — full app logs (restarts the app)", app.name),
                         kind: .app(
                             deviceID: device.udid,
                             bundleID: app.bundleID,

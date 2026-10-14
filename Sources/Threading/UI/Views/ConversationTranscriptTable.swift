@@ -143,6 +143,9 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
 
     weak var surface: Surface?
 
+    /// Text chosen across rows — see `TranscriptTextSelection`.
+    private(set) lazy var textSelection = TranscriptTextSelection(tableView: tableView, source: self)
+
     /// Complete ordering without a complete view tree. Timeline rows carry only their stable
     /// integer identity; expensive Markdown/tool views are constructed when the table requests
     /// a viewport row and released when that host is reused.
@@ -234,6 +237,9 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         table.addTableColumn(column)
         table.headerView = nil
         table.selectionHighlightStyle = .none
+        // The table takes the keyboard only to hold a text selection for ⌘C; the selection's
+        // own highlight is the mark of that, and a ring around the whole conversation is not.
+        table.focusRingType = .none
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.intercellSpacing = .zero
         table.rowHeight = ConversationDefaults.estimatedRowHeight
@@ -254,6 +260,9 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         super.init()
         table.delegate = self
         table.dataSource = self
+        // Installs the table's copy, select-all and press hooks now rather than at the first
+        // press, which would leave ⌘A answered by AppKit's row selection until then.
+        _ = textSelection
     }
 
     // MARK: - Lifecycle
@@ -273,7 +282,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
     func layoutColumn() {
         let column = ConversationVirtualRowHost.stateColumnWidth(in: tableView)
         let width = min(
-            Design.Size.readableWidth,
+            Design.Chat.columnWidth,
             max(0, column - Design.Spacing.inset * 2)
         )
         guard width > 0 else { return }
@@ -297,6 +306,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
     /// Replaces the whole ordering and reloads once. The materialized working set is dropped;
     /// AppKit asks again for the handful of rows that are actually visible.
     func replaceItems(_ newItems: [Item]) {
+        textSelection.clear()
         items = newItems
         activeToolGroupIndices.removeAll(keepingCapacity: true)
         reload()
@@ -320,6 +330,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         guard !newItems.isEmpty else { return }
         let position = min(max(0, position), items.count)
         let appendsAtTail = position == items.count
+        if !appendsAtTail { textSelection.itemsChanged(from: position) }
         items.insert(contentsOf: newItems, at: position)
         if arriving, notifies {
             for item in newItems { recordArrival(of: item.id) }
@@ -352,6 +363,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
 
     func remove(at positions: IndexSet) {
         guard !positions.isEmpty, let first = positions.first else { return }
+        textSelection.itemsChanged(from: first)
         var removedLeadingIndices: [Int] = []
         for position in positions.reversed() where items.indices.contains(position) {
             let item = items[position]
@@ -419,6 +431,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
 
     private func replaceItem(at position: Int, with item: Item) {
         guard items.indices.contains(position) else { return }
+        textSelection.itemsChanged(from: position)
         forget(items[position])
         items[position] = item
         guard notifies, position < tableView.numberOfRows else { return }
@@ -556,6 +569,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
     /// once. Live rows and rebuilt rows therefore take the same shape, because they are built by
     /// the same append.
     func rebuild(prefix: [Item] = []) {
+        textSelection.clear()
         isRebuilding = true
         items = prefix
         activeToolGroupIndices.removeAll(keepingCapacity: true)
@@ -719,6 +733,17 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         false
     }
 
+    /// A row arriving inside the selection — scrolled to, or reached by a drag's autoscroll — is
+    /// painted as it joins the table. Here rather than at `viewFor`, because the highlight is
+    /// placed by where each run of text sits, and a host has no place until its row does.
+    func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
+        guard textSelection.range != nil else { return }
+        rowView.layoutSubtreeIfNeeded()
+        for case let host as ConversationVirtualRowHost in rowView.subviews {
+            textSelection.decorate(host, item: row)
+        }
+    }
+
     func tableView(
         _ tableView: NSTableView,
         viewFor tableColumn: NSTableColumn?,
@@ -737,6 +762,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
             owner: self
         ) as? ConversationVirtualRowHost ?? ConversationVirtualRowHost()
         host.identifier = identifier
+        host.textSelection = textSelection
         host.setColumnWidth(ConversationVirtualRowHost.columnWidth(of: tableView))
 #if DEBUG
         let hostEnded = DispatchTime.now().uptimeNanoseconds
@@ -834,7 +860,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
             return MarkdownView(markdown: source)
         }
         let availableWidth = min(
-            Design.Size.readableWidth,
+            Design.Chat.columnWidth,
             max(
                 1,
                 ConversationVirtualRowHost.columnWidth(of: tableView) - Design.Spacing.inset * 2
@@ -954,8 +980,8 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
                 return .chrome
             }
             return ConversationRowView.rhythm(for: rows[index])
-        case .markdown:
-            return .answer
+        case .markdown(_, _, let source):
+            return Markdown.headingLevel(ofSource: source) == nil ? .answer : .heading
         case .divider:
             return .boundary
         case .toolFold:
@@ -975,6 +1001,39 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
     }
 }
 
+// MARK: - TranscriptTextSource
+
+extension ConversationTranscriptTable: TranscriptTextSource {
+    var selectableItemCount: Int { items.count }
+
+    func materializedHost(ofItem item: Int) -> NSView? {
+        guard items.indices.contains(item), item < tableView.numberOfRows else { return nil }
+        return tableView.view(atColumn: 0, row: item, makeIfNecessary: false)
+            as? ConversationVirtualRowHost
+    }
+
+    /// An item's prose as the model holds it — what a selection copies for a row it covers that
+    /// has no views. Tool calls, folds, dividers and a surface's own furniture hold none: they
+    /// are the record of the work, not what was said, and their labels are not transcript text.
+    func selectableText(ofItem item: Int) -> String? {
+        guard items.indices.contains(item) else { return nil }
+        switch items[item].content {
+        case .timeline(let index):
+            guard let rows = surface?.transcriptRows, rows.indices.contains(index) else { return nil }
+            switch rows[index] {
+            case .userMessage(let message): return message.text
+            case .assistant(let markdown): return MarkdownPlainText.text(of: markdown, style: markdownStyle)
+            case .thinking(let text): return MarkdownPlainText.text(of: text, style: markdownStyle)
+            case .toolCall, .turnOutcome, .notice: return nil
+            }
+        case .markdown(_, _, let source):
+            return MarkdownPlainText.text(of: source, style: markdownStyle)
+        case .divider, .toolFold, .surface:
+            return nil
+        }
+    }
+}
+
 // MARK: - Row Host
 
 /// Reusable shell around a conversation row. The host, not the content, is what AppKit recycles;
@@ -982,6 +1041,34 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
 /// automatic height ownership for the presentation table.
 final class ConversationVirtualRowHost: NSTableCellView {
     private var releaseContent: (() -> Void)?
+    /// The installed content's ceiling, `Design.Chat.columnWidth`.
+    private weak var measureCap: NSLayoutConstraint?
+
+    /// The transcript's own text selection, which a press on this row's prose belongs to.
+    weak var textSelection: TranscriptTextSelection?
+
+    /// A primary press on transcript text is answered by the host rather than by the label under
+    /// it, because the selection it starts may run on into other rows — which a label, owning
+    /// only itself and lent the window's one field editor, cannot follow. Everything else keeps
+    /// its own route: controls, links' neighbours, the scroll wheel over a code block, and a
+    /// Control-click, which is a secondary click.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        guard let hit, textSelection != nil,
+              let event = NSApp.currentEvent,
+              event.type == .leftMouseDown,
+              !event.modifierFlags.contains(.control),
+              TranscriptTextSegments.isText(hit, within: self) else { return hit }
+        return self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let textSelection else {
+            super.mouseDown(with: event)
+            return
+        }
+        textSelection.track(mouseDown: event)
+    }
 
     /// The width of the column this cell sits in, which has to be *stated* — see
     /// `setColumnWidth`. Held on the cell rather than the content so it survives recycling.
@@ -1000,17 +1087,22 @@ final class ConversationVirtualRowHost: NSTableCellView {
     /// **A cell is not given its column's width.** Under `usesAutomaticRowHeights` the table
     /// solves the cell from the constraints inside it, and a width nothing determines settles on
     /// the smallest that satisfies them. So a row capped at the readable measure came out
-    /// `readableWidth` plus its insets — 644pt — sitting at the column's leading edge, and the
-    /// `centerXAnchor` below centred the content inside *that* rather than in the pane. The
-    /// column the whole pane is designed around was therefore flush left in every window wider
-    /// than 644, which is most of them: prose and bubbles hugged the sidebar with several
-    /// hundred points of empty pane beside them, and the turn rail — placed for a column that
-    /// is *centred* — landed on the first character of every paragraph.
+    /// exactly the measure plus its insets — 644pt, at the time — sitting at the column's
+    /// leading edge, and the `centerXAnchor` below centred the content inside *that* rather
+    /// than in the pane. The column the whole pane is designed around was therefore flush left
+    /// in every window wider than 644, which is most of them: prose and bubbles hugged the
+    /// sidebar with several hundred points of empty pane beside them, and the turn rail —
+    /// placed for a column that is *centred* — landed on the first character of every paragraph.
     ///
     /// Stating the width is what makes `centerXAnchor` mean the pane's centre. It also closes
     /// the older fault the other way round: with the cell pinned to its column it can no longer
     /// grow past the clip in a pane narrower than the column.
     func setColumnWidth(_ width: CGFloat) {
+        // The measure is restated beside the column: it is counted in the reading size, so a
+        // text-size change moves it under a cell that was never recycled.
+        if let measureCap, abs(measureCap.constant - Design.Chat.columnWidth) > 0.5 {
+            measureCap.constant = Design.Chat.columnWidth
+        }
         guard width > 0 else {
             columnWidth.isActive = false
             return
@@ -1076,6 +1168,10 @@ final class ConversationVirtualRowHost: NSTableCellView {
             constant: -sideInset * 2
         )
         paneWidth.priority = .defaultHigh
+        let measureCap = content.widthAnchor.constraint(
+            lessThanOrEqualToConstant: Design.Chat.columnWidth
+        )
+        self.measureCap = measureCap
 
         NSLayoutConstraint.activate([
             content.topAnchor.constraint(equalTo: topAnchor, constant: topInset),
@@ -1083,7 +1179,7 @@ final class ConversationVirtualRowHost: NSTableCellView {
             content.centerXAnchor.constraint(equalTo: centerXAnchor),
             content.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: sideInset),
             content.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -sideInset),
-            content.widthAnchor.constraint(lessThanOrEqualToConstant: Design.Size.readableWidth),
+            measureCap,
             paneWidth
         ])
     }

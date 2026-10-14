@@ -12,12 +12,8 @@ final class UserMessageBubbleView: NSView {
 
     private let text: String
 
-    private lazy var label: NSTextField = {
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.applyFont(.body, in: .conversation)
-        label.textColor = Design.Text.label
-        label.isSelectable = true
-        label.translatesAutoresizingMaskIntoConstraints = false
+    private lazy var label: ProseLabel = {
+        let label = ProseLabel(text: text)
         label.maximumNumberOfLines = ConversationDefaults.longMessageLineCap
         label.wantsLayer = true
         return label

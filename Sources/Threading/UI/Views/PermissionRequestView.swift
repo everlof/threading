@@ -253,7 +253,7 @@ final class PermissionRequestView: NSView {
         resolvedLabel.isHidden = false
         resolvedLabel.stringValue = note
         switch decision {
-        case .allow:
+        case .allow, .deferToAgent:
             resolvedLabel.textColor = Design.Text.secondary
         case .deny:
             resolvedLabel.textColor = Design.Status.negative

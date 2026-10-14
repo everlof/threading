@@ -38,7 +38,7 @@ final class DeviceLogWorkspaceTests: XCTestCase {
         return workspace
     }
 
-    func testTabSwitchKeepsBothReadersAndHidingWorkspaceStopsBoth() async throws {
+    func testTabSwitchKeepsBothReadersAndHidingWorkspaceKeepsOnlyBluetoothRecording() async throws {
         let regular = Reader(), bluetooth = Reader()
         let workspace = workspace(regular: regular, bluetooth: bluetooth)
         defer { workspace.setPresented(false) }
@@ -80,14 +80,24 @@ final class DeviceLogWorkspaceTests: XCTestCase {
         XCTAssertEqual(bluetooth.stops, 0)
 
         workspace.setPresented(false)
-        XCTAssertEqual(regular.stops, 1)
-        XCTAssertEqual(bluetooth.stops, 1)
+        XCTAssertEqual(regular.stops, 1, "a hidden system log must not keep its firehose alive")
+        XCTAssertEqual(bluetooth.stops, 0, "a Bluetooth capture is a recording and survives hiding")
         XCTAssertFalse(logs.isVisibleForCapture)
-        XCTAssertFalse(packets.isVisibleForCapture)
+        XCTAssertTrue(packets.recordsWhileHidden)
+
+        // What happens while nobody looks — a firmware update, a pairing — is still recorded.
+        bluetooth.enqueue([row("packet while hidden")])
+        let drawnWhileHidden = packets.presentationUpdateCount
+        packets.drain()
+        XCTAssertEqual(packets.presentationUpdateCount, drawnWhileHidden, "hidden means not drawn")
+        let recordedWhileHidden = try await count(packets.recorder)
+        XCTAssertEqual(recordedWhileHidden, 2)
+
         workspace.setPresented(true)
         XCTAssertEqual(regular.starts, 2)
-        XCTAssertEqual(bluetooth.starts, 2)
+        XCTAssertEqual(bluetooth.starts, 1, "the recording was never interrupted, so nothing restarts")
         XCTAssertEqual(logs.focusSummary.total, 2, "reappearing keeps both rings")
+        XCTAssertEqual(packets.focusSummary.total, 2, "the packets that arrived while hidden are on screen")
     }
 
     func testDockedStreamsAreVisibleTogetherAndShareReaderLifetime() async throws {
@@ -119,7 +129,7 @@ final class DeviceLogWorkspaceTests: XCTestCase {
         workspace.setSectionPresented(.regular, presented: false)
         workspace.setSectionPresented(.bluetooth, presented: false)
         XCTAssertEqual(regular.stops, 1)
-        XCTAssertEqual(bluetooth.stops, 1)
+        XCTAssertEqual(bluetooth.stops, 0, "a Bluetooth recording outlives its hidden section")
         XCTAssertEqual(logs.focusSummary.total, 1)
         XCTAssertEqual(packets.focusSummary.total, 1)
     }

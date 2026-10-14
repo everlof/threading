@@ -360,7 +360,9 @@ final class MCPSessionRegistryTests: XCTestCase {
       "a deny with no reason is as mute as no answer at all"
     )
 
-    let expected = PermissionDecision.deny(reason: MCPDefaults.hookDenyReason).hookResponse
+    let expected = try XCTUnwrap(
+      PermissionDecision.deny(reason: MCPDefaults.hookDenyReason).hookResponse
+    )
     XCTAssertEqual(
       answer as NSDictionary,
       expected as NSDictionary,

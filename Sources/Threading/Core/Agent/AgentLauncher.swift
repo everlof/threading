@@ -396,13 +396,17 @@ enum AgentLauncher {
         in project: Project
     ) -> AgentLaunchPlan {
         var command = ShellCommand(word: AgentDefaults.grokExecutable)
-        command.append(word: "agent")
-        appendModelFlag(for: session, flag: AgentDefaults.grokModelFlag, to: &command)
         // The same flag the terminal launch states, for the same reason. Without it, choosing
         // Plan or Bypass Permissions on a natively rendered Grok session recorded the choice
         // and redrew the chip while the process ran under whatever `grok` defaults to. The ACP
         // handshake carries no mode either, so the launch line is the only place to say it.
+        //
+        // Before `agent`, because that is the only place it parses: grok 1.0.30 refuses
+        // `grok agent --permission-mode auto stdio` with "unexpected argument" and exits before
+        // the handshake, while `grok --permission-mode <mode> agent stdio` validates the value.
         appendPermissionMode(for: session, to: &command)
+        command.append(word: "agent")
+        appendModelFlag(for: session, flag: AgentDefaults.grokModelFlag, to: &command)
         command.append(word: "stdio")
 
         return launchPlan(

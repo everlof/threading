@@ -6,7 +6,9 @@ import ThreadingMarkdownKit
 enum MarkdownDefaults {
     static let codeFontSize: CGFloat = 12
     static let headingBump: CGFloat = 3
-    static let codePadding: CGFloat = 8
+    /// A code block's inset from its plate. `inset` rather than a tight 8: with the prose at
+    /// its reading leading, code pressed to its plate's edge read as the denser of the two.
+    @MainActor static var codePadding: CGFloat { Design.Spacing.inset }
     static let listIndent: CGFloat = 18
     /// The conversation's answer rhythm, so a document's blocks and an answer split into rows
     /// are spaced by one token — see `Design.Chat.Rhythm`.

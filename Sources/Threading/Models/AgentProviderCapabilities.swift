@@ -388,6 +388,19 @@ struct AgentCapabilities: OptionSet {
   /// setup-token` mints a one-year token the CLI reads from `CLAUDE_CODE_OAUTH_TOKEN`. Codex has
   /// API keys, but those bill differently and are not a substitute for a subscription login.
   static let longLivedAccountToken = Self(rawValue: 1 << 40)
+
+  /// The runtime's own approval policy runs after Threading's `PreToolUse` hook lets a call
+  /// through, and asks a person over the native transport whenever that policy says to. So the
+  /// hook never has to ask on its behalf; it only adds Threading's own refusals.
+  ///
+  /// Codex only. 0.162.1 honours a `PreToolUse` reply of `deny` and reports `allow` and `ask`
+  /// as unsupported, so an allow from the hook grants nothing: the sandbox, the approval policy
+  /// and the `approvals_reviewer` still decide, and a question for a person arrives as an
+  /// app-server `item/*/requestApproval`. Claude is the opposite case — a hook's `allow` skips its
+  /// permission check, and a headless run has no prompt of its own, so the hook is the only
+  /// place it can ask. Grok and Cursor run no hook: ACP's `session/request_permission` is
+  /// already the runtime asking.
+  static let runtimeOwnedApprovals = Self(rawValue: 1 << 42)
 }
 
 /// How a runtime accepts a long-lived sign-in token: the variable its CLI reads, what every such
@@ -499,7 +512,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .inlineTerminalViewport, .lifecycleReportedTranscriptPath,
         .lifecycleReportedWorkingDirectory, .detectableExternalResume, .bankedUsageReset,
-        .answeringMailHooks
+        .answeringMailHooks, .runtimeOwnedApprovals
       ]
     case .grok:
       return [

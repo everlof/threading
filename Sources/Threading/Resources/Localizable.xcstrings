@@ -1731,6 +1731,17 @@
         }
       }
     },
+    "%@ — full app logs (restarts the app)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ — appens fullständiga loggar (startar om appen)"
+          }
+        }
+      }
+    },
     "%@ — open Threading on the iPhone and approve it with Face ID. %@ left." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17379,6 +17390,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sökning i konversationshistoriken är inte tillgänglig."
+          }
+        }
+      }
+    },
+    "Conversation prose — a message, a reply while it streams — in the reading size and its leading, rebuilt when the theme or text size moves. Switch Text size in Settings to watch it re-set." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Samtalets löptext — ett meddelande, ett svar medan det strömmar in — i lässtorleken med dess radavstånd, ombyggd när temat eller textstorleken ändras. Byt Textstorlek i Inställningar för att se den sättas om."
           }
         }
       }
@@ -42476,6 +42498,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Föreslå tilläggsinstallation"
+          }
+        }
+      }
+    },
+    "ProseLabel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ProseLabel"
           }
         }
       }

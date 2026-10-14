@@ -124,11 +124,7 @@ enum ConversationRowView {
         bubble.translatesAutoresizingMaskIntoConstraints = false
         bubble.applySurface(fill: Design.Chat.bubbleFill, radius: .panel)
 
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.applyFont(.body, in: .conversation)
-        label.textColor = Design.Text.label
-        label.isSelectable = true
-        label.translatesAutoresizingMaskIntoConstraints = false
+        let label = ProseLabel(text: text)
         bubble.addSubview(label)
 
         // A bubble is padded tighter than a card — `medium`, measured against the conversation's
@@ -214,9 +210,10 @@ enum ConversationRowView {
 
     /// The reply as it streams. Plain text, replaced by rendered markdown when the message
     /// finishes: rendering markdown per token would reflow the whole block on every keystroke,
-    /// and the finished message is authoritative anyway.
-    static func streaming(_ text: String) -> NSTextField {
-        label(text, role: .body, color: Design.Text.label)
+    /// and the finished message is authoritative anyway. Set in the Markdown's own face and
+    /// leading (`ProseLabel`), so the paragraph keeps its line box across that replacement.
+    static func streaming(_ text: String) -> ProseLabel {
+        ProseLabel(text: text)
     }
 
     // MARK: - Private Methods

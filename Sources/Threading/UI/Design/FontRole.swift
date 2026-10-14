@@ -37,6 +37,8 @@ extension Design {
         case placeholderTitle
         case subheading
         case body
+        /// Conversation prose at the reading size — see `Typography.reading`.
+        case reading
         case emphasizedBody
         case strongBody
         case control
@@ -84,6 +86,7 @@ extension Design {
             case .placeholderTitle: return Typography.placeholderTitle(surface: surface)
             case .subheading: return Typography.subheading(surface: surface)
             case .body: return Typography.body(surface: surface)
+            case .reading: return Typography.reading(surface: surface)
             case .emphasizedBody: return Typography.emphasizedBody(surface: surface)
             case .strongBody: return Typography.strongBody(surface: surface)
             case .control: return Typography.control(surface: surface)
@@ -135,7 +138,7 @@ extension Design {
                 return .numericControl(weight: weight == .regular ? .semibold : weight)
             case .numericDetail(let weight):
                 return .numericDetail(weight: weight == .regular ? .semibold : weight)
-            case .heading, .placeholderTitle, .emphasizedBody, .strongBody, .control, .caption,
+            case .heading, .placeholderTitle, .reading, .emphasizedBody, .strongBody, .control, .caption,
                  .markdownHeading, .wordmark, .welcomeGreeting, .welcomeCaption,
                  .inlineCode, .previewCode, .compactCode, .emphasizedCompactCode,
                  .compactToolName, .numericDisplay, .numericBody, .accountEmoji, .emojiPickerCell:
@@ -150,7 +153,7 @@ extension Design {
         /// correctness gate — and it stays correct if Tier 3's override later reaches code.
         public var followsTheme: Bool {
             switch self {
-            case .heading, .placeholderTitle, .subheading, .body, .emphasizedBody, .strongBody,
+            case .heading, .placeholderTitle, .subheading, .body, .reading, .emphasizedBody, .strongBody,
                  .control, .controlRegular, .caption, .detail, .markdownHeading, .wordmark,
                  .welcomeGreeting, .welcomeCaption:
                 return true

@@ -559,6 +559,11 @@ final class ExecutionAuditStore: @unchecked Sendable {
         case .deny(let value):
             phase = .denied
             reason = value
+        case .deferToAgent(let value):
+            // Threading's gate let the call through; the reason names who decides from here,
+            // and the tool's own completed or failed record follows it.
+            phase = .allowed
+            reason = value
         }
         enqueueAppend(
             sessionID: request.sessionID,

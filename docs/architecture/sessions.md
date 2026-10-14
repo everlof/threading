@@ -1713,7 +1713,11 @@ asserted where they always were — against the tokenized launch line in
 `AgentPermissionModeTests`, which is the only place that proves the CLI receives them.
 
 This surface is capability-gated to Claude, Codex, and Grok. Grok accepts the same six values
-through `--permission-mode`, except that Threading's Manual is spelled `default` on its wire.
+through `--permission-mode`, except that Threading's Manual is spelled `default` on its wire. On
+the native surface the flag goes **before** `agent`: grok 1.0.30 refuses
+`grok agent --permission-mode auto stdio` with "unexpected argument" and exits before the ACP
+handshake, so every native Grok chat with a mode failed to start, while
+`grok --permission-mode <mode> agent stdio` parses and validates the value.
 OpenCode's `opencode.json` has a richer
 per-tool permission policy, and its `--auto` flag is not equivalent to any of the six modes;
 Threading therefore shows no mode control and leaves OpenCode's configuration untouched.
@@ -1769,6 +1773,34 @@ answers for the three modes that promise something (Bypass allows, Don't Ask den
 allows file changes and still asks about commands) and returns nil for Manual, Plan and Auto,
 which are enforced inside the CLI and promise nothing about the sheet. Being wrong there costs an
 extra question rather than an unasked-for action.
+
+**A card belongs where the runtime would have asked, and the hook is not always that place.**
+Answering every hook call like Manual was wrong in two ways, found on 2026-10-13 when a native
+Codex chat in Auto (Approve for me) raised a card for every web fetch, edit and compile while the
+reviewer agent it had chosen saw none of them. `PermissionRequest.Origin` now separates the hook
+(`toolHook`, before the runtime's own flow) from the runtime asking for itself (`runtimeRequest`:
+Codex app-server approvals, ACP `session/request_permission`), and
+`PermissionPolicy.agentDecision(for:kind:)` answers a hook call `deferToAgent` — an empty hook
+reply, which both CLIs read as "no decision" — in two cases:
+
+- **The process reports Auto.** Claude's `PreToolUse` payload carries `permission_mode`, the mode
+  the running process is in. Measured on 2.1.296 through the native transport's own flags
+  (`--print`, stream-json, `--include-hook-events`): with a hook that printed nothing,
+  `--permission-mode auto` ran a `Write` and a `Bash` with no denials, decided by Claude's
+  classifier; `manual` denied both. The payload decides, never the record — a chip moved from the
+  sidebar applies at the next launch, and a silent hook in front of a process still in Manual
+  blocks the call instead of deciding it.
+- **The runtime owns its approvals** (`AgentCapabilities.runtimeOwnedApprovals`, Codex). 0.162.1
+  honours a hook's `deny` and reports `allow` and `ask` as unsupported, so the hook's allow never
+  granted anything: Codex's sandbox, approval policy and `approvals_reviewer` decided after it, and
+  asked over app-server when they wanted a person. The hook's card either repeated that question or
+  asked one Codex's posture never would — including every chat that inherits an
+  `approvals_reviewer = "auto_review"` from `config.toml`.
+
+Threading's own refusals are untouched: an unattended automation run's revision and the macOS
+grant briefing both answer in `PermissionBroker.decide` before the policy is consulted, and a
+runtime's own request is never handed back to it. `PermissionDeferralTests` holds the matrix and
+runs the generated hook against a live listener.
 
 **The record is the launch mode, not a live mirror.** Changing the mode on a running terminal
 session restates nothing — the flags belong to the process. The broker is the exception, since it

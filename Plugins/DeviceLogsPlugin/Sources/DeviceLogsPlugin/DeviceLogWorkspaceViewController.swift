@@ -107,7 +107,7 @@ final class DeviceLogWorkspaceViewController: NSViewController {
             discoveryGeneration += 1
             for pane in panes.values {
                 pane.setRowsPresented(false)
-                pane.stopCapture()
+                pane.stopCaptureUnlessRecording()
             }
         }
     }

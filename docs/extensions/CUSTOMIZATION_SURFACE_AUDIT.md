@@ -605,6 +605,13 @@ introduced by this form.
 Thinking, notices and the streaming placeholder are not public components. They are transient
 states whose durable output becomes an assistant-message row.
 
+The transcript's reading typography and its cross-row text selection (2026-10-13) are host-owned
+and add no seam. Themes reach both through existing roles — the reading face follows the
+conversation font override and the theme's text scale, and the selection is painted with
+`ThemedTextSelection`'s roles — and nothing is exposed to extensions: content an extension renders
+into a row is not transcript text, so a selection passes over it and copies none of it, and no
+selected text enters component context.
+
 ## Corner-card precedent
 
 The floating card over the session's content pane is the first contract whose **slot IDs are

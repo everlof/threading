@@ -346,7 +346,28 @@ public final class DeviceLogPaneViewController: NSViewController {
     public override func viewWillDisappear() {
         super.viewWillDisappear()
         guard !captureManagedByWorkspace else { return }
-        stopCapture()
+        stopCaptureUnlessRecording()
+    }
+
+    /// A Bluetooth capture is a recording someone started on purpose — a firmware update, a
+    /// pairing — and the thing worth seeing often happens while they look at something else. So a
+    /// running Bluetooth reader keeps reading, recording and following procedures while the pane is
+    /// hidden; only drawing stops. Everything else stops, because a hidden tab must not keep a
+    /// firehose of system log alive. The reader still ends with the pane: releasing it releases the
+    /// source, whose `deinit` stops the capture.
+    var recordsWhileHidden: Bool {
+        guard source != nil, endedReason == nil, case .bluetooth = selectedOption?.kind else { return false }
+        return true
+    }
+
+    func stopCaptureUnlessRecording() {
+        guard recordsWhileHidden else {
+            stopCapture()
+            return
+        }
+        bluetoothProfileSetup.cancelBrowser()
+        discoveryGeneration += 1
+        setRowsPresented(false)
     }
 
     func stopCapture() {

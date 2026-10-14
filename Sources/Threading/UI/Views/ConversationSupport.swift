@@ -198,13 +198,13 @@ enum ConversationDefaults {
     /// scroll view's document, where no constraint can reach the pane.
     static let statedColumnPriority = NSLayoutConstraint.Priority(400)
 
-    /// The reply box's column: the transcript's readable measure plus the box's own padding.
+    /// The reply box's column: the transcript's column plus the box's own padding.
     ///
     /// The box is padded by `Design.Spacing.inset` before its text starts, so a box this wide
     /// puts the line being typed on exactly the column the conversation above it is read on —
     /// one edge down the whole pane rather than a box that spans the window under a centred
     /// column. It is a cap: a pane narrower than this keeps the box inset from its edges.
-    static var composerWidth: CGFloat { Design.Size.readableWidth + Design.Spacing.inset * 2 }
+    @MainActor static var composerWidth: CGFloat { Design.Chat.columnWidth + Design.Spacing.inset * 2 }
 
     /// Tool output beyond this is truncated. Generous, because output is collapsed by
     /// default — the cost of keeping it is layout, not attention.

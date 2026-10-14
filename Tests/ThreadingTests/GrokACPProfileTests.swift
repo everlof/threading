@@ -172,7 +172,8 @@ final class GrokACPProfileTests: XCTestCase {
         let source = try XCTUnwrap(plan.arguments.last)
 
         XCTAssertTrue(
-            source.contains("'grok' 'agent' '--model' 'grok-4.5' '--permission-mode' 'plan' 'stdio'"),
+            // The mode before the subcommand: grok 1.0.30 rejects it after `agent`.
+            source.contains("'grok' '--permission-mode' 'plan' 'agent' '--model' 'grok-4.5' 'stdio'"),
             source
         )
         XCTAssertEqual(plan.resumeState, .resumable(transcriptID))

@@ -890,6 +890,9 @@ final class ACPStreamSession:
         switch decision {
         case .allow: allowed = true
         case .deny: allowed = false
+        // Never produced for a request the agent raised itself (`PermissionRequest.Origin`);
+        // refusing is the reading that cannot run something nobody approved.
+        case .deferToAgent: allowed = false
         }
         if let toolCallID, !allowed { deniedToolCallIDs.insert(toolCallID) }
         let preferredKinds = allowed

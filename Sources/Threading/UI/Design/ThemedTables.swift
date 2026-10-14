@@ -60,6 +60,17 @@ public class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, S
     /// nothing.
     public var onDraggingExited: (() -> Void)?
 
+    /// Edit ▸ Copy (⌘C) with this list focused, for a list whose rows hold their own selection —
+    /// text chosen across several rows, say — rather than AppKit's row selection. Reported rather
+    /// than handled, on `onContextMenu`'s contract; `canCopy` is what enables the menu item, so a
+    /// list with nothing chosen does not offer to copy nothing.
+    public var onCopy: (() -> Void)?
+    public var canCopy: (() -> Bool)?
+
+    /// Edit ▸ Select All (⌘A) for the same kind of list. Answering `false` leaves AppKit's own
+    /// row selection to handle it.
+    public var onSelectAll: (() -> Bool)?
+
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         backgroundColor = .clear
@@ -167,6 +178,24 @@ public class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, S
     public override func draggingEnded(_ sender: NSDraggingInfo) {
         super.draggingEnded(sender)
         onDraggingExited?()
+    }
+
+    @objc public func copy(_ sender: Any?) {
+        onCopy?()
+    }
+
+    public override func selectAll(_ sender: Any?) {
+        if onSelectAll?() == true { return }
+        super.selectAll(sender)
+    }
+
+    /// Only `copy(_:)` is answered here: it is this class's own action, and a list that states
+    /// no `canCopy` has nothing to copy. Everything else is AppKit's decision.
+    public override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(copy(_:)) {
+            return canCopy?() ?? false
+        }
+        return super.validateUserInterfaceItem(item)
     }
 }
 

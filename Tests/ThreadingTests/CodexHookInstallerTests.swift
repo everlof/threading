@@ -471,7 +471,8 @@ final class CodexHookInstallerTests: XCTestCase {
         XCTAssertFalse((output["permissionDecisionReason"] as? String ?? "").isEmpty)
         XCTAssertEqual(
             decision as NSDictionary,
-            PermissionDecision.deny(reason: MCPDefaults.hookDenyReason).hookResponse as NSDictionary
+            try XCTUnwrap(PermissionDecision.deny(reason: MCPDefaults.hookDenyReason).hookResponse)
+                as NSDictionary
         )
     }
 

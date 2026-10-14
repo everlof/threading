@@ -47,11 +47,16 @@ final class ConversationStickyStepView: NSView, PointerClaiming {
     /// pins never on the pane. See `ConversationDefaults.statedColumnPriority`.
     private lazy var columnWidth: NSLayoutConstraint = {
         let constraint = column.widthAnchor.constraint(
-            equalToConstant: Design.Size.readableWidth
+            equalToConstant: Design.Chat.columnWidth
         )
         constraint.priority = ConversationDefaults.statedColumnPriority
         return constraint
     }()
+
+    /// The column's ceiling, restated in `layout()` because it is counted in the reading size.
+    private lazy var columnCap = column.widthAnchor.constraint(
+        lessThanOrEqualToConstant: Design.Chat.columnWidth
+    )
 
     private var rowIndex: Int?
     private var isHighlighted = false { didSet { updateInk() } }
@@ -130,7 +135,7 @@ final class ConversationStickyStepView: NSView, PointerClaiming {
         // `ConversationDefaults.statedColumnPriority`.
         NSLayoutConstraint.activate([
             column.centerXAnchor.constraint(equalTo: centerXAnchor),
-            column.widthAnchor.constraint(lessThanOrEqualToConstant: Design.Size.readableWidth),
+            columnCap,
             column.leadingAnchor.constraint(
                 greaterThanOrEqualTo: leadingAnchor, constant: Design.Spacing.inset
             ),
@@ -158,10 +163,9 @@ final class ConversationStickyStepView: NSView, PointerClaiming {
     /// States the column for the band's current width before the pass lays it out — the plain
     /// view's `viewDidLayout`.
     override func layout() {
-        let width = min(
-            Design.Size.readableWidth,
-            bounds.width - Design.Spacing.inset * 2
-        )
+        let cap = Design.Chat.columnWidth
+        if abs(columnCap.constant - cap) > 0.5 { columnCap.constant = cap }
+        let width = min(cap, bounds.width - Design.Spacing.inset * 2)
         if width > 0, abs(columnWidth.constant - width) > 0.5 {
             columnWidth.constant = width
         }

@@ -10,11 +10,16 @@ public struct MarkdownStyle {
     public var codeColor: NSColor
     public var codeBackground: NSColor
     public var linkColor: NSColor
+    /// Extra space between two lines of one paragraph, and between two lines of a code block.
+    /// Zero leaves AppKit's own line box, which is what a host that states nothing gets.
+    public var lineSpacing: CGFloat
+    public var codeLineSpacing: CGFloat
 
     @MainActor
     public init(font: NSFont, textColor: NSColor, secondaryColor: NSColor,
                 codeFont: NSFont, codeColor: NSColor, codeBackground: NSColor,
-                linkColor: NSColor, headingFont: NSFont? = nil) {
+                linkColor: NSColor, headingFont: NSFont? = nil,
+                lineSpacing: CGFloat = 0, codeLineSpacing: CGFloat = 0) {
         self.font = font
         self.headingFont = headingFont ?? NSFontManager.shared.convert(
             NSFontManager.shared.convert(font, toSize: font.pointSize + 3), toHaveTrait: .boldFontMask
@@ -25,6 +30,34 @@ public struct MarkdownStyle {
         self.codeColor = codeColor
         self.codeBackground = codeBackground
         self.linkColor = linkColor
+        self.lineSpacing = lineSpacing
+        self.codeLineSpacing = codeLineSpacing
+    }
+
+    /// The paragraph style prose is set in, or nil when the style states no spacing.
+    public var paragraphStyle: NSParagraphStyle? {
+        Self.paragraphStyle(lineSpacing: lineSpacing)
+    }
+
+    /// The same for a code block's lines, which never wrap.
+    ///
+    /// The line-break mode is stated because a paragraph style always carries one, and its
+    /// default — word wrapping — overrides the clipping label it is set on: the label stops
+    /// stating a width of its own, collapses to a few points inside its scroll view, and the
+    /// block draws as an empty plate.
+    public var codeParagraphStyle: NSParagraphStyle? {
+        Self.paragraphStyle(lineSpacing: codeLineSpacing, lineBreakMode: .byClipping)
+    }
+
+    private static func paragraphStyle(
+        lineSpacing: CGFloat,
+        lineBreakMode: NSLineBreakMode = .byWordWrapping
+    ) -> NSParagraphStyle? {
+        guard lineSpacing > 0 else { return nil }
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = lineSpacing
+        style.lineBreakMode = lineBreakMode
+        return style
     }
 }
 

@@ -481,7 +481,7 @@ extension ConversationViewController {
             return
         }
 
-        streamingLabel.stringValue = text
+        streamingLabel.text = text
         transcript.noteHeightChanged(of: .surface(.streaming))
         scrollToBottom()
     }

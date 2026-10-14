@@ -171,6 +171,7 @@ final class ComponentGalleryViewController: NSViewController {
         "PanelListView",
         "PromptCompletionPresenter",
         "PromptView",
+        "ProseLabel",
         "ProjectTextSearchPreviewViewController",
         "RevealHighlightView",
         "RunPlanDisclosureView",
@@ -1107,6 +1108,11 @@ final class ComponentGalleryViewController: NSViewController {
         )
     }
 
+    /// Narrow enough that the sample wraps, so the leading between its lines is on show.
+    private enum ProseStory {
+        static let width: CGFloat = 420
+    }
+
     /// The control row story's own width, for the reason the audit row states below: both of the
     /// row's edges are what it demonstrates, and a row sized to its contents has no gap to hold.
     private enum ControlRowStory {
@@ -1950,6 +1956,13 @@ final class ComponentGalleryViewController: NSViewController {
                         + "survives Differentiate Without Colour. Paste the whole ID to see a "
                         + "line shorter than the query still answer for itself.",
                     matchStory
+                ),
+                story(
+                    "ProseLabel",
+                    "Conversation prose — a message, a reply while it streams — in the reading "
+                        + "size and its leading, rebuilt when the theme or text size moves. "
+                        + "Switch Text size in Settings to watch it re-set.",
+                    proseSample()
                 ),
                 story(
                     "SearchResultRowView",
@@ -7426,6 +7439,15 @@ final class ComponentGalleryViewController: NSViewController {
             row.widthAnchor.constraint(equalTo: cards.widthAnchor).isActive = true
         }
         return result
+    }
+
+    private func proseSample() -> NSView {
+        let prose = ProseLabel(
+            text: "The transcript keeps your request and the answer easy to find. Work stays "
+                + "available in the disclosure above, including commands, results and the exact edit."
+        )
+        prose.widthAnchor.constraint(equalToConstant: ProseStory.width).isActive = true
+        return prose
     }
 
     private func story(_ name: String, _ summary: String, _ sample: NSView) -> NSView {

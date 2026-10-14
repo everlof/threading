@@ -17,10 +17,12 @@ extension Markdown {
             byte == 0x60 || byte == 0x2A || byte == 0x5F || byte == 0x5B
         }
         if !containsMarkupCandidate {
-            return NSAttributedString(string: text, attributes: [
+            var attributes: [NSAttributedString.Key: Any] = [
                 .font: baseFont,
                 .foregroundColor: style.textColor
-            ])
+            ]
+            attributes[.paragraphStyle] = style.paragraphStyle
+            return NSAttributedString(string: text, attributes: attributes)
         }
 
         let result = NSMutableAttributedString()
@@ -32,6 +34,15 @@ extension Markdown {
             traits: InlineFontTraits(),
             depth: 0
         )
+        // One paragraph style across the block's runs: spacing is a property of the paragraph,
+        // and a run that left it out would set its own line differently from its neighbours.
+        if let paragraphStyle = style.paragraphStyle, result.length > 0 {
+            result.addAttribute(
+                .paragraphStyle,
+                value: paragraphStyle,
+                range: NSRange(location: 0, length: result.length)
+            )
+        }
         return result
     }
 

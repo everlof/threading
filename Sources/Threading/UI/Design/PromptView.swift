@@ -633,7 +633,7 @@ final class PromptView: NSView, ThemedComponent {
     /// or size changes; the chrome and the row are added on top by `updateHeight`.
     private var restingHeight: CGFloat {
         guard showsFooterRow else { return minimumHeight }
-        let line = Design.FontRole.body.resolved(in: fontSurface).boundingRectForFont.height
+        let line = textRole.resolved(in: fontSurface).boundingRectForFont.height
         let text = (line * PromptViewDefaults.restingLines).rounded()
         return max(
             minimumHeight,
@@ -687,15 +687,21 @@ final class PromptView: NSView, ThemedComponent {
     var fontSurface: Design.Typography.FontSurface = .chrome {
         didSet {
             guard fontSurface != oldValue else { return }
-            textView.applyFont(.body, in: fontSurface)
+            textView.applyFont(textRole, in: fontSurface)
         }
+    }
+
+    /// What is typed is set the way it will read once sent: the conversation's reading size in a
+    /// reply box, the chrome's body everywhere else.
+    private var textRole: Design.FontRole {
+        fontSurface == .conversation ? .reading : .body
     }
 
     private func setupTextView() {
         textView.delegate = self
         textView.setAccessibilityIdentifier("composer.prompt.text")
         textView.placeholder = placeholder
-        textView.applyFont(.body, in: fontSurface)
+        textView.applyFont(textRole, in: fontSurface)
         textView.textColor = Design.Text.label
         // State these explicitly instead of inheriting NSTextView's initializer defaults.
         // This is the app's primary input and must never become read-only because an AppKit

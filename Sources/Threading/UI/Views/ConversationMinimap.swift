@@ -19,11 +19,12 @@ enum ConversationMinimap {
         /// Vertical distance between two marks. The rail's height follows from the number of
         /// turns rather than from the conversation's length — see `railHeight`.
         ///
-        /// t3code uses 8, which at three turns is a 16pt smudge that reads as a rendering
-        /// artefact rather than a control. Measured off Codex's own rail instead — about
-        /// twenty-five marks over five hundred points — which is roomy enough that a short
-        /// conversation still looks like an index of something.
-        static let markerSpacing: CGFloat = 20
+        /// Codex's rows (2026-10-13, from its shipped bundle) are 10pt; t3code's 8. This was 20,
+        /// read off a screenshot of Codex rather than its source, and at that spacing the marks
+        /// stood apart as scattered ticks — reported as the rail looking "really meagre". Packed
+        /// at the reference density they read as one object, an index, which is also why the
+        /// spine they used to hang from could go.
+        static let markerSpacing: CGFloat = Design.Spacing.medium
 
         static let markerHeight: CGFloat = 2
 
@@ -34,8 +35,10 @@ enum ConversationMinimap {
         /// Clearance between the rail and the text column, so the two never touch.
         static let gutterInset: CGFloat = 12
 
-        /// Where the rail rests relative to the pane's own leading edge, when there is room.
-        static let edgeInset: CGFloat = Design.Spacing.pane
+        /// Where the rail rests relative to the pane's own leading edge, when there is room —
+        /// t3code's 12 (Codex's desktop app is at 16). At 32 it floated in the margin, attached
+        /// to neither the pane's edge nor the text.
+        static let edgeInset: CGFloat = Design.Spacing.inset
 
         /// The rail never grows past this, however wide the window gets. It is a control, and
         /// a 200pt one would read as a third pane.

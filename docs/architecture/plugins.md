@@ -629,6 +629,14 @@ packet. Silence keeps waiting with profile/activity guidance. Service-start erro
 even when the CLI remains alive waiting for another device event. Rescan can restart a failed
 reader, and stale discovery completions cannot start a reader after the pane was hidden.
 
+A running Bluetooth reader outlives hiding; the system log does not. A capture is something the
+user started on purpose, and the moment it exists for — a firmware update, a pairing — tends to
+happen while they look at another session; the first real DFU test lost its pairing to exactly
+that. Hiding therefore only stops drawing (`stopCaptureUnlessRecording`): the reader keeps
+decoding, recording and following procedures at its existing bounds, and closing the tab or session
+releases the source, whose `deinit` stops it. A system log is a firehose nobody asked to keep, so
+it still stops.
+
 Scaling: expected 100–6,000 packets/s, stress 100,000 generated packets; 32 KiB reads, at most
 128 KiB per pipe per 50 ms worker tick, one incomplete packet of at most 65,535 bytes, 4 KiB
 diagnostics, and 256 payload bytes per row. The existing 20,000-row handoff, 50,000-row viewport
