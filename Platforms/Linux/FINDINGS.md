@@ -6274,8 +6274,7 @@ card, question, changed-files and conversation-render tests pass, and the build 
 repository boundaries. `scripts/test.sh all` ran 10,543 Mac tests with one failure:
 `testComponentGalleryCataloguesEveryConcreteDesignComponent`, the gallery gap recorded in §184.
 It names nine components, none from this work. Because the Mac half failed, the iOS half did not
-start. The installed suite now runs the permission journey; a full installed run including it is
-pending.
+start. The installed suite now runs the permission journey.
 
 Claude asks through its `PreToolUse` hook and Threading's HTTP listener, which the Linux host
 does not run, so a headless Claude there still blocks the tools it would ask about. Questions,
@@ -6343,3 +6342,9 @@ the document, user bubble and short user row journeys, the three native contract
 focused harness lanes. On the Mac, the card's change is the original code under its `#else` and
 `canImport(ObjectiveC)` branches. 79 focused question, permission, card, changed-files and
 conversation-render tests pass after it.
+
+The full installed suite then passed from the clean commit, with 123 PASS lines and exit 0. That
+includes the Claude native workspace lane and this decision journey. Evidence:
+out/bundle-smoke/run.esDD4pFR, log out/llk-bundle-smoke5.log. Manifest:
+e775372e5872d311550e370f629b4763a3ad25a8, source_dirty=false. Debian SHA-256:
+003c6c8c4ed8523fa58b89628efa5be9aa3bb4330a11e13f3cfa876fb537e252.
