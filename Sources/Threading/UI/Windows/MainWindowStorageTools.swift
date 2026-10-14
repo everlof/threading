@@ -154,52 +154,58 @@ extension AgentToolCoordinator {
     /// read, never treated as evidence — and a refusal names the gate that said no, because an
     /// agent told *which* proof was missing can often supply it.
     func suggestReclaimableLocation(
-        _ arguments: SuggestReclaimableLocationArguments
-    ) -> MCPToolResult {
-        let paths = (arguments.paths ?? "")
-            .split(separator: "\n")
+        _ arguments: SuggestReclaimableLocationArguments,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        let rawPaths = (arguments.paths ?? "").split(
+            separator: "\n",
+            maxSplits: ArtifactScanDefaults.maximumSuggestedPaths
+        )
+        guard rawPaths.count <= ArtifactScanDefaults.maximumSuggestedPaths else {
+            completion(.failure(StorageToolStrings.tooManySuggestions))
+            return
+        }
+        let paths = rawPaths
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
-        guard !paths.isEmpty else { return .failure(StorageToolStrings.noPaths) }
-
-        // One census for the whole call, on the main actor, the way the scan and the cleanup
-        // take theirs — so a session that ends mid-call cannot make two paths disagree.
-        let dormantSessionIDs = DormantSessionCensus.dormant()
-
-        var accepted = 0
-        var refused = 0
-        var lines: [String] = []
-
-        for path in Set(paths).sorted() {
-            switch ArtifactScanner.vet(
-                URL(fileURLWithPath: path),
-                dormantSessionIDs: dormantSessionIDs
-            ) {
-            case .vetted(let artifact):
-                guard ArtifactScanService.shared.adopt(artifact) else {
-                    refused += 1
-                    lines.append(StorageToolStrings.vetOutOfScope(path))
-                    continue
-                }
-                accepted += 1
-                lines.append(StorageToolStrings.vetAccepted(
-                    path,
-                    kind: artifact.kind.displayName,
-                    size: Self.storageSize.string(fromByteCount: artifact.byteCount)
-                ))
-
-            case .refused(let refusal):
-                refused += 1
-                lines.append(Self.describe(refusal, at: path))
-            }
+        guard !paths.isEmpty else {
+            completion(.failure(StorageToolStrings.noPaths))
+            return
         }
-
-        return .success(
-            StorageToolStrings.vetSummary(accepted: accepted, refused: refused)
-            + "\n" + lines.joined(separator: "\n")
-            + "\n\n" + StorageToolStrings.vetFooter
-        )
+        let started = ArtifactScanService.shared.vetSuggestedPaths(
+            Set(paths).sorted(),
+            dormantSessionIDs: DormantSessionCensus.dormant()
+        ) { outcomes in
+            var accepted = 0
+            var refused = 0
+            var lines: [String] = []
+            for (path, outcome) in outcomes {
+                switch outcome {
+                case .vetted(let artifact):
+                    guard ArtifactScanService.shared.adopt(artifact) else {
+                        refused += 1
+                        lines.append(StorageToolStrings.vetOutOfScope(path))
+                        continue
+                    }
+                    accepted += 1
+                    lines.append(StorageToolStrings.vetAccepted(
+                        path,
+                        kind: artifact.kind.displayName,
+                        size: Self.storageSize.string(fromByteCount: artifact.byteCount)
+                    ))
+                case .refused(let refusal):
+                    refused += 1
+                    lines.append(Self.describe(refusal, at: path))
+                }
+            }
+            completion(.success(
+                StorageToolStrings.vetSummary(accepted: accepted, refused: refused)
+                + "\n" + lines.joined(separator: "\n")
+                + "\n\n" + StorageToolStrings.vetFooter
+            ))
+        }
+        if !started { completion(.failure(StorageToolStrings.suggestionBusy)) }
     }
 
     private static func describe(

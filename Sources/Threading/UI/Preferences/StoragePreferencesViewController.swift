@@ -904,12 +904,12 @@ private enum StorageStrings {
 
     static var safety: String {
         L10n.string("""
-            Only directories git ignores and a known tool can rebuild are offered. Anything tracked \
-            in a repository is left alone, whatever it is called — and ignored files that are not \
-            build output, such as .env files, are never touched. In a temporary location a build \
-            cache is offered only when Xcode's own manifest identifies it, never an agent's working \
-            copy of a repository. Removal is immediate rather than moved to the Trash, since space \
-            in the Trash has not been reclaimed.
+            Project build output must be ignored by git and recognized as rebuildable. Xcode \
+            caches in DerivedData and temporary locations require Xcode's own manifest. Standard \
+            DerivedData caches are kept while recently written, while Xcode or build services \
+            run, or while an executable inside them is running. Session scratchpads are offered \
+            only for known dormant sessions; their contents are not rebuilt. Removal is immediate \
+            rather than moved to the Trash.
             """)
     }
 

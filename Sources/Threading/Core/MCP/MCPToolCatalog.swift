@@ -621,7 +621,8 @@ enum MCPToolCatalog {
       build or install dying partway with a write error — call list_reclaimable_storage \
       before reporting failure or asking the user to free space by hand. It reports build \
       output that can be deleted and rebuilt, with sizes: across their projects, whose \
-      worktrees are usually holding far more of it than they realise, and in the temporary \
+      worktrees are usually holding far more of it than they realise, in the standard Xcode \
+      cache folder ~/Library/Developer/Xcode/DerivedData, and in the temporary \
       locations agents build in, /private/tmp and the per-user temp directory, where build \
       caches left by earlier sessions outlive the work they were for. Also reach for it \
       when they ask what is taking up space.

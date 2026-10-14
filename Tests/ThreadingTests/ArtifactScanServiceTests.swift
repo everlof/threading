@@ -71,11 +71,12 @@ final class ArtifactScanServiceTests: XCTestCase {
     /// calls it a failure. On a machine compiling something else these went red as a class, and
     /// the walk they measure is a handful of fixture directories — the behaviour under test is
     /// what the scan finds and publishes, which its priority does not change.
-    private func makeService(busy: Bool = false) -> ArtifactScanService {
+    private func makeService(busy: Bool = false, derivedDataRoot: URL? = nil) -> ArtifactScanService {
         ArtifactScanService(
             directory: directory,
             fileManager: .default,
             scratchRoots: [scratch],
+            derivedDataRoot: derivedDataRoot,
             projects: { [] },
             isAnySessionWorking: { busy },
             qualityOfService: .utility
@@ -136,7 +137,10 @@ final class ArtifactScanServiceTests: XCTestCase {
 
     /// Writes a reading straight into the scratch store so the staleness rule can be asked about
     /// an hour-old one without waiting an hour for it.
-    private func seedScratchScan(scannedAt: Date) {
+    private func seedScratchScan(
+        scannedAt: Date,
+        scopeVersion: Int? = ArtifactScanDefaults.externalScopeVersion
+    ) {
         let store = RecoverableFileStore<ArtifactScanService.ProjectScan?>(
             url: directory.appendingPathComponent(ArtifactScanDefaults.scratchFileName),
             fileManager: .default,
@@ -145,10 +149,70 @@ final class ArtifactScanServiceTests: XCTestCase {
             dateEncodingStrategy: .iso8601,
             dateDecodingStrategy: .iso8601
         )
-        _ = store.save(ArtifactScanService.ProjectScan(scannedAt: scannedAt, artifacts: []))
+        _ = store.save(ArtifactScanService.ProjectScan(
+            scannedAt: scannedAt,
+            artifacts: [],
+            externalScopeVersion: scopeVersion
+        ))
     }
 
     // MARK: - Persistence
+
+    func testStandardXcodeCachesReachTheListingAndSurviveReopening() throws {
+        let root = directory.appendingPathComponent("DerivedData")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let temporary = try derivedData("App")
+        let tree = root.appendingPathComponent("App")
+        try FileManager.default.moveItem(at: temporary, to: tree)
+        try FileManager.default.removeItem(at: tree.appendingPathComponent("ModuleCache.noindex"))
+
+        // A recent cache from an older app must be refreshed when the scan scope expands.
+        seedScratchScan(scannedAt: Date(), scopeVersion: nil)
+        let service = makeService(derivedDataRoot: root)
+        let published = publication(from: service)
+        service.refreshStaleProjects()
+        wait(for: [published], timeout: Fixture.scanTimeout)
+        XCTAssertEqual(service.scratchArtifacts().map { normalized($0.url) }, [normalized(tree)])
+
+        let reopened = makeService(derivedDataRoot: root)
+        let artifact = try XCTUnwrap(reopened.scratchArtifacts().first)
+        XCTAssertEqual(normalized(artifact.url), normalized(tree))
+        let proposal = StorageCleanupGate.resolve(artifact.url.path, against: reopened.scratchArtifacts())
+        XCTAssertEqual(proposal.matched, [artifact])
+        reopened.forgetScratch([artifact])
+        XCTAssertTrue(reopened.scratchArtifacts().isEmpty)
+
+        guard case .vetted(let nominated) = ArtifactScanner.vet(tree, roots: [], derivedDataRoot: root) else {
+            return XCTFail("standard cache was not vetted")
+        }
+        XCTAssertTrue(reopened.adopt(nominated))
+        XCTAssertEqual(reopened.scratchArtifacts(), [nominated])
+    }
+
+    func testSuggestionsRunAsOneAsynchronousBoundedRequest() throws {
+        let tree = try derivedData("Suggested")
+        let service = makeService()
+        let completed = expectation(description: "suggestion measured off the caller")
+        var received = false
+        XCTAssertTrue(service.vetSuggestedPaths([tree.path], dormantSessionIDs: []) { outcomes in
+            received = true
+            XCTAssertEqual(outcomes.count, 1)
+            guard case .vetted(let artifact) = outcomes.first?.1 else {
+                return XCTFail("the fixture was not vetted")
+            }
+            XCTAssertTrue(service.adopt(artifact))
+            completed.fulfill()
+        })
+        XCTAssertFalse(received, "filesystem work must not complete synchronously on main")
+        XCTAssertFalse(service.vetSuggestedPaths([tree.path], dormantSessionIDs: []) { _ in
+            XCTFail("a concurrent request was accepted")
+        })
+        wait(for: [completed], timeout: Fixture.scanTimeout)
+        XCTAssertTrue(received)
+        XCTAssertFalse(service.vetSuggestedPaths(Array(repeating: tree.path, count: 9), dormantSessionIDs: []) { _ in
+            XCTFail("an oversized request was accepted")
+        })
+    }
 
     /// The reading survives the process, which is the entire point of caching it: finding these
     /// directories means walking every other one first, and a page that opens empty every launch

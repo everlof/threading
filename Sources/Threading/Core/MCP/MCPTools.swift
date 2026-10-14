@@ -8134,13 +8134,16 @@ enum MCPTools {
         Find safe, rebuildable build output when disk space is short, a command fails \
         with ENOSPC or “No space left on device”, or the user asks what is taking up \
         space. Lists Rust and Swift build directories, node_modules, and caches across \
-        the user's projects, and Xcode build caches left in the temporary locations \
-        agents build in (/private/tmp and the per-user temp directory), with each size, \
+        the user's projects, Xcode caches in ~/Library/Developer/Xcode/DerivedData, and \
+        temporary locations (/private/tmp and the per-user temp directory), with each size, \
         what it belongs to, and its last-write time. Threading has already checked that \
-        everything listed is either ignored by git or identified as a build cache by \
-        Xcode's own manifest, and rebuildable by a known command, so nothing tracked or \
-        irreplaceable appears here. A cache whose workspace no longer exists is marked \
-        ORPHANED. Reading this changes nothing.
+        build output is ignored by git or identified by Xcode's own manifest. Known dormant \
+        Claude session scratchpads can also be listed; their contents are not rebuilt. A \
+        cache whose workspace no longer exists is marked ORPHANED. Standard Xcode caches \
+        are rechecked before removal: recent writes, Xcode/build processes, or a running \
+        executable inside the cache prevent removal. This is a list of verified cleanup \
+        candidates; it does not measure all disk usage such as swap, simulator data, app \
+        containers, backups, Trash, or profiling traces. Reading this changes nothing.
         """,
       inputSchema: MCPInputSchema(properties: [:], required: [])
     ),
@@ -8164,12 +8167,13 @@ enum MCPTools {
       },
       observesPanel: false,
       executeArguments: { handler, arguments, sessionID, completion in
-        completion(handler.suggestReclaimableLocation(arguments))
+        handler.suggestReclaimableLocation(arguments, completion: completion)
       },
       description: """
         Ask Threading to check directories you believe are reclaimable but that \
         list_reclaimable_storage did not mention — it scans on a timer, so something you \
-        just found or just built may not be in its listing yet. Threading checks each path \
+        just found or just built may not be in its listing yet. Pass at most eight paths. \
+        Checks run in the background, one request at a time. Threading checks each path \
         against the same rules it applies to everything it finds on its own: it does not \
         take your word for it. A path that passes is measured, added to the listing, and can \
         then be named in propose_storage_cleanup. A path that fails is reported with the \

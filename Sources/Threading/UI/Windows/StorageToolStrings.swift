@@ -7,14 +7,14 @@ enum StorageToolStrings {
 
     static let scanning = """
         Threading is still measuring build output, in the user's projects and in the temporary \
-        locations agents build in. Ask again shortly.
+        locations agents build in, including the standard Xcode DerivedData folder. Ask again shortly.
         """
 
     /// Names both scopes, because the answer covers both: "nothing in your projects" would be a
     /// narrower claim than the one that was actually checked.
     static let nothingFound = """
         No reclaimable build output was found, either in the user's projects or in the temporary \
-        locations agents build in.
+        locations agents build in, or in the standard Xcode DerivedData folder.
         """
 
     /// The two gates, stated as the alternatives they are. A finding inside a project is offered
@@ -22,13 +22,19 @@ enum StorageToolStrings {
     /// offered because Xcode's own manifest says what wrote it. Claiming git for both would be
     /// false about every scratch line.
     static let listingFooter = """
-        Everything above is either ignored by git or identified as a build cache by Xcode's own \
-        manifest, and is rebuildable by the command shown. To act on any of it, call \
+        Build output above is either ignored by git or identified by Xcode's own manifest. \
+        Session scratchpads belong to known dormant sessions and are not rebuilt. Standard \
+        Xcode caches cannot be removed while recently written, while Xcode/build services run, \
+        or while an executable inside them is running. This listing covers verified cleanup \
+        candidates; swap, simulator data, app containers, backups, Trash, and profiling traces \
+        can account for other disk usage. To act on any of it, call \
         propose_storage_cleanup with the exact paths — that asks the user, who decides. Nothing \
         is removed without their approval.
         """
 
     static let noPaths = "No paths were given. Pass one absolute path per line in `paths`."
+    static let tooManySuggestions = "Pass at most \(ArtifactScanDefaults.maximumSuggestedPaths) paths per suggestion."
+    static let suggestionBusy = "Another storage suggestion is being checked. Try again after it finishes."
 
     // MARK: - Suggesting
 
@@ -69,7 +75,7 @@ enum StorageToolStrings {
     static func vetOutOfScope(_ path: String) -> String {
         """
         \(path) — reclaimable, but it belongs to no project Threading has open and sits in no \
-        temporary location it watches, so there is no listing to add it to.
+        temporary or Xcode cache location it watches, so there is no listing to add it to.
         """
     }
 

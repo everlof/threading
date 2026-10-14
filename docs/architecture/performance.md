@@ -4,6 +4,28 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## Standard Xcode cache discovery — 2026-10-14
+
+The previous storage scan did not visit the standard DerivedData location. Its expected input
+is hundreds of direct children; the opt-in regression fixture creates 1,000 manifest-bearing
+caches. `XcodeDerivedDataScannerTests.testBoundedScanAcrossManyStandardCaches`, enabled with
+`TEST_RUNNER_THREADING_STORAGE_STRESS=1 scripts/test.sh fast
+-only-testing:ThreadingTests/XcodeDerivedDataScannerTests`, measures only discovery and sizing,
+after fixture creation. Two Debug runs found all 1,000 in 0.222 and 0.317 seconds (median 0.269 s,
+maximum 0.317 s). This is a synthetic
+metadata workload, not a claim about scanning a real 100-GB cache or Release startup latency.
+
+One pass admits 4,096 immediate root entries, one million measured entries total, and a
+30-second cooperative deadline. A partial measurement is omitted rather than reported as an
+exact size. Discovery and explicit nominations run on the existing serial disk worker; at most
+one nomination request of eight paths can wait there. Storage keeps the existing virtual rows
+and proposal outline. The lifecycle test proves nominations return asynchronously and refuse
+concurrent/oversized requests, while the existing 120-group and 10,001-artifact viewport tests
+still cover bounded UI construction and exact removal identity. The scope and deletion rules
+are in [storage-and-stats.md](storage-and-stats.md#standard-xcode-deriveddata).
+The focused final run passed 99 tests; all four Storage captures (light/dark, regular/constrained
+width) were inspected through the shipping preferences controller.
+
 ## Finite remote HTTP responses — 2026-10-11
 
 Physical iPhone pairing reached and pinned the Mac, which persisted the new device, but every

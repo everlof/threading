@@ -22,7 +22,8 @@ import Foundation
 ///   changing underneath the walk.
 ///
 /// **There is a second scope beside the projects.** The scratch locations agents build in —
-/// `/private/tmp` and the per-user temporary directory — belong to no project, so they are kept
+/// `/private/tmp` and the per-user temporary directory — plus standard Xcode DerivedData belong
+/// to no checkout, so they are kept
 /// as one extra reading rather than under a synthetic project id, and persisted in a file of
 /// their own: the projects' store holds `[ProjectID: ProjectScan]`, and widening that shape
 /// would break the decode of the cache the page draws on first paint, while a second file needs
@@ -41,6 +42,7 @@ final class ArtifactScanService {
     struct ProjectScan: Codable {
         var scannedAt: Date
         var artifacts: [ReclaimableArtifact]
+        var externalScopeVersion: Int? = nil
 
         var byteCount: Int64 { artifacts.reduce(0) { $0 + $1.byteCount } }
     }
@@ -59,6 +61,7 @@ final class ArtifactScanService {
     /// The same guard for the scratch scope, which has no project id to be a member of a set:
     /// walking `/private/tmp` twice at once is the one thing the roots make expensive.
     private var isScratchInFlight = false
+    private var isVettingSuggestions = false
 
     /// Whether anything is being scanned, which the page shows rather than a spinner.
     var isScanning: Bool { !inFlight.isEmpty || isScratchInFlight }
@@ -70,6 +73,7 @@ final class ArtifactScanService {
     /// Where the scratch walk looks. Injected so a test can point it at a fixture directory
     /// instead of the machine's real temporary directories.
     private let scratchRoots: [URL]
+    private let derivedDataRoot: URL?
 
     /// The projects the passive pass sweeps, and whose sessions both busy rules ask about.
     private let projectsProvider: @MainActor () -> [Project]
@@ -99,6 +103,7 @@ final class ArtifactScanService {
         directory: URL? = nil,
         fileManager: FileManager = .default,
         scratchRoots: [URL] = ScratchDefaults.roots,
+        derivedDataRoot: URL? = XcodeDerivedDataScanner.defaultRoot,
         projects: (@MainActor () -> [Project])? = nil,
         isAnySessionWorking: (@MainActor () -> Bool)? = nil,
         qualityOfService: DispatchQoS = .background
@@ -109,6 +114,7 @@ final class ArtifactScanService {
         )
         self.fileManager = fileManager
         self.scratchRoots = scratchRoots
+        self.derivedDataRoot = derivedDataRoot
         self.projectsProvider = projects ?? { ProjectStore.shared.projects }
         self.scratchBusyOverride = isAnySessionWorking
 
@@ -179,6 +185,35 @@ final class ArtifactScanService {
 
     // MARK: - Scanning
 
+    /// Suggestions share the serial disk worker. One bounded request may wait for an existing
+    /// scan; concurrent requests are refused instead of building an unbounded work queue.
+    @discardableResult
+    func vetSuggestedPaths(
+        _ paths: [String],
+        dormantSessionIDs: Set<SessionID>,
+        completion: @escaping @MainActor @Sendable ([(String, ArtifactScanner.VetOutcome)]) -> Void
+    ) -> Bool {
+        guard !isVettingSuggestions, paths.count <= ArtifactScanDefaults.maximumSuggestedPaths else { return false }
+        isVettingSuggestions = true
+        let roots = scratchRoots
+        let derivedDataRoot = derivedDataRoot
+        queue.async { [weak self] in
+            let outcomes = paths.map { path in
+                (path, ArtifactScanner.vet(
+                    URL(fileURLWithPath: path),
+                    dormantSessionIDs: dormantSessionIDs,
+                    roots: roots,
+                    derivedDataRoot: derivedDataRoot
+                ))
+            }
+            Task { @MainActor in
+                self?.isVettingSuggestions = false
+                completion(outcomes)
+            }
+        }
+        return true
+    }
+
     /// Starts the passive scan, once, at launch.
     ///
     /// The first pass is deferred rather than immediate: launch is already busy restoring a
@@ -217,7 +252,8 @@ final class ArtifactScanService {
         }
 
         let scratchAge = scratchScan.map { now.timeIntervalSince($0.scannedAt) }
-        if scratchAge.map({ $0 > ArtifactScanDefaults.staleAfter }) ?? true {
+        if scratchScan?.externalScopeVersion != ArtifactScanDefaults.externalScopeVersion
+            || (scratchAge.map({ $0 > ArtifactScanDefaults.staleAfter }) ?? true) {
             refreshScratch()
         }
     }
@@ -289,6 +325,7 @@ final class ArtifactScanService {
         notifyChanged()
 
         let roots = scratchRoots
+        let derivedDataRoot = derivedDataRoot
         // Taken here rather than inside the walk: session state lives on the main actor, and the
         // census is a fact about the moment the scan starts, not something to sample repeatedly
         // from a background queue while directories are being measured.
@@ -299,7 +336,8 @@ final class ArtifactScanService {
         )
 
         queue.async { [weak self] in
-            let artifacts = ArtifactScanner.scanScratch(
+            let xcodeArtifacts = derivedDataRoot.map { XcodeDerivedDataScanner.scan(root: $0) } ?? []
+            let artifacts = xcodeArtifacts + ArtifactScanner.scanScratch(
                 roots: roots,
                 dormantSessionIDs: dormantSessionIDs
             )
@@ -308,7 +346,11 @@ final class ArtifactScanService {
             Task { @MainActor in
                 guard let self else { return }
                 self.isScratchInFlight = false
-                self.scratchScan = ProjectScan(scannedAt: scannedAt, artifacts: artifacts)
+                self.scratchScan = ProjectScan(
+                    scannedAt: scannedAt,
+                    artifacts: artifacts,
+                    externalScopeVersion: ArtifactScanDefaults.externalScopeVersion
+                )
                 self.saveScratch()
                 self.notifyChanged()
                 let bytes = artifacts.reduce(Int64(0)) { $0 + $1.byteCount }
@@ -335,7 +377,10 @@ final class ArtifactScanService {
     func adopt(_ artifact: ReclaimableArtifact) -> Bool {
         let path = artifact.url.standardizedFileURL.path
 
-        if ArtifactScanner.isWithinScratchRoots(artifact.url, roots: scratchRoots) {
+        let isXcodeCache = derivedDataRoot.map {
+            XcodeDerivedDataScanner.contains(artifact.url, root: $0)
+        } ?? false
+        if isXcodeCache || ArtifactScanner.isWithinScratchRoots(artifact.url, roots: scratchRoots) {
             var scan = scratchScan ?? ProjectScan(scannedAt: Date(), artifacts: [])
             guard !scan.artifacts.contains(where: { $0.url.standardizedFileURL.path == path }) else {
                 return true
@@ -432,6 +477,8 @@ final class ArtifactScanService {
 // MARK: - Artifact Scan Defaults
 
 enum ArtifactScanDefaults {
+    static let externalScopeVersion = 1
+    static let maximumSuggestedPaths = 8
     static let fileName = "storage-scan.json"
 
     /// The scratch scope's reading, kept beside the projects' rather than inside it: that file's

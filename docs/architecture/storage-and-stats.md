@@ -4,8 +4,8 @@ What can be rebuilt, and what a project is made of.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-`ArtifactScanner` finds build output a documented command can rebuild — inside a project, and in
-the temporary locations agents build in — and the Storage settings page removes it. On the
+`ArtifactScanner` finds build output a documented command can rebuild — inside a project, in
+the temporary locations agents build in, and in Xcode's standard DerivedData directory — and the Storage settings page removes it. On the
 machine it was built for: **87.61 GB across 45 directories**, and 58 GB of that in git worktrees
 rather than the checkouts anyone opens — abandoned branches each holding a full `target/` and
 their own copy of `node_modules`.
@@ -28,6 +28,61 @@ known build output.
 Both gates are re-checked immediately before a delete: a listing being read is a listing going
 stale. Removal is **immediate rather than to the Trash**, which for once is the safer-feeling
 option that helps nobody — 30 GB in the Trash has not been reclaimed.
+
+## Standard Xcode DerivedData
+
+`XcodeDerivedDataScanner` covers `~/Library/Developer/Xcode/DerivedData` separately from the
+temporary roots. Adding that path to `ScratchDefaults.roots` would both grant session-directory
+recognition in the wrong place and miss ordinary Xcode caches: Xcode shares `ModuleCache.noindex`
+at the root, whereas temporary `-derivedDataPath` builds usually put it inside each tree. A
+read-only inventory on 2026-10-14 found 298 child directories, 23 with workspace manifests and
+only two satisfying the temporary layout. Thirteen manifest-bearing children retained only logs
+and test results after cleaning.
+
+Only a **direct, non-symlink child** with a regular, non-symlink `info.plist`, an absolute
+`WorkspacePath`, and a recognized Xcode output directory is offered. The root, shared caches
+without a workspace manifest, nested directories, and unidentified leftovers are refused. The
+temporary recognizer still requires its original Build and local ModuleCache evidence. The same
+standard-location recognizer serves discovery, explicit path suggestions, and removal; a failed
+standard-location check cannot fall through to temporary recognition.
+
+The expected inventory is hundreds of children; the stress fixture has 1,000. Discovery examines
+at most 4,096 root entries, measures at most one million entries across the entire pass and uses
+a 30-second cooperative deadline. File measurement includes bundles and deduplicates hard links.
+An unreadable or incomplete tree contributes no candidate or partial byte count. This work runs
+on the existing serial background scan queue. A nominated path gets its own identical measurement
+budget. The existing virtual Storage rows and drawn proposal outline consume only value models.
+Path suggestions use that serial worker too, accept at most eight paths, and allow one pending
+request globally. Their main-actor phase only takes the session census and publishes the results;
+suggesting a multi-gigabyte tree no longer performs its walk on the UI thread.
+
+Before removal, the cache is measured again and its workspace identity must match the approved
+finding. A write or manifest access in the last fifteen minutes refuses removal. A bounded,
+same-user libproc census also refuses while Xcode, xcodebuild or Xcode build services are alive,
+or an executable is running from the candidate tree. Failed/full process censuses fail closed.
+The census runs before and after measurement, and the manifest is checked again afterwards.
+This is deliberately conservative: close Xcode and let builds finish before removing standard
+caches. These checks reduce races but do not lock an external build system against starting a
+new build after the last check.
+
+Standard caches share the existing external (`storage-scratch-scan.json`) reading, grouping by
+workspace and retaining their actual root as the subtitle. An optional external-scope version
+keeps old readings visible but schedules their refresh even when their timestamp is fresh.
+Discovery, nomination/adoption, persisted reopening, proposal resolution and refusal at removal
+are covered by `XcodeDerivedDataScannerTests` and `ArtifactScanServiceTests`. No cleanup authority
+is added: presentation remains host-only, and Threading retains recognition, activity checks,
+exact-path approval and deletion. `/tmp` session recognition remains limited to known dormant
+Claude sessions; arbitrary files, unknown sessions and Codex scratch layouts are not inferred
+safe from their age or name.
+
+The list reports verified cleanup candidates, not a complete disk-usage inventory. Swap,
+simulator/device state, app containers, backups, Trash and profiling traces have different
+ownership and retention rules. Large size or an absent process reference does not prove they
+are disposable. Likewise, absence from the cached list is not a safety refusal: a manifest-valid
+temporary Xcode cache may simply await its next passive scan, and nomination must remain usable
+without waiting for all running sessions to settle.
+
+## Temporary locations
 
 **Outside a project the necessary gate is replaced, never dropped.** Agents build in the scratch
 locations too: measured on 2026-08-13 with 31 GiB free, `/private/tmp/claude-501` held **76 GB

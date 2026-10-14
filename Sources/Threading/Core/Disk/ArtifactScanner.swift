@@ -205,13 +205,19 @@ struct DerivedDataManifest: Equatable {
             ), isDirectory.boolValue else { return nil }
         }
 
+        return readManifest(inDirectory: url)
+    }
+
+    /// Decodes the bounded manifest only. The caller must separately establish the directory
+    /// layout: temporary DerivedData above, or XcodeDerivedDataScanner's standard-root gate.
+    static func readManifest(inDirectory url: URL) -> DerivedDataManifest? {
         let manifest = url.appendingPathComponent(ScratchDefaults.derivedDataManifestName)
         // A ceiling rather than a trust: the file Xcode writes is a few hundred bytes, and a
         // walk of somebody's scratch directory should not be able to read an arbitrary blob
         // into memory because it was named `info.plist`.
         guard let size = try? manifest.resourceValues(forKeys: [.fileSizeKey]).fileSize,
               size <= ScratchDefaults.maximumManifestBytes,
-              let data = try? Data(contentsOf: manifest),
+              let data = try? BoundedFileReader.read(manifest, maximumBytes: ScratchDefaults.maximumManifestBytes),
               let contents = try? PropertyListSerialization.propertyList(
                   from: data,
                   options: [],
@@ -219,7 +225,7 @@ struct DerivedDataManifest: Equatable {
               ),
               let plist = contents as? [String: Any],
               let workspacePath = plist[Key.workspacePath] as? String,
-              !workspacePath.isEmpty else { return nil }
+              workspacePath.hasPrefix("/") else { return nil }
 
         // Read leniently: a tree without a usable date is still a DerivedData tree, and the
         // measured mtime stands in for it.
@@ -630,7 +636,8 @@ enum ArtifactScanner {
     static func isSafeToRemove(
         _ artifact: ReclaimableArtifact,
         dormantSessionIDs: Set<SessionID> = [],
-        roots: [URL] = ScratchDefaults.roots
+        roots: [URL] = ScratchDefaults.roots,
+        derivedDataRoot: URL? = XcodeDerivedDataScanner.defaultRoot
     ) -> Bool {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: artifact.url.path, isDirectory: &isDirectory),
@@ -638,6 +645,10 @@ enum ArtifactScanner {
 
         switch artifact.kind.gating {
         case .manifest:
+            if let root = derivedDataRoot,
+               XcodeDerivedDataScanner.contains(artifact.url, root: root) {
+                return XcodeDerivedDataScanner.isSafeToRemove(artifact, root: root)
+            }
             return isDisposableScratch(artifact.url, kind: artifact.kind, roots: roots)
 
         case .session:
@@ -658,7 +669,7 @@ enum ArtifactScanner {
     /// Why a nominated path is not reclaimable. Each case names the gate that refused, because an
     /// agent that is told *which* proof was missing can often supply it — run the build, look
     /// somewhere else — where "no" alone sends it round the same loop.
-    enum VetRefusal: Equatable {
+    enum VetRefusal: Equatable, Sendable {
         /// Nothing is there, or what is there is not a directory.
         case missing
 
@@ -674,7 +685,7 @@ enum ArtifactScanner {
         case unrecognised
     }
 
-    enum VetOutcome: Equatable {
+    enum VetOutcome: Equatable, Sendable {
         case vetted(ReclaimableArtifact)
         case refused(VetRefusal)
     }
@@ -693,11 +704,21 @@ enum ArtifactScanner {
     static func vet(
         _ url: URL,
         dormantSessionIDs: Set<SessionID> = [],
-        roots: [URL] = ScratchDefaults.roots
+        roots: [URL] = ScratchDefaults.roots,
+        derivedDataRoot: URL? = XcodeDerivedDataScanner.defaultRoot
     ) -> VetOutcome {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
               isDirectory.boolValue else { return .refused(.missing) }
+
+        // This location has its own stricter boundary. An unrecognised child must not fall
+        // through to the temporary-directory gate (including when tests nest it under /tmp).
+        if let root = derivedDataRoot, XcodeDerivedDataScanner.contains(url, root: root) {
+            guard let artifact = XcodeDerivedDataScanner.vet(url, root: root) else {
+                return .refused(.unrecognised)
+            }
+            return .vetted(artifact)
+        }
 
         if let layout = SessionScratchLayout.read(url, roots: roots) {
             guard dormantSessionIDs.contains(layout.sessionID) else {
@@ -758,12 +779,14 @@ enum ArtifactScanner {
     static func remove(
         _ artifact: ReclaimableArtifact,
         dormantSessionIDs: Set<SessionID> = [],
-        roots: [URL] = ScratchDefaults.roots
+        roots: [URL] = ScratchDefaults.roots,
+        derivedDataRoot: URL? = XcodeDerivedDataScanner.defaultRoot
     ) -> Bool {
         removeWithOutcome(
             artifact,
             dormantSessionIDs: dormantSessionIDs,
-            roots: roots
+            roots: roots,
+            derivedDataRoot: derivedDataRoot
         ) == .removed
     }
 
@@ -773,12 +796,14 @@ enum ArtifactScanner {
     static func removeWithOutcome(
         _ artifact: ReclaimableArtifact,
         dormantSessionIDs: Set<SessionID> = [],
-        roots: [URL] = ScratchDefaults.roots
+        roots: [URL] = ScratchDefaults.roots,
+        derivedDataRoot: URL? = XcodeDerivedDataScanner.defaultRoot
     ) -> ArtifactRemovalOutcome {
         guard isSafeToRemove(
             artifact,
             dormantSessionIDs: dormantSessionIDs,
-            roots: roots
+            roots: roots,
+            derivedDataRoot: derivedDataRoot
         ) else {
             ThreadingLogger.storage.error(
                 "Refused to remove \(artifact.url.path, privacy: .private(mask: .hash)): no longer disposable"
@@ -813,6 +838,16 @@ enum ArtifactScanner {
     /// The identifier is only fetched for files that *are* linked more than once, so the
     /// ordinary file costs nothing extra.
     private static func measure(_ url: URL) -> (bytes: Int64, modifiedAt: Date?) {
+        var budget = ArtifactMeasurementBudget(remainingEntries: .max, deadline: .distantFuture)
+        return measure(url, budget: &budget) ?? (0, nil)
+    }
+
+    /// A bounded, complete reading. A partial walk must never become a deletion candidate or
+    /// a precise-looking byte count. The external Xcode scan shares one budget across trees.
+    static func measure(
+        _ url: URL,
+        budget: inout ArtifactMeasurementBudget
+    ) -> (bytes: Int64, modifiedAt: Date?)? {
         let keys: [URLResourceKey] = [
             .totalFileAllocatedSizeKey,
             .contentModificationDateKey,
@@ -822,17 +857,21 @@ enum ArtifactScanner {
         // Packages are descended into: `du` counts what is inside an `.app`, and a DerivedData's
         // `Build/Products` is nothing but bundles — skipping them understates the one number
         // this measurement exists to report.
+        var failed = false
         guard let walker = FileManager.default.enumerator(
             at: url,
-            includingPropertiesForKeys: keys
-        ) else { return (0, nil) }
+            includingPropertiesForKeys: keys,
+            errorHandler: { _, _ in failed = true; return false }
+        ) else { return nil }
 
         var bytes: Int64 = 0
-        var newest: Date?
+        var newest = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+            .contentModificationDate
         var countedLinks: Set<NSObject> = []
 
         for case let file as URL in walker {
-            guard let values = try? file.resourceValues(forKeys: Set(keys)) else { continue }
+            guard budget.consume(),
+                  let values = try? file.resourceValues(forKeys: Set(keys)) else { return nil }
 
             if (values.linkCount ?? 1) > 1 {
                 guard let identifier = values.fileResourceIdentifier as? NSObject,
@@ -845,7 +884,18 @@ enum ArtifactScanner {
             }
         }
 
-        return (bytes, newest)
+        return failed ? nil : (bytes, newest)
+    }
+}
+
+struct ArtifactMeasurementBudget {
+    var remainingEntries: Int
+    let deadline: Date
+
+    mutating func consume() -> Bool {
+        guard remainingEntries > 0, Date() < deadline else { return false }
+        remainingEntries -= 1
+        return true
     }
 }
 

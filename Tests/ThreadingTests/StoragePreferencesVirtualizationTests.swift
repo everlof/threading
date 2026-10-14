@@ -140,7 +140,7 @@ final class StoragePreferencesVirtualizationTests: XCTestCase {
                 let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
                 var data: Data?
                 appearance.performAsCurrentDrawingAppearance {
-                    let groups = fixtureGroups(count: 4)
+                    let groups = xcodeFixtureGroups() + fixtureGroups(count: 2)
                     let controller = fixtureController(groups: groups)
                     _ = controller.view
                     controller.setGroupExpandedForTesting(groups[0].identity, expanded: true)
@@ -180,9 +180,35 @@ final class StoragePreferencesVirtualizationTests: XCTestCase {
             refreshStaleProjects: {},
             extensionSectionsProvider: { [] },
             summaryProvider: {
-                "38.1 GB reclaimable in 12 directories · measured 12 min ago · only 31 GB free"
+                let bytes = groups.reduce(Int64(0)) { $0 + $1.byteCount }
+                let count = groups.reduce(0) { $0 + $1.artifacts.count }
+                let size = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+                return "\(size) reclaimable in \(count) directories · measured 12 min ago · only 31 GB free"
             }
         )
+    }
+
+    @MainActor
+    private func xcodeFixtureGroups() -> [ReclaimableFindings.Group] {
+        let root = "/Users/dev/Library/Developer/Xcode/DerivedData"
+        let project = Project(name: "Threading", folderURL: URL(fileURLWithPath: "/Users/dev/repo/Threading"))
+        let caches = [
+            ReclaimableArtifact(
+                url: URL(fileURLWithPath: root + "/Threading-abcdefghijklmnopqrstuv"),
+                kind: .xcodeDerivedData, byteCount: 18_000_000_000,
+                modifiedAt: nil, checkoutPath: root,
+                workspacePath: "/Users/dev/repo/Threading/Threading.xcodeproj"
+            ),
+            ReclaimableArtifact(
+                url: URL(fileURLWithPath: root + "/OldApp-zyxwvutsrqponmlkjihgfe"),
+                kind: .xcodeDerivedData, byteCount: 7_000_000_000,
+                modifiedAt: nil, checkoutPath: root,
+                workspacePath: "/Users/dev/deleted/OldApp.xcodeproj"
+            )
+        ]
+        return ReclaimableFindings.scratchGroups(caches, among: [project]) {
+            !$0.contains("/deleted/")
+        }
     }
 
     @MainActor

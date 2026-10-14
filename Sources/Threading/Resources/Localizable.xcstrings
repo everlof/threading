@@ -39668,6 +39668,17 @@
         }
       }
     },
+    "Other build caches and scratchpads" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Andra byggcachar och arbetsmappar"
+          }
+        }
+      }
+    },
     "Other build caches in temporary locations" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42056,6 +42067,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Projektåtgärder"
+          }
+        }
+      }
+    },
+    "Project build output must be ignored by git and recognized as rebuildable. Xcode caches in DerivedData and temporary locations require Xcode's own manifest. Standard DerivedData caches are kept while recently written, while Xcode or build services run, or while an executable inside them is running. Session scratchpads are offered only for known dormant sessions; their contents are not rebuilt. Removal is immediate rather than moved to the Trash." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projektens byggutdata måste ignoreras av git och identifieras som återskapbara. Xcode-cachar i DerivedData och temporära mappar kräver Xcodes egen manifestfil. Standardcachar i DerivedData behålls om de nyligen har skrivits till, om Xcode eller byggtjänster körs eller om en körbar fil i dem används. Sessioners arbetsmappar erbjuds bara för kända vilande sessioner; innehållet återskapas inte. Borttagningen sker direkt, utan att flytta till papperskorgen."
           }
         }
       }
@@ -72486,6 +72508,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "byggcache i /tmp"
+          }
+        }
+      }
+    },
+    "build caches" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "byggcachar"
           }
         }
       }

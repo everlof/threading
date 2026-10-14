@@ -6546,15 +6546,17 @@ everything smaller folds into a single **"N smaller directories"** line — a co
 dozens of tiny caches, and they used to bury the two directories holding the space. Click the
 fold to show them, and **Show fewer** to close it again.
 
-**Build caches in temporary locations are found too.** An agent working in a scratchpad under
+**Xcode DerivedData and build caches in temporary locations are found too.** Threading checks
+`~/Library/Developer/Xcode/DerivedData`, `/private/tmp` (also known as `/tmp`), and the per-user
+temporary directory. An agent working in a scratchpad under
 `/tmp` builds there, and what it leaves belongs to no checkout. Xcode writes an `info.plist` at
 the top of a derived data tree naming the workspace it was built for, and that name is what the
 page files each finding by:
 
 ```
-Threading · build cache in /tmp · 27.1 GB
+Threading · build caches · 27.1 GB
 Left over from deleted workspaces · 14.4 GB
-Other build caches in temporary locations · 9.4 GB
+Other build caches and scratchpads · 9.4 GB
 ```
 
 A cache built for a workspace inside one of your projects appears under that project, sorting
@@ -6565,6 +6567,18 @@ exist but is not one of your projects — usually another session's copy of a re
 heading of its own rather than being called deleted, because somebody may be building in it right
 now. Every one of these rows names the workspace it was built for, so two caches of the same
 project are told apart.
+
+The standard DerivedData scan recognizes individual caches using Xcode's workspace manifest,
+including caches that share a module cache and those retaining only logs or test results. It
+does not offer the whole DerivedData folder, shared caches without manifests, or unidentified
+folders. Before removing a standard cache, Threading checks its identity and age again. It keeps
+caches written or accessed in the last fifteen minutes, and refuses removal while Xcode or its
+build services run, or while a program runs from that cache. Close Xcode and let builds finish
+before reclaiming these caches.
+
+Known dormant Claude session scratchpads in `/tmp` can also appear. Their contents are not
+rebuilt. Active or unknown sessions, arbitrary temporary files, and other agents' unrecognized
+scratch layouts are not offered for whole-directory removal.
 
 Every row says what it costs to bring back — the command that rebuilds it — and when anything
 inside it was last written. A directory written in the last few minutes is marked **in use**,
@@ -6588,6 +6602,12 @@ worktree build directories are 60 GB and rebuild with `cargo build`". You get a 
 exactly what it proposes and why, and nothing happens until you approve. An agent can only
 propose paths that already appear in the listing, so it cannot use this to delete anything else,
 and it is told to propose rather than reach for `rm` itself.
+
+This is a list of verified cleanup candidates, not a full disk-usage report. Swap, simulator
+data, application containers, backups, Trash and profiling traces can explain space outside
+this list. A missing build cache may also mean the scan is stale: an agent can use
+`suggest_reclaimable_location` to check up to eight exact paths in the background and add those
+that pass the same safety rules.
 
 The sheet is named for the chat that asked, and the directories are grouped under the same
 headings this page uses — a checkout, or a tier of temporary caches — with the path segments they

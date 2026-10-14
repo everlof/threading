@@ -190,7 +190,7 @@ enum ReclaimableFindings {
             guard let project = byID[id] else { return nil }
             return Group(
                 attribution: .scratchProject(project),
-                title: "\(project.name) · \(Strings.buildCacheInTemporary)",
+                title: "\(project.name) · \(Strings.externalBuildCaches)",
                 subtitle: rootsLabel(of: artifacts),
                 identity: ScratchGroupKey.project(id),
                 artifacts: artifacts.sorted { $0.byteCount > $1.byteCount }
@@ -211,7 +211,7 @@ enum ReclaimableFindings {
         if !other.isEmpty {
             groups.append(Group(
                 attribution: .scratchOther,
-                title: Strings.otherTemporaryCaches,
+                title: Strings.otherBuildCaches,
                 subtitle: rootsLabel(of: other),
                 identity: ScratchGroupKey.other,
                 artifacts: other.sorted { $0.byteCount > $1.byteCount }
@@ -287,7 +287,7 @@ enum ReclaimableFindings {
 
         /// What a project's findings outside its own folder are called, after its name: the same
         /// `<project> · <where>` shape a checkout heading has.
-        static var buildCacheInTemporary: String { L10n.string("build cache in /tmp") }
+        static var externalBuildCaches: String { L10n.string("build caches") }
 
         /// The orphan tier's heading, which names what the findings are rather than where they
         /// live — there is no project left to name, and that absence is the point.
@@ -297,8 +297,8 @@ enum ReclaimableFindings {
 
         /// The tier for a workspace that is alive and is not ours. Deliberately not the orphan
         /// heading: somebody may be building in it right now.
-        static var otherTemporaryCaches: String {
-            L10n.string("Other build caches in temporary locations")
+        static var otherBuildCaches: String {
+            L10n.string("Other build caches and scratchpads")
         }
 
         /// The tree a cache was built for, which is the only thing that says which checkout fed
