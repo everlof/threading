@@ -9,12 +9,17 @@ public enum NSLineBreakMode: Int, Sendable {
 }
 
 @MainActor
-public final class NSTextFieldCell {
-    weak var owner: NSTextField?
+open class NSTextFieldCell {
+    /// The field this cell measures for; a themed cell reads its font.
+    public internal(set) weak var owner: NSTextField?
+    public required init() {}
     /// Linux's Pango label has no private AppKit cell padding: its shaped bounds are its cell.
     public var cellSize: NSSize { owner?.intrinsicContentSize ?? .zero }
     public func cellSize(forBounds bounds: NSRect) -> NSSize { cellSize }
     public func titleRect(forBounds bounds: NSRect) -> NSRect { bounds }
+    /// Where an editable field draws its text and places its field editor. A themed cell
+    /// insets this from the bezel it draws; a label's shaped bounds are its cell.
+    open func drawingRect(forBounds bounds: NSRect) -> NSRect { bounds }
     public var truncatesLastVisibleLine = false {
         didSet {
             owner?.needsDisplay = true
@@ -56,7 +61,7 @@ open class NSTextField: NSView {
             attributedStorage = nil
             selectedTextRange = NSRange(location: 0, length: 0)
             selectionAnchor = nil
-            setAccessibilityRole(.staticText)
+            setAccessibilityRole(isEditable ? .textField : .staticText)
             setAccessibilityLabel(newValue)
             let prefix = Array(newValue.utf8.prefix(Self.maximumUTF8Bytes + 1))
             if prefix.count <= Self.maximumUTF8Bytes {
@@ -97,14 +102,35 @@ open class NSTextField: NSView {
         didSet { invalidateTextMetrics() }
     }
     private lazy var labelCell: NSTextFieldCell = {
-        let cell = NSTextFieldCell()
+        let cell = type(of: self).cellClass.init()
         cell.owner = self
         return cell
     }()
     open var cell: NSTextFieldCell? { labelCell }
+    open class var cellClass: NSTextFieldCell.Type { NSTextFieldCell.self }
+
+    // MARK: Editing
+
+    /// An editable field edits through a field editor, as AppKit's does: while editing, the
+    /// window's first responder is that `NSTextView`, placed over the cell's drawing rect.
     open var isEditable = false {
-        didSet { precondition(!isEditable, "Linux NSTextField currently supports labels, not editing") }
+        didSet { if isEditable != oldValue { editabilityDidChange() } }
     }
+
+    /// Initializers set the property without its observer, so they call this directly.
+    private func editabilityDidChange() {
+        if isEditable { isSelectable = true } else { abortEditing() }
+        setAccessibilityRole(isEditable ? .textField : .staticText)
+        window?.invalidateCursorRects(for: self)
+        needsDisplay = true
+    }
+    open weak var delegate: NSTextFieldDelegate?
+    open var placeholderString: String? { didSet { needsDisplay = true } }
+    /// Sent when Return ends editing. This field is not an `NSControl` here, so it owns the
+    /// pair itself; on Linux a `Selector` is the closure.
+    open var action: Selector?
+    open weak var target: AnyObject?
+    var fieldEditor: NSTextFieldEditor?
     open var isSelectable = false {
         didSet {
             if !isSelectable {
@@ -141,9 +167,18 @@ open class NSTextField: NSView {
         lineBreakMode = .byWordWrapping
     }
 
+    /// AppKit's editable single-line field. The host theme draws its bezel through its cell.
+    public convenience init(string: String) {
+        self.init(frame: .zero)
+        stringValue = string
+        isEditable = true
+        editabilityDidChange()
+    }
+
     open override var isFlipped: Bool { true }
 
     open override var intrinsicContentSize: NSSize {
+        if isEditable { return editableIntrinsicSize }
         let scale = window?.backingScaleFactor ?? 1
         let metric = metrics(at: scale)
         let width = wrapsAtLayoutWidth ? naturalWidth(at: scale) : CGFloat(metric.width) / scale
@@ -169,6 +204,11 @@ open class NSTextField: NSView {
         let width = CGFloat(metrics(at: scale, unwrapped: true).width) / scale
         unwrappedWidth = (scale, width)
         return width
+    }
+
+    open override func layout() {
+        super.layout()
+        layoutFieldEditor()
     }
 
     open override func viewDidMoveToWindow() {
@@ -298,6 +338,10 @@ open class NSTextField: NSView {
     }
 
     open override func draw(_ dirtyRect: NSRect) {
+        if isEditable {
+            drawEditableContent()
+            return
+        }
         if isSelectable {
             drawSelectableLabel()
             return
@@ -400,6 +444,10 @@ open class NSTextField: NSView {
     open override func mouseDown(with event: NSEvent) {
         guard isSelectable else { super.mouseDown(with: event); return }
         _ = window?.makeFirstResponder(self)
+        if let fieldEditor {
+            fieldEditor.mouseDown(with: event)
+            return
+        }
         let point = convert(event.locationInWindow, from: nil)
         if let complete = completePlainText(at: window?.backingScaleFactor ?? 1) {
             let scale = window?.backingScaleFactor ?? 1
@@ -418,6 +466,10 @@ open class NSTextField: NSView {
     }
 
     open override func mouseDragged(with event: NSEvent) {
+        if let fieldEditor {
+            fieldEditor.mouseDragged(with: event)
+            return
+        }
         if isSelectable, draggingSelection, let start = completeDragStart,
            let complete = completePlainText(at: window?.backingScaleFactor ?? 1) {
             let point = convert(event.locationInWindow, from: nil)

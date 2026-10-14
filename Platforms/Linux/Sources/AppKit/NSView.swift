@@ -209,6 +209,15 @@ open class NSView: NSResponder, NSLayoutItem {
         appliedSurface = (fill, radius, border)
         needsDisplay = true
     }
+
+    /// AppKit's `layer.borderColor` changes the stroke alone; the retained fill and corner stay.
+    public func setAppliedSurfaceBorder(_ border: NSColor?) {
+        guard let surface = appliedSurface else {
+            preconditionFailure("a surface border needs an applied surface")
+        }
+        appliedSurface = (surface.fill, surface.radius, border)
+        needsDisplay = true
+    }
     open var identifier: NSUserInterfaceItemIdentifier?
     open var toolTip: String?
     open var alignmentRectInsets: NSEdgeInsets { NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
@@ -865,7 +874,7 @@ public struct NSUserInterfaceItemIdentifier: RawRepresentable, Hashable, Sendabl
 }
 
 public enum NSAccessibility {
-    public enum Notification: Sendable { case valueChanged }
+    public enum Notification: Sendable { case valueChanged, layoutChanged }
     @MainActor public static var notificationHandler: ((NSView, Notification) -> Void)?
 
     @MainActor public static func post(element: NSView, notification: Notification) {
@@ -877,7 +886,9 @@ public enum NSAccessibility {
         case image
         case staticText
         case textArea
+        case textField
         case button
+        case radioButton
         case table
         case group
         case menu

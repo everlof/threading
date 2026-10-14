@@ -108,12 +108,15 @@ public class BackdropThemedControl: ThemedControl {
     func themedMenuPresentationDidChange(isPresented: Bool)
 }
 public enum ThemedMenuAnchor { case pointer(NSPoint), control }
+#if !THREADING_WINDOW_HARNESS
+// The window host links the production ControlRow; the narrower harnesses keep this shape.
 @MainActor public protocol ControlRowMember { func adopt(_ metrics: ControlRowMetrics) }
 public struct ControlRowMetrics {
     public let height: CGFloat
     public let glyphSlot: CGFloat
     public let glyphRole: Design.Symbol.Role
 }
+#endif
 
 extension NSView {
     /// No diagnostic host view applies a rounded layer surface around the icon button.

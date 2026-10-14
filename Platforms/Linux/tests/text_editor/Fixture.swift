@@ -18,6 +18,18 @@ private final class PlaceholderInk: NSView {
     }
 }
 
+@MainActor
+private final class FieldNotices: NSTextFieldDelegate {
+    var began = 0, changes: [String] = [], ended: [Int] = []
+    func controlTextDidBeginEditing(_ obj: Notification) { began += 1 }
+    func controlTextDidChange(_ obj: Notification) {
+        changes.append((obj.object as? NSTextField)?.stringValue ?? "")
+    }
+    func controlTextDidEndEditing(_ obj: Notification) {
+        ended.append(obj.userInfo?["NSTextMovement"] as? Int ?? -1)
+    }
+}
+
 @main
 @MainActor
 enum Fixture {
@@ -190,6 +202,7 @@ enum Fixture {
 
         verifyKeyLoop()
         verifyNavigationKeys()
+        verifyEditableField()
 
         let paint = ThemedTextView(frame: NSRect(x: 0, y: 0, width: 180, height: 40),
                                    textContainer: nil)
@@ -221,6 +234,60 @@ enum Fixture {
             benchmarkScroll(lineCount: 170)
             benchmarkScroll(lineCount: 1700)
         }
+    }
+
+    /// AppKit's editable field: focus lands on its field editor, edits notify the delegate,
+    /// Return sends the action and keeps editing, Tab moves on and commits, and the editor leaves.
+    private static func verifyEditableField() {
+        let window = NSWindow(backingScaleFactor: 1)
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 80))
+        let field = NSTextField(string: "")
+        let next = KeyLoopControl()
+        let notices = FieldNotices()
+        var actions = 0
+        field.frame = NSRect(x: 10, y: 10, width: 200, height: 22)
+        field.placeholderString = "Write your answer…"
+        field.delegate = notices
+        field.action = { actions += 1 }
+        field.nextKeyView = next
+        next.nextKeyView = field
+        root.addSubview(field)
+        root.addSubview(next)
+        window.contentView = root
+        precondition(field.isEditable && field.isSelectable,
+                     "editable=\(field.isEditable) selectable=\(field.isSelectable)")
+        precondition(field.accessibilityRole() == .textField, "role \(String(describing: field.accessibilityRole()))")
+        precondition(field.intrinsicContentSize.width == NSView.noIntrinsicMetric,
+                     "an editable field takes its width from layout")
+
+        let empty = Bitmap(width: 240, height: 80, background: (1, 1, 1, 1))
+        root.render(in: NSGraphicsContext(bitmap: empty, scale: 1))
+        let placeholderInk = empty.pixels.indices.filter { $0 % 4 == 0 && empty.pixels[$0] < 245 }.count
+        precondition(placeholderInk > 20, "an empty field draws its placeholder")
+
+        precondition(window.makeFirstResponder(field))
+        guard let editor = window.firstResponder as? NSTextView else {
+            preconditionFailure("focusing an editable field focuses its field editor")
+        }
+        precondition(field.currentEditor() === editor && editor.superview === field)
+        editor.insertText("Line one\nline two", replacementRange: NSRange(location: NSNotFound, length: 0))
+        precondition(field.stringValue == "Line one line two", "a single-line field turns a break into a space")
+        precondition(notices.began == 1 && notices.changes == ["Line one line two"], "\(notices.changes)")
+        editor.keyDown(with: NSEvent(type: .keyDown, window: window, keyCode: 36))
+        precondition(actions == 1 && notices.ended == [NSTextMovement.return.rawValue],
+                     "Return sends the action and ends this edit")
+        precondition(window.firstResponder === editor && editor.selectedRange().length == 17,
+                     "Return keeps the editor with its text selected")
+        editor.insertText("é", replacementRange: NSRange(location: NSNotFound, length: 0))
+        editor.keyDown(with: NSEvent(type: .keyDown, window: window, keyCode: 48))
+        precondition(window.firstResponder === next, "Tab moves to the next key view")
+        precondition(field.currentEditor() == nil && editor.superview == nil, "the editor leaves when editing ends")
+        precondition(field.stringValue == "é" && notices.began == 2
+                     && notices.ended.last == NSTextMovement.tab.rawValue, "\(notices.ended)")
+
+        precondition(window.makeFirstResponder(field))
+        precondition(field.abortEditing() && field.currentEditor() == nil && window.firstResponder !== field)
+        print("PASS editable NSTextField: field editor focus, delegate notices, single line, Return, Tab and abort")
     }
 
     private static func verifyKeyLoop() {

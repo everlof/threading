@@ -1,4 +1,7 @@
 import AppKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 /// Host-owned question form. One bounded page is mounted at a time; selections are values keyed
 /// by the original question ID. No option is selected or submitted on the user's behalf.
@@ -13,9 +16,17 @@ final class ConversationQuestionCard: NSView, NSTextFieldDelegate {
     private let progress = NSTextField(labelWithString: "")
     private let other = ThemedTextField(string: "")
     private var optionButtons: [ConversationChoiceRow] = []
+#if os(Linux)
+    private lazy var back = ThemedButton(title: L10n.string("Back"), target: self,
+                                         action: { [weak self] in self?.previousQuestion() })
+    private lazy var next = ThemedButton(title: "", target: self, action: { [weak self] in self?.nextQuestion() })
+    private lazy var cancel = ThemedButton(title: L10n.string("Cancel"), target: self,
+                                           action: { [weak self] in self?.cancelQuestion() })
+#else
     private lazy var back = ThemedButton(title: L10n.string("Back"), target: self, action: #selector(previousQuestion))
     private lazy var next = ThemedButton(title: "", target: self, action: #selector(nextQuestion))
     private lazy var cancel = ThemedButton(title: L10n.string("Cancel"), target: self, action: #selector(cancelQuestion))
+#endif
 
     init(request: ConversationQuestionRequest, completion: @escaping ([String: String]?) -> Void) {
         self.request = request
@@ -128,13 +139,22 @@ final class ConversationQuestionCard: NSView, NSTextFieldDelegate {
         } ?? false
     }
 
-    @objc private func previousQuestion() { page -= 1; showPage(); focusQuestion() }
-    @objc private func nextQuestion() {
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func previousQuestion() { page -= 1; showPage(); focusQuestion() }
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func nextQuestion() {
         guard next.isEnabled else { return }
         if page < request.questions.count - 1 { page += 1; showPage(); focusQuestion() }
         else { submit(answers) }
     }
-    @objc private func cancelQuestion() { finish(nil) }
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func cancelQuestion() { finish(nil) }
 
     private func focusQuestion() {
         let target: NSView = optionButtons.first.map { $0 as NSView } ?? other
@@ -158,39 +178,4 @@ final class ConversationQuestionCard: NSView, NSTextFieldDelegate {
 
     /// Server settlement/teardown invalidates the action without sending a stale response.
     func invalidate() { completion = nil }
-}
-
-/// Shared anatomy for an inline decision, while each owner keeps its distinct semantics.
-final class ConversationDecisionHeader: NSView {
-    init(title: String, detail: String, symbol: String) {
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        let glyph = GlyphView()
-        glyph.setSymbol(symbol, slot: Design.Symbol.control, role: .control, weight: .medium)
-        glyph.tint = Design.Surface.accent
-        let heading = NSTextField(wrappingLabelWithString: title)
-        heading.applyFont(.subheading, in: .conversation)
-        heading.textColor = Design.Text.label
-        let explanation = NSTextField(wrappingLabelWithString: detail)
-        explanation.applyFont(.caption, in: .conversation)
-        explanation.textColor = Design.Text.secondary
-        let text = NSStackView(views: [heading, explanation])
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = Design.Spacing.tight
-        for view in [glyph, text] { view.translatesAutoresizingMaskIntoConstraints = false; addSubview(view) }
-        NSLayoutConstraint.activate([
-            glyph.widthAnchor.constraint(equalToConstant: Design.Symbol.control),
-            glyph.heightAnchor.constraint(equalToConstant: Design.Symbol.control),
-            glyph.leadingAnchor.constraint(equalTo: leadingAnchor),
-            glyph.topAnchor.constraint(equalTo: text.topAnchor),
-            text.leadingAnchor.constraint(equalTo: glyph.trailingAnchor, constant: Design.Spacing.medium),
-            text.trailingAnchor.constraint(equalTo: trailingAnchor),
-            text.topAnchor.constraint(equalTo: topAnchor),
-            text.bottomAnchor.constraint(equalTo: bottomAnchor),
-            heading.widthAnchor.constraint(equalTo: text.widthAnchor),
-            explanation.widthAnchor.constraint(equalTo: text.widthAnchor)
-        ])
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }

@@ -142,6 +142,24 @@ final class PermissionBrokerTests: XCTestCase {
         }
     }
 
+    /// The portable policy names no MCP inventory of its own. A host that serves none of
+    /// Threading's tools, as the Linux preview does, gets no preapproval for their names.
+    func testPortablePolicyTakesTheHostsMCPInventory() {
+        let display = ToolIdentity(MCPDefaults.allowedToolName(MCPBuiltInTool.allCases[0].rawValue))
+        XCTAssertTrue(PermissionPolicy.isAutoAllowed(display))
+        XCTAssertFalse(PermissionPolicy.isAutoAllowed(display, builtInMCPTool: { _ in false }))
+
+        let request = PermissionRequest(sessionID: SessionID(), tool: display, input: [:])
+        XCTAssertNil(PermissionPolicy.automaticDecision(
+            for: request, allowedForSession: [], mode: .manual, builtInMCPTool: { _ in false }
+        ))
+        guard case .allow = PermissionPolicy.automaticDecision(
+            for: request, allowedForSession: [display], mode: .manual, builtInMCPTool: { _ in false }
+        ) else {
+            return XCTFail("a tool allowed for the session was asked about again")
+        }
+    }
+
     /// Claude receives the same exact identities instead of a server wildcard. Keeping these in
     /// one comma-separated argument is Claude's documented multi-tool form; contribution IDs are
     /// validated separately and cannot introduce a comma or whitespace into a qualified name.

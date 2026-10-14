@@ -53,11 +53,15 @@ public final class NSWindow: NSResponder {
     /// that declines `becomeFirstResponder`) leaves the window itself as first responder.
     @discardableResult
     public func makeFirstResponder(_ responder: NSResponder?) -> Bool {
-        let candidate: NSResponder
+        var candidate: NSResponder
         if let view = responder as? NSView {
             candidate = view.window === self ? view : self
         } else {
             candidate = self
+        }
+        // Focusing an editable field focuses its field editor, as in AppKit.
+        if let field = candidate as? NSTextField, let editor = field.beginEditingSession() {
+            candidate = editor
         }
         let old = firstResponder ?? self
         if old === candidate { return true }

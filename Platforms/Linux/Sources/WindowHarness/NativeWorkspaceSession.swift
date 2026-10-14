@@ -33,6 +33,28 @@ final class NativeWorkspaceSession {
     var onRow: ((Int, ConversationTimeline.Row, [String]?) -> Void)?
     var onStreaming: ((String?) -> Void)?
     var onChange: (() -> Void)?
+    /// Fired when the request at the head of the permission queue changes.
+    var onPermissionChange: (() -> Void)?
+    private struct PendingPermission {
+        let id: Int
+        let request: PermissionRequest
+        let decide: PermissionBroker.Completion
+    }
+    /// Requests the provider is blocked on, answered one at a time in arrival order.
+    private var permissionQueue: [PendingPermission] = []
+    private var permissionSerial = 0
+    /// The head of the queue: the one request the pane presents.
+    var pendingPermission: (id: Int, request: PermissionRequest)? {
+        permissionQueue.first.map { ($0.id, $0.request) }
+    }
+    /// Fired when a provider question arrives or leaves.
+    var onQuestionsChange: (() -> Void)?
+    /// Questions the provider asked, in arrival order, each with its one-shot answer.
+    private(set) var questions: [(request: ConversationQuestionRequest, answer: ([String: String]?) -> Void)] = []
+    /// The session's own mode, for a runtime that has modes; nil asks for everything else.
+    var permissionMode: AgentPermissionMode? {
+        prepared.flatMap { $0.session.kind.supportsPermissionModes ? $0.session.permissionMode : nil }
+    }
     private var pendingRenderBytes = 0
     private var pendingRenderCount = 0
     private var launching = false
@@ -53,6 +75,7 @@ final class NativeWorkspaceSession {
         self.id = id
         worker = DispatchQueue(label: "codes.threading.linux.native-workspace.\(id.uuidString)", qos: .userInitiated)
         timeline = ConversationTimeline(sessionID: id, chartDecoder: { _, _ in nil })
+        PermissionBroker.register(self)
         worker.async { [weak self] in
             let result = Result { try Self.prepare(store: store, id: id, shell: shell, codex: codex, claude: claude) }
             NativeConversationDelivery.callbacks.receive { self?.loaded(result) }
@@ -156,9 +179,18 @@ final class NativeWorkspaceSession {
             stream.onEvent = { [weak self] in self?.apply($0) }
             stream.onInteractionAvailabilityChange = { [weak self] in self?.changed() }
             stream.onLaunchFailure = { [weak self] in self?.report(String(describing: $0)) }
+            if let asking = stream as? QuestionAskingConversation {
+                asking.onQuestion = { [weak self] request, answer in
+                    guard let self else { answer(nil); return }
+                    self.receiveQuestion(request, answer: answer)
+                }
+                asking.onQuestionResolved = { [weak self] in self?.retireQuestion($0) }
+            }
             stream.onExit = { [weak self] status in
                 guard let self else { return }
                 self.status = "Agent exited (\(status))"
+                self.settlePermissions(reason: "Denied — the agent exited.")
+                self.retireQuestions()
                 self.changed()
                 self.persist { session in session.lastExitCode = status; session.lastActiveAt = Date() }
             }
@@ -181,6 +213,7 @@ final class NativeWorkspaceSession {
         stopped = true
         stream?.terminate()
         stream = nil
+        endPermissions()
         changed()
     }
 
@@ -189,6 +222,93 @@ final class NativeWorkspaceSession {
         if stream?.detachFromBackgroundHost(by: deadline) != true { stream?.terminate() }
         stopped = true
         stream = nil
+        endPermissions()
+    }
+
+    // MARK: - Permissions
+
+    func requestPermission(_ request: PermissionRequest, completion: @escaping PermissionBroker.Completion) {
+        guard !stopped else {
+            completion(.deny(reason: "Denied — session ended."))
+            return
+        }
+        permissionSerial += 1
+        permissionQueue.append(PendingPermission(id: permissionSerial, request: request, decide: completion))
+        if permissionQueue.count == 1 { permissionChanged() }
+    }
+
+    /// Answers the presented request, then settles any queued request that policy now answers
+    /// before the next card is shown.
+    func answerPermission(id: Int, _ decision: PermissionDecision) {
+        guard let head = permissionQueue.first, head.id == id else { return }
+        permissionQueue.removeFirst()
+        head.decide(decision)
+        while let next = permissionQueue.first,
+              let automatic = PermissionBroker.automaticDecision(for: next.request, mode: permissionMode) {
+            permissionQueue.removeFirst()
+            next.decide(automatic)
+        }
+        permissionChanged()
+    }
+
+    /// A provider blocked on a card must not outlive the session that would have answered it.
+    private func endPermissions() {
+        PermissionBroker.unregister(id)
+        settlePermissions(reason: "Denied — session ended.")
+        retireQuestions()
+    }
+
+    // MARK: - Questions
+
+    /// Bounded as the Mac bounds it; a duplicate or an overflow is declined at once.
+    private func receiveQuestion(_ request: ConversationQuestionRequest,
+                                 answer: @escaping ([String: String]?) -> Void) {
+        guard !stopped, questions.count < ConversationQuestionRequest.Limits.pendingRequests,
+              !questions.contains(where: { $0.request.id == request.id }) else {
+            answer(nil)
+            return
+        }
+        questions.append((request, answer))
+        questionsChanged()
+    }
+
+    /// The card's answer, or nil for Cancel. The transport validates and replies once.
+    func answerQuestion(_ id: UUID, _ answers: [String: String]?) {
+        guard let index = questions.firstIndex(where: { $0.request.id == id }) else { return }
+        let question = questions.remove(at: index)
+        question.answer(answers)
+        questionsChanged()
+    }
+
+    /// The provider settled or withdrew it; there is nothing left to answer.
+    private func retireQuestion(_ id: UUID) {
+        guard let index = questions.firstIndex(where: { $0.request.id == id }) else { return }
+        questions.remove(at: index)
+        questionsChanged()
+    }
+
+    /// A transport invalidates its own pending questions when it ends; only the cards go.
+    private func retireQuestions() {
+        guard !questions.isEmpty else { return }
+        questions.removeAll()
+        questionsChanged()
+    }
+
+    private func questionsChanged() {
+        onQuestionsChange?()
+        changed()
+    }
+
+    private func settlePermissions(reason: String) {
+        let pending = permissionQueue
+        permissionQueue.removeAll()
+        for request in pending { request.decide(.deny(reason: reason)) }
+        if !pending.isEmpty { permissionChanged() }
+    }
+
+    private func permissionChanged() {
+        onPermissionChange?()
+        changed()
     }
 
     private nonisolated static func hostPlan(_ prepared: Prepared, socket: String) -> PTYHostChildPlan {

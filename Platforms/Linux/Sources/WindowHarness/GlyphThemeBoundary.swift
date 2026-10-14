@@ -110,7 +110,9 @@ public enum Design {
                                  weight: NSFont.Weight) -> NSImage? {
             precondition(name == "ellipsis" || name == "plus" || name == "terminal"
                          || name == "chevron.down" || name == "folder" || name == "doc.text"
-                         || name == "text.bubble",
+                         || name == "text.bubble" || name == "hand.raised"
+                         || name == "questionmark.bubble" || name == "circle"
+                         || name == "checkmark.circle.fill",
                          "No Linux diagnostic symbol artwork for \(name)")
             precondition(slot.isFinite && pointSize.isFinite && slot > 0 && pointSize > 0)
             // Keep the artwork at its optical point size inside the requested layout slot.
@@ -144,6 +146,69 @@ public enum Design {
                     }
                     text.lineWidth = bubble.lineWidth
                     text.stroke()
+                } else if name == "circle" || name == "checkmark.circle.fill" {
+                    // A question choice's radio mark: an open ring, or a filled disc with the
+                    // check knocked out of it once chosen.
+                    let disc = NSRect(x: origin + side * 0.1, y: origin + side * 0.1,
+                                      width: side * 0.8, height: side * 0.8)
+                    if name == "circle" {
+                        let ring = NSBezierPath(ovalIn: disc.insetBy(dx: side * 0.04, dy: side * 0.04))
+                        ring.lineWidth = max(1, side * 0.08 * weightFactor)
+                        NSColor.white.setStroke()
+                        ring.stroke()
+                    } else {
+                        NSBezierPath(ovalIn: disc).fill()
+                        let check = NSBezierPath()
+                        check.move(to: NSPoint(x: origin + side * 0.3, y: origin + side * 0.5))
+                        check.line(to: NSPoint(x: origin + side * 0.44, y: origin + side * 0.35))
+                        check.line(to: NSPoint(x: origin + side * 0.7, y: origin + side * 0.64))
+                        check.lineWidth = max(1, side * 0.1 * weightFactor)
+                        check.lineCapStyle = .round
+                        NSGraphicsContext.current?.compositingOperation = .copy
+                        NSColor.clear.setStroke()
+                        check.stroke()
+                        NSGraphicsContext.current?.compositingOperation = .sourceOver
+                    }
+                } else if name == "questionmark.bubble" {
+                    // The question card's mark: the conversation bubble around a question mark.
+                    let bubble = NSBezierPath()
+                    bubble.move(to: NSPoint(x: origin + side * 0.15, y: origin + side * 0.25))
+                    bubble.line(to: NSPoint(x: origin + side * 0.15, y: origin + side * 0.85))
+                    bubble.line(to: NSPoint(x: origin + side * 0.85, y: origin + side * 0.85))
+                    bubble.line(to: NSPoint(x: origin + side * 0.85, y: origin + side * 0.25))
+                    bubble.line(to: NSPoint(x: origin + side * 0.42, y: origin + side * 0.25))
+                    bubble.line(to: NSPoint(x: origin + side * 0.25, y: origin + side * 0.10))
+                    bubble.line(to: NSPoint(x: origin + side * 0.25, y: origin + side * 0.25))
+                    bubble.close()
+                    bubble.lineWidth = max(1, side * 0.07 * weightFactor)
+                    NSColor.white.setStroke()
+                    bubble.stroke()
+                    let mark = NSBezierPath()
+                    mark.move(to: NSPoint(x: origin + side * 0.4, y: origin + side * 0.66))
+                    mark.curve(to: NSPoint(x: origin + side * 0.5, y: origin + side * 0.45),
+                               controlPoint1: NSPoint(x: origin + side * 0.42, y: origin + side * 0.8),
+                               controlPoint2: NSPoint(x: origin + side * 0.66, y: origin + side * 0.62))
+                    mark.lineWidth = bubble.lineWidth
+                    mark.lineCapStyle = .round
+                    mark.stroke()
+                    NSBezierPath(ovalIn: NSRect(x: origin + side * 0.46, y: origin + side * 0.31,
+                                                width: side * 0.08, height: side * 0.08)).fill()
+                } else if name == "hand.raised" {
+                    // The permission card's mark: an open palm, four raised fingers and a thumb.
+                    let hand = NSBezierPath(roundedRect: NSRect(
+                        x: origin + side * 0.26, y: origin + side * 0.08,
+                        width: side * 0.5, height: side * 0.46),
+                        xRadius: side * 0.16, yRadius: side * 0.16)
+                    for (x, top) in [(0.33, 0.84), (0.46, 0.92), (0.59, 0.88), (0.71, 0.76)] as [(CGFloat, CGFloat)] {
+                        hand.move(to: NSPoint(x: origin + side * x, y: origin + side * 0.48))
+                        hand.line(to: NSPoint(x: origin + side * x, y: origin + side * top))
+                    }
+                    hand.move(to: NSPoint(x: origin + side * 0.27, y: origin + side * 0.32))
+                    hand.line(to: NSPoint(x: origin + side * 0.12, y: origin + side * 0.50))
+                    hand.lineWidth = max(1, side * 0.08 * weightFactor)
+                    hand.lineCapStyle = .round
+                    NSColor.white.setStroke()
+                    hand.stroke()
                 } else if name == "doc.text" {
                     let paper = NSBezierPath()
                     paper.move(to: NSPoint(x: origin + side * 0.22, y: origin + side * 0.08))

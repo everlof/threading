@@ -182,6 +182,8 @@ public final class NSColor: @unchecked Sendable, Equatable, Hashable {
         NSColor(white: appearance.name == .darkAqua ? 1 : 0,
                 alpha: (appearance.name == .darkAqua ? 63.0 : 66.0) / 255)
     }
+    /// AppKit draws a field's placeholder in this role; here it is the tertiary label ink.
+    public static var placeholderTextColor: NSColor { tertiaryLabelColor }
     public static let controlAccentColor = NSColor(name: Name("controlAccentColor")) { _ in
         NSColor(red: 0, green: 122.0 / 255, blue: 1, alpha: 1)
     }

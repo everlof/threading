@@ -101,8 +101,11 @@ are the profiles that exist today, and the transport cannot tell them apart.
 
 The Linux CoreSlice compiles these production classes and their lifecycle, replay and execution
 adapters. Pure transcript readers and launch values are separate from host account lookup,
-permission presentation and MCP catalogue admission. The Mac keeps its existing host policy;
-Linux denies permissions and exposes no MCP tools until its host supplies those boundaries.
+permission presentation and MCP catalogue admission. The Mac keeps its existing host policy.
+`PermissionPolicy` is Foundation-only and shared: the automatic answers (read-only tools and
+commands, Allow for Session, the session's mode) are one function both hosts call, and the only
+host-owned input is the inventory of Threading MCP tools that host serves. Linux serves none, so
+it preapproves none, and it exposes no MCP tools.
 Deterministic peers exercise two turns, Unicode, permission replies and exactly one exit both
 locally and through the real Linux daemon. This is transport evidence: the ordinary Linux
 workspace still needs the complete production conversation controller and its permission and
@@ -116,9 +119,20 @@ Worker preparation owns account/history lookup, Markdown partitioning, child lau
 metadata. `ConversationPreparedChild` transfers a worker-created child once to the UI transport,
 retaining an exit that arrives before installation. The ordinary Codex journey checks native
 selection, persistent turns, draft retention across a terminal switch, restart replay and
-same-thread resume. Claude's workspace plan is available but its ordinary journey is not yet
-verified. Full tool disclosures, permission presentation and the other provider launch routes
-remain open. MCP admission and permission decisions still use the previously stated host boundary.
+same-thread resume, and the same journey passes for Claude's stream-json route.
+
+Linux presents permission requests with the production `PermissionRequestView`, inline after the
+transcript. Its own `PermissionBroker` applies the shared policy, then queues what is left on
+the retained native session that raised it; the pane shows the queue's head and re-checks the
+rest when it is answered. A request with no live session is refused, and pending requests are
+denied when the agent exits or the session closes. The card's paired-device and manager paths
+cross a fail-closed boundary there: nothing but the card can decide. This covers the transports
+that ask through `ConversationPermissionDecision` (Codex and ACP). Claude asks through the
+`PreToolUse` hook and Threading's HTTP listener, which the Linux host does not run yet; there a
+headless Claude blocks the tools it would have asked about. Provider questions
+(`QuestionAskingConversation`) mount the production `ConversationQuestionCard` in the same
+trailing block, answered through the shim's AppKit-style field editor. Full tool disclosures and
+the other provider launch routes remain open.
 
 `ConversationCallbackDelivery` makes the host's UI executor explicit. The Mac default keeps
 MainActor tasks for deferred lifecycle callbacks and main-queue delivery for worker results.

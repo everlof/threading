@@ -260,7 +260,13 @@ share the eight-runtime limit. The native host prepares account routing, history
 on a serial worker, then mounts the shared production rows and prompt editor. Codex and Claude
 launch plans are available, and the ordinary journey is verified for both against deterministic
 peers speaking each provider's production wire.
-Permission presentation, full tool-row interaction, other providers' workspace launch routes and
+Codex and ACP permission requests appear as the production permission card inline after the
+transcript. The shared `PermissionPolicy` answers read-only tools and commands, Allow for Session
+and the session's mode first. Codex questions appear as the production question card, and an
+editable `NSTextField` edits through an AppKit-style field editor. `tests/native_permission_smoke.py`
+checks policy auto-allow, Deny, Allow for Session, that Return in the composer never answers a
+card, and a two-page question answered by choice and by typed text. Claude's hook-based
+permission route, full tool-row interaction, other providers' workspace launch routes and
 the complete production conversation controller remain open. A wrapping label reports its
 single-line natural width, as AppKit does, and an automatic-height row is re-measured when a
 worker result changes a label's size. The full-height native evidence shows right-aligned bubbles

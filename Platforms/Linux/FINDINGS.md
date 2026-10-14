@@ -6222,3 +6222,124 @@ out/bundle-smoke/run.wo7hwjMu, log out/llk-bundle-smoke4.log. Manifest:
 Permission presentation, questions, full tool disclosures, the other providers' workspace launch
 routes, complete native accessibility and the full production conversation controller remain
 open. This checkpoint does not claim production UI parity.
+
+## 189. Native permission requests use the production card
+
+Linux answered every native permission request with a refusal:
+`ConversationPermissionDecision.decide` had no presenter. Codex and ACP ask through that seam, so
+any command or edit outside a session's mode failed without asking anyone.
+
+The automatic answers lived inside the Mac's `PermissionBroker`, beside system-grant briefing,
+the audit store, unattended runs and `ProjectStore`. `PermissionPolicy` now holds them in a
+Foundation-only production file: read-only tools and commands, Allow for Session, then the
+session's mode. Both hosts call that function. Its one host-owned input is the inventory of
+Threading MCP tools the host serves. The Mac passes its built-in registry through overloads
+beside the broker, so its callers are unchanged. CoreSlice vendors the policy and
+`ShellCommandPolicy` byte-identically. A new Mac test locks in that a host serving no MCP tools
+gets no preapproval for their names.
+
+The Linux host's `PermissionBroker` applies the shared policy and queues what remains on the
+retained `NativeWorkspaceSession` that raised it; with no live session it refuses. The session
+answers one request at a time and re-checks the rest of the queue when one is answered, as the
+Mac does, because Allow for Session can settle requests already waiting. Pending requests are
+denied when the agent exits or the session closes. The pane mounts the production
+`PermissionRequestView` as the transcript's last row; `DocumentRowSource` keeps that card after
+the streaming and settled rows. The status reads "Waiting for permission" while a card waits, as on the Mac.
+
+The card links unchanged. `ConversationDecisionHeader` and `FlippedClipView` moved into their own
+production files so Linux can link them without the question card or the conversation
+controller's support file. The card gained the established `#if os(Linux)` closure branch for its
+three actions, and `makeButton` takes `Selector?`. Its paired-device and manager paths cross a
+Linux boundary that makes the remote projection undecidable, so nothing but the card can answer.
+The shim gained `NSScrollView.borderType`, which accepts only `.noBorder`, and a border-only
+surface update. The `hand.raised` mark has Linux artwork; its absence trapped the first run,
+the same class of gap as `text.bubble` in §185.
+
+Production `ThemedButton` takes the keyboard on click on the Mac as well, so after a decision the
+composer no longer has focus. The journey clicks back into it, as a person would. The Mac is
+inconsistent here: retiring a question card returns focus to the prompt when the card held it
+(`ConversationViewController.removeQuestion`), while retiring a permission card does not. Linux
+matches the permission behaviour; that choice is the Mac's to settle.
+
+`tests/native_permission_smoke.py` drives a deterministic Codex app-server through the real daemon
+in `manual` mode. In the first turn `ls -la` is accepted by policy with no card, and the
+following `touch` raises the production card (out/llk-perm/permission-card.png). Return in the
+composer does not answer it, and the pointer chooses Deny. In the second turn, Allow for Session
+answers the `touch` and policy then accepts the following `rm` with no third card. It passed 3 of
+3 debug runs and once from Release. The Codex and Claude native workspace journeys, document,
+user bubble and short user row journeys, all 20 focused harness lanes, the native conversation
+delivery, UI worker and app event contracts, and the 12 Linux runner contracts pass. All 127
+core copies and the AppKit vendor copies verify. On the Mac, 118 focused permission, mode,
+card, question, changed-files and conversation-render tests pass, and the build ran the
+repository boundaries. `scripts/test.sh all` ran 10,543 Mac tests with one failure:
+`testComponentGalleryCataloguesEveryConcreteDesignComponent`, the gallery gap recorded in §184.
+It names nine components, none from this work. Because the Mac half failed, the iOS half did not
+start. The installed suite now runs the permission journey; a full installed run including it is
+pending.
+
+Claude asks through its `PreToolUse` hook and Threading's HTTP listener, which the Linux host
+does not run, so a headless Claude there still blocks the tools it would ask about. Questions,
+full tool disclosures, the other providers' workspace launch routes and the full production
+conversation controller remain open.
+
+## 190. Editable text fields and native provider questions
+
+The shim's `NSTextField` was a label: `isEditable` trapped, and there was no `init(string:)`,
+delegate or placeholder. Every production form that takes typed input was out of reach,
+including the question card. Its "Write your answer…" field is built whether or not it is shown.
+
+An editable field now edits through a field editor, as AppKit's does:
+- **Focus.** `NSWindow.makeFirstResponder` redirects focus on an editable field to a
+  single-line `NSTextView`, placed inside the field over its cell's `drawingRect(forBounds:)`.
+  `currentEditor()` returns it while it edits. Linux text input reaches whichever text view holds
+  focus, so a card's field editor receives typing, composition and paste.
+- **Notices.** The shim's `NSTextView` gained AppKit's `didChangeText()` hook. It runs after
+  every user edit: typing, deletion, composition, cut, paste and undo. A programmatic `string`
+  assignment does not call it. The field reports `controlTextDidBeginEditing` on the first change
+  and `controlTextDidChange` on each change. `controlTextDidEndEditing` carries AppKit's
+  `NSTextMovement` value.
+- **Keys.** Return ends the edit, sends the action and keeps the editor with its text selected.
+  Tab and Shift-Tab move along the key-view loop and commit. A typed or pasted line break becomes
+  a space.
+- **Placeholder.** It stays visible under an empty editor until the first keystroke.
+- **Size.** An editable field has no intrinsic width; its height is one line.
+- **Cells.** `NSTextFieldCell` is subclassable, with `drawingRect(forBounds:)` and
+  `cellClass`, so the Linux `ThemedTextField` draws the production well through `ThemedSurface`.
+  It uses the field fill, an accent border with an inner focus ring while editing, the 8-point
+  text inset and the 32-point field height. Bevel materials, the outlined search style and hover
+  presentation are not themed there yet. Long text is not scrolled to the caret within a field.
+
+Swift does not run a class's own property observers inside its initializers, so `init(string:)`
+applies the editable configuration directly. The first contract run caught a field that was
+editable but not selectable, and therefore ignored clicks. The shim `NSTextView` also returned
+early from drawing with an empty visible rect. A field editor in an unlaid-out card had converted
+an infinite row index and trapped.
+
+`tests/text_editor` now checks the field: focus lands on its editor, delegate notices arrive,
+a line break becomes a space, Return sends the action and ends the edit, Tab moves and commits,
+the editor leaves, and `abortEditing` works.
+
+Codex asks questions through `item/tool/requestUserInput`; the production `CodexQuestionRequests`
+already validated and answered them. `NativeWorkspaceSession` now holds the requests, bounded as
+the Mac bounds them, and retires them when the provider settles them or the agent ends. The pane
+mounts the production `ConversationQuestionCard`, which links with the established Linux closure
+branch for its three buttons. The production `ControlRowView` and `ConversationChoiceRow` link
+too. WindowHarness had been carrying placeholder `ControlRowMember`/`ControlRowMetrics`
+declarations, which now apply only to the narrower harnesses. The shim gained the `textField`,
+`radioButton` and `layoutChanged` accessibility vocabulary. The `questionmark.bubble`, `circle`
+and `checkmark.circle.fill` marks have Linux artwork, the check knocked out with `.copy`.
+
+`DocumentRowSource` keeps decision cards as a trailing block in arrival order. A card already
+shown keeps its row, and nothing else reloads. Permission and question cards can wait together.
+A question card that leaves while it holds focus returns focus to the prompt, as on the Mac. The
+status reads "Waiting for your answer" while one waits.
+
+The decision journey gained a third turn: a two-page question. The pointer picks Blue, moves on,
+clicks the free-text field and pastes "Fixture 日本語 café". The provider then receives exactly
+`{color: [Blue], name: [Fixture 日本語 café]}` (out/llk-perm/question-answer.png). The pane now
+logs only enabled card buttons, so a journey cannot press Send answer before it can act. The
+journey passed 4 of 4 debug runs and once from Release, beside both native workspace journeys,
+the document, user bubble and short user row journeys, the three native contracts and the 20
+focused harness lanes. On the Mac, the card's change is the original code under its `#else` and
+`canImport(ObjectiveC)` branches. 79 focused question, permission, card, changed-files and
+conversation-render tests pass after it.

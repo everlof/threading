@@ -1523,6 +1523,8 @@ struct WindowHarness {
         defer { NSPasteboard.general.writeString = nil; NSPasteboard.general.readString = nil }
         NativeCursorBoundary.install(for: window)
         defer { NativeCursorBoundary.uninstall() }
+        // Native panes present permission cards; without this every request is refused.
+        PermissionBroker.install()
         // The raster surface is two device pixels per AppKit point. Keep one content owner and
         // root for the native window's lifetime so attachment callbacks describe that lifetime.
         let contentWindow = NSWindow(backingScaleFactor: 2)

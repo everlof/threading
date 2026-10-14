@@ -159,6 +159,8 @@ dbus-run-session -- python3 /native_workspace_smoke.py "$bin/WindowHarness" "$bi
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture" /evidence/restart-out/native-workspace
 dbus-run-session -- python3 /native_workspace_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture" /evidence/restart-out/native-workspace-claude claude
+dbus-run-session -- python3 /native_permission_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture" /evidence/restart-out/native-permission
 dbus-run-session -- python3 /composer_account_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/composer-account.sock" "$fixture" \
   /evidence/restart-out/composer-account

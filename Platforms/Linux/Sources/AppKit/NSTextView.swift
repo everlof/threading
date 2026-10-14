@@ -467,7 +467,12 @@ open class NSTextView: NSText {
         applyingLocalChange = true
         ensureStorage().replaceCharacters(in: range, with: text)
         applyingLocalChange = false
+        didChangeText()
     }
+
+    /// AppKit's notice after a user edit — typing, deletion, composition, cut, paste, undo —
+    /// and not after a programmatic `string` assignment.
+    open func didChangeText() {}
 
     private func register(_ edit: Edit) {
         guard allowsUndo, edit.removed != edit.inserted else { return }
@@ -763,6 +768,8 @@ open class NSTextView: NSText {
             NSBezierPath.fill(bounds)
         }
         let visible = visibleRect
+        // A view clipped out by every ancestor has nothing to draw; its null rect is infinite.
+        guard !visible.isEmpty else { return }
         let padding = max(0, textContainer?.lineFragmentPadding ?? 5) +
             max(0, textContainerInset.width)
         // Cached visual lines have one height and start at the text inset. A wheel frame must

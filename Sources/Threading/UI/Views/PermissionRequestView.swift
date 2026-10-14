@@ -1,5 +1,8 @@
 import AppKit
 import ThreadingRemoteKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 /// An approval request shown inline in the conversation it belongs to.
 ///
@@ -103,15 +106,22 @@ final class PermissionRequestView: NSView {
     }
 
     private func makeButtonRow() -> NSStackView {
-        let allow = makeButton(L10n.string("Allow"), action: #selector(allowOnce))
+#if os(Linux)
+        let actions: [Selector] = [{ [weak self] in self?.allowOnce() },
+                                   { [weak self] in self?.allowSession() },
+                                   { [weak self] in self?.deny() }]
+#else
+        let actions = [#selector(allowOnce), #selector(allowSession), #selector(deny)]
+#endif
+        let allow = makeButton(L10n.string("Allow"), action: actions[0])
         allow.emphasis = .primary
         // Return in the composer must remain a send, not grant a newly arrived permission.
         // The focused button still activates through the ordinary keyboard/AX contract.
 
         let row = NSStackView(views: [
             allow,
-            makeButton(L10n.string("Allow for Session"), action: #selector(allowSession)),
-            makeButton(L10n.string("Deny"), action: #selector(deny))
+            makeButton(L10n.string("Allow for Session"), action: actions[1]),
+            makeButton(L10n.string("Deny"), action: actions[2])
         ])
         row.orientation = .horizontal
         row.spacing = Design.Spacing.small
@@ -119,7 +129,7 @@ final class PermissionRequestView: NSView {
         return row
     }
 
-    private func makeButton(_ title: String, action: Selector) -> ThemedButton {
+    private func makeButton(_ title: String, action: Selector?) -> ThemedButton {
         let button = ThemedButton(title: title, target: self, action: action)
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
@@ -229,17 +239,26 @@ final class PermissionRequestView: NSView {
 
     // MARK: - Actions
 
-    @objc private func allowOnce() {
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func allowOnce() {
         settle(.allow(reason: "Approved in Threading."), note: L10n.string("Allowed."))
     }
 
-    @objc private func allowSession() {
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func allowSession() {
         PermissionBroker.allowAlways(toolName: request.toolName, for: request.sessionID)
         settle(.allow(reason: "Approved in Threading for the rest of this session."),
                note: L10n.string("Allowed for this session."))
     }
 
-    @objc private func deny() {
+#if canImport(ObjectiveC)
+    @objc
+#endif
+    private func deny() {
         settle(.deny(reason: "The user declined in Threading."), note: L10n.string("Denied."))
     }
 

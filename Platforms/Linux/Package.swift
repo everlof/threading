@@ -52,6 +52,7 @@ let package = Package(
             linkerSettings: [.linkedLibrary("atk-1.0", .when(platforms: [.linux]))]),
         .executableTarget(name: "WindowHarness", dependencies: ["AppKit", "CoreText", "CoreSlice", "TerminalRuntime", "LinuxNativeDiffAppKit", "ThreadingMarkdownKit",
             .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit"),
+            .product(name: "ThreadingRemoteKit", package: "ThreadingRemoteKit"),
             .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
             .target(name: "LinuxWindowBridge", condition: .when(platforms: [.linux]))],
             resources: [.copy("Resources/ProviderMarks"), .copy("Resources/Theme")],

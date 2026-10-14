@@ -35,11 +35,52 @@ public class ThemedScrollView: NSScrollView {
     }
 }
 
-// A field editor can arrive at ThemedTextSelection through the production API. No editable
-// field is mounted yet; this type reserves its explicit well-ground contract for that path.
+/// The editable field under the production component's name. It draws the production well
+/// through `ThemedSurface` — the field fill, an accent border and inner focus ring while
+/// editing — and insets its text the same 8 points, centred in the 32-point field height.
+/// Bevel materials, the outlined search style and hover presentation are not themed here yet.
 @MainActor
 class ThemedTextField: NSTextField {
-    func textSelectionGround() -> NSColor { LinuxTheme.color("controlResting") }
+    fileprivate enum Layout {
+        static let inset: CGFloat = Design.Spacing.small + 2
+        static let height: CGFloat = 32
+    }
+
+    override class var cellClass: NSTextFieldCell.Type { ThemedTextFieldCell.self }
+
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        size.height = max(size.height, Layout.height)
+        return size
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let editing = currentEditor() != nil
+        let shape = ThemedSurface.draw(bounds, fill: isEditable ? Design.Surface.field : Design.Surface.controlResting,
+                                       border: editing ? Design.Surface.accent : Design.Surface.border)
+        if editing {
+            let width = Design.Accessibility.focusRingWidth
+            let ring = shape.inset(by: width / 2).path
+            Design.Surface.accent.setStroke()
+            ring.lineWidth = width
+            ring.stroke()
+        }
+        super.draw(dirtyRect)
+    }
+
+    func textSelectionGround() -> NSColor { isEditable ? Design.Surface.field : Design.Surface.controlResting }
+}
+
+/// The production field's text rect: inset from the border and one line centred vertically.
+@MainActor
+private final class ThemedTextFieldCell: NSTextFieldCell {
+    override func drawingRect(forBounds rect: NSRect) -> NSRect {
+        let font = owner?.font ?? .systemFont(ofSize: 13)
+        let line = ceil(font.boundingRectForFont.height)
+        let inset = ThemedTextField.Layout.inset
+        return NSRect(x: rect.minX + inset, y: rect.minY + max(0, (rect.height - line) / 2),
+                      width: max(0, rect.width - 2 * inset), height: min(rect.height, line))
+    }
 }
 
 @MainActor

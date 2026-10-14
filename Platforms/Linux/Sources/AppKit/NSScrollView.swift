@@ -72,6 +72,10 @@ open class NSClipView: NSView {
 
 /// A small AppKit-compatible scroll owner. It does not build document rows: a table or sidebar
 /// supplies only its visible children and uses the clip view's bounds as the viewport.
+public enum NSBorderType: Equatable, Sendable {
+    case noBorder, lineBorder, bezelBorder, grooveBorder
+}
+
 @MainActor
 open class NSScrollView: NSView {
     public enum Elasticity: Equatable, Sendable {
@@ -103,6 +107,11 @@ open class NSScrollView: NSView {
     }
 
     open var drawsBackground = false
+    /// The Linux host draws no bezel; themed scroll views state `.noBorder`, and other kinds
+    /// are refused rather than silently dropped.
+    open var borderType: NSBorderType = .noBorder {
+        didSet { precondition(borderType == .noBorder, "Linux NSScrollView draws no bezel border") }
+    }
     open var hasVerticalScroller = false
     open var autohidesScrollers = false
     open var hasHorizontalScroller = false

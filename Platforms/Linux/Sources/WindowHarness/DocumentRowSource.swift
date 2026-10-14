@@ -21,11 +21,18 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
         case thinking(String)
         case native(ConversationTimeline.Row)
         case nativeStreaming(String)
+        /// A host-owned decision card. The card is retained here, so scrolling it out of the
+        /// viewport releases only its row host, never the pending decision.
+        case decision(NSView)
     }
     private var entries: [Entry]
     private var nextID: Int
     /// The live stream's tail row, kept last so settled rows insert above it.
     private(set) var streamingIndex: Int?
+    /// Pending decision cards, after everything else in arrival order, as the Mac transcript
+    /// appends them. Hosts bound how many can wait, so the block stays small.
+    private var decisionCount = 0
+    private var decisionStart: Int { entries.count - decisionCount }
     private(set) var constructed = 0
     private(set) var configured = 0
     private(set) var released = 0
@@ -96,7 +103,7 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
             // stable; do not search/reindex the transcript on each streamed tool update.
             preconditionFailure("native result update changed its settled row anatomy")
         }
-        let start = streamingIndex ?? entries.count
+        let start = settledInsertionPoint
         appendSettled(contents, in: table)
         nativeLocations[index] = (start, contents.count)
     }
@@ -105,10 +112,11 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
         func content(_ value: String) -> Content { native ? .nativeStreaming(value) : .streaming(value) }
         switch (text, streamingIndex) {
         case (let text?, nil):
-            entries.append(Entry(id: nextID, content: content(text)))
+            let index = decisionStart
+            entries.insert(Entry(id: nextID, content: content(text)), at: index)
             nextID += 1
-            streamingIndex = entries.count - 1
-            table.insertRows(at: IndexSet(integer: entries.count - 1), withAnimation: [])
+            streamingIndex = index
+            table.insertRows(at: IndexSet(integer: index), withAnimation: [])
         case (let text?, let index?):
             entries[index] = Entry(id: entries[index].id, content: content(text))
             table.reloadData(forRowIndexes: IndexSet(integer: index), columnIndexes: IndexSet(integer: 0))
@@ -120,9 +128,30 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
             break
         }
     }
+    /// Makes the trailing block exactly `cards`. A card already shown keeps its row; a retired
+    /// one leaves; a new one appends. No other row is reloaded.
+    func setDecisions(_ cards: [NSView], in table: NSTableView) {
+        for index in (decisionStart..<entries.count).reversed() {
+            guard case .decision(let card) = entries[index].content,
+                  !cards.contains(where: { $0 === card }) else { continue }
+            entries.remove(at: index)
+            decisionCount -= 1
+            table.removeRows(at: IndexSet(integer: index), withAnimation: [])
+        }
+        let shown = entries[decisionStart...].compactMap { entry -> NSView? in
+            if case .decision(let card) = entry.content { return card } else { return nil }
+        }
+        for card in cards where !shown.contains(where: { $0 === card }) {
+            entries.append(Entry(id: nextID, content: .decision(card)))
+            nextID += 1
+            decisionCount += 1
+            table.insertRows(at: IndexSet(integer: entries.count - 1), withAnimation: [])
+        }
+    }
+    private var settledInsertionPoint: Int { streamingIndex ?? decisionStart }
     private func appendSettled(_ contents: [Content], in table: NSTableView) {
         guard !contents.isEmpty else { return }
-        let start = streamingIndex ?? entries.count
+        let start = settledInsertionPoint
         for (offset, content) in contents.enumerated() {
             entries.insert(Entry(id: nextID, content: content), at: start + offset)
             nextID += 1
@@ -170,6 +199,7 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
             content = MarkdownView(markdown: text)
         case .nativeStreaming(let text): content = ConversationRowView.streaming(text)
         case .thinking(let source): content = MarkdownView(markdown: source, style: .thinking)
+        case .decision(let card): content = card
         case .native(let row):
             switch row {
             case .turnOutcome(let outcome): content = ConversationRowView.turnOutcome(outcome)

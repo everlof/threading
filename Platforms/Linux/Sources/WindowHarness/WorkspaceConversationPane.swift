@@ -23,6 +23,11 @@ final class WorkspaceConversationPane: WorkspacePane {
     private var displayRevision: UInt64 = 0
     private var followTail = true
     private var focused = false
+    private var presentedPermission: Int?
+    private var permissionCard: PermissionRequestView?
+    private var questionCards: [UUID: ConversationQuestionCard] = [:]
+    /// Every decision card in arrival order, as the trailing transcript block shows them.
+    private var decisionOrder: [NSView] = []
     var title: String { "Threading conversation · \(runtime.status)" }
     var needsPolling: Bool { false }
     func takeInitialViewport() -> (Int, Int)? { nil }
@@ -71,12 +76,72 @@ final class WorkspaceConversationPane: WorkspacePane {
             self.needsPresentation = true
         }
         runtime.onChange = { [weak self] in self?.updateState() }
+        runtime.onPermissionChange = { [weak self] in self?.updatePermission() }
+        runtime.onQuestionsChange = { [weak self] in self?.updateQuestions() }
         setThemeAppearance()
+        updatePermission()
+        updateQuestions()
         updateState()
     }
 
+    /// The queue's head as the production card, after the transcript as the Mac shows it. An
+    /// answered card leaves; the next request, if any, replaces it.
+    private func updatePermission() {
+        let pending = runtime.pendingPermission
+        guard pending?.id != presentedPermission else { return }
+        presentedPermission = pending?.id
+        let card = pending.map { pending in
+            PermissionRequestView(request: pending.request) { [weak self] decision in
+                self?.runtime.answerPermission(id: pending.id, decision)
+            }
+        }
+        if let permissionCard { retire(permissionCard, returningFocus: false) }
+        permissionCard = card
+        if let card { decisionOrder.append(card) }
+        rows.setDecisions(decisionOrder, in: table)
+        followTail = true
+        needsPresentation = true
+    }
+
+    /// Each provider question as the production card. A card the provider withdrew leaves.
+    private func updateQuestions() {
+        let live = Set(runtime.questions.map(\.request.id))
+        for (id, card) in questionCards where !live.contains(id) {
+            card.invalidate()
+            questionCards[id] = nil
+            retire(card, returningFocus: true)
+        }
+        for question in runtime.questions where questionCards[question.request.id] == nil {
+            let id = question.request.id
+            let card = ConversationQuestionCard(request: question.request) { [weak self] answers in
+                self?.runtime.answerQuestion(id, answers)
+            }
+            card.onLayoutChange = { [weak self, weak card] in
+                guard let self, let card else { return }
+                let row = table.row(for: card)
+                if row >= 0 { table.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row)) }
+                needsPresentation = true
+            }
+            questionCards[id] = card
+            decisionOrder.append(card)
+        }
+        rows.setDecisions(decisionOrder, in: table)
+        followTail = true
+        needsPresentation = true
+    }
+
+    /// Removes a card from the block. The Mac returns focus held inside a question card to the
+    /// prompt, and leaves it where it was for a permission card; both are kept.
+    private func retire(_ card: NSView, returningFocus: Bool) {
+        decisionOrder.removeAll { $0 === card }
+        if returningFocus, let responder = owner.firstResponder as? NSView, responder.isDescendant(of: card) {
+            _ = owner.makeFirstResponder(editor.textView)
+        }
+    }
+
     private func updateState() {
-        status.stringValue = runtime.status
+        status.stringValue = runtime.pendingPermission != nil ? "Waiting for permission"
+            : runtime.questions.isEmpty ? runtime.status : "Waiting for your answer"
         status.textColor = runtime.failure == nil ? Design.Text.secondary : Design.Status.negative
         submit.title = runtime.canInterrupt ? "Stop" : "Send"
         submit.isEnabled = runtime.canInterrupt || (runtime.canSend
@@ -150,7 +215,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
         if focused {
             tw_title(window, title)
-            let caret = editor.textView.convert(editor.textView.insertionPointRect, to: root)
+            let caret = activeTextView.convert(activeTextView.insertionPointRect, to: root)
             tw_text_input_rect(window, Int32(originX + Int(caret.minX * 2)),
                 Int32(WorkspacePaneChrome.headerPixelHeight + Int((size.height - caret.maxY) * 2)),
                 Int32(max(1, caret.width * 2)), Int32(max(1, caret.height * 2)))
@@ -163,6 +228,29 @@ final class WorkspaceConversationPane: WorkspacePane {
             (view as? NSTextField)?.isWaitingForCompleteTextViewport == true || view.subviews.contains(where: waiting)
         }
         let prepared = runtime.rowsPrepared && !waiting(table) && !status.isWaitingForCompleteTextViewport
+        for card in decisionOrder where card.window != nil {
+            // Window-pixel centres of a decision card's controls, for journeys that use them.
+            var controls: [String] = []
+            func centre(_ name: String, _ view: NSView) {
+                let point = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: root)
+                let x = originX + Int(point.x * 2)
+                let y = WorkspacePaneChrome.headerPixelHeight + Int((size.height - point.y) * 2)
+                controls.append("\(name.replacingOccurrences(of: " ", with: "_"))=\(x),\(y)")
+            }
+            func walk(_ view: NSView) {
+                guard !view.isHidden else { return }
+                if let button = view as? ThemedButton {
+                    if button.isEnabled { centre(button.title, button) }
+                    return
+                }
+                if let choice = view as? ConversationChoiceRow { centre(choice.accessibilityLabel() ?? "", choice); return }
+                if let field = view as? NSTextField, field.isEditable { centre("field", field); return }
+                view.subviews.forEach(walk)
+            }
+            walk(card)
+            let kind = card === permissionCard ? "PERMISSION_FRAME \(presentedPermission ?? 0)" : "QUESTION_FRAME"
+            print("\(kind) \(controls.joined(separator: " "))")
+        }
         print("CONVERSATION_FRAME \(runtime.id.uuidString) rows=\(table.numberOfRows) mounted=\(table.mountedViewCount) turns=\(runtime.completedTurns) prepared=\(prepared) dark=\(LinuxTheme.isDark) status=\(runtime.status)")
         fflush(nil)
     }
@@ -172,14 +260,14 @@ final class WorkspaceConversationPane: WorkspacePane {
         switch input.kind {
         case 6, 46:
             if let text = String(validatingCString: tw_event_text(&input)) {
-                editor.textView.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+                activeTextView.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
             }
         case 19, 47:
             if let text = String(validatingCString: tw_event_text(&input)) {
                 let lengths = text.unicodeScalars.map { String($0).utf16.count }
                 let start = min(max(0, Int(input.textCursor)), lengths.count)
                 let end = min(start + max(0, Int(input.textSelectionLength)), lengths.count)
-                editor.textView.setMarkedText(text, selectedRange: NSRange(location: lengths.prefix(start).reduce(0, +),
+                activeTextView.setMarkedText(text, selectedRange: NSRange(location: lengths.prefix(start).reduce(0, +),
                     length: lengths[start..<end].reduce(0, +)), replacementRange: NSRange(location: NSNotFound, length: 0))
             }
         case 7, 48:
@@ -187,7 +275,7 @@ final class WorkspaceConversationPane: WorkspacePane {
             let event = WindowHarness.composerKeyEvent(input)
             if input.modifiers & (4 | 8) != 0, Int(input.key) == 118 { paste() }
             else if input.modifiers & (4 | 8) != 0, Int(input.key) == 97 {
-                editor.textView.selectAll(nil)
+                activeTextView.selectAll(nil)
             }
             else { _ = owner.dispatchToContent(event) }
         case 14: paste()
@@ -201,14 +289,18 @@ final class WorkspaceConversationPane: WorkspacePane {
             if input.kind == 16 {
                 followTail = scroll.contentView.bounds.maxY >= table.frame.maxY - 1
             }
-            _ = tw_workspace_editor_focus(window, owner.firstResponder === editor.textView ? 1 : 0)
+            _ = tw_workspace_editor_focus(window, owner.firstResponder is NSTextView ? 1 : 0)
         default: break
         }
         updateState()
     }
 
     private func paste() {
-        editor.textView.paste(nil)
+        activeTextView.paste(nil)
     }
+
+    /// Native text input reaches the focused text view: a decision card's field editor while
+    /// one is editing, the prompt otherwise.
+    private var activeTextView: NSTextView { (owner.firstResponder as? NSTextView) ?? editor.textView }
 }
 #endif
