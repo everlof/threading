@@ -1741,6 +1741,7 @@ struct WindowHarness {
         var savedPicker: SavedPicker?
         var savedSelected = 0, savedFirst = 0
         var accountPicker: AgentKind?
+        let retainedMenuRows = RetainedMenuRows()
         var accountSelected = 0, accountFirst = 0
         var activatedAccountHandle: AccountHandle?
         var pendingSelection: PendingSelection?
@@ -2799,9 +2800,11 @@ struct WindowHarness {
                         ))
                     }
                     let plan = ThemedMenuRowPlan(entries: entries)
+                    retainedMenuRows.prepare(menu: "actions:\(menu.kind)", entries: entries,
+                                             visible: menu.first..<end)
                     var top = navigatorHeaderHeight + 2
                     for index in menu.first..<end {
-                        guard let row = plan.row(at: index) else {
+                        guard let row = retainedMenuRows.row(at: index, plan: plan) else {
                             throw WindowFailure("host command was not a menu item")
                         }
                         let rowHeight = plan.heights[index]
@@ -2832,9 +2835,11 @@ struct WindowHarness {
                                                     isSelected: handle == active))
                     }
                     let plan = ThemedMenuRowPlan(entries: entries)
+                    retainedMenuRows.prepare(menu: "accounts:\(provider)", entries: entries,
+                                             visible: accountFirst..<end)
                     var top = navigatorHeaderHeight + 2
                     for index in accountFirst..<end {
-                        guard let row = plan.row(at: index) else {
+                        guard let row = retainedMenuRows.row(at: index, plan: plan) else {
                             throw WindowFailure("account choice was not a menu item")
                         }
                         let rowHeight = plan.heights[index]
@@ -2854,6 +2859,7 @@ struct WindowHarness {
                         top += rowHeight
                     }
                 } else if let savedPicker {
+                    retainedMenuRows.reset()
                     let project = projects[savedPicker.projectIndex]
                     let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
                     end = min(saved.count, savedFirst + count)
@@ -2879,6 +2885,7 @@ struct WindowHarness {
                         }
                     }
                 } else {
+                    retainedMenuRows.reset()
                     if projects.isEmpty, launch != nil {
                         end = 1
                         addNavigatorRow("Add project folder…", index: 0, width: width,

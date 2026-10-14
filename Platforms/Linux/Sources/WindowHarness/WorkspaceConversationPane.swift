@@ -130,7 +130,9 @@ final class WorkspaceConversationPane: WorkspacePane {
         let bottom = editor.frame.maxY + Design.Spacing.medium
         scroll.frame = NSRect(x: inset, y: bottom, width: max(1, size.width - 2 * inset),
             height: max(1, size.height - bottom - inset))
-        if table.frame.width != scroll.bounds.width {
+        // The clip view already sizes its document to the viewport, so the table's own width is
+        // no signal; the column's is. Cells read it when they are built and state it as theirs.
+        if table.tableColumns.first?.width != scroll.bounds.width || table.frame.width != scroll.bounds.width {
             table.tableColumns.first?.width = scroll.bounds.width
             table.frame.size.width = scroll.bounds.width
             ConversationVirtualRowHost.stateColumnWidth(in: table)

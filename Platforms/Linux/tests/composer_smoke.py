@@ -121,6 +121,8 @@ try:
         eventually(lambda: socket.exists(), 'PTY daemon socket', daemon_process)
     home = root / 'home'
     home.mkdir()
+    cursor = NativeCursor()
+    cursor.park()
     with window_log.open('w') as log:
         process = subprocess.Popen([binary, '--app-agents-project', str(store), str(socket),
                                     '/bin/sh', str(child), str(child), str(project)],
@@ -130,7 +132,6 @@ try:
                                         str(process.pid), '--name', '^Threading experiment - '),
                             'native window', process).splitlines()[0]
         xdo('windowfocus', '--sync', window)
-        cursor = NativeCursor()
         composer = open_composer(app, process)
         xdo('key', 'Escape')
         eventually(lambda: panel(app).get_child_at_index(0).get_name() == 'No Session Selected',
@@ -290,7 +291,7 @@ try:
                    'composer action focus', process)
         subprocess.run(['import', '-window', window,
                         str(output / 'composer-empty-placeholder.png')], check=True, timeout=5)
-        arrow = cursor.read(output / 'cursor-control.png')
+        arrow = cursor.settled(output / 'cursor-control.png')
         editor_bounds = editor.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
         xdo('mousemove', '--window', window,
             str(editor_bounds.x + editor_bounds.width // 2),

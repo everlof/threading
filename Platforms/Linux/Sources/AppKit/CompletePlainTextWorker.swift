@@ -33,6 +33,9 @@ struct CompleteTextMetrics: Sendable {
     let height: Int
     let baseline: Int
     let utf16Length: Int
+    /// Whether any paragraph broke at the wrap width. When none did, `width` is the text's
+    /// natural width; when one did, the text wants more room than it was given.
+    let wrapped: Bool
 }
 
 enum CompleteTextAction: Sendable {
@@ -114,16 +117,17 @@ final class CompletePlainTextWorker: @unchecked Sendable {
             byteCount = bytes.count
             source = text as NSString
             var values: [(byte: Int, utf16: Int)] = [(0, 0)]
-            var byte = 0, utf16 = 0
+            var byte = 0, utf16 = 0, paragraphs = 1
             for character in text {
                 let value = String(character)
                 byte += value.utf8.count
                 utf16 += value.utf16.count
+                if character.isNewline { paragraphs += 1 }
                 values.append((byte, utf16))
             }
             boundaries = values
             metrics = CompleteTextMetrics(width: Int(metric.width), height: Int(metric.height),
-                baseline: Int(metric.baseline), utf16Length: utf16)
+                baseline: Int(metric.baseline), utf16Length: utf16, wrapped: Int(lines) > paragraphs)
         }
 
         deinit { tat_document_destroy(handle) }

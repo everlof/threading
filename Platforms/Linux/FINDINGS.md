@@ -6113,3 +6113,112 @@ The ordinary Claude plan is available but its UI journey is not verified. Full t
 permission presentation, questions, the other providers' workspace launch routes, complete native
 accessibility, worker-side replay reduction and the full production conversation controller remain
 open. This checkpoint does not claim production UI parity.
+
+## 186. Installed-suite cursor ordering and retained menu rows
+
+§185's installed suite stopped at document_ui_smoke.py's arrow-in-gap check. The cause was the
+test display, not the cursor policy. The installed lane keeps one Xvfb display alive with
+-noreset, so each journey starts with the pointer where the previous client left it. A window
+mapped under a stationary pointer set its cursor before any pointer motion, and Xvfb then showed
+later cursor changes only after the pointer moved again. The arrow reference could therefore be
+read before the window's own cursor reached the server. On that shared display about one run in
+three failed; a fresh display never did.
+
+`NativeCursor.park()` now warps the pointer to the root window's corner before a journey starts
+its window, so the pointer always enters through motion, as on a fresh display.
+`NativeCursor.settled()` takes a reference cursor only after two spaced reads agree, because a
+client's cursor request reaches the server only when that client next flushes. Composer and
+document journeys use both. Eight consecutive document runs on one -noreset display passed,
+against roughly a third failing before. Only test code changed.
+
+The rerun then passed composer, document, user bubble, stream and native workspace, and failed
+at the installed account picker, 4/4 in the package. The navigator rebuilt its menu rows on every
+frame: `ThemedMenuRowPlan.row(at:)` constructs a new `ThemedMenuRowView`. A press that moved the
+highlight caused a redraw, and the release reached a fresh row that had never seen the press, so
+`onChoose` never ran. AppKit keeps a menu row's view for as long as the menu is open.
+`RetainedMenuRows` keeps the visible page's rows across frames while the menu kind and every
+entry's title, help, enabled and selected state match. A changed menu builds fresh rows. Only the
+visible page is retained. The Actions menu and the account picker both use it, and
+`Specimen.mountMenuRows` keeps rows that are already mounted instead of detaching them all.
+After repackaging, the installed account picker passed 4/4.
+
+## 187. Native workspace bubble width, row heights and dark-switch evidence
+
+The narrow user bubble recorded in §185 had two causes.
+
+The first was in the shim. A wrapping label's intrinsic width came from its last layout width, so
+a squeezed measurement became permanent. An AppKit probe in a real window showed that a
+wrapping `NSTextField` under Auto Layout with no `preferredMaxLayoutWidth` reports its
+single-line natural width as its intrinsic width (186pt for the probe string), however it was last
+laid out, and that the bubble grows back after the pane widens. The shim now does the same:
+`intrinsicContentSize` uses the unwrapped natural width whenever the label wraps at its layout
+width. The complete-text path takes the widest raster line when the text wrapped. Bounded labels
+cache one unwrapped measurement, which appearance or text changes clear.
+`CompleteTextMetrics.wrapped` records whether any paragraph took more than one visual line.
+
+The complete-text worker returns a label's size after its row has been measured. On macOS a
+wrapped size is known when the row is measured, so nothing re-measures later. When a worker
+result changes a label's size, the label now finds its enclosing automatic-height `NSTableView`
+and calls `noteHeightOfRows(withIndexesChanged:)` for its row: the same call a Mac caller makes
+after a content change.
+
+The second cause was in the pane. `WorkspaceConversationPane.refresh` updated the column width
+only when the table's frame width differed from the viewport. The clip view had already sized the
+table, so the column stayed at the shim's default 100pt. `ConversationVirtualRowHost` states the
+column width as each host's own width, so every user label was measured at 100pt, squeezed to
+39pt and committed. The pane now also compares the column's width. The bubble renders on one
+right-aligned line and rows are spaced correctly
+(out/llk-native-ws/native-first-reply.png). Making the measuring pass include the root's own
+superview constraints was tried and reverted: the host's width constraint is already installed on
+the host itself.
+
+The dark-switch color defects were in the test, not in rendering. `native_workspace_smoke.py`
+waited on `ready(2)` and on `'dark=true'` in the last frame, each from its own read of the log.
+`ready` could accept the last light, prepared frame from before the switch while the second read
+found the first dark frame, which still drew the previous rasters and was not yet prepared. The
+capture then showed the stale state: light sidebar, light-mode ink on dark surfaces. Five
+repeated runs captured it 3 times. A capture 1.5s later was correct every time, and a draw-time
+probe showed the status ink resolving to the dark palette (white, alpha 0.7). `ready` now judges a
+single frame from a single read, including its theme. The dark capture must also show a dark
+sidebar ground and light status ink, measured with ImageMagick, so a retained light-mode ink fails
+the journey rather than only appearing in the picture. The disabled prominent Send button's dark
+title matches its dimmed light-on-accent ink; that one is not a defect.
+
+With the race fixed, the restart replay waited forever in 3 of 3 runs. After restart the window
+was briefly 480px tall, and the pane's readiness walk included a retained row scrolled out of
+view. That label never draws, so it never requests a viewport, and
+`isWaitingForCompleteTextViewport` stayed true. A label hidden or clipped out by every ancestor
+now awaits nothing, because a viewport is requested only when the label draws.
+
+The native workspace journey passed 3 of 3 runs with the dark assertions
+(out/llk-native-ws). Document, user bubble and short user row journeys passed from the same
+Release build. All 20 focused harness lanes passed, as did the 12 Linux runner contracts. All 125
+exact core copies and the AppKit vendor copies verify.
+
+## 188. The ordinary Claude journey and a green installed suite
+
+`native_workspace_smoke.py` now takes an optional provider. Its Claude peer speaks the headless
+stream-json wire: it answers the `initialize` control request, then for each turn emits
+`system/init`, a partial text delta, the assistant message and a `result`. Like the real CLI, it
+writes the dialogue to the account transcript under the project's slug. The peer asserts the
+production stream flags, a fresh launch's `--session-id` and a restart's `--resume` of the same
+id with its transcript present. The ordinary Claude journey then passed the same checks as Codex:
+- three Unicode/multiline turns on one daemon child, with draft and pane retention;
+- the dark pixel assertions;
+- the durable provider identity, restart replay and same-thread resume.
+
+It passed 3 of 3 runs (out/llk-native-ws-claude); Codex passed 4 of 4 with the parameterized
+script. The installed runtime suite now runs both providers. The full run below predates adding
+the Claude lane.
+
+The full installed suite passed end to end for the first time since §185, with 121 PASS lines and
+exit 0. That covers startup, live reinstall, the workspace lanes, session and project Actions,
+Open In, catalogue, composer, document, user bubble, stream, the native workspace, account
+picker, project count, native outline, terminal restart and the desktop entry. Evidence:
+out/bundle-smoke/run.wo7hwjMu, log out/llk-bundle-smoke4.log. Manifest:
+964d50fedf48331bceab800b3a3e1513ee14a0e3, source_dirty=true. Debian SHA-256:
+7db9670232881689e8991149fe1765b57b76da3b816d0adf4c0da41f53985fa2.
+
+Permission presentation, questions, full tool disclosures, the other providers' workspace launch
+routes, complete native accessibility and the full production conversation controller remain
+open. This checkpoint does not claim production UI parity.

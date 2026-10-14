@@ -36,6 +36,7 @@ open class NSTextField: NSView {
     private var attributedStorage: NSAttributedString?
     private var naturalMetrics: TATMetrics?
     private var scaledMetrics: (scale: CGFloat, metrics: TATMetrics)?
+    private var unwrappedWidth: (scale: CGFloat, width: CGFloat)?
     private var automaticLayoutWidth: CGFloat = 0
     private var labelLayout: SelectableLabelLayout?
     private var selectionAnchor: Int?
@@ -145,8 +146,29 @@ open class NSTextField: NSView {
     open override var intrinsicContentSize: NSSize {
         let scale = window?.backingScaleFactor ?? 1
         let metric = metrics(at: scale)
-        return NSSize(width: CGFloat(metric.width) / scale,
-                      height: CGFloat(metric.height) / scale)
+        let width = wrapsAtLayoutWidth ? naturalWidth(at: scale) : CGFloat(metric.width) / scale
+        return NSSize(width: width, height: CGFloat(metric.height) / scale)
+    }
+
+    /// A label whose wrap width comes from layout rather than `preferredMaxLayoutWidth`.
+    private var wrapsAtLayoutWidth: Bool {
+        !translatesAutoresizingMaskIntoConstraints && preferredMaxLayoutWidth == 0
+            && (effectiveLineBreakMode == .byWordWrapping || effectiveLineBreakMode == .byCharWrapping)
+    }
+
+    /// AppKit gives such a label its single-line natural width as its intrinsic width, and only
+    /// its height follows the solved width. Reporting the width it wrapped to instead would let
+    /// one narrow pass pin it narrow: hugging could never ask for the room to grow back. A
+    /// complete document's layout says whether it wrapped; when it did, the text wants all the
+    /// room there is, and its constraints decide how much that is.
+    private func naturalWidth(at scale: CGFloat) -> CGFloat {
+        if usesCompletePlainText, let complete = completePlainText(at: scale), let metrics = complete.metrics {
+            return metrics.wrapped ? CGFloat(Self.maximumRasterWidth) / scale : CGFloat(metrics.width) / scale
+        }
+        if let unwrappedWidth, unwrappedWidth.scale == scale { return unwrappedWidth.width }
+        let width = CGFloat(metrics(at: scale, unwrapped: true).width) / scale
+        unwrappedWidth = (scale, width)
+        return width
     }
 
     open override func viewDidMoveToWindow() {
@@ -179,6 +201,7 @@ open class NSTextField: NSView {
     private func invalidateTextMetrics() {
         naturalMetrics = nil
         scaledMetrics = nil
+        unwrappedWidth = nil
         labelLayout = nil
         if !usesCompletePlainText { completeLabel?.suspend() }
         needsDisplay = true
@@ -195,17 +218,19 @@ open class NSTextField: NSView {
         return intrinsicContentSize != before
     }
 
-    private func metrics(at scale: CGFloat) -> TATMetrics {
-        if let complete = completePlainText(at: scale), let metrics = complete.metrics {
+    /// `unwrapped` measures the bounded label paths with no wrap width and leaves the cached
+    /// layout-width metrics alone; it is how `naturalWidth(at:)` reads a line's natural width.
+    private func metrics(at scale: CGFloat, unwrapped: Bool = false) -> TATMetrics {
+        if !unwrapped, let complete = completePlainText(at: scale), let metrics = complete.metrics {
             return TATMetrics(width: Int32(metrics.width), height: Int32(metrics.height),
                               baseline: Int32(metrics.baseline), glyphs: 0)
         }
-        if scale == 1, let naturalMetrics { return naturalMetrics }
-        if let scaledMetrics, scaledMetrics.scale == scale { return scaledMetrics.metrics }
+        if !unwrapped, scale == 1, let naturalMetrics { return naturalMetrics }
+        if !unwrapped, let scaledMetrics, scaledMetrics.scale == scale { return scaledMetrics.metrics }
         let wraps = effectiveLineBreakMode == .byWordWrapping || effectiveLineBreakMode == .byCharWrapping
         let lineLimit = min(Self.maximumLines, max(1, maximumNumberOfLines == 0 ? Self.maximumLines : maximumNumberOfLines))
         let measuredWidth = preferredMaxLayoutWidth > 0 ? preferredMaxLayoutWidth : automaticLayoutWidth
-        let wrapWidth = wraps && measuredWidth.isFinite && measuredWidth > 0
+        let wrapWidth = !unwrapped && wraps && measuredWidth.isFinite && measuredWidth > 0
             ? Int(ceil(min(CGFloat(Self.maximumRasterWidth), measuredWidth * scale))) : 0
         if attributedStorage != nil || isSelectable {
             let source = attributedStorage ?? NSAttributedString(
@@ -218,6 +243,7 @@ open class NSTextField: NSView {
                          characterWrapping: effectiveLineBreakMode == .byCharWrapping,
                          completeLabelHeight: isSelectable)
                 ?? TATMetrics(width: 0, height: 0, baseline: 0, glyphs: 0)
+            if unwrapped { return result }
             if scale == 1 { naturalMetrics = result }
             else { scaledMetrics = (scale, result) }
             return result
@@ -250,6 +276,7 @@ open class NSTextField: NSView {
                 }
             }
         }
+        if unwrapped { return result }
         if scale == 1 { naturalMetrics = result }
         else { scaledMetrics = (scale, result) }
         return result
@@ -517,8 +544,22 @@ open class NSTextField: NSView {
     /// The raster host can observe settling without touching a Pango handle or scanning source.
     public var isCompleteTextLayoutReady: Bool { completeLabel?.isReady ?? false }
     public var isCompleteTextViewportReady: Bool { completeLabel?.isViewportReady ?? false }
+    /// A viewport is requested when the label draws. One hidden or clipped out by every
+    /// ancestor, such as a retained row scrolled past, draws nothing and so awaits nothing.
     public var isWaitingForCompleteTextViewport: Bool {
-        usesCompletePlainText && !preparedUTF8.isEmpty && !(completeLabel?.isViewportReady ?? false)
+        usesCompletePlainText && !preparedUTF8.isEmpty && !isHiddenOrHasHiddenAncestor
+            && !visibleRect.isEmpty && !(completeLabel?.isViewportReady ?? false)
+    }
+
+    /// On macOS a label's wrapped size is known when its table row is measured. A complete
+    /// layout arrives here later, from its worker, so the automatic-height row holding it is
+    /// re-measured when it does, through the same call a Mac caller makes after a change.
+    private func noteEnclosingRowHeightChanged() {
+        var ancestor = superview
+        while let view = ancestor, !(view is NSTableView) { ancestor = view.superview }
+        guard let table = ancestor as? NSTableView, table.usesAutomaticRowHeights else { return }
+        let row = table.row(for: self)
+        if row >= 0 { table.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row)) }
     }
 
     private func completePlainText(at scale: CGFloat) -> CompletePlainLabelState? {
@@ -536,6 +577,7 @@ open class NSTextField: NSView {
                     naturalMetrics = nil
                     scaledMetrics = nil
                     invalidateIntrinsicContentSize()
+                    noteEnclosingRowHeightChanged()
                 }
                 needsDisplay = true
             }

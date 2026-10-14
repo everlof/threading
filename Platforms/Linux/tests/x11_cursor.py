@@ -3,6 +3,7 @@ import ctypes
 import hashlib
 from pathlib import Path
 import struct
+import time
 import zlib
 
 
@@ -26,13 +27,49 @@ class NativeCursor:
         self.x11.XFree.argtypes = [ctypes.c_void_p]
         self.fixes.XFixesGetCursorImage.argtypes = [ctypes.c_void_p]
         self.fixes.XFixesGetCursorImage.restype = ctypes.POINTER(CursorImage)
+        self.x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        self.x11.XDefaultRootWindow.restype = ctypes.c_ulong
+        self.x11.XWarpPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
+                                          ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint,
+                                          ctypes.c_int, ctypes.c_int]
+        self.x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
         self.display = self.x11.XOpenDisplay(None)
         assert self.display, 'X11 cursor observer could not open display'
+
+    def park(self):
+        """Move the pointer to the root window's corner, outside any journey window.
+
+        The installed lane shares one X display between journeys, so the pointer starts wherever
+        the previous client left it. A window mapped under that stationary pointer can change its
+        cursor before any pointer motion, and Xvfb then shows later cursor changes only after the
+        pointer moves again. Starting outside the window gives every journey the fresh display's
+        ordering: the pointer enters through motion.
+        """
+        root = self.x11.XDefaultRootWindow(self.display)
+        self.x11.XWarpPointer(self.display, 0, root, 0, 0, 0, 0, 0, 0)
+        self.x11.XSync(self.display, 0)
 
     def close(self):
         if self.display:
             self.x11.XCloseDisplay(self.display)
             self.display = None
+
+    def settled(self, destination=None, timeout=5, interval=.15):
+        """The installed cursor once two spaced reads agree.
+
+        A client sets its cursor after rendering, but the X server applies the request only when
+        that client next flushes its connection. A read taken as soon as a frame is published can
+        therefore still return the previous cursor; a reference cursor must not be one of those.
+        """
+        deadline = time.monotonic() + timeout
+        previous = self.read()
+        while time.monotonic() < deadline:
+            time.sleep(interval)
+            current = self.read()
+            if current == previous:
+                return self.read(destination) if destination else current
+            previous = current
+        raise AssertionError('native cursor did not settle')
 
     def read(self, destination=None):
         image = self.fixes.XFixesGetCursorImage(self.display)

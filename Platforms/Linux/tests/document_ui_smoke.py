@@ -11,8 +11,9 @@ output = Path(output_path)
 output.mkdir(parents=True, exist_ok=True)
 log = (output / 'window.log').open('w')
 started = time.monotonic()
-process = subprocess.Popen([binary, '--document-ui-fixture', str(output)], stdout=log, stderr=subprocess.STDOUT)
 cursor = NativeCursor()
+cursor.park()
+process = subprocess.Popen([binary, '--document-ui-fixture', str(output)], stdout=log, stderr=subprocess.STDOUT)
 
 
 def state():
@@ -63,7 +64,7 @@ try:
     serial = state()['serial']
     xdo('mousemove', '--window', window, 600, 30)
     eventually(lambda s: s['serial'] > serial, 'header pointer delivered')
-    arrow = cursor.read(output / 'cursor-arrow.png')
+    arrow = cursor.settled(output / 'cursor-arrow.png')
     click(paragraph)
     eventually(lambda s: cursor.read() != arrow, 'native selectable paragraph cursor')
     cursor.read(output / 'cursor-text.png')

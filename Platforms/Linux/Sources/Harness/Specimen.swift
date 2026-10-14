@@ -202,10 +202,15 @@ enum Specimen {
 
         /// Menu rows come from the production design component. The host supplies only the
         /// bounded visible page and retains command identity in its own presentation model.
+        /// Rows that stay visible stay mounted: detaching a row mid-press would end the
+        /// gesture its release is meant to complete.
         func mountMenuRows(_ rows: [NSView]) {
-            for row in mountedMenuRows { row.removeFromSuperview() }
+            let kept = Set(rows.map(ObjectIdentifier.init))
+            for row in mountedMenuRows where !kept.contains(ObjectIdentifier(row)) {
+                row.removeFromSuperview()
+            }
             mountedMenuRows = rows
-            for row in rows { menuLayer.addSubview(row) }
+            for row in rows where row.superview !== menuLayer { menuLayer.addSubview(row) }
         }
 
         func mountedMenuRow(at slot: Int) -> NSView? {
