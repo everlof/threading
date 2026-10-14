@@ -469,11 +469,75 @@ final class SimulatorPlatformMixTests: HostedStoreTestCase {
         XCTAssertEqual(route(besideAndroid, empty), .prepare(nil), "nothing held yet: choose on Android")
         XCTAssertEqual(route(android, mixed), .prepare(pixel), "platform alone addresses its only member")
         XCTAssertEqual(route(android, iOSPair), .addBeside, "a pair without Android gains one")
-        XCTAssertEqual(route(SimulatorPrepareArguments(deviceID: pixel.rawValue), iOSPair), .prepare(pixel))
+        XCTAssertEqual(route(SimulatorPrepareArguments(deviceID: pixel.rawValue), iOSPair), .add(pixel),
+                       "a pair without Android gains the named emulator")
         XCTAssertNil(route(SimulatorPrepareArguments(deviceID: nil), iOSPair), "several devices and no hint is ambiguous")
         XCTAssertNil(route(SimulatorPrepareArguments(deviceID: nil, layout: "diagonal"), nil))
         guard case .accepted(let request) = Service.preparationRequest(from: besideAndroid) else { return XCTFail() }
         XCTAssertEqual(request.layout, .row)
+    }
+
+    func testANamedDeviceTakesItsPlatformsPlaceAndOnlyBesideOrDevicesGrowTheWorkspace() {
+        typealias Service = SimulatorAgentCommandService
+        func route(_ arguments: SimulatorPrepareArguments, _ shape: Service.WorkspaceShape?) -> Service.PreparationRoute? {
+            guard case .accepted(let request) = Service.preparationRequest(from: arguments),
+                  case .accepted(let route) = Service.preparationRoute(for: request, in: shape) else { return nil }
+            return route
+        }
+        let iPhone = Service.WorkspaceShape(memberCount: 1, isLoneAndEmpty: false, deviceOnPlatform: nil,
+                                            devices: [phone], selected: phone)
+        let mixed = Service.WorkspaceShape(memberCount: 2, isLoneAndEmpty: false, deviceOnPlatform: nil,
+                                           devices: [phone, pixel], selected: pixel)
+        let named = { (id: SimulatorDeviceID) in SimulatorPrepareArguments(deviceID: id.rawValue) }
+
+        XCTAssertEqual(route(named(phone), iPhone), .prepare(phone), "the device on show: nothing changes")
+        XCTAssertEqual(route(named(otherPhone), iPhone), .replace(phone, with: otherPhone),
+                       "a second iPhone takes the first one's place")
+        XCTAssertEqual(route(SimulatorPrepareArguments(deviceID: otherPhone.rawValue, beside: true), iPhone),
+                       .add(otherPhone), "beside is what adds")
+        XCTAssertEqual(route(named(pixel), iPhone), .replace(phone, with: pixel),
+                       "a lone device switches platform, as platform alone does")
+        XCTAssertEqual(route(named(tablet), mixed), .replace(pixel, with: tablet), "the emulator's place, not the iPhone's")
+        XCTAssertEqual(route(named(otherPhone), mixed), .replace(phone, with: otherPhone),
+                       "the iPhone's place, although the emulator is the selected device")
+        XCTAssertEqual(route(SimulatorPrepareArguments(deviceID: pixel.rawValue, devices: [phone.rawValue, pixel.rawValue]),
+                             iPhone), .set([phone, pixel], selecting: pixel))
+        XCTAssertEqual(route(SimulatorPrepareArguments(deviceID: nil, devices: [pixel.rawValue, phone.rawValue]), nil),
+                       .set([pixel, phone], selecting: pixel), "the first device answers when none is picked")
+    }
+
+    func testARequestedWorkspaceNamesEachDeviceOnceAndNothingElseDecidesIt() {
+        func rejected(_ arguments: SimulatorPrepareArguments) -> Bool {
+            if case .rejected = SimulatorAgentCommandService.preparationRequest(from: arguments) { return true }
+            return false
+        }
+        let five = (1...5).map { "00000000-0000-0000-0000-00000000000\($0)" }
+        XCTAssertTrue(rejected(SimulatorPrepareArguments(deviceID: nil, devices: [])))
+        XCTAssertTrue(rejected(SimulatorPrepareArguments(deviceID: nil, devices: five)), "more than the workspace holds")
+        XCTAssertFalse(rejected(SimulatorPrepareArguments(deviceID: nil, devices: Array(five.prefix(4)))))
+        XCTAssertTrue(rejected(SimulatorPrepareArguments(deviceID: nil, devices: [phone.rawValue, phone.rawValue])))
+        XCTAssertTrue(rejected(SimulatorPrepareArguments(deviceID: nil, devices: ["iPhone 17"])), "never a guessed name")
+        XCTAssertTrue(rejected(SimulatorPrepareArguments(deviceID: nil, platform: "android", devices: [pixel.rawValue])))
+        XCTAssertTrue(rejected(SimulatorPrepareArguments(deviceID: nil, beside: true, devices: [pixel.rawValue])))
+        XCTAssertTrue(rejected(SimulatorPrepareArguments(deviceID: tablet.rawValue, devices: [pixel.rawValue])),
+                      "device_id picks one of devices")
+        XCTAssertFalse(rejected(SimulatorPrepareArguments(deviceID: nil, layout: "row", devices: [phone.rawValue, pixel.rawValue])))
+    }
+
+    func testTheResultNamesWhatACallAddedAndRemovedAndNothingWhenItChangedNothing() throws {
+        typealias Service = SimulatorAgentCommandService
+        let summary = Service.WorkspaceSummary(layout: "row", devices: [
+            Service.WorkspaceMember(deviceID: phone, name: "iPhone", selected: true),
+            Service.WorkspaceMember(deviceID: pixel, name: "Pixel", selected: false),
+        ])
+        let changed = summary.changes(since: [phone, tablet])
+        XCTAssertEqual(changed.added, [pixel.rawValue])
+        XCTAssertEqual(changed.removed, [tablet.rawValue])
+        let unchanged = summary.changes(since: [pixel, phone])
+        XCTAssertNil(unchanged.added, "the same devices in another order are no change")
+        XCTAssertNil(unchanged.removed)
+        let json = try XCTUnwrap(String(data: JSONEncoder().encode(unchanged), encoding: .utf8))
+        XCTAssertFalse(json.contains("added") || json.contains("removed"))
     }
 
     func testAskingForAndroidBesideAnIPhoneAddsItAndAskingAgainSelectsIt() async throws {

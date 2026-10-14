@@ -474,6 +474,27 @@ final class SimulatorPaneViewController: NSViewController {
         return button
     }()
 
+    /// Removes this member from its workspace. Set by the workspace; the tile offers it with an
+    /// ✕ in its top corner while the pointer is over it.
+    var onWorkspaceRemove: (() -> Void)?
+    private var workspaceTileIsHovered = false
+    private var workspaceHoverArea: NSTrackingArea?
+
+    /// Fades in while the pointer is over the tile, as a tab's close button does. Screen readers
+    /// and the device's options menu reach the same action at any time.
+    private lazy var workspaceRemoveButton: ThemedIconButton = {
+        let title = L10n.format("Remove %@ from Workspace", workspaceDeviceName)
+        let button = ThemedIconButton(symbolName: "xmark", accessibility: title,
+                                      target: .besidePrimary, inkSource: .chrome)
+        button.toolTip = title
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setAccessibilityIdentifier("simulator.workspace.memberRemove")
+        button.isHidden = true
+        button.alphaValue = 0
+        button.onPress = { [weak self] in self?.onWorkspaceRemove?() }
+        return button
+    }()
+
     private lazy var workspaceTitleActions: NSStackView = {
         let stack = NSStackView(views: [workspaceTitle, workspaceTileMenuButton])
         stack.orientation = .horizontal
@@ -514,6 +535,32 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     @objc private func selectFromWorkspaceTitle() { onFocusRequest?() }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard event.trackingArea === workspaceHoverArea else { return super.mouseEntered(with: event) }
+        workspaceTileIsHovered = true
+        applyWorkspaceHover()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard event.trackingArea === workspaceHoverArea else { return super.mouseExited(with: event) }
+        workspaceTileIsHovered = false
+        applyWorkspaceHover()
+    }
+
+    /// The pointer over the tile, for render and behaviour tests that cannot move one.
+    var workspaceTileIsHoveredForTesting: Bool {
+        get { workspaceTileIsHovered }
+        set { workspaceTileIsHovered = newValue; applyWorkspaceHover() }
+    }
+
+    private func applyWorkspaceHover() {
+        let shown = workspaceTileIsHovered && !workspaceRemoveButton.isHidden
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Design.Motion.quick
+            workspaceRemoveButton.animator().alphaValue = shown ? 1 : 0
+        }
+    }
 
     private lazy var noteSendBar: AnnotationSendBar = {
         let bar = AnnotationSendBar()
@@ -997,9 +1044,13 @@ final class SimulatorPaneViewController: NSViewController {
     private func setupWorkspaceMemberUI() {
         view.addLayoutGuide(workspaceContentTop)
         view.addLayoutGuide(workspaceTitleBand)
-        for child in [workspaceTitleActions, screenView, statusLabel, noteSendBar, recordingBadge] {
+        for child in [workspaceTitleActions, workspaceRemoveButton, screenView, statusLabel, noteSendBar, recordingBadge] {
             view.addSubview(child)
         }
+        let hoverArea = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                       owner: self, userInfo: nil)
+        view.addTrackingArea(hoverArea)
+        workspaceHoverArea = hoverArea
         let fillsWidth = screenView.widthAnchor.constraint(equalTo: view.widthAnchor)
         fillsWidth.priority = .defaultHigh - 10
         // Just below required: a tile briefly smaller than its own chrome clips rather than
@@ -1018,6 +1069,11 @@ final class SimulatorPaneViewController: NSViewController {
             workspaceTitleActions.centerXAnchor.constraint(equalTo: screenView.centerXAnchor),
             workspaceTitleActions.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor),
             workspaceTitleActions.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor),
+            // The ✕ sits over the screen's top corner; the name gives way to it rather than run under.
+            workspaceRemoveButton.centerYAnchor.constraint(equalTo: workspaceTitleBand.centerYAnchor),
+            workspaceRemoveButton.trailingAnchor.constraint(equalTo: screenView.trailingAnchor),
+            workspaceTitleActions.trailingAnchor.constraint(lessThanOrEqualTo: workspaceRemoveButton.leadingAnchor,
+                                                           constant: -Design.Spacing.hairline),
             screenTopToControlRow,
             screenView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             screenView.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor),
@@ -1041,6 +1097,8 @@ final class SimulatorPaneViewController: NSViewController {
         let titled = workspaceRole != .solo
         workspaceTitle.isHidden = !titled
         workspaceTileMenuButton.isHidden = !titled
+        workspaceRemoveButton.isHidden = !titled || onWorkspaceRemove == nil
+        applyWorkspaceHover()
         NSLayoutConstraint.deactivate(titled ? workspaceUntitledConstraints : workspaceTitledConstraints)
         NSLayoutConstraint.activate(titled ? workspaceTitledConstraints : workspaceUntitledConstraints)
         let selected = workspaceRole == .selected
@@ -3631,6 +3689,9 @@ final class SimulatorPaneViewController: NSViewController {
                 let optionsTitle = "\(L10n.string("Device Options")): \(name)"
                 workspaceTileMenuButton.setSymbol("chevron.down", accessibility: optionsTitle)
                 workspaceTileMenuButton.toolTip = optionsTitle
+                let removeTitle = L10n.format("Remove %@ from Workspace", name)
+                workspaceRemoveButton.setSymbol("xmark", accessibility: removeTitle)
+                workspaceRemoveButton.toolTip = removeTitle
                 reportedWorkspaceName = name
                 onWorkspaceIdentityChange?()
             }

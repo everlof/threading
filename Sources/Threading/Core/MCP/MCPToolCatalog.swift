@@ -438,7 +438,7 @@ enum MCPToolCatalog {
     instruction: """
       When developing or testing an iOS app, prefer Threading's adopted Simulator in the \
       right display panel over opening Apple Simulator.app in a separate window. Start with \
-      simulator_prepare. It adds or reuses an exact device in this session's Simulator workspace, boots or \
+      simulator_prepare. It shows an exact device in this session's Simulator workspace, boots or \
       adopts one device, and returns its exact UDID. Use that UDID for xcodebuild with \
       -destination id=<device_id>, then call simulator_install_launch with the built .app and \
       bundle identifier. Use simulator_screenshot when you need the current pixels in your \
@@ -461,11 +461,14 @@ enum MCPToolCatalog {
       overview, power and volume buttons there, and rotateLeft/rotateRight on an emulator. Do not \
       start an emulator window or drive the device with adb input when the panel can.
 
-      To show platforms side by side, call simulator_prepare once per device: platform "ios", then \
-      platform "android" with beside true and layout "row". beside adds the automatic choice next \
-      to the existing devices instead of switching a lone one; layout also takes column, grid, focus \
-      and automatic. Each result's workspace field lists every member's device_id and platform; in \
-      a mixed workspace, platform alone also addresses that platform's only device.
+      To show platforms side by side, name them all at once: simulator_prepare with devices \
+      [<iOS id>, <Android id>] and layout "row" makes the workspace exactly those devices, keeps the \
+      ones already shown running and removes the rest, so repeating it changes nothing. Without \
+      devices, a new device_id takes the place of the workspace's device on its platform; only \
+      beside true adds one, as with platform "android" and beside true after an iPhone. layout also \
+      takes column, grid, focus and automatic. Each result's workspace field lists every member's \
+      device_id and platform, and added and removed say what the call changed; in a mixed \
+      workspace, platform alone also addresses that platform's only device.
 
       When the checkout has .threading/scenarios.json, simulator_scenario opens the installed app \
       in a state it declares on every device at once, and steps through a flow in place so the \

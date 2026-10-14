@@ -2338,10 +2338,12 @@ struct SimulatorPrepareArguments: Codable, Sendable {
   var beside: Bool? = nil
   /// A `SimulatorWorkspaceLayout` name for the whole workspace.
   var layout: String? = nil
+  /// Exact device ids the workspace should hold, in order: the whole workspace in one call.
+  var devices: [String]? = nil
 
   private enum CodingKeys: String, CodingKey {
     case deviceID = "device_id"
-    case platform, beside, layout
+    case platform, beside, layout, devices
   }
 }
 
@@ -6696,20 +6698,24 @@ enum MCPTools {
         handler.simulatorPrepare(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Add or reuse an exact iOS Simulator, Android emulator or USB Android device in this session's \
-        workspace in Threading's right display panel, then boot or adopt the device and return its exact \
-        device_id. Call this before building when the user should see the app in Threading instead of a \
-        separate Simulator or emulator window. Omit device_id to prefer an already booted device of \
-        platform ("ios" by default), then the first available one. The workspace holds up to four \
-        devices side by side: an exact device_id that is not a member yet is added, and beside: true \
-        adds the automatic choice for platform next to the existing members instead of switching a lone \
-        member to it. To show iOS and Android side by side: call with platform "ios", then with \
-        platform "android", beside true and layout "row" (row = side by side, column = stacked, grid, \
-        focus = one large, automatic = fit the panel). In a workspace with several devices, platform \
-        alone addresses its only member of that platform; otherwise pass device_id, here and to every \
-        other simulator_* tool. The result lists every member under workspace. For iOS the returned \
-        device_id is the authority for xcodebuild -destination id=<device_id>; for Android the result \
-        carries adb_serial and a Gradle build hint.
+        Show an exact iOS Simulator, Android emulator or USB Android device in this session's workspace \
+        in Threading's right display panel, boot or adopt it, and return its exact device_id. Call this \
+        before building when the user should see the app in Threading instead of a separate Simulator or \
+        emulator window. Calling it again with the same arguments changes nothing. The workspace holds up \
+        to four devices side by side. devices sets the whole workspace in one call: exactly those \
+        device ids in that order. Members already showing one keep running, the rest are removed, and \
+        the result describes device_id (default: the first). Without devices, a device_id already in the \
+        workspace is selected, and a new one takes the place of the workspace's device on its platform, \
+        or of a lone device. Only beside: true adds a device next to the others; it joins them without \
+        it only when none of them is on its platform. Omit device_id to prefer an already booted device \
+        of platform ("ios" by default), then the first available one. To show iOS and Android side by \
+        side: devices [<iOS id>, <Android id>] with layout "row" (row = side by side, column = stacked, \
+        grid, focus = one large, automatic = fit the panel), or platform "ios", then platform "android" \
+        with beside true. In a workspace with several devices, platform alone addresses its only member \
+        of that platform; otherwise pass device_id, here and to every other simulator_* tool. The result \
+        lists every member under workspace, with added and removed naming what this call changed. For \
+        iOS the returned device_id is the authority for xcodebuild -destination id=<device_id>; for \
+        Android the result carries adb_serial and a Gradle build hint.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -6724,8 +6730,14 @@ enum MCPTools {
           ),
           "beside": MCPPropertySchema(
             type: .boolean,
-            description: "Optional: true adds the automatic choice for platform as a new device beside the "
-              + "workspace's current devices (up to four) rather than switching a lone device to it."
+            description: "Optional: true adds device_id, or the automatic choice for platform, as a new "
+              + "device beside the workspace's current devices (up to four) instead of in place of one."
+          ),
+          "devices": MCPPropertySchema(
+            type: .array,
+            description: "Optional: the whole workspace, one to four exact device ids in order. Devices "
+              + "already shown keep running; others are removed. Leave out platform and beside with it.",
+            items: MCPArrayItemSchema(type: .string, description: "An exact device id.")
           ),
           "layout": MCPPropertySchema(
             type: .string,

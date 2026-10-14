@@ -247,11 +247,17 @@ enum SimulatorAgentCommandService {
 
     /// What `simulator_prepare` does once its arguments are read.
     enum PreparationRoute: Equatable {
-        /// Prepare this exact device (adding it when it is not a member), or with nil the
-        /// workspace's lone member by its automatic choice.
+        /// Prepare this exact device: the member already holding it, a lone member that holds
+        /// nothing yet, or a new workspace. With nil, the lone member by its automatic choice.
         case prepare(SimulatorDeviceID?)
         /// Add the platform's automatic choice as a new member beside the others.
         case addBeside
+        /// Add this exact device as a new member beside the others.
+        case add(SimulatorDeviceID)
+        /// Show the first device in place of the second, in the same member.
+        case replace(SimulatorDeviceID, with: SimulatorDeviceID)
+        /// Make the workspace exactly these devices, in this order, and answer for `selecting`.
+        case set([SimulatorDeviceID], selecting: SimulatorDeviceID)
     }
 
     /// The parts of the current workspace the route depends on; nil when there is no tab yet.
@@ -261,6 +267,10 @@ enum SimulatorAgentCommandService {
         let isLoneAndEmpty: Bool
         /// The device of the first member on the requested platform.
         let deviceOnPlatform: SimulatorDeviceID?
+        /// Every member's device, in order.
+        var devices: [SimulatorDeviceID] = []
+        /// The selected member's device.
+        var selected: SimulatorDeviceID? = nil
     }
 
     struct PreparationRequest: Equatable {
@@ -268,6 +278,8 @@ enum SimulatorAgentCommandService {
         let preferAndroid: Bool?
         let layout: SimulatorWorkspaceLayout?
         let beside: Bool
+        /// The whole workspace, when the agent named it.
+        var devices: [SimulatorDeviceID]? = nil
     }
 
     static func preparationRequest(from arguments: SimulatorPrepareArguments) -> Request<PreparationRequest> {
@@ -281,22 +293,72 @@ enum SimulatorAgentCommandService {
         case .accepted(let value): preferAndroid = value
         case .rejected(let result): return .rejected(result)
         }
+        let layout: SimulatorWorkspaceLayout?
         switch requestedLayout(from: arguments) {
-        case .accepted(let layout):
-            return .accepted(PreparationRequest(deviceID: deviceID, preferAndroid: preferAndroid,
-                                                layout: layout, beside: arguments.beside == true))
+        case .accepted(let value): layout = value
         case .rejected(let result): return .rejected(result)
         }
+        let devices: [SimulatorDeviceID]?
+        switch requestedDevices(from: arguments, deviceID: deviceID) {
+        case .accepted(let value): devices = value
+        case .rejected(let result): return .rejected(result)
+        }
+        return .accepted(PreparationRequest(deviceID: deviceID, preferAndroid: preferAndroid,
+                                            layout: layout, beside: arguments.beside == true, devices: devices))
     }
 
-    /// Without a device_id the platform decides: in a workspace of several devices, its member of
-    /// that platform, or a new member beside the others when it has none. beside always adds,
-    /// except to a lone member that holds nothing yet. A lone member asked for the other platform
-    /// without beside switches to it, as it always has.
+    /// The whole workspace an agent named: one to four exact, distinct ids. It says everything
+    /// platform and beside would, and device_id only picks which of them the result describes.
+    static func requestedDevices(
+        from arguments: SimulatorPrepareArguments, deviceID: SimulatorDeviceID?
+    ) -> Request<[SimulatorDeviceID]?> {
+        guard let raw = arguments.devices else { return .accepted(nil) }
+        let maximum = SimulatorWorkspaceState.maximumMembers
+        guard (1...maximum).contains(raw.count) else {
+            return .rejected(.failure("devices must list one to \(maximum) device ids."))
+        }
+        var devices: [SimulatorDeviceID] = []
+        for value in raw {
+            guard let id = SimulatorDeviceID(value) else { return .rejected(.failure(deviceIDFormatFailure)) }
+            guard !devices.contains(id) else {
+                return .rejected(.failure("devices lists \(value) twice; name each device once."))
+            }
+            devices.append(id)
+        }
+        if arguments.platform != nil || arguments.beside != nil {
+            return .rejected(.failure("devices sets the whole workspace; leave out platform and beside."))
+        }
+        if let deviceID, !devices.contains(deviceID) {
+            return .rejected(.failure("device_id must be one of devices: it picks the device the result describes."))
+        }
+        return .accepted(devices)
+    }
+
+    /// Only devices and beside make the workspace grow, so calling again with the same arguments
+    /// changes nothing. devices names the whole workspace. A device_id already shown is selected;
+    /// a new one takes the place of the workspace's device on its platform (the selected one when
+    /// that is on it), or of a lone device, and joins the others only when none is on its
+    /// platform. Without a device_id the platform decides the same way, by its automatic choice.
     static func preparationRoute(
         for request: PreparationRequest, in workspace: WorkspaceShape?
     ) -> Request<PreparationRoute> {
-        guard request.deviceID == nil, let workspace else { return .accepted(.prepare(request.deviceID)) }
+        if let devices = request.devices, let first = devices.first {
+            return .accepted(.set(devices, selecting: request.deviceID ?? first))
+        }
+        guard let workspace else { return .accepted(.prepare(request.deviceID)) }
+        if let id = request.deviceID {
+            if workspace.devices.contains(id) || workspace.isLoneAndEmpty { return .accepted(.prepare(id)) }
+            if request.beside { return .accepted(.add(id)) }
+            let android = id.platform.isAndroid
+            let onPlatform = workspace.devices.filter { $0.platform.isAndroid == android }
+            if let current = workspace.selected.flatMap({ onPlatform.contains($0) ? $0 : nil }) ?? onPlatform.first {
+                return .accepted(.replace(current, with: id))
+            }
+            if workspace.memberCount == 1, let lone = workspace.devices.first {
+                return .accepted(.replace(lone, with: id))
+            }
+            return .accepted(.add(id))
+        }
         if request.beside { return .accepted(workspace.isLoneAndEmpty ? .prepare(nil) : .addBeside) }
         guard workspace.memberCount > 1 else { return .accepted(.prepare(nil)) }
         guard request.preferAndroid != nil else {
@@ -328,6 +390,21 @@ enum SimulatorAgentCommandService {
     struct WorkspaceSummary: Encodable, Equatable {
         let layout: String
         let devices: [WorkspaceMember]
+        /// What this call put in and took out; omitted when it changed nothing.
+        var added: [String]? = nil
+        var removed: [String]? = nil
+
+        /// The same summary, naming what changed since `before`.
+        func changes(since before: [SimulatorDeviceID]) -> WorkspaceSummary {
+            let now = devices.compactMap(\.deviceID)
+            let previous = before.map(\.rawValue)
+            var summary = self
+            let added = now.filter { !previous.contains($0) }
+            let removed = previous.filter { !now.contains($0) }
+            summary.added = added.isEmpty ? nil : added
+            summary.removed = removed.isEmpty ? nil : removed
+            return summary
+        }
     }
 
     static func launchRequest(
@@ -358,7 +435,8 @@ enum SimulatorAgentCommandService {
     }
 
     static func preparationResult(
-        for lease: SimulatorDeviceLease, adbSerial: String? = nil, workspace: WorkspaceSummary? = nil
+        for lease: SimulatorDeviceLease, adbSerial: String? = nil, workspace: WorkspaceSummary? = nil,
+        problems: [String] = []
     ) -> MCPToolResult {
         let device = lease.device
         let android = device.platform.isAndroid
@@ -378,7 +456,8 @@ enum SimulatorAgentCommandService {
                     + "), then call simulator_install_launch with the .apk and its applicationId."
                 : nil,
             buttons: Button.available(on: device.platform).map(\.rawValue),
-            workspace: workspace
+            workspace: workspace,
+            problems: problems.isEmpty ? nil : problems
         ))
     }
 
@@ -497,6 +576,8 @@ private struct PreparationPayload: Encodable {
     let buttons: [String]
     /// Every member beside this one, so an agent that built a side-by-side view can see it.
     let workspace: SimulatorAgentCommandService.WorkspaceSummary?
+    /// Other members of a requested workspace that could not be prepared.
+    let problems: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case deviceID = "device_id"
@@ -506,7 +587,7 @@ private struct PreparationPayload: Encodable {
         case xcodebuildDestination = "xcodebuild_destination"
         case adbSerial = "adb_serial"
         case buildHint = "build_hint"
-        case buttons, workspace
+        case buttons, workspace, problems
     }
 }
 

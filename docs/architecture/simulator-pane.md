@@ -233,7 +233,10 @@ like the single pane plus one **+**; the first version stacked a layout row and 
 chooser above it, said "1 Simulators", and truncated both choosers to a letter at 260 points.
 Alone, the chooser switches the device as the single pane's did; beside peers it selects a member.
 With several devices, each name band has its own chevron menu for device actions, including
-**Remove … from Workspace**. Shared touch settings stay in the header's options menu. Layout
+**Remove … from Workspace**, and an **✕** over the screen's top-trailing corner that fades in while
+the pointer is over the tile (`Design.Motion.quick`, so none under Reduce Motion), as a tab's close
+button does. The ✕ is in the accessibility tree at all times, labelled with the device's name; the
+name gives way to it in a narrow tile. Shared touch settings stay in the header's options menu. Layout
 stays in the shared header chooser, or that options menu at narrow widths. The device's screen
 context menu also offers removal; either route
 selects the neighbour. The six hardware controls retain their full targets and wrap into rows as
@@ -296,7 +299,11 @@ running. This prevents both an endless stale-lease retry loop and ownership laun
 
 The built-in **iOS Simulator** tool group is session-scoped. Its preferred sequence is:
 
-1. `simulator_prepare` adds or reuses an exact device and reveals the stable workspace tab.
+1. `simulator_prepare` shows an exact device and reveals the stable workspace tab. Repeating a
+   call changes nothing: only `beside: true` or `devices` (the whole workspace, in order, keeping
+   the devices already shown) makes the workspace grow, and a new `device_id` otherwise takes the
+   place of the device on its platform. Each result's `workspace` names what the call `added` and
+   `removed`.
    With several members, every Simulator command requires `device_id`; omission is refused as
    ambiguous instead of following human focus. `panel_list_tabs` publishes the workspace's member
    UDIDs and selected member. Element refs remain scoped to the explicitly targeted device.

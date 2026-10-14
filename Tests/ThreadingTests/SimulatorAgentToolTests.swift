@@ -267,16 +267,39 @@ final class SimulatorAgentToolTests: HostedStoreTestCase {
         XCTAssertTrue(fixture.stream.session.inputs.isEmpty)
     }
 
+    func testNamingAnotherDeviceTakesTheLoneDevicesPlaceAndSaysSo() async throws {
+        let fixture = makeFixture(visible: true, multipleDevices: true)
+        defer { fixture.cleanup() }
+        let first = await execute(.simulatorPrepare(SimulatorPrepareArguments(deviceID: simulatorAgentTestDevice.id.rawValue)),
+                                  with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertFalse(first.isError, first.text)
+        let second = await execute(.simulatorPrepare(SimulatorPrepareArguments(deviceID: simulatorAgentSecondDevice.id.rawValue)),
+                                   with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertFalse(second.isError, second.text)
+        XCTAssertTrue(second.text.contains("\"removed\"") && second.text.contains(simulatorAgentTestDevice.id.rawValue),
+                      second.text)
+        let workspace = try XCTUnwrap(fixture.pane.simulatorWorkspace(for: fixture.sessionID))
+        XCTAssertEqual(workspace.state.members.compactMap(\.deviceID), [simulatorAgentSecondDevice.id],
+                       "one device shown, not two")
+    }
+
     func testMultipleDevicesRefuseAmbiguousInputAndTargetTheExactHelper() async throws {
         let fixture = makeFixture(visible: true, multipleDevices: true)
         defer { fixture.cleanup() }
-        for device in [simulatorAgentTestDevice, simulatorAgentSecondDevice] {
-            let prepared = await execute(.simulatorPrepare(SimulatorPrepareArguments(deviceID: device.id.rawValue)),
-                                         with: fixture.coordinator, sessionID: fixture.sessionID)
-            XCTAssertFalse(prepared.isError, prepared.text)
+        let pair = [simulatorAgentTestDevice.id.rawValue, simulatorAgentSecondDevice.id.rawValue]
+        let prepared = await execute(.simulatorPrepare(SimulatorPrepareArguments(deviceID: nil, devices: pair)),
+                                     with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertFalse(prepared.isError, prepared.text)
+        XCTAssertTrue(prepared.text.contains("\"added\""), prepared.text)
+        for repeated in [SimulatorPrepareArguments(deviceID: nil, devices: pair),
+                         SimulatorPrepareArguments(deviceID: simulatorAgentSecondDevice.id.rawValue)] {
+            let again = await execute(.simulatorPrepare(repeated), with: fixture.coordinator, sessionID: fixture.sessionID)
+            XCTAssertFalse(again.isError, again.text)
+            XCTAssertFalse(again.text.contains("\"added\"") || again.text.contains("\"removed\""),
+                           "asking for what is already shown changes nothing: \(again.text)")
         }
         let workspace = try XCTUnwrap(fixture.pane.simulatorWorkspace(for: fixture.sessionID))
-        XCTAssertEqual(workspace.state.members.count, 2)
+        XCTAssertEqual(workspace.state.members.compactMap(\.deviceID), pair.compactMap(SimulatorDeviceID.init))
         let ambiguous = await execute(.simulatorTap(SimulatorTapArguments(x: 0.25, y: 0.75, ref: nil, role: nil, label: nil, identifier: nil)),
                                       with: fixture.coordinator, sessionID: fixture.sessionID)
         XCTAssertTrue(ambiguous.isError)

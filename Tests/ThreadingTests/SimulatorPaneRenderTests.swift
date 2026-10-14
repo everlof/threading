@@ -224,6 +224,23 @@ final class SimulatorPaneRenderTests: XCTestCase {
             root.cacheDisplay(in: root.bounds, to: bitmap)
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
                 to: Render.directory.appendingPathComponent("simulator-pane-workspace-android-\(name).png"))
+
+            // Pointing at the Pixel brings its ✕ over the screen's top corner, clear of its name.
+            let pixel = workspace.simulators[1]
+            let remove = try XCTUnwrap(firstSubview(of: pixel.view, identifier: "simulator.workspace.memberRemove"))
+            XCTAssertEqual(remove.alphaValue, 0)
+            Design.Motion.reduceMotionOverrideForTesting = true
+            defer { Design.Motion.reduceMotionOverrideForTesting = nil }
+            pixel.workspaceTileIsHoveredForTesting = true
+            settle(fixture.window)
+            XCTAssertEqual(remove.alphaValue, 1)
+            XCTAssertTrue(pixel.view.bounds.contains(remove.frame), "the ✕ stays inside its tile")
+            let title = try XCTUnwrap(firstSubview(of: pixel.view, identifier: "simulator.workspace.member"))
+            XCTAssertFalse(title.convert(title.bounds, to: pixel.view).intersects(remove.frame), "the name gives way to the ✕")
+            XCTAssertEqual(firstSubview(of: workspace.simulators[0].view, identifier: "simulator.workspace.memberRemove")?
+                .alphaValue, 0, "only the tile under the pointer shows it")
+            try write(fixture.window, "simulator-pane-workspace-remove-\(name)")
+            pixel.workspaceTileIsHoveredForTesting = false
             workspace.select(workspace.state.members[0].id)
             settle(fixture.window)
             let iOSShown = workspace.selectedSimulator.workspaceHardwareControls.subviews.filter { !$0.isHidden }
@@ -351,6 +368,11 @@ final class SimulatorPaneRenderTests: XCTestCase {
         let deadline = Date().addingTimeInterval(5)
         while outcome == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
         try XCTUnwrap(outcome, "the work did not finish").get()
+    }
+
+    private func firstSubview(of view: NSView, identifier: String) -> NSView? {
+        if view.accessibilityIdentifier() == identifier { return view }
+        return view.subviews.lazy.compactMap { self.firstSubview(of: $0, identifier: identifier) }.first
     }
 
     private func write(_ window: NSWindow, _ name: String) throws {

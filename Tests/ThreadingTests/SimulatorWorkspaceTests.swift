@@ -77,6 +77,77 @@ final class SimulatorWorkspaceTests: HostedStoreTestCase {
         XCTAssertTrue(try workspace.adopt(device(1)) === original)
     }
 
+    func testARequestedWorkspaceKeepsTheDevicesAlreadyShownAndAskingAgainChangesNothing() throws {
+        let workspace = SimulatorWorkspaceViewController(state: SimulatorWorkspaceState(deviceID: device(1))) { id in
+            SimulatorPaneViewController(preferredDeviceID: id, isWorkspaceMember: true, control: WorkspaceControlFake())
+        }
+        defer { workspace.terminate() }
+        let first = workspace.selectedSimulator
+        let second = try workspace.adopt(device(2))
+        try workspace.setDevices([device(3), device(2)], selecting: device(2))
+        XCTAssertEqual(workspace.state.members.compactMap(\.deviceID), [device(3), device(2)])
+        XCTAssertTrue(workspace.simulators[1] === second, "the device already shown keeps its pane and stream")
+        XCTAssertFalse(workspace.simulators.contains { $0 === first }, "a device not named leaves")
+        XCTAssertTrue(workspace.selectedSimulator === second)
+
+        let state = workspace.state
+        let panes = workspace.simulators
+        var changes = 0
+        workspace.onChange = { changes += 1 }
+        try workspace.setDevices([device(3), device(2)], selecting: device(2))
+        XCTAssertEqual(workspace.state, state)
+        XCTAssertTrue(zip(panes, workspace.simulators).allSatisfy { $0 === $1 })
+        XCTAssertEqual(changes, 0, "the workspace it already is")
+        XCTAssertThrowsError(try workspace.setDevices((1...5).map(device), selecting: device(1)))
+        XCTAssertEqual(workspace.state, state)
+    }
+
+    func testANamedDeviceTakesTheMembersPlaceWithoutAddingOne() throws {
+        let workspace = SimulatorWorkspaceViewController(state: SimulatorWorkspaceState(deviceID: device(1))) { id in
+            SimulatorPaneViewController(preferredDeviceID: id, isWorkspaceMember: true, control: WorkspaceControlFake())
+        }
+        defer { workspace.terminate() }
+        let first = workspace.selectedSimulator
+        _ = try workspace.adopt(device(2))
+        XCTAssertTrue(workspace.replace(device(1), with: device(3)) === first)
+        XCTAssertEqual(workspace.state.members.compactMap(\.deviceID), [device(3), device(2)])
+        XCTAssertEqual(first.selectedDeviceID, device(3))
+        XCTAssertTrue(workspace.selectedSimulator === first)
+        XCTAssertNil(workspace.replace(device(9), with: device(4)), "no member shows that device")
+        XCTAssertNil(workspace.replace(device(3), with: device(2)), "a device on show is never shown twice")
+        XCTAssertEqual(workspace.state.members.compactMap(\.deviceID), [device(3), device(2)])
+    }
+
+    func testEachTileOffersRemovalBesidePeersAndNoneAlone() throws {
+        let workspace = SimulatorWorkspaceViewController(state: SimulatorWorkspaceState(deviceID: device(1))) { id in
+            SimulatorPaneViewController(preferredDeviceID: id, isWorkspaceMember: true, control: WorkspaceControlFake())
+        }
+        defer { workspace.terminate() }
+        workspace.view.frame = NSRect(x: 0, y: 0, width: 420, height: 600)
+        let first = workspace.selectedSimulator
+        let second = try workspace.adopt(device(2))
+        workspace.view.layoutSubtreeIfNeeded()
+        let remove = try XCTUnwrap(removeButton(in: second))
+        XCTAssertFalse(remove.isHidden)
+        XCTAssertEqual(remove.alphaValue, 0, "it shows while the pointer is over the tile")
+        XCTAssertEqual(remove.accessibilityTitle(),
+                       L10n.format("Remove %@ from Workspace", second.workspaceDeviceName),
+                       "a screen reader reaches it whether or not it shows")
+        XCTAssertTrue(remove.accessibilityPerformPress())
+        XCTAssertEqual(workspace.state.members.compactMap(\.deviceID), [device(1)])
+        XCTAssertTrue(workspace.selectedSimulator === first)
+        XCTAssertEqual(removeButton(in: first)?.isHidden, true, "the last device stays")
+    }
+
+    private func removeButton(in pane: SimulatorPaneViewController) -> ThemedIconButton? {
+        func find(_ view: NSView) -> ThemedIconButton? {
+            if let button = view as? ThemedIconButton,
+               button.accessibilityIdentifier() == "simulator.workspace.memberRemove" { return button }
+            return view.subviews.lazy.compactMap(find).first
+        }
+        return find(pane.view)
+    }
+
     func testRecoveryChoiceOfAnExistingMemberSelectsItWithoutDuplicatingTheDevice() throws {
         let workspace = SimulatorWorkspaceViewController(state: SimulatorWorkspaceState(deviceID: device(1))) { id in
             SimulatorPaneViewController(preferredDeviceID: id, isWorkspaceMember: true, control: WorkspaceControlFake())

@@ -231,6 +231,68 @@ final class SimulatorWorkspaceViewController: NSViewController {
         return controllers[member.id]!
     }
 
+    /// Shows `deviceID` in the member that holds `current`, in the same place, and selects it; the
+    /// member lets the old device go. Nil when no member holds `current` or one already shows `deviceID`.
+    @discardableResult
+    func replace(_ current: SimulatorDeviceID, with deviceID: SimulatorDeviceID) -> SimulatorPaneViewController? {
+        guard !state.members.contains(where: { heldDevice($0) == deviceID }),
+              let index = state.members.firstIndex(where: { heldDevice($0) == current }),
+              let controller = controllers[state.members[index].id] else { return nil }
+        let id = state.members[index].id
+        state.members[index].deviceID = deviceID
+        controller.selectDevice(deviceID)
+        if state.selectedID != id { select(id) } else if isViewLoaded { refreshHeader() }
+        onChange?()
+        return controller
+    }
+
+    /// Makes the members exactly `devices`, in that order, and selects the one showing `selected`.
+    /// A member already showing one of them keeps its pane, lease and stream, so asking for the
+    /// workspace it already is changes nothing. A member holding nothing yet takes a new device;
+    /// every other member leaves and lets its device go.
+    func setDevices(_ devices: [SimulatorDeviceID], selecting selected: SimulatorDeviceID) throws {
+        guard devices.count <= SimulatorWorkspaceState.maximumMembers else { throw Failure.full }
+        guard !devices.isEmpty, Set(devices).count == devices.count, devices.contains(selected) else {
+            assertionFailure("The agent service validates a requested workspace.")
+            return
+        }
+        var unused = state.members
+        var members: [SimulatorWorkspaceState.Member] = []
+        var added: [SimulatorWorkspaceState.Member] = []
+        for device in devices {
+            if let index = unused.firstIndex(where: { heldDevice($0) == device }) {
+                var member = unused.remove(at: index)
+                member.deviceID = device
+                members.append(member)
+            } else if let index = unused.firstIndex(where: { heldDevice($0) == nil }) {
+                var member = unused.remove(at: index)
+                member.deviceID = device
+                controllers[member.id]?.selectDevice(device)
+                members.append(member)
+            } else {
+                let member = SimulatorWorkspaceState.Member(id: UUID(), deviceID: device)
+                added.append(member)
+                members.append(member)
+            }
+        }
+        let selectedID = members.first { $0.deviceID == selected }?.id ?? members[0].id
+        guard members != state.members || selectedID != state.selectedID else { return }
+        for member in unused {
+            let controller = controllers.removeValue(forKey: member.id)
+            controller?.terminate()
+            controller?.view.removeFromSuperview()
+            controller?.removeFromParent()
+        }
+        added.forEach(makeMember)
+        state.members = members
+        state.selectedID = selectedID
+        if isViewLoaded { rebuildMembership(); refreshSelection(); updatePresentation() }
+        onChange?()
+    }
+
+    /// The devices the members hold or are reaching for, in order.
+    var heldDevices: [SimulatorDeviceID] { state.members.compactMap(heldDevice) }
+
     /// The device a member holds or is reaching for, so a member still preparing counts as taken.
     private func heldDevice(_ member: SimulatorWorkspaceState.Member) -> SimulatorDeviceID? {
         member.deviceID ?? controllers[member.id]?.selectedDeviceID
@@ -257,7 +319,9 @@ final class SimulatorWorkspaceViewController: NSViewController {
         SimulatorAgentCommandService.WorkspaceShape(
             memberCount: state.members.count,
             isLoneAndEmpty: state.members.count == 1 && selectedSimulator.selectedDeviceID == nil,
-            deviceOnPlatform: memberID(onAndroid: android).flatMap(deviceID(ofMember:))
+            deviceOnPlatform: memberID(onAndroid: android).flatMap(deviceID(ofMember:)),
+            devices: heldDevices,
+            selected: deviceID(ofMember: state.selectedID)
         )
     }
 
@@ -428,6 +492,7 @@ final class SimulatorWorkspaceViewController: NSViewController {
             guard let self, self.isViewLoaded, self.state.selectedID == member.id else { return }
             self.refreshHeader()
         }
+        controller.onWorkspaceRemove = { [weak self] in self?.remove(member.id) }
         controller.workspaceMenuExtras = { [weak self, weak controller] in
             guard let self, let controller, self.state.members.count > 1 else { return [] }
             return [.item(ThemedMenuItem(

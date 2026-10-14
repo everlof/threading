@@ -3787,8 +3787,9 @@ deliberately released.
 With one device, the chooser switches it, as before; with several, each device's name sits above
 its screen and the chooser picks which one the shared toolbar and hardware controls act on. Click a
 device's name (or its screen, which also performs the tap) to select it; the selected name wears a
-plate. The **⌄** beside each device's name opens that device's actions, including **Remove … from
-Workspace**. The device's right-click menu offers the same removal. The shared header's **…**
+plate. Point at a device and an **✕** appears at the top corner of its screen: click it to remove
+that device. The **⌄** beside each device's name opens that device's actions, including the same
+**Remove … from Workspace**, and so does the device's right-click menu. The shared header's **…**
 contains touch settings and, when the pane is narrow, Layout. Removing a device selects its neighbour; close the tab
 to remove the last one. Device order, selection and layout come back after relaunch.
 

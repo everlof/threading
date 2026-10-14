@@ -63,6 +63,18 @@ one, never one the workspace already holds. The pane's own preparation, the pane
   view can see it and address each device.
 - A lone member asked for the other platform without `beside` still switches, as it did before
   this existed; `beside` is the explicit way to keep it.
+- An exact `device_id` follows the same rule, so calling `simulator_prepare` again never grows
+  the workspace by surprise. One already in the workspace is selected. A new one takes the place
+  of the workspace's device on its platform (the selected one when it is on that platform), or of
+  a lone device, and joins the others only when none is on its platform; `beside: true` adds it.
+  It used to be added whenever it was new, and an agent switching iPhones ended up with both.
+- `devices` names the whole workspace at once, one to four exact ids in order, and cannot be
+  combined with `platform` or `beside`; `device_id` then only picks the device the result
+  describes. `SimulatorWorkspaceViewController.setDevices` keeps the member (pane, lease and
+  stream) of every device already shown, removes the rest, and does nothing when the workspace
+  already is that list. `SimulatorAgentPreparation` prepares every member at once and reports
+  the others' failures under `problems`. Every result's `workspace` carries `added` and
+  `removed`, omitted when the call changed nothing.
 
 **Persistence.** A workspace with any Android member always writes `simulatorWorkspace` and
 requires panel format 6. A build that predates Android therefore refuses the document instead
