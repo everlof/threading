@@ -138,9 +138,57 @@ public class BufferedDeviceLogSource: DeviceLogRowSource {
 /// A partial tail waits for the next chunk; an absurdly long line is dropped rather than grown
 /// without limit, because a log source is externally sized and one pathological line must not
 /// become unbounded memory.
+/// Ties a long-lived reader to Threading's lifetime, however Threading ends.
+///
+/// A reader started with `Process` outlives a Threading that quits, crashes or is replaced by an
+/// update: macOS has no parent-death signal, and `idevicebtlogger` ignores `SIGPIPE`, so writing
+/// into a pipe nobody reads does not stop it. The orphan then keeps the phone's Bluetooth log
+/// relay, and the next Threading's capture receives nothing — an update in the middle of a
+/// firmware-update test showed exactly that, with every packet the user produced missing.
+///
+/// So the reader runs under a small `/bin/sh` tether whose standard input is a pipe only Threading
+/// holds the write end of. A watcher in the tether blocks reading it; when Threading ends in any
+/// way the kernel closes that end, the read returns, and the watcher ends the reader. Stopping
+/// closes the end too, so a tether that had to be killed outright still takes its reader with
+/// it. The reader's own exit status passes through unchanged.
+enum TetheredReader {
+    static let shell = "/bin/sh"
+
+    /// `$@` is the reader and its arguments. Descriptor 3 is the tether, kept from the reader.
+    static let script = #"""
+        exec 3<&0
+        "$@" </dev/null 3<&- &
+        reader=$!
+        ( read -r _ <&3; kill "$reader" 2>/dev/null; sleep 1; kill -9 "$reader" 2>/dev/null ) </dev/null &
+        watcher=$!
+        exec 3<&-
+        trap 'kill "$reader" 2>/dev/null; kill "$watcher" 2>/dev/null; wait "$reader"; exit 143' TERM INT HUP
+        wait "$reader"
+        status=$?
+        kill "$watcher" 2>/dev/null
+        exit "$status"
+        """#
+
+    /// Points `task` at the tether running `executable` with `arguments`, and returns the handle
+    /// Threading must keep: closing it — or Threading ending — ends the reader.
+    static func configure(_ task: Process, executable: String, arguments: [String]) -> FileHandle {
+        task.executableURL = URL(fileURLWithPath: shell)
+        task.arguments = ["-c", script, "threading-reader", executable] + arguments
+        let tether = Pipe()
+        task.standardInput = tether
+        // Only the tether may hold this end. Without close-on-exec, every process Threading starts
+        // afterwards — terminals, agents, the PTY host — would inherit it and keep the reader alive.
+        let writeEnd = tether.fileHandleForWriting
+        _ = fcntl(writeEnd.fileDescriptor, F_SETFD, FD_CLOEXEC)
+        return writeEnd
+    }
+}
+
 public final class DeviceLogLineReader {
     private let queue: DispatchQueue
     private var process: Process?
+    /// Threading's end of the reader's tether; see `TetheredReader`.
+    private var tether: FileHandle?
 
     public init(label: String) {
         queue = DispatchQueue(label: "codes.threading.devicelog.\(label)")
@@ -166,8 +214,7 @@ public final class DeviceLogLineReader {
             return
         }
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: executable)
-        task.arguments = arguments
+        let tether = TetheredReader.configure(task, executable: executable, arguments: arguments)
         task.environment = environment
         let pipe = Pipe()
         task.standardOutput = pipe
@@ -199,6 +246,7 @@ public final class DeviceLogLineReader {
             deliveryQueue.async { ending.call(message) }
         }
         process = task
+        self.tether = tether
 
         queue.async {
             var buffer = Data()
@@ -232,6 +280,8 @@ public final class DeviceLogLineReader {
         process?.terminationHandler = nil
         process?.terminate()
         process = nil
+        try? tether?.close()
+        tether = nil
     }
 
     /// A reader released without `stop()` would otherwise leave its child running, and for the
@@ -239,6 +289,7 @@ public final class DeviceLogLineReader {
     deinit {
         process?.terminationHandler = nil
         process?.terminate()
+        try? tether?.close()
     }
 }
 

@@ -63,6 +63,8 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "codes.threading.devicelog.bluetooth")
     private var process: Process?
+    /// Threading's end of the logger's tether; see `TetheredReader`.
+    private var tether: FileHandle?
     private var output: Pipe?
     private var errors: Pipe?
     private var timer: DispatchSourceTimer?
@@ -119,9 +121,13 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
             self.output = output
             self.errors = errors
             process = task
-            task.executableURL = URL(fileURLWithPath: toolPath)
-            task.arguments = arguments
-            task.standardInput = FileHandle.nullDevice
+            // A logger left by an earlier Threading still holds the phone's Bluetooth relay, and
+            // this capture would receive nothing while it lives. The tether below stops new ones
+            // being left; this reclaims those that were, from builds before it.
+            if let udid = phoneIdentity {
+                DeviceRelayReclaim.reclaimOrphanedReaders(udid: udid, toolPath: toolPath)
+            }
+            tether = TetheredReader.configure(task, executable: toolPath, arguments: arguments)
             task.standardOutput = output
             task.standardError = errors
             do {
@@ -289,6 +295,9 @@ private final class BluetoothCaptureWorker: @unchecked Sendable {
             }
         }
         process = nil
+        // Closing Threading's end of the tether ends the logger even if the tether was wedged.
+        try? tether?.close()
+        tether = nil
         for pipe in [output, errors].compactMap({ $0 }) {
             try? pipe.fileHandleForReading.close()
             try? pipe.fileHandleForWriting.close()

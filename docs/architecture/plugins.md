@@ -629,6 +629,16 @@ packet. Silence keeps waiting with profile/activity guidance. Service-start erro
 even when the CLI remains alive waiting for another device event. Rescan can restart a failed
 reader, and stale discovery completions cannot start a reader after the pane was hidden.
 
+No reader outlives Threading. macOS has no parent-death signal and `idevicebtlogger` ignores
+`SIGPIPE`, so a logger started by a Threading that quit for an update kept the phone's Bluetooth
+relay, and the new Threading's captures received nothing. Long-lived readers therefore run under
+`TetheredReader`: a `/bin/sh` tether whose stdin is a pipe only Threading holds the
+(close-on-exec) write end of. Its watcher blocks reading that pipe and ends the reader on
+end-of-file — Threading quitting, crashing or being killed, or a stop closing the end, which also
+covers a tether that had to be `SIGKILL`ed. The Bluetooth capture additionally runs
+`DeviceRelayReclaim` before it starts, as the system log already did, to clear orphans left by
+builds without the tether.
+
 A running Bluetooth reader outlives hiding; the system log does not. A capture is something the
 user started on purpose, and the moment it exists for — a firmware update, a pairing — tends to
 happen while they look at another session; the first real DFU test lost its pairing to exactly
