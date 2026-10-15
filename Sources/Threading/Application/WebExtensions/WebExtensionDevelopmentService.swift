@@ -13,7 +13,8 @@ final class WebExtensionDevelopmentService: WebExtensionServicing {
     static let shared = WebExtensionDevelopmentService()
     private var workers: [SessionID: WebExtensionProcess] = [:]
     private var projects: [SessionID: URL] = [:]
-    private var busy: Set<SessionID> = []
+    /// The action holding each worker; its deadline bounds how long a queued command waits.
+    private var busy: [SessionID: WebExtensionRequest.Action] = [:]
     private var waiting: [SessionID: UUID] = [:]
     private let observations = AppEventObservations()
     private let currentProject: (SessionID) -> URL?
@@ -44,50 +45,75 @@ final class WebExtensionDevelopmentService: WebExtensionServicing {
         guard currentProject(sessionID)?.standardizedFileURL == project.standardizedFileURL else {
             return .failure("This checkout is no longer active for this chat. Reopen Web Extensions from the current checkout.")
         }
-        guard waiting[sessionID] == nil else { return .failure("A development operation is already queued. Wait for it to finish.") }
-        if busy.contains(sessionID) {
-            guard request.action != .events, request.action != .inspect, let current = workers[sessionID] else {
-                return .failure("A development operation is already running. Wait for it to finish.")
-            }
-            // Reserve one command behind the active operation. A background event poll must
-            // never make the user's Start/Reload click fail just because its reply is in flight.
-            let reservation = UUID()
-            waiting[sessionID] = reservation
-            defer { if waiting[sessionID] == reservation { waiting.removeValue(forKey: sessionID) } }
-            let deadline = Date().addingTimeInterval(180)
-            while busy.contains(sessionID), workers[sessionID] === current,
-                  !Task.isCancelled, Date() < deadline {
-                try? await Task.sleep(nanoseconds: 20_000_000)
-            }
-            guard !Task.isCancelled, !busy.contains(sessionID), workers[sessionID] === current else {
-                return .failure("The queued development operation was cancelled or timed out.")
-            }
+        if request.action.isRead {
+            if let refusal = await waitForReadTurn(sessionID) { return refusal }
+        } else if let refusal = await waitForCommandTurn(sessionID) {
+            return refusal
         }
-        if projects[sessionID].map({ $0 != project }) == true { release(sessionID) }
+        if projects[sessionID].map({ $0.standardizedFileURL != project.standardizedFileURL }) == true { release(sessionID) }
         let worker: WebExtensionProcess
         if let existing = workers[sessionID] { worker = existing }
         else {
-            guard workers.count < 4 else { return .failure("Four chats already have extension workbenches. Close one before opening another.") }
+            guard workers.count < WebExtensionDefaults.maximumWorkers else {
+                return .failure("\(WebExtensionDefaults.maximumWorkers) chats already have extension workbenches. Close one before opening another.")
+            }
             worker = WebExtensionProcess(project: project, configuration: configuration(sessionID))
             workers[sessionID] = worker
             projects[sessionID] = project
         }
-        busy.insert(sessionID)
+        busy[sessionID] = request.action
         let reply = await worker.call(request)
         guard workers[sessionID] === worker else { return .failure("This development session has ended.") }
-        busy.remove(sessionID)
-        if request.action != .events && request.action != .inspect {
+        busy.removeValue(forKey: sessionID)
+        if !request.action.isRead {
             NotificationCenter.default.post(WebExtensionDidChange(sessionID: sessionID))
         }
         return reply
     }
 
-    func isBusy(_ sessionID: SessionID) -> Bool { busy.contains(sessionID) || waiting[sessionID] != nil }
+    func isBusy(_ sessionID: SessionID) -> Bool { busy[sessionID] != nil || waiting[sessionID] != nil }
 
     func release(_ sessionID: SessionID) {
         workers.removeValue(forKey: sessionID)?.cancel()
         projects.removeValue(forKey: sessionID)
-        busy.remove(sessionID)
+        busy.removeValue(forKey: sessionID)
         waiting.removeValue(forKey: sessionID)
+    }
+
+    /// A read waits briefly behind another operation, so an agent's read does not fail just
+    /// because the panel's poll is in flight. It never takes the queued-command slot and yields
+    /// to a queued command; behind a long operation it is refused rather than held.
+    private func waitForReadTurn(_ sessionID: SessionID) async -> WebExtensionReply? {
+        guard isBusy(sessionID) else { return nil }
+        let current = workers[sessionID]
+        let deadline = Date().addingTimeInterval(WebExtensionDefaults.readWaitTimeout)
+        while isBusy(sessionID), workers[sessionID] === current, !Task.isCancelled, Date() < deadline {
+            try? await Task.sleep(nanoseconds: WebExtensionDefaults.queuePollNanoseconds)
+        }
+        guard !isBusy(sessionID), workers[sessionID] === current, !Task.isCancelled else {
+            return .failure("A development operation is running. Read events again when it finishes.")
+        }
+        return nil
+    }
+
+    /// One command may wait behind an in-flight operation, so a background event poll can never
+    /// make the user's Start/Reload click fail. The wait is bounded by the deadline of the action
+    /// it is waiting behind (setup runs longest). Further commands are refused.
+    private func waitForCommandTurn(_ sessionID: SessionID) async -> WebExtensionReply? {
+        guard waiting[sessionID] == nil else { return .failure("A development operation is already queued. Wait for it to finish.") }
+        guard let running = busy[sessionID], let current = workers[sessionID] else { return nil }
+        let reservation = UUID()
+        waiting[sessionID] = reservation
+        defer { if waiting[sessionID] == reservation { waiting.removeValue(forKey: sessionID) } }
+        let deadline = Date().addingTimeInterval(WebExtensionDefaults.timeout(for: running))
+        while busy[sessionID] != nil, workers[sessionID] === current, !Task.isCancelled, Date() < deadline {
+            try? await Task.sleep(nanoseconds: WebExtensionDefaults.queuePollNanoseconds)
+        }
+        guard !Task.isCancelled, busy[sessionID] == nil, workers[sessionID] === current else {
+            return .failure("The queued development operation was cancelled or timed out.")
+        }
+        // The command now runs; the slot is free for the next one to queue behind it.
+        waiting.removeValue(forKey: sessionID)
+        return nil
     }
 }

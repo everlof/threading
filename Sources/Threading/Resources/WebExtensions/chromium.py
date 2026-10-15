@@ -86,7 +86,7 @@ class Chromium:
                     del buffer[:end + 1]
                     if 'id' in value:
                         self.loop.call_soon_threadsafe(self.receive, value)
-                    elif (end <= 65536 and value.get('method') in ('Runtime.exceptionThrown', 'ServiceWorker.workerErrorReported')
+                    elif (end <= 65536 and value.get('method') == 'Runtime.exceptionThrown'
                           and self.event_slots.acquire(blocking=False)):
                         self.loop.call_soon_threadsafe(self.receive_event, value)
         except (OSError, ValueError):
@@ -110,7 +110,7 @@ class Chromium:
                     future.set_exception(ValueError(error.get('message', str(error))))
                 else:
                     future.set_result(message.get('result', {}))
-        elif message.get('method') in ('Runtime.exceptionThrown', 'ServiceWorker.workerErrorReported'):
+        elif message.get('method') == 'Runtime.exceptionThrown':
             self.on_event(message['method'], message.get('params', {}))
 
     def disconnected(self):

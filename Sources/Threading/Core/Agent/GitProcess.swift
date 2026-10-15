@@ -357,6 +357,12 @@ enum GitChildEnvironment {
         )
     }
 
+    /// The login shell's PATH alone, for an app-owned tool process that must not inherit Git's
+    /// locale and prompt policy. Blocking and cached: call it off the main actor.
+    static func loginShellPath() -> String? {
+        loginPath(for: loginShell)
+    }
+
     /// Background Git work cannot read the main-actor terminal profile. The account's SHELL is
     /// the login shell whose startup files define PATH; the terminal profile is a separate UI
     /// choice that normally agrees but must not pull Git back onto the main actor.

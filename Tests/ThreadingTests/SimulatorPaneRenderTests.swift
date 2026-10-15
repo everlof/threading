@@ -1266,6 +1266,28 @@ final class SimulatorPaneRenderTests: XCTestCase {
         }
     }
 
+    /// A restarted helper numbers its events from 1 again. Rows from the earlier worker must go,
+    /// or Open Source could resolve a stale row to a different event that reuses its ID.
+    func testWebExtensionPanelDropsRowsFromARestartedWorker() throws {
+        let fixture = try makeFixture(appearance: .aqua, deviceFrame: makeDeviceFramePNG())
+        defer { fixture.tearDown() }
+        let sessionID = try XCTUnwrap(fixture.panel.currentSessionID)
+        let service = RestartingWebExtensionService()
+        let panel = try XCTUnwrap(fixture.panel.activateWebExtensions(
+            for: sessionID, project: FileManager.default.temporaryDirectory, service: service))
+        func find(_ id: String, in view: NSView) -> NSView? {
+            if view.accessibilityIdentifier() == id { return view }
+            return view.subviews.lazy.compactMap { find(id, in: $0) }.first
+        }
+        let table = try XCTUnwrap(find("webExtensions.events", in: panel.view) as? NSTableView)
+        eventually { table.numberOfRows == 3 }
+        let restartedAt = service.reads.count
+        service.generation = "second"
+        eventually(timeout: 5) { table.numberOfRows == 1 }
+        XCTAssertEqual(table.numberOfRows, 1, "Rows from the earlier worker survived its restart")
+        XCTAssertTrue(service.reads[restartedAt...].contains(0), "The new worker was not read from its first event")
+    }
+
     private func makeFixture(
         appearance appearanceName: NSAppearance.Name,
         deviceFrame: Data,
@@ -1920,6 +1942,32 @@ private final class RenderNotificationTestHost: NotificationTestHosting {
         for sessionID: SessionID
     ) -> RemoteNotificationDestinationDTO.Kind? {
         targetKinds[reference]
+    }
+}
+
+/// Answers like a helper that restarts when `generation` changes: event IDs begin at 1 again, and a
+/// cursor past the new journal is read from its start, as the worker does.
+@MainActor
+private final class RestartingWebExtensionService: WebExtensionServicing {
+    var generation = "first"
+    private(set) var reads: [Int] = []
+    func isBusy(_ sessionID: SessionID) -> Bool { false }
+    func release(_ sessionID: SessionID) {}
+    func call(_ request: WebExtensionRequest, sessionID: SessionID, project: URL) async -> WebExtensionReply {
+        var payload = WebExtensionPayload()
+        payload.generation = generation
+        guard request.action == .events else { return .success(payload, text: "{}") }
+        let count = generation == "first" ? 3 : 1
+        let requested = request.after ?? 0
+        reads.append(requested)
+        let after = requested > count ? 0 : requested
+        payload.events = (1...count).filter { $0 > after }.map { id in
+            WebExtensionEvent(id: id, target: "chrome", level: "info", kind: "console", message: "\(generation) \(id)",
+                              stack: "", context: "background", contextID: "context", build: "build", url: "",
+                              received: 0, tab: nil, frame: nil)
+        }
+        payload.cursor = count
+        return .success(payload, text: "{}")
     }
 }
 

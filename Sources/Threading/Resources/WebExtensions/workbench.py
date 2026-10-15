@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import posixpath
 import re
 import secrets
 import shutil
@@ -30,6 +31,13 @@ MAX_FILES = 4096
 MAX_BYTES = 32 * 1024 * 1024
 MAX_EVENTS = 2000
 MAX_LINE = 65536
+MINIMUM_PYTHON = (3, 9)
+OPERATION_TIMEOUT = 150
+SETUP_TIMEOUT = 330
+BUILD_TIMEOUT = 120
+SETUP_STEP_TIMEOUT = 150
+WORKER_WRAPPER = 'threading_worker.js'
+RESERVED_FILES = ('threading_reload.html', WORKER_WRAPPER, 'threading_diagnostics.js', 'threading_background.js')
 BROWSERS = {
     'chromium': None,
     'chrome': '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -62,6 +70,23 @@ def clean(value):
     value = str(value)[:8192]
     value = re.sub(r'(?i)((?:token|password|secret|authorization|api[_-]?key)[=:\s]+)[^\s&,"\']+', r'\1[redacted]', value)
     return re.sub(r'(https?://)[^/@\s]+:[^/@\s]+@', r'\1[redacted]@', value)
+
+
+def error_message(error, action='', deadline=None):
+    """A reply never carries an empty error. asyncio deadlines stringify to '' and a KeyError to
+    its bare key, so both are named here rather than reaching the panel or an agent blank."""
+    timed_out = isinstance(error, (TimeoutError, asyncio.TimeoutError))
+    if timed_out and deadline is not None:
+        return (f'The {action or "development"} operation did not finish within {deadline} seconds. '
+                'Inspect the build log in the event list, then try again.')
+    if isinstance(error, KeyError):
+        return f'Missing required field {error}.'
+    message = str(error)
+    if isinstance(error, ImportError):
+        message += '. Choose Project → Install Development Tools, or call the setup action.'
+    if not message and timed_out:
+        return 'A browser or network step timed out.'
+    return message or f'{type(error).__name__} without a message.'
 
 
 class Journal:
@@ -103,6 +128,10 @@ class Journal:
         limit = max(1, min(limit, 200))
         query = query.casefold()
         with self.lock:
+            # A cursor past this journal's sequence came from an earlier worker. Restart at
+            # its first event instead of skipping everything up to the stale number.
+            if after > self.sequence:
+                after = 0
             rows, size = [], 0
             for row in self.events:
                 if row['id'] <= after or (target and row['target'] != target):
@@ -121,6 +150,11 @@ class Journal:
             return dict(events=rows, cursor=rows[-1]['id'] if rows else self.sequence,
                         oldest=self.events[0]['id'] if self.events else 0,
                         dropped=self.dropped, evicted=self.evicted, retained=len(self.events))
+
+    def find(self, identity, target=''):
+        with self.lock:
+            return next((dict(row) for row in self.events
+                         if row['id'] == identity and (not target or row['target'] == target)), None)
 
 
 class Collector(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -195,7 +229,7 @@ def discover(project):
     config = project / '.threading/web-extensions.json'
     if config.exists():
         value = read_json(config)
-        if value.get('version') != 1 or not isinstance(value.get('targets'), list):
+        if not isinstance(value, dict) or value.get('version') != 1 or not isinstance(value.get('targets'), list):
             raise ValueError('web-extensions.json requires version: 1 and targets: [].')
         targets = value['targets']
     else:
@@ -210,18 +244,28 @@ def discover(project):
     if len(targets) > 16:
         raise ValueError('At most 16 development targets may be declared.')
     seen = set()
+    normalized = []
     for target in targets:
+        if not isinstance(target, dict):
+            raise ValueError('Each target must be an object: {id, browser, source, build}.')
         identity = target.get('id', '')
-        if not re.fullmatch(r'[a-zA-Z0-9_-]{1,48}', identity) or identity in seen:
+        if not isinstance(identity, str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,48}', identity) or identity in seen:
             raise ValueError('Target IDs must be unique, 1–48 letters, digits, underscores or hyphens.')
         seen.add(identity)
-        contained(project, target.get('source', '.'))
+        source = target.get('source', '.')
+        if not isinstance(source, str) or not source:
+            raise ValueError(f'source in target {identity} must be the built extension directory, relative to the checkout.')
+        contained(project, source)
         command = target.get('build', [])
         if not isinstance(command, list) or len(command) > 32 or any(not isinstance(x, str) or len(x) > 4096 for x in command):
             raise ValueError('build must be an argv array of at most 32 strings; no shell expansion.')
-        if target.get('browser') not in {*BROWSERS, 'firefox-android', 'safari-ios', 'manual'}:
+        browser = target.get('browser')
+        if not isinstance(browser, str) or browser not in {*BROWSERS, 'firefox-android', 'safari-ios', 'manual'}:
             raise ValueError(f'Unknown browser in target {identity}.')
-    return targets
+        # Every consumer — the panel, an agent and start/reload — reads the same complete record,
+        # so an omitted optional field cannot be valid here and missing later.
+        normalized.append(dict(target, source=source, build=command))
+    return normalized
 
 
 def stage(source, destination, endpoint, token, target, project):
@@ -269,8 +313,7 @@ def stage(source, destination, endpoint, token, target, project):
                 output.parent.mkdir(parents=True, exist_ok=True)
                 output.write_bytes(data)
         build = digest.hexdigest()[:16]
-        if any((pending / name).exists() for name in
-               ('threading_reload.html', 'threading_worker.js', 'threading_diagnostics.js', 'threading_background.js')):
+        if any((pending / name).exists() for name in RESERVED_FILES):
             raise ValueError('The extension uses a reserved threading_ development filename.')
         (pending / 'threading_reload.html').write_text('<!doctype html><title>Reload extension</title>')
         bootstrap = Path(__file__).with_name('diagnostics.js').read_text()
@@ -285,12 +328,22 @@ def stage(source, destination, endpoint, token, target, project):
             manifest[permission_key].append('http://127.0.0.1/*')
         background = manifest.setdefault('background', {})
         if background.get('service_worker'):
-            original = background['service_worker']
+            if not isinstance(background['service_worker'], str):
+                raise ValueError('background.service_worker must be a path.')
+            original = posixpath.normpath(background['service_worker'].lstrip('/'))
             contained(pending, original)
-            imports = ['./threading_background.js', './' + original]
+            # importScripts() and self.location resolve against the registered worker's own URL.
+            # The wrapper therefore sits beside the original, so a classic worker in a folder keeps
+            # the base its relative imports were written against.
+            folder = posixpath.dirname(original)
+            wrapper = posixpath.join(folder, WORKER_WRAPPER)
+            if (pending / wrapper).exists():
+                raise ValueError('The extension uses a reserved threading_ development filename.')
+            diagnostics = posixpath.relpath('threading_background.js', folder or '.')
+            imports = [diagnostics if diagnostics.startswith('.') else './' + diagnostics, './' + posixpath.basename(original)]
             code = '\n'.join('import ' + json.dumps(x) + ';' for x in imports) if background.get('type') == 'module' else 'importScripts(' + ','.join(map(json.dumps, imports)) + ');'
-            (pending / 'threading_worker.js').write_text(code)
-            background['service_worker'] = 'threading_worker.js'
+            (pending / wrapper).write_text(code)
+            background['service_worker'] = wrapper
         if background.get('scripts') is not None:
             background['scripts'].insert(0, 'threading_background.js')
         if not any(background.get(key) for key in ('scripts', 'service_worker', 'page')):
@@ -344,8 +397,14 @@ class Workbench:
     def __init__(self, project, state):
         self.project, self.state = project.resolve(), state.resolve()
         self.state.mkdir(parents=True, exist_ok=True)
-        self.packages = Path.home() / 'Library/Caches/Threading/WebExtensionTools/python'
+        # Compiled dependencies (Playwright's greenlet) are built per interpreter version, and
+        # the host may find a different Python on another machine or after an upgrade.
+        self.packages = (Path.home() / 'Library/Caches/Threading/WebExtensionTools/python' /
+                         f'{sys.version_info.major}.{sys.version_info.minor}')
         sys.path.insert(0, str(self.packages))
+        # Event IDs restart with every worker. The generation tells a reader that a cursor or an
+        # event ID it holds was issued by an earlier worker.
+        self.generation = secrets.token_hex(8)
         self.journal = Journal()
         self.collector = Collector(self.journal)
         self.thread = threading.Thread(target=self.collector.serve_forever, daemon=True)
@@ -359,9 +418,14 @@ class Workbench:
         return dict(os.environ, PYTHONPATH=str(self.packages),
                     PATH=os.environ.get('PATH', '') + ':/opt/homebrew/bin:/usr/local/bin')
 
-    async def command(self, argv, target, cwd=None, timeout=120):
-        process = await asyncio.create_subprocess_exec(*argv, cwd=cwd or self.project, env=self.command_environment(),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
+    async def command(self, argv, target, cwd=None, timeout=BUILD_TIMEOUT):
+        environment = self.command_environment()
+        try:
+            process = await asyncio.create_subprocess_exec(*argv, cwd=cwd or self.project, env=environment,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
+        except FileNotFoundError:
+            raise ValueError(f'{argv[0]} was not found on PATH ({environment["PATH"]}). Install it, or name '
+                             'its absolute path in the target build.') from None
         async def drain():
             total = 0
             while data := await process.stdout.read(4096):
@@ -370,7 +434,11 @@ class Workbench:
                     self.event(target, 'build', data.decode(errors='replace'))
             return await process.wait()
         try:
-            result = await asyncio.wait_for(drain(), timeout)
+            try:
+                result = await asyncio.wait_for(drain(), timeout)
+            except (TimeoutError, asyncio.TimeoutError):
+                raise ValueError(f'{Path(argv[0]).name} did not finish within {timeout} seconds and was stopped; '
+                                 'inspect the build log.') from None
             if result:
                 raise ValueError(f'Command exited {result}; inspect the build log.')
         finally:
@@ -483,14 +551,21 @@ class Workbench:
         self.event(run['target'], 'lifecycle', f'Browser launcher exited {code}', 'warning' if code else 'info')
 
     def native_event(self, run, method, fields):
-        details = fields.get('exceptionDetails') or fields.get('errorMessage') or fields
-        message = details.get('exception', {}).get('description') or details.get('errorMessage') or details.get('text') or method
+        details = fields.get('exceptionDetails') or {}
+        message = details.get('exception', {}).get('description') or details.get('text') or method
         frames = details.get('stackTrace', {}).get('callFrames', [])[:40]
         stack = '\n'.join(f"at {f.get('functionName', '')} ({f.get('url', '')}:{f.get('lineNumber', 0) + 1}:{f.get('columnNumber', 0) + 1})" for f in frames)
-        if not stack and details.get('sourceURL'):
-            stack = f"{details['sourceURL']}:{max(1, details.get('lineNumber', 1))}:{max(1, details.get('columnNumber', 1))}"
-        self.event(run['target'], 'native-exception', message, 'error', stack=stack,
-                   url=details.get('sourceURL', details.get('url', '')), build=run['build'])
+        url = details.get('url', '')
+        if not stack and url:
+            stack = f"{url}:{details.get('lineNumber', 0) + 1}:{details.get('columnNumber', 0) + 1}"
+        # The protocol reports every exception on an attached page, including the website's own
+        # scripts. Only a throw whose code came from this extension is the extension's error.
+        origin = 'chrome-extension://' + run.get('extension_id', '')
+        if origin in stack or url.startswith(origin):
+            kind, level = 'native-exception', 'error'
+        else:
+            kind, level = 'page-exception', 'warning'
+        self.event(run['target'], kind, message, level, stack=stack, url=url, build=run['build'])
 
     async def reload(self, identity):
         run = self.runs.get(identity)
@@ -739,6 +814,11 @@ class Workbench:
         if 'text' in step:
             WebDriverWait(driver, 10).until(lambda browser: match(browser) and match(browser).text == str(step['text']))
 
+    def require_generation(self, request):
+        generation = request.get('generation')
+        if generation and generation != self.generation:
+            raise ValueError('That event came from an earlier development worker. Read events again and use a current ID.')
+
     async def call(self, request):
         action = request.get('action', 'inspect')
         identity = request.get('target', '')
@@ -748,12 +828,13 @@ class Workbench:
             if self.runs:
                 raise ValueError('Stop development targets before updating their tools.')
             await self.command([sys.executable, '-m', 'pip', 'install', '--upgrade', '--target', str(self.packages),
-                                'playwright==1.64.0', 'selenium==4.51.0'], '', timeout=150)
+                                'playwright==1.64.0', 'selenium==4.51.0'], '', timeout=SETUP_STEP_TIMEOUT)
             importlib.invalidate_caches()
-            await self.command([sys.executable, '-m', 'playwright', 'install', 'chromium'], '', timeout=150)
+            await self.command([sys.executable, '-m', 'playwright', 'install', 'chromium'], '', timeout=SETUP_STEP_TIMEOUT)
             return dict(instructions='Chromium and desktop development tools installed. Firefox uses the installed Firefox application. Android additionally needs adb and web-ext.')
         if action == 'inspect':
             return dict(targets=discover(self.project), runs=[self.public_run(x) for x in self.runs.values()],
+                generation=self.generation,
                 runtime=dict(playwright=bool(importlib.util.find_spec('playwright')), selenium=bool(importlib.util.find_spec('selenium'))),
                 coverage=dict(instrumented=['console', 'exceptions', 'unhandled-rejections', 'failed-fetch', 'message-operations', 'context-lifecycle'],
                     excluded=['MAIN-world and dynamically injected content scripts', 'browser-internal errors', 'XHR', 'request bodies', 'breakpoints'],
@@ -767,9 +848,9 @@ class Workbench:
         if action in ('debug', 'popup', 'options', 'side-panel'):
             return await self.open_page(identity, action)
         if action == 'source':
+            self.require_generation(request)
             run = self.runs.get(identity)
-            with self.journal.lock:
-                event = next((row for row in self.journal.events if row['id'] == request.get('event') and row['target'] == identity), None)
+            event = self.journal.find(request.get('event'), identity)
             if not run or not event:
                 raise ValueError('The target or event is no longer retained.')
             if event['build'] != run['build']:
@@ -778,8 +859,17 @@ class Workbench:
         if action == 'stop':
             return await self.stop(identity)
         if action == 'events':
-            page = self.journal.page(int(request.get('after', 0)), int(request.get('limit', 100)), request.get('query', ''), identity)
+            if request.get('event') is not None:
+                self.require_generation(request)
+                event = self.journal.find(request['event'], identity)
+                if not event:
+                    raise ValueError('That event is no longer retained.')
+                page = dict(events=[event], cursor=event['id'])
+            else:
+                page = self.journal.page(int(request.get('after', 0)), int(request.get('limit', 100)),
+                                         request.get('query', ''), identity)
             page['runs'] = [self.public_run(run) for run in self.runs.values()]
+            page['generation'] = self.generation
             return page
         if action == 'clear':
             with self.journal.lock:
@@ -790,7 +880,9 @@ class Workbench:
             run = self.runs.get(identity)
             if not run:
                 raise ValueError('Start the Safari target before packaging its development copy.')
-            output = self.state / identity / 'Safari'
+            # The generated Xcode project outlives this worker generation: Xcode may still have
+            # it open after the panel closes. One folder per target, replaced by the next package.
+            output = self.state.parent / 'Safari' / identity
             await self.command(['xcrun', 'safari-web-extension-converter', run['directory'], '--project-location', str(output),
                                 '--app-name', 'ExtensionDevelopment', '--bundle-identifier', 'local.threading.extensiondevelopment',
                                 '--no-open', '--force'], identity)
@@ -801,6 +893,16 @@ class Workbench:
         await asyncio.gather(*(self.stop(identity) for identity in list(self.runs)), return_exceptions=True)
         await asyncio.to_thread(self.collector.shutdown)
         self.collector.server_close()
+        # Profiles, development copies and screenshots belong to this worker generation alone.
+        # Removing them here covers an application quit, where only stdin's EOF reaches us.
+        # A state directory that holds the checkout is a misconfiguration, never deleted.
+        if not self.project.is_relative_to(self.state):
+            await asyncio.to_thread(shutil.rmtree, self.state, ignore_errors=True)
+
+
+def unsupported_python():
+    return (f'Python {MINIMUM_PYTHON[0]}.{MINIMUM_PYTHON[1]} or later is required; {sys.executable} is '
+            f'{sys.version.split()[0]}. Install a newer Python 3, then reopen Web Extensions.')
 
 
 async def main():
@@ -810,20 +912,22 @@ async def main():
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, lambda: None if closing else task.cancel())
     try:
         while line := await asyncio.to_thread(sys.stdin.buffer.readline, MAX_LINE + 1):
-            identity = None
-            request = None
+            identity, request, action, deadline = None, None, '', None
+            started = time.monotonic()
             try:
                 if len(line) > MAX_LINE:
                     raise ValueError('Command too large')
                 request = json.loads(line)
+                if not isinstance(request, dict):
+                    raise ValueError('A development command must be a JSON object.')
                 identity = request.get('id')
-                timeout = 330 if request.get('action') == 'setup' else 150
-                value = await asyncio.wait_for(workbench.call(request), timeout)
+                action = str(request.get('action', ''))
+                deadline = SETUP_TIMEOUT if action == 'setup' else OPERATION_TIMEOUT
+                value = await asyncio.wait_for(workbench.call(request), deadline)
                 reply = dict(id=identity, ok=True, result=value)
             except Exception as error:
-                message = str(error)
-                if isinstance(error, ImportError):
-                    message += '. Choose Project → Install Development Tools, or call the setup action.'
+                expired = deadline is not None and time.monotonic() - started >= deadline
+                message = error_message(error, action, deadline if expired else None)
                 workbench.event(request.get('target', '') if isinstance(request, dict) else '', 'operation', message, 'error')
                 reply = dict(id=identity, ok=False, error=message)
             print(json.dumps(reply), flush=True)
@@ -834,4 +938,9 @@ async def main():
 
 if __name__ == '__main__':
     os.setpgrp()
-    asyncio.run(main())
+    if sys.version_info < MINIMUM_PYTHON:
+        # Answer every command with the reason instead of failing on a newer standard-library API.
+        for _ in sys.stdin.buffer:
+            print(json.dumps(dict(id=None, ok=False, error=unsupported_python())), flush=True)
+    else:
+        asyncio.run(main())

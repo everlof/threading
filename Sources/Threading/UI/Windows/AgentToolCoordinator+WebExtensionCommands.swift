@@ -11,14 +11,14 @@ extension AgentToolCoordinator {
             completion(.failure("This chat has no local checkout."))
             return
         }
-        if arguments.action != .events && arguments.action != .inspect {
+        if !arguments.action.isRead {
             displayPaneController.activateWebExtensions(for: sessionID, service: dependencies.webExtensions)
             revealDisplayPane(for: sessionID)
         }
         Task {
             let reply = await dependencies.webExtensions.call(arguments, sessionID: sessionID,
                                                                          project: URL(fileURLWithPath: directory))
-            completion(reply.toolResult)
+            completion(reply.toolResult(for: arguments))
         }
     }
 }

@@ -14,7 +14,7 @@ import urllib.request
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'Sources/Threading/Resources/WebExtensions'))
-from workbench import Journal, Workbench, contained, discover, stage
+from workbench import Journal, Workbench, contained, discover, error_message, stage
 from project import scaffold, resolve_source
 from chromium import Chromium
 
@@ -130,8 +130,133 @@ class Contracts(unittest.TestCase):
             self.assertEqual('service_worker' in background, browser == 'chromium')
             self.assertEqual('scripts' in background, browser == 'firefox')
 
+    def test_discovery_completes_optional_fields_and_rejects_malformed_targets(self):
+        config = self.project / '.threading/web-extensions.json'
+        config.parent.mkdir()
+        config.write_text(json.dumps(dict(version=1, targets=[dict(id='a', browser='chromium')])))
+        # The panel decodes source as required; an omitted one is completed, never passed through.
+        self.assertEqual(discover(self.project), [dict(id='a', browser='chromium', source='.', build=[])])
+        for targets in ([5], [dict(id='a', browser='chromium', source=3)], [dict(id=4, browser='chromium')]):
+            config.write_text(json.dumps(dict(version=1, targets=targets)))
+            with self.assertRaises(ValueError):
+                discover(self.project)
+        config.write_text('[]')
+        with self.assertRaisesRegex(ValueError, 'version: 1'):
+            discover(self.project)
+
+    def test_service_worker_in_a_folder_keeps_its_import_base(self):
+        source = self.project / 'extension'
+        (source / 'background').mkdir(parents=True)
+        (source / 'background/main.js').write_text("importScripts('helper.js');")
+        (source / 'background/helper.js').write_text('')
+        for kind, expected in [(None, 'importScripts("../threading_background.js","./main.js");'),
+                               ('module', 'import "../threading_background.js";\nimport "./main.js";')]:
+            background = dict(service_worker='/background/main.js')
+            if kind:
+                background['type'] = kind
+            (source / 'manifest.json').write_text(json.dumps(dict(manifest_version=3, name='x', version='1', background=background)))
+            output = self.root / f'staged-{kind}'
+            stage(source, output, '', '', 'chromium', self.project)
+            manifest = json.loads((output / 'manifest.json').read_text())
+            # importScripts('helper.js') in main.js resolves against the registered worker's URL.
+            self.assertEqual(manifest['background']['service_worker'], 'background/threading_worker.js')
+            self.assertEqual((output / 'background/threading_worker.js').read_text(), expected)
+        (source / 'background/threading_worker.js').write_text('user-owned')
+        with self.assertRaisesRegex(ValueError, 'reserved'):
+            stage(source, self.root / 'staged-reserved', '', '', 'chromium', self.project)
+
+    def test_source_lookup_skips_development_files_beside_originals(self):
+        source = self.project / 'dist'
+        (source / 'background').mkdir(parents=True)
+        (source / 'background/main.js').write_text('run()')
+        stack = ('at (chrome-extension://id/background/threading_worker.js:1:1)\n'
+                 'at run (chrome-extension://id/background/main.js:1:4)')
+        self.assertEqual(resolve_source(self.project, source, stack)['path'], str((source / 'background/main.js').resolve()))
+
+    def test_a_cursor_from_an_earlier_worker_restarts_and_one_event_is_found_by_id(self):
+        journal = Journal()
+        for index in range(3):
+            journal.add('chrome', dict(message=f'event {index}'))
+        self.assertEqual([row['id'] for row in journal.page(after=1500)['events']], [1, 2, 3])
+        self.assertEqual(journal.page(after=3)['events'], [])
+        self.assertEqual(journal.find(2)['message'], 'event 1')
+        self.assertIsNone(journal.find(2, target='firefox'))
+
+    def test_error_replies_are_never_empty(self):
+        self.assertIn('did not finish within 150 seconds', error_message(asyncio.TimeoutError(), 'start', 150))
+        self.assertEqual(error_message(TimeoutError()), 'A browser or network step timed out.')
+        self.assertEqual(error_message(KeyError('source')), "Missing required field 'source'.")
+        self.assertEqual(error_message(ValueError()), 'ValueError without a message.')
+        self.assertIn('Install Development Tools', error_message(ImportError('No module named selenium')))
+
 
 class PipeContracts(unittest.IsolatedAsyncioTestCase):
+    async def test_commands_name_missing_executables_and_overrun_deadlines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'project').mkdir()
+            worker = Workbench(root / 'project', root / 'state')
+            try:
+                with self.assertRaisesRegex(ValueError, 'was not found on PATH'):
+                    await worker.command(['threading-missing-build-tool'], 'chrome')
+                with self.assertRaisesRegex(ValueError, 'did not finish within 0.2 seconds'):
+                    await worker.command([sys.executable, '-c', 'import time; time.sleep(30)'], 'chrome', timeout=0.2)
+            finally:
+                await worker.close()
+
+    async def test_close_removes_its_generation_but_keeps_safari_packages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'project').mkdir()
+            package = root / 'session/Safari/safari'
+            package.mkdir(parents=True)
+            worker = Workbench(root / 'project', root / 'session/generation')
+            (worker.state / 'safari/profile').mkdir(parents=True)
+            await worker.close()
+            self.assertFalse((root / 'session/generation').exists())
+            self.assertTrue(package.exists())
+            # A state directory that holds the checkout is never removed.
+            misconfigured = Workbench(root / 'project', root)
+            await misconfigured.close()
+            self.assertTrue((root / 'project').exists())
+
+    async def test_event_ids_carry_their_worker_generation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'project').mkdir()
+            worker = Workbench(root / 'project', root / 'state')
+            try:
+                worker.event('chrome', 'console', 'first')
+                page = await worker.call(dict(action='events'))
+                self.assertEqual(page['generation'], worker.generation)
+                single = await worker.call(dict(action='events', event=1, generation=worker.generation))
+                self.assertEqual([row['message'] for row in single['events']], ['first'])
+                with self.assertRaisesRegex(ValueError, 'earlier development worker'):
+                    await worker.call(dict(action='events', event=1, generation='earlier'))
+                with self.assertRaisesRegex(ValueError, 'earlier development worker'):
+                    await worker.call(dict(action='source', target='chrome', event=1, generation='earlier'))
+            finally:
+                await worker.close()
+
+    async def test_page_script_exceptions_are_not_reported_as_extension_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'project').mkdir()
+            worker = Workbench(root / 'project', root / 'state')
+            try:
+                run = dict(target='chrome', build='build', extension_id='abc')
+                def thrown(url):
+                    return {'exceptionDetails': {'text': 'Uncaught', 'url': url, 'lineNumber': 0, 'columnNumber': 4,
+                                                 'exception': {'description': 'TypeError: boom'}}}
+                worker.native_event(run, 'Runtime.exceptionThrown', thrown('https://example.test/site.js'))
+                worker.native_event(run, 'Runtime.exceptionThrown', thrown('chrome-extension://abc/content.js'))
+                rows = worker.journal.page()['events']
+                self.assertEqual([(row['kind'], row['level']) for row in rows],
+                                 [('page-exception', 'warning'), ('native-exception', 'error')])
+                self.assertEqual(rows[1]['stack'], 'chrome-extension://abc/content.js:1:5')
+            finally:
+                await worker.close()
+
     async def test_collector_requires_live_target_route_and_revokes_it_on_stop(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -195,7 +320,9 @@ async def browser_e2e(browser, headless=True):
         project.mkdir()
         scaffold(project)
         background = project / 'web-extension/background.js'
-        background.write_text(background.read_text() + "\nconsole.error('e2e-background-error');\nsetTimeout(() => { throw new Error('e2e-unhandled'); }, 200);\n")
+        # The extension's own onMessage handler must never receive diagnostics traffic.
+        background.write_text(background.read_text() + "\nconsole.error('e2e-background-error');\nsetTimeout(() => { throw new Error('e2e-unhandled'); }, 200);\n"
+                              "api.runtime.onMessage.addListener(message => { if (message?.type !== 'hello') console.error('e2e-foreign-message'); });\n")
         content = project / 'web-extension/content.js'
         content.write_text(content.read_text() + "\nconsole.warn('e2e-content-warning');\napi.runtime.sendMessage('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', {token: 'e2e-private-payload'}).catch(() => {});\n")
         original = {x.name: x.read_bytes() for x in (project / 'web-extension').iterdir()}
@@ -209,7 +336,8 @@ async def browser_e2e(browser, headless=True):
             while asyncio.get_running_loop().time() < deadline:
                 records = worker.journal.page(limit=200)['events']
                 if all(any(message in row['message'] for row in records)
-                       for message in ['e2e-background-error', 'e2e-content-warning', 'e2e-unhandled']) and any(row['kind'] == 'message-failed' for row in records):
+                       for message in ['e2e-background-error', 'e2e-content-warning', 'e2e-unhandled']) and any(row['kind'] == 'message-failed' for row in records) \
+                        and any(row['context'] == 'extension-page' and 'Popup connected' in row['message'] for row in records):
                     break
                 await asyncio.sleep(0.1)
             else:
@@ -219,6 +347,8 @@ async def browser_e2e(browser, headless=True):
             assert Path(mapped['path']) == background.resolve(), mapped
             assert original == {x.name: x.read_bytes() for x in (project / 'web-extension').iterdir()}
             assert 'e2e-private-payload' not in json.dumps(records)
+            assert not any('e2e-foreign-message' in row['message'] for row in records), 'Diagnostics reached the extension’s onMessage'
+            assert any(row['context'] == 'content-script' and row['tab'] is not None for row in records), 'Relayed events lost their tab'
             internal = worker.runs[browser]
             if context := internal.get('context'):
                 await context.evaluate(internal['test_page'], "chrome.storage.local.set({threadingE2E: 'retained'})")

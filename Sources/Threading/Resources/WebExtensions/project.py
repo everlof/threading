@@ -79,7 +79,8 @@ def resolve_source(root, source, stack):
     # Never fetch source maps from a URL named by untrusted extension output.
     for match in re.finditer(r'(?:chrome-extension|moz-extension|safari-web-extension)://[^/\s]+/([^\s():]+):(\d+):(\d+)', stack):
         relative, line, column = match.groups()
-        if relative.startswith('threading_'):
+        # Development files can sit beside an original (the service-worker wrapper does).
+        if relative.rsplit('/', 1)[-1].startswith('threading_'):
             continue
         path = (source / urllib.parse.unquote(relative)).resolve()
         if not path.is_relative_to(root) or not path.is_file():

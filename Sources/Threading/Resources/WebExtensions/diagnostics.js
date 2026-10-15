@@ -4,12 +4,17 @@
   Object.defineProperty(globalThis, '__threadingDiagnostics', {value: true});
   const config = __THREADING_CONFIG__;
   const api = globalThis.browser || globalThis.chrome;
+  // A sandboxed extension page has no extension API at all.
+  const runtime = api?.runtime;
   const originalFetch = globalThis.fetch.bind(globalThis);
-  const originalSend = api.runtime.sendMessage.bind(api.runtime);
-  const contextID = crypto.randomUUID();
+  const originalConnect = runtime?.connect?.bind(runtime);
+  // randomUUID exists only in secure contexts, and a content script on a plain-http site is not one.
+  const contextID = globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const location = () => globalThis.location?.href || '';
   const context = config.background ? 'background' :
     /^(chrome|moz|safari-web)-extension:/.test(location()) ? 'extension-page' : 'content-script';
+  const relay = {name: 'threading-diagnostics', batch: 50, queue: 200, delay: 100, idle: 5000};
   let sequence = 0, sent = 0, windowStart = Date.now();
   const text = value => {
     try {
@@ -36,19 +41,43 @@
       return JSON.stringify(preview(value, 3))?.slice(0, 4096) || String(value);
     } catch { return '[unserializable]'; }
   };
+  const post = event => originalFetch(config.endpoint, {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(event), signal: AbortSignal.timeout(2000)}).catch(() => {});
+  // The background and extension pages hold the loopback host permission and post directly.
+  // A content script makes requests under its page's origin rules, so it batches events over one
+  // named port to the background instead. A port reaches only onConnect listeners, never the
+  // extension's own onMessage handlers, and batching makes background wake-ups follow bursts of
+  // diagnostics rather than every single event.
+  let port = null, pending = [], flushTimer = 0, idleTimer = 0;
+  const flush = () => {
+    clearTimeout(flushTimer);
+    flushTimer = 0;
+    if (!pending.length || !originalConnect) return;
+    try {
+      if (!port) {
+        port = originalConnect({name: relay.name});
+        port.onDisconnect.addListener(() => { void runtime.lastError; port = null; });
+      }
+      port.postMessage({token: config.token, events: pending.splice(0, relay.batch)});
+    } catch {
+      // A port the background closed, or a context orphaned by a reload. That batch is lost; the
+      // bounded queue waits for the next event to try a fresh port.
+      port = null;
+      return;
+    }
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { try { port?.disconnect(); } catch {} port = null; }, relay.idle);
+    if (pending.length) flushTimer = setTimeout(flush, relay.delay);
+  };
   const deliver = event => {
     // A bounded fire-and-forget diagnostics channel must never break the application.
     try {
-      if (config.background) {
-        originalFetch(config.endpoint, {method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(event), signal: AbortSignal.timeout(2000)}).catch(() => {});
-      } else if (globalThis.browser) {
-        originalSend({__threading: config.token, event}).catch(() => {});
-      } else {
-        originalSend({__threading: config.token, event}, () => void api.runtime.lastError);
-      }
+      if (context !== 'content-script') return void post(event);
+      if (pending.length < relay.queue) pending.push(event);
+      if (!flushTimer) flushTimer = setTimeout(flush, relay.delay);
     } catch {}
   };
+  if (context === 'content-script') globalThis.addEventListener('pagehide', flush);
   const emit = (level, kind, message, stack = '') => {
     const now = Date.now();
     if (now - windowStart > 1000) { windowStart = now; sent = 0; }
@@ -60,17 +89,19 @@
     deliver({level, kind, message: message.slice(0, 8192), stack: stack.slice(0, 8192),
       context, contextID, sequence: ++sequence, build: config.build, url: location(), time: now});
   };
-  if (config.background) {
-    api.runtime.onMessage.addListener((message, sender) => {
-      if (message?.__threading !== config.token || sender.id !== api.runtime.id) {
-        emit('debug', 'message-received', `runtime.onMessage from tab ${sender.tab?.id ?? 'extension'} / frame ${sender.frameId ?? 0}`);
-        return;
-      }
-      const event = message.event;
-      if (!event || typeof event !== 'object') return;
-      deliver({...event, tab: sender.tab?.id, frame: sender.frameId});
-      // Do not claim the response channel of the extension's own messages.
-      return false;
+  if (config.background && runtime) {
+    runtime.onConnect.addListener(port => {
+      if (port.name !== relay.name || port.sender?.id !== runtime.id) return;
+      port.onMessage.addListener(message => {
+        if (message?.token !== config.token || !Array.isArray(message.events)) return;
+        for (const event of message.events.slice(0, relay.batch)) {
+          if (event && typeof event === 'object') post({...event, tab: port.sender?.tab?.id, frame: port.sender?.frameId});
+        }
+      });
+    });
+    // Records the extension's own traffic. Returning nothing never claims a response channel.
+    runtime.onMessage.addListener((message, sender) => {
+      emit('debug', 'message-received', `runtime.onMessage from tab ${sender.tab?.id ?? 'extension'} / frame ${sender.frameId ?? 0}`);
     });
   }
   // Preserve callback/Promise behavior; record the operation, never its payload or reply.
@@ -87,7 +118,7 @@
       const done = error => emit(error ? 'error' : 'debug', error ? 'message-failed' : 'message-reply',
         `${label} ${operation} (${Math.round(performance.now() - started)} ms)${error ? ': ' + text(error) : ''}`, stack);
       const callback = typeof args.at(-1) === 'function' ? args.pop() : null;
-      if (callback) args.push((...reply) => { const error = api.runtime.lastError; done(error?.message); callback(...reply); });
+      if (callback) args.push((...reply) => { const error = runtime.lastError; done(error?.message); callback(...reply); });
       try {
         const result = original(...args);
         if (!callback && result?.then) return result.then(value => { done(); return value; }, error => { done(error); throw error; });
@@ -95,8 +126,8 @@
       } catch (error) { done(error); throw error; }
     };
   };
-  traceMessages(api.runtime, 'sendMessage', 'runtime.sendMessage');
-  traceMessages(api.tabs, 'sendMessage', 'tabs.sendMessage');
+  traceMessages(runtime, 'sendMessage', 'runtime.sendMessage');
+  traceMessages(api?.tabs, 'sendMessage', 'tabs.sendMessage');
   for (const level of ['debug', 'log', 'info', 'warn', 'error', 'trace']) {
     const original = console[level].bind(console);
     console[level] = (...args) => {

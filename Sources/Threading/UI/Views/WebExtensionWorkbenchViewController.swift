@@ -12,6 +12,8 @@ final class WebExtensionWorkbenchViewController: NSViewController, NSTableViewDa
     private var runs: [WebExtensionRun] = []
     private var events: [WebExtensionEvent] = []
     private var cursor = 0
+    /// The worker that issued `events`' IDs and `cursor`. A restarted worker numbers from 1 again.
+    private var workerGeneration: String?
     private var polling: Task<Void, Never>?
     private var operating = false
     private var selectedTarget: String?
@@ -218,6 +220,7 @@ final class WebExtensionWorkbenchViewController: NSViewController, NSTableViewDa
         switch reply {
         case .failure(let message): status.stringValue = message
         case .success(let payload, _):
+            adopt(generation: payload.generation)
             targets = payload.targets ?? []
             runs = payload.runs ?? []
             picker.removeAllItems()
@@ -269,9 +272,12 @@ final class WebExtensionWorkbenchViewController: NSViewController, NSTableViewDa
     private func readEvents() async {
         guard !terminated, !operating, !service.isBusy(sessionID) else { return }
         let generation = filterGeneration
-        let request = WebExtensionRequest(action: .events, after: cursor, limit: 200, query: search.stringValue)
+        let request = WebExtensionRequest(action: .events, after: cursor, limit: WebExtensionDefaults.eventPageLimit,
+                                          query: search.stringValue)
         guard case .success(let payload, _) = await service.call(request, sessionID: sessionID, project: project),
               generation == filterGeneration, let incoming = payload.events else { return }
+        // This page was read with the previous worker's cursor; read the new worker from its start.
+        guard !adopt(generation: payload.generation) else { return }
         cursor = payload.cursor ?? cursor
         if let latest = payload.runs, latest != runs { runs = latest; updateState() }
         eventCount.stringValue = String(format: L10n.string("%d retained · %d dropped"), payload.retained ?? events.count + incoming.count,
@@ -297,6 +303,19 @@ final class WebExtensionWorkbenchViewController: NSViewController, NSTableViewDa
         table.reloadData()
     }
 
+    /// Rows from an earlier worker would alias the new worker's IDs, so Open Source could resolve
+    /// a stale row to a different event. Returns whether the rows were discarded.
+    @discardableResult
+    private func adopt(generation: String?) -> Bool {
+        guard let generation, generation != workerGeneration else { return false }
+        let replaced = workerGeneration != nil
+        workerGeneration = generation
+        guard replaced else { return false }
+        resetEvents()
+        detail.textView.string = L10n.string("Select an event to inspect its stack and context.")
+        return true
+    }
+
     @objc private func targetChanged() { selectedTarget = targets.indices.contains(picker.indexOfSelectedItem) ? targets[picker.indexOfSelectedItem].id : nil; updateState() }
     @objc private func start() { perform(.start) }
     @objc private func reload() { perform(.reload) }
@@ -306,7 +325,8 @@ final class WebExtensionWorkbenchViewController: NSViewController, NSTableViewDa
         guard events.indices.contains(table.selectedRow) else { return }
         let event = events[table.selectedRow]
         Task {
-            switch await service.call(.init(action: .source, target: event.target, event: event.id), sessionID: sessionID, project: project) {
+            let request = WebExtensionRequest(action: .source, target: event.target, event: event.id, generation: workerGeneration)
+            switch await service.call(request, sessionID: sessionID, project: project) {
             case .success(let payload, _):
                 if let path = payload.path { _ = ExternalAppLauncher.shared.openInPreferredApp(.file(URL(fileURLWithPath: path), line: payload.line)) }
             case .failure(let message): status.stringValue = message

@@ -926,6 +926,7 @@ final class MCPWireTests: XCTestCase {
       case .trafficGet: arguments = ["id": "1"]
       case .trafficBody: arguments = ["id": "1", "side": "response"]
       case .trafficHeaders: arguments = ["id": "1", "side": "response", "index": 0]
+      case .webExtensionDevelopment: arguments = ["action": "inspect"]
       default: arguments = [:]
       }
       let payload = try JSONSerialization.data(
