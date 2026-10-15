@@ -1246,6 +1246,17 @@ the real main-menu items and a fixture window's responder chain so the shipping 
 too. Hosted `xcodebuild` cannot make that window genuinely key, so the test supplies it as the
 otherwise-targetless items' target — the same window `NSApplication` selects in the running app.
 
+**Every Edit item sends its AppKit action straight to the responder chain** — `cut:`, `copy:`,
+`paste:` and `selectAll:` as well as the two above (`AppKitEditActions`). They keep their command
+ids and registry shortcuts, but the menu must not route them through the host's
+`performHostMenuCommand(_:)`. During `NSApp.runModal(for:)` AppKit disables a menu item whose
+target is outside the modal window, and the app delegate always is: with the host route, ⌘C, ⌘V
+and ⌘A worked in the main window and did nothing in Rename Session or any other `TextPromptAlert`.
+The command palette may still invoke `system.copy` and its siblings through the command plane,
+which re-sends the same AppKit actions. `EditMenuModalRoutingTests` runs a real modal session on a
+parked borderless panel and drives the shipping ⌘A through it, because nothing outside a modal
+session can see the disabled item.
+
 Each `PromptView` owns the undo manager returned by its text-view delegate. AppKit's typing
 operations keep ranges into that prompt's text storage; replacing the string after a send or
 draft restore leaves those ranges invalid and a later ⌘Z can throw from `NSTextStorage`.

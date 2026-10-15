@@ -98,10 +98,19 @@ private struct StartupProfileMeasurement: Sendable {
 /// as Swift methods. They take a sender (`undo:` / `redo:`); `UndoManager.undo` and `.redo` are
 /// different, zero-argument selectors, so sending either of those through the responder chain
 /// finds no target even while the focused editor's manager has work waiting.
+///
+/// The Edit menu sends every one of these straight to the responder chain rather than through
+/// `performHostMenuCommand(_:)`. During `NSApp.runModal(for:)` AppKit disables a menu item whose
+/// target lies outside the modal window, and the app delegate always does — so routing ⌘C, ⌘V
+/// and ⌘A through the host left every modal prompt's field unable to copy, paste or select.
 @MainActor
 enum AppKitEditActions {
     static let undo = NSSelectorFromString("undo:")
     static let redo = NSSelectorFromString("redo:")
+    static let cut = #selector(NSText.cut(_:))
+    static let copy = #selector(NSText.copy(_:))
+    static let paste = #selector(NSText.paste(_:))
+    static let selectAll = #selector(NSText.selectAll(_:))
 }
 
 @MainActor
@@ -2704,10 +2713,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(commandItem("system.undo", action: AppKitEditActions.undo))
         menu.addItem(withTitle: L10n.string("Redo"), action: AppKitEditActions.redo, keyEquivalent: "Z")
         menu.addItem(.separator())
-        menu.addItem(commandItem("system.cut", action: #selector(performHostMenuCommand(_:))))
-        menu.addItem(commandItem("system.copy", action: #selector(performHostMenuCommand(_:))))
-        menu.addItem(commandItem("system.paste", action: #selector(performHostMenuCommand(_:))))
-        menu.addItem(commandItem("system.selectAll", action: #selector(performHostMenuCommand(_:))))
+        menu.addItem(commandItem("system.cut", action: AppKitEditActions.cut))
+        menu.addItem(commandItem("system.copy", action: AppKitEditActions.copy))
+        menu.addItem(commandItem("system.paste", action: AppKitEditActions.paste))
+        menu.addItem(commandItem("system.selectAll", action: AppKitEditActions.selectAll))
         menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.find, action: #selector(showFind)))
         menu.addItem(commandItem(
@@ -3807,10 +3816,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case "system.quit": NSApp.terminate(nil)
         case "system.undo":
             NSApp.sendAction(AppKitEditActions.undo, to: nil, from: nil)
-        case "system.cut": NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
-        case "system.copy": NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
-        case "system.paste": NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
-        case "system.selectAll": NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+        case "system.cut": NSApp.sendAction(AppKitEditActions.cut, to: nil, from: nil)
+        case "system.copy": NSApp.sendAction(AppKitEditActions.copy, to: nil, from: nil)
+        case "system.paste": NSApp.sendAction(AppKitEditActions.paste, to: nil, from: nil)
+        case "system.selectAll": NSApp.sendAction(AppKitEditActions.selectAll, to: nil, from: nil)
         case "system.fullScreen": mainWindowController?.window?.toggleFullScreen(nil)
         case "system.minimize": mainWindowController?.window?.miniaturize(nil)
         default:
