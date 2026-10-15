@@ -27,6 +27,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case browserCapabilities
   case browserRunIsolated
   case browserAttachChrome
+  case webExtensionDevelopment
   case browserSnapshot
   case browserAnnotations
   case browserScreenshot

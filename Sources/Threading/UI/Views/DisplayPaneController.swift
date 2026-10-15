@@ -627,6 +627,7 @@ final class DisplayPaneController: NSViewController {
     case .deviceLogs: return activateDeviceLog(for: sessionID) != nil
     case .bluetoothLogs: return activateBluetoothLog(for: sessionID) != nil
     case .notificationTest: return activateNotificationTest(for: sessionID) != nil
+    case .webExtensions: return activateWebExtensions(for: sessionID) != nil
     case .audit: return addAuditTab(for: sessionID) != nil
     case .browser: return addBrowserTab(for: sessionID) != nil
     case .privateBrowser: return addBrowserTab(for: sessionID, contextKind: .private) != nil
@@ -1913,6 +1914,30 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
+  @discardableResult
+  func activateWebExtensions(
+    for sessionID: SessionID,
+    project: URL? = nil,
+    service: any WebExtensionServicing = WebExtensionDevelopmentService.shared
+  ) -> WebExtensionWorkbenchViewController? {
+    if let existing = revealPeerTab?(sessionID, { $0.webExtensions != nil }) { return existing.webExtensions }
+    restoreIfNeeded(sessionID)
+    if let existing = tabsBySession[sessionID]?.first(where: { $0.webExtensions != nil }) {
+      activeTabIDBySession[sessionID] = existing.id
+      if sessionID == currentSessionID { render() }
+      return existing.webExtensions
+    }
+    guard !ProjectStore.shared.sessionRunsOnRemoteHost(sessionID),
+          let project = project ?? ProjectStore.shared.workingDirectory(forSessionID: sessionID).map({ URL(fileURLWithPath: $0) }) else { return nil }
+    let controller = WebExtensionWorkbenchViewController(sessionID: sessionID, project: project, service: service)
+    addChild(controller)
+    let tab = DisplayTab(body: .webExtensions(controller), owningSessionID: sessionID)
+    tabsBySession[sessionID, default: []].append(tab)
+    activeTabIDBySession[sessionID] = tab.id
+    if sessionID == currentSessionID { render() }
+    return controller
+  }
+
   // MARK: - Public — Subagents Tab
 
   /// Opens the session's ephemeral child-agent transcript surface and selects one child.
@@ -2428,6 +2453,7 @@ final class DisplayPaneController: NSViewController {
   /// A terminal is the one kind holding something a detach does not release: closing its tab
   /// has to kill the shell, or the process outlives every view that could reach it.
   private func teardownHosted(_ tab: DisplayTab) {
+    tab.webExtensions?.terminate()
     tab.terminal?.terminate()
     tab.simulatorWorkspace?.terminate()
     tab.realDevice?.terminate()
@@ -2769,6 +2795,14 @@ final class DisplayPaneController: NSViewController {
       contentMenuButton.isHidden = true
       installHosted(controller)
 
+    case .webExtensions(let controller):
+      imageView.image = nil
+      imageView.isHidden = true
+      hideHTML()
+      captionLabel.isHidden = true
+      contentMenuButton.isHidden = true
+      installHosted(controller)
+
     case .nativePlugin(let plugin):
       imageView.image = nil
       imageView.isHidden = true
@@ -2924,6 +2958,7 @@ final class DisplayPaneController: NSViewController {
     case .simulator: return "simulator"
     case .realDevice: return "real-device"
     case .notificationTest: return "notification-test"
+    case .webExtensions: return "web-extensions"
     case .extensionPanel: return "extension-panel"
     case .compare: return "compare"
     case .browserComparison: return "browser-comparison"

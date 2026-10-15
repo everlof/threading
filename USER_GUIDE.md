@@ -7253,3 +7253,18 @@ from the Mac pinned for widgets; tinted Home Screens and vibrant Lock Screens us
 
 Agents can request `preview_app_theme` with `frames: 3` to compare gradient drift at 0, ⅓ and ⅔
 of its authored cycle. Particles remain stamped for a stable comparison.
+
+### Developing browser extensions
+
+Open **Web Extensions** from the display panel’s **+** menu or command palette. Choose
+**Project → Create Starter Extension** for a new extension, then **Install Development Tools**
+once (Python 3 is required). Select a browser and **Start**. Edit your source and choose
+**Rebuild & Reload**; **Run Tests** checks the declared page and extension-page interactions.
+The event list collects background, content-script and popup diagnostics. Search it, select an
+error and choose **Open Source**, or use **Project → Open Browser Debugger** for native tools.
+
+Chromium and installed Chrome-family browsers use separate development profiles. Firefox uses
+a temporary add-on. Safari requires activation in Safari; **Package Safari** creates its Xcode
+project for Mac or iOS Simulator. Android Firefox uses a configured dedicated adb device.
+Browser-specific configuration, capture limits and test instructions are in the
+[WebExtension development guide](docs/architecture/web-extension-development.md).

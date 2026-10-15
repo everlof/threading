@@ -606,6 +606,18 @@
       }
     },
     {
+      "id": "web-extension-workbench",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Web Extension Workbench",
+      "description": "Live cross-context extension diagnostics and rebuild controls in the shipping conversation and panel shell.",
+      "states": ["Connected target with background exception, content network failure and popup log", "Rebuild action reaches the shared service"],
+      "matrix": {"themes": ["System", "Cyberpunk", "Swiss Minimalist"], "appearances": ["System light", "System dark", "Authored appearance"], "sizes": ["420-point right panel"]},
+      "source": {"path": "Tests/ThreadingTests/SimulatorPaneRenderTests.swift", "test": "ThreadingTests/SimulatorPaneRenderTests/testRendersWebExtensionWorkbenchInRightPanel"},
+      "capture": {"glob": "web-extension-*.png"}
+    },
+    {
       "id": "notification-test-pane",
       "kind": "surface",
       "status": "implemented",

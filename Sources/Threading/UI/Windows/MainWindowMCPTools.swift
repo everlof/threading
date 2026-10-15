@@ -85,6 +85,7 @@ struct AgentToolDependencies {
   /// This Mac's agent-mail store. Defaulted so existing compositions keep compiling; a test
   /// passes a mailbox in a scratch directory.
   var mail: MacMailbox = .shared
+  var webExtensions: any WebExtensionServicing = WebExtensionDevelopmentService.shared
 
   static let live = AgentToolDependencies(
     projects: .shared,

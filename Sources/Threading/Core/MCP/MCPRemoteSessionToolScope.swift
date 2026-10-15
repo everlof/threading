@@ -38,7 +38,8 @@ enum MCPRemoteSessionToolScope {
              .browserPerformance, .browserAccessibilityAudit:
             return true
         // Each moves a file across this Mac's disk, or attaches to one of its processes.
-        case .browserUpload, .browserDownload, .browserTrace, .browserRunIsolated, .browserAttachChrome:
+        case .browserUpload, .browserDownload, .browserTrace, .browserRunIsolated, .browserAttachChrome,
+             .webExtensionDevelopment:
             return false
 
         // A simulator and a device log are this Mac's; an app a Linux host built cannot be

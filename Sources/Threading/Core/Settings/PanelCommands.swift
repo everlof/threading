@@ -5,7 +5,7 @@ import Foundation
 enum PanelCommandTarget: Equatable {
     case simulator, androidDevice, realDevice, deviceLogs, bluetoothLogs, audit, browser, privateBrowser, overview, compare
     case supervision
-    case notificationTest
+    case notificationTest, webExtensions
     case nativePlugin(URL)
     case extensionPanel(identifier: String, panelID: String)
 }
@@ -38,6 +38,8 @@ enum PanelCommands {
               detail: "Send a test notification from this chat to the Mac or iPhone"),
         Entry(id: "panel.audit", title: "Execution audit", icon: "checklist.checked", target: .audit),
         Entry(id: "panel.browser", title: "New Browser", icon: "globe", target: .browser),
+        Entry(id: "panel.webExtensions", title: "Web Extensions", icon: "puzzlepiece.extension", target: .webExtensions,
+              detail: "Build, run and debug browser extensions across browsers"),
         Entry(id: "panel.privateBrowser", title: "Private Browser", icon: "hand.raised.fill", target: .privateBrowser),
         Entry(id: "panel.overview", title: "Overview", icon: "rectangle.grid.1x2", target: .overview),
         Entry(id: AppCommands.ID.review, title: "Review", icon: "plus.forwardslash.minus", target: nil),

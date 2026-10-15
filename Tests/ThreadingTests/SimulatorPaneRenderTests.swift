@@ -1175,6 +1175,97 @@ final class SimulatorPaneRenderTests: XCTestCase {
         }
     }
 
+    func testWebExtensionPanelRunsRealBrowserDevelopmentLoop() async throws {
+        guard ProcessInfo.processInfo.environment["THREADING_WEBEXT_E2E"] == "1" else {
+            throw XCTSkip("Set THREADING_WEBEXT_E2E=1 for the visible-browser panel journey")
+        }
+        let project = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: project) }
+        let fixture = try makeFixture(appearance: .aqua, deviceFrame: makeDeviceFramePNG())
+        defer { fixture.tearDown() }
+        let id = try XCTUnwrap(fixture.panel.currentSessionID)
+        let service = WebExtensionDevelopmentService(currentProject: { _ in project })
+        defer { service.release(id) }
+        guard case .success = await service.call(.init(action: .scaffold), sessionID: id, project: project) else {
+            return XCTFail("Could not create the panel journey's extension")
+        }
+        let panel = try XCTUnwrap(fixture.panel.activateWebExtensions(for: id, project: project, service: service))
+        func find(_ identifier: String, in view: NSView) -> NSView? {
+            if view.accessibilityIdentifier() == identifier { return view }
+            return view.subviews.lazy.compactMap { find(identifier, in: $0) }.first
+        }
+        func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+            let deadline = Date().addingTimeInterval(150)
+            while !condition(), Date() < deadline { try await Task.sleep(nanoseconds: 50_000_000) }
+            _ = try XCTUnwrap(condition() ? true : nil, "The real-browser panel operation did not finish")
+        }
+        let start = try XCTUnwrap(find("webExtensions.start", in: panel.view) as? ThemedButton)
+        let reload = try XCTUnwrap(find("webExtensions.reload", in: panel.view) as? ThemedButton)
+        let test = try XCTUnwrap(find("webExtensions.test", in: panel.view) as? ThemedButton)
+        let stop = try XCTUnwrap(find("webExtensions.stop", in: panel.view) as? ThemedButton)
+        func details(in view: NSView) -> ThemedTextView? {
+            if let text = view as? ThemedTextView { return text }
+            return view.subviews.lazy.compactMap { details(in: $0) }.first
+        }
+        let detail = try XCTUnwrap(details(in: panel.view))
+        try await waitUntil { start.isEnabled }
+        XCTAssertTrue(start.performPrimaryAction())
+        try await waitUntil { reload.isEnabled }
+        XCTAssertTrue(test.performPrimaryAction())
+        try await waitUntil { test.isEnabled && detail.string.contains("Declared page assertions passed") }
+        let background = project.appendingPathComponent("web-extension/background.js")
+        let updated = try String(contentsOf: background, encoding: .utf8) + "\nconsole.info('panel-reload-marker');\n"
+        try updated.write(to: background, atomically: true, encoding: .utf8)
+        XCTAssertTrue(reload.performPrimaryAction())
+        try await waitUntil { reload.isEnabled }
+        XCTAssertTrue(test.performPrimaryAction())
+        try await waitUntil { test.isEnabled && detail.string.contains("Declared page assertions passed") }
+        XCTAssertTrue(stop.performPrimaryAction())
+        try await waitUntil { start.isEnabled && !stop.isEnabled }
+    }
+
+    func testRendersWebExtensionWorkbenchInRightPanel() throws {
+        try FileManager.default.createDirectory(at: Render.directory, withIntermediateDirectories: true)
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        let frame = try makeDeviceFramePNG()
+        let variants: [(String, AppTheme, NSAppearance.Name)] = [
+            ("system-light", .system, .aqua), ("system-dark", .system, .darkAqua),
+            ("cyberpunk", try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Cyberpunk" }), .darkAqua),
+            ("swiss", try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Swiss Minimalist" }), .aqua)
+        ]
+        for (name, theme, appearance) in variants {
+            AppThemePalette.set(theme)
+            let fixture = try makeFixture(appearance: appearance, deviceFrame: frame)
+            defer { fixture.tearDown() }
+            let sessionID = try XCTUnwrap(fixture.panel.currentSessionID)
+            let service = RenderWebExtensionService()
+            let panel = try XCTUnwrap(fixture.panel.activateWebExtensions(
+                for: sessionID, project: FileManager.default.temporaryDirectory, service: service))
+            eventually { service.actions.contains(.events) }
+            func find(_ id: String, in view: NSView) -> NSView? {
+                if view.accessibilityIdentifier() == id { return view }
+                return view.subviews.lazy.compactMap { find(id, in: $0) }.first
+            }
+            let table = try XCTUnwrap(find("webExtensions.events", in: panel.view) as? NSTableView)
+            XCTAssertEqual(table.numberOfRows, 3)
+            table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+            AppThemeRefresh.repaint(fixture.window.contentView!)
+            settle(fixture.window)
+            let content = try XCTUnwrap(fixture.window.contentView)
+            let representation = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: representation)
+            try XCTUnwrap(representation.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("web-extension-\(name).png"))
+            XCTAssertEqual(fixture.panel.view.bounds.width, Render.panelWidth, accuracy: 2)
+            let reload = try XCTUnwrap(find("webExtensions.reload", in: panel.view) as? ThemedButton)
+            XCTAssertTrue(reload.isEnabled)
+            XCTAssertTrue(reload.performPrimaryAction())
+            eventually { service.actions.contains(.reload) }
+        }
+    }
+
     private func makeFixture(
         appearance appearanceName: NSAppearance.Name,
         deviceFrame: Data,
@@ -1829,5 +1920,33 @@ private final class RenderNotificationTestHost: NotificationTestHosting {
         for sessionID: SessionID
     ) -> RemoteNotificationDestinationDTO.Kind? {
         targetKinds[reference]
+    }
+}
+
+@MainActor
+private final class RenderWebExtensionService: WebExtensionServicing {
+    var actions: [WebExtensionRequest.Action] = []
+    func isBusy(_ sessionID: SessionID) -> Bool { false }
+    func release(_ sessionID: SessionID) {}
+    func call(_ request: WebExtensionRequest, sessionID: SessionID, project: URL) async -> WebExtensionReply {
+        actions.append(request.action)
+        var payload = WebExtensionPayload()
+        if request.action == .inspect {
+            payload.targets = [.init(id: "chrome", browser: "chrome", source: "dist/chrome", build: ["npm", "run", "build:chrome"])]
+            payload.runs = [.init(target: "chrome", browser: "chrome", build: "bc032fedc581922a", status: "connected", directory: "/tmp/development", instructions: "Background, content script and popup connected.")]
+        } else if request.action == .events {
+            payload.cursor = 3
+            payload.events = request.after == 0 ? [
+                ("error", "background", "exception", "TypeError: Cannot read properties of undefined"),
+                ("warning", "content-script", "network", "503 https://example.test/api/status"),
+                ("info", "extension-page", "console", "Popup connected")
+            ].enumerated().map { index, item in
+                WebExtensionEvent(id: index + 1, target: "chrome", level: item.0, kind: item.2,
+                    message: item.3, stack: "at refresh (background.js:42:7)", context: item.1,
+                    contextID: "fixture-context", build: "bc032fedc581922a", url: "https://example.test",
+                    received: 0, tab: 1, frame: 0)
+            } : []
+        }
+        return .success(payload, text: "{}")
     }
 }

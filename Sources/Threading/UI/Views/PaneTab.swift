@@ -81,6 +81,7 @@ final class PaneTab {
     case simulator(SimulatorWorkspaceViewController)
     case realDevice(RealDevicePaneViewController)
     case notificationTest(NotificationTestViewController)
+    case webExtensions(WebExtensionWorkbenchViewController)
     case nativePlugin(NativePluginPaneViewController)
     case extensionPanel(ExtensionPanelViewController)
     case compare(CompareViewController)
@@ -199,6 +200,11 @@ final class PaneTab {
     return nil
   }
 
+  var webExtensions: WebExtensionWorkbenchViewController? {
+    if case .webExtensions(let controller) = body { return controller }
+    return nil
+  }
+
   var extensionPanel: ExtensionPanelViewController? {
     if case .extensionPanel(let panel) = body { return panel }
     return nil
@@ -233,6 +239,7 @@ final class PaneTab {
     case .simulator(let simulator): return simulator
     case .realDevice(let realDevice): return realDevice
     case .notificationTest(let controller): return controller
+    case .webExtensions(let controller): return controller
     case .extensionPanel(let panel): return panel
     case .compare(let compare): return compare
     case .browserComparison(let comparison): return comparison
@@ -273,6 +280,8 @@ final class PaneTab {
       return "iphone.gen2"
     case .notificationTest:
       return "bell.badge"
+    case .webExtensions:
+      return "puzzlepiece.extension"
     case .extensionPanel:
       return "puzzlepiece.extension"
     case .compare:
@@ -328,6 +337,8 @@ final class PaneTab {
       return L10n.string("iPhone Device")
     case .notificationTest:
       return L10n.string("Push Test")
+    case .webExtensions:
+      return L10n.string("Web Extensions")
     case .extensionPanel(let panel):
       return panel.panelTitle
     case .compare:

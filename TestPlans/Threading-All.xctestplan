@@ -79,6 +79,14 @@
         "value" : "$(THREADING_STRESS)"
       },
       {
+        "key" : "THREADING_WEBEXT_E2E",
+        "value" : "$(THREADING_WEBEXT_E2E)"
+      },
+      {
+        "key" : "THREADING_WEBEXT_PYTHON",
+        "value" : "$(THREADING_WEBEXT_PYTHON)"
+      },
+      {
         "key" : "THREADING_RENDER_OUT",
         "value" : "$(THREADING_RENDER_OUT)"
       },
