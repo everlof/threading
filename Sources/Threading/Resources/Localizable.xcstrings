@@ -11040,6 +11040,17 @@
         }
       }
     },
+    "Bluetooth logs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetoothloggar"
+          }
+        }
+      }
+    },
     "Blur" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12528,6 +12539,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ta bild av simulator"
+          }
+        }
+      }
+    },
+    "Capture a paired iPhone's Bluetooth packets" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fånga Bluetooth-paket från en parkopplad iPhone"
           }
         }
       }

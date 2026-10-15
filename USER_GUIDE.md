@@ -4182,19 +4182,19 @@ to `idevicesyslog`. That fallback remains live but has only the flattened metada
 supplies. Hiding the pane stops either reader; showing it resumes the selected source without
 clearing the rows already on screen.
 
-Device Logs opens separate **Device Logs** and **Bluetooth** workspace tabs. Close Bluetooth
-if you do not need it; bringing Device Logs forward again does not reopen it. Device Logs keeps
-the system/app source selector; Bluetooth lists paired iPhones and their USB or Wi-Fi capture source.
+**+ → Device logs** opens one **Device Logs** tab; **+ → Bluetooth logs** opens a separate
+**Bluetooth** tab beside it. Each command opens only its own tab and brings it forward if it is
+already open, in either order. Device Logs keeps the system/app source selector; Bluetooth lists paired iPhones and their USB or Wi-Fi capture source.
 A running Bluetooth capture keeps recording while the tab is hidden — while you switch to another
 session or panel tab during a firmware update or a pairing, for example — and the packets that
 arrived meanwhile are there when you come back. It stops when you close the Bluetooth tab or the
 session. The system log, by contrast, stops while hidden.
 Dock the two tabs side by side to watch both streams. Switching or moving tabs keeps each reader,
 filter, scroll position and history; the system log reader stops when neither log tab is visible.
-Bluetooth capture is created only when you first select its tab. Each tab has its own device
+Bluetooth capture is created only when you first open its tab. Each tab has its own device
 selection, and Bluetooth initially follows the regular tab's phone when available.
 
-For Bluetooth protocol traffic, open **Bluetooth** and select the iPhone.
+For Bluetooth protocol traffic, choose **+ → Bluetooth logs** and select the iPhone.
 Install `libimobiledevice` on the Mac (`brew install libimobiledevice`), then Rescan.
 The iPhone needs Apple's current **Bluetooth logging profile**, available under
 [Bluetooth for iOS/iPadOS](https://developer.apple.com/bug-reporting/profiles-and-logs/?name=bluetooth).
@@ -4301,7 +4301,7 @@ The format reference is
 [`docs/bluetooth-packet-definitions.md`](docs/bluetooth-packet-definitions.md).
 
 Agents can select it with `plugin__devicelogs__bluetooth` using the exact iPhone hardware UDID,
-then read it with the existing `visible`, `search` and `time_range` tools; `linked` finds the
+which opens the Bluetooth tab if it is not already open, then read it with the existing `visible`, `search` and `time_range` tools; `linked` finds the
 packet an app log line is about, or the reverse. Hiding the pane stops
 capture. To keep a full raw capture for PacketLogger or Wireshark, use the external tool separately:
 `idevicebtlogger -u <UDID> -x -f pcap capture.pcap` (add `-n` for Wi-Fi).
@@ -7108,7 +7108,7 @@ It does delete that session's Threading-owned execution ledger, including its ro
 ### Panel commands and hidden projects
 
 Every action in the display panel's **+** menu is available in the command palette, including
-**iOS Simulator**, **Device logs**, **Execution audit**, **New Browser**, **Private Browser**,
+**iOS Simulator**, **Device logs**, **Bluetooth logs**, **Execution audit**, **New Browser**, **Private Browser**,
 **Overview**, **Compare Files…**, installed plugin panels and enabled extension panels. Assign
 shortcuts in the palette or **Settings → Keyboard**. **Browser** reveals an existing browser;
 **New Browser** adds a tab.

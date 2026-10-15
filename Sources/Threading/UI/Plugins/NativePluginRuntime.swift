@@ -19,6 +19,10 @@ final class NativePluginRuntime {
 
     private var entries: [ObjectIdentifier: Entry] = [:]
 
+    /// Opens a chat's Bluetooth tab. The window that owns the panes installs it: the plugin's
+    /// `bluetooth` tool can start a capture but cannot ask for the tab its packets appear in.
+    var revealBluetoothLog: ((SessionID) -> Void)?
+
     func register(
         _ plugin: ThreadingNativePlugin,
         controller: NativePluginPaneViewController,

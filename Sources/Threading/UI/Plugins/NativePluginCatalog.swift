@@ -111,6 +111,16 @@ enum NativePluginCatalog {
 
     static var deviceLogsBundle: URL? { bundledPlugin(identifier: deviceLogsIdentifier) }
 
+    /// The Device Logs pane's two tabs. They share one plugin instance, its discovery and its
+    /// readers, but each opens on its own command: one action never produces two tabs.
+    enum DeviceLogsSection {
+        static let regular = "regular"
+        static let bluetooth = "bluetooth"
+        /// The plugin tool that starts a packet capture. Its rows appear only in the Bluetooth
+        /// tab, and a plugin cannot ask the host for a tab, so the host opens it before the call.
+        static let bluetoothTool = "bluetooth"
+    }
+
     /// Whether a bundle is one of ours, and so already covered by the app's signature.
     nonisolated static func isBundled(_ url: URL) -> Bool {
         url.resolvingSymlinksInPath().path

@@ -662,6 +662,9 @@ final class SimulatorPaneRenderTests: XCTestCase {
             let dock = try XCTUnwrap(fixture.dock)
             let session = try XCTUnwrap(fixture.panel.currentSessionID)
             let logs = try XCTUnwrap(fixture.panel.activateDeviceLog(for: session))
+            // Bluetooth is its own command; open it beside the logs, then bring the logs forward.
+            XCTAssertNotNil(fixture.panel.activateBluetoothLog(for: session))
+            XCTAssertTrue(fixture.panel.activateDeviceLog(for: session) === logs)
             eventually { logs.loaded != nil || logs.refusal != nil }
             XCTAssertNil(logs.refusal)
             let plugin = try XCTUnwrap(logs.loaded as? NSObject)
@@ -752,9 +755,16 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 XCTAssertFalse(control.isHiddenOrHasHiddenAncestor)
                 XCTAssertTrue(logs.view.bounds.contains(control.convert(control.bounds, to: logs.view)))
             }
-            XCTAssertEqual(fixture.panel.tabs(for: fixture.sessionID).filter {
-                if case .nativePlugin = $0.body { return true }; return false
-            }.map(\.title), [L10n.string("Device Logs"), L10n.string("Bluetooth")])
+            func pluginTabTitles() -> [String] {
+                fixture.panel.tabs(for: fixture.sessionID).filter {
+                    if case .nativePlugin = $0.body { return true }; return false
+                }.map(\.title)
+            }
+            XCTAssertEqual(pluginTabTitles(), [L10n.string("Device Logs")])
+            // Bluetooth is its own command; open it beside the logs, then bring the logs forward.
+            XCTAssertNotNil(fixture.panel.activateBluetoothLog(for: fixture.sessionID))
+            XCTAssertTrue(fixture.panel.activateDeviceLog(for: fixture.sessionID) === logs)
+            XCTAssertEqual(pluginTabTitles(), [L10n.string("Device Logs"), L10n.string("Bluetooth")])
             // cacheDisplay omitted the layer-backed chrome and plugin controls while every
             // geometry assertion above passed. Capture only this test-owned window, as the
             // sheet render tests do, so the evidence includes its actual composited controls.

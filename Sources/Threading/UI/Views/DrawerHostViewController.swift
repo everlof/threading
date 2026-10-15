@@ -594,15 +594,14 @@ final class DrawerHostViewController: NSViewController {
                 tabs.append(PaneTab(id: id, body: .browser(controller)))
 
             case .deviceLog:
-                guard let controller = makeDeviceLogs(for: sessionID, section: persisted.mode ?? "regular") else { continue }
+                guard let controller = makeDeviceLogs(
+                    for: sessionID, section: persisted.mode ?? NativePluginCatalog.DeviceLogsSection.regular
+                ) else { continue }
                 tabs.append(PaneTab(
                     id: id,
                     body: .nativePlugin(controller),
                     owningSessionID: sessionID
                 ))
-                if persisted.mode == nil, let bluetooth = makeDeviceLogs(for: sessionID, section: "bluetooth") {
-                    tabs.append(PaneTab(body: .nativePlugin(bluetooth), owningSessionID: sessionID))
-                }
 
             default:
                 // Kinds the drawer cannot rebuild yet keep their place in the payload; they

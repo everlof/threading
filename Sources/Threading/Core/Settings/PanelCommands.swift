@@ -3,7 +3,8 @@ import Foundation
 /// Panel creation is a host command by default. Menus contribute presentation, never closures
 /// with a separate implementation. Dynamic targets retain values, not constructed controllers.
 enum PanelCommandTarget: Equatable {
-    case simulator, androidDevice, realDevice, deviceLogs, audit, browser, privateBrowser, overview, compare, supervision
+    case simulator, androidDevice, realDevice, deviceLogs, bluetoothLogs, audit, browser, privateBrowser, overview, compare
+    case supervision
     case notificationTest
     case nativePlugin(URL)
     case extensionPanel(identifier: String, panelID: String)
@@ -27,7 +28,11 @@ enum PanelCommands {
               detail: "Show an Android emulator or a USB Android phone, beside any iOS Simulator"),
         Entry(id: "panel.realDevice", title: "iPhone Device", icon: "iphone.gen2", target: .realDevice,
               detail: "Preview and control a paired physical iPhone"),
+        // One command, one tab. The two streams share a reader and its discovery, but each tab
+        // is asked for on its own, so opening the logs does not also open a packet capture.
         Entry(id: "panel.deviceLogs", title: "Device logs", icon: "list.bullet.rectangle", target: .deviceLogs),
+        Entry(id: "panel.bluetoothLogs", title: "Bluetooth logs", icon: "antenna.radiowaves.left.and.right",
+              target: .bluetoothLogs, detail: "Capture a paired iPhone's Bluetooth packets"),
         Entry(id: "panel.notificationTest", title: "Push Test", icon: "bell.badge",
               target: .notificationTest,
               detail: "Send a test notification from this chat to the Mac or iPhone"),

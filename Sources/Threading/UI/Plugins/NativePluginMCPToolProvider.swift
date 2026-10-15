@@ -90,6 +90,12 @@ final class NativePluginMCPToolProvider: MCPExternalToolProvider {
             ))
             return true
         }
+        // Device Logs opens without its Bluetooth tab, so a capture the agent starts brings that
+        // tab up first; otherwise its packets would be recorded where nobody can see them.
+        if match.plugin.pluginIdentifier == NativePluginCatalog.deviceLogsIdentifier,
+           parsed.tool == NativePluginCatalog.DeviceLogsSection.bluetoothTool {
+            NativePluginRuntime.shared.revealBluetoothLog?(sessionID)
+        }
         // A tool answers when its own work does — a store query completes on the queue that owns
         // the store — so the reply arrives on whatever thread the plugin used. Hop rather than
         // assume: `assumeIsolated` off the main thread is a trap, not a check.

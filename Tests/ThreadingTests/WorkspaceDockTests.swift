@@ -399,22 +399,57 @@ final class WorkspaceDockTests: HostedStoreTestCase {
     XCTAssertEqual(corner(DisplayPaneController(dockID: UUID(), dockSessionID: SessionID())), 0)
   }
 
-  func testClosedBluetoothTabStaysClosedWhenDeviceLogsIsRevealedAgain() throws {
+  func testDeviceLogsAndBluetoothCommandsEachOpenOnlyTheirOwnTab() throws {
     try XCTSkipIf(NativePluginCatalog.deviceLogsBundle == nil, "Device Logs is not bundled in this build")
     let panel = DisplayPaneController()
     let session = SessionID()
     panel.showSession(session)
-    func bluetooth() -> PaneTab? {
-      panel.tabs(for: session).first { tab in
-        if case let .nativePlugin(plugin) = tab.body { return plugin.paneSection == "bluetooth" }
-        return false
+    func sections() -> [String] {
+      panel.tabs(for: session).compactMap { tab in
+        if case let .nativePlugin(plugin) = tab.body { return plugin.paneSection }
+        return nil
       }
     }
-    XCTAssertNotNil(panel.activateDeviceLog(for: session))
-    let opened = try XCTUnwrap(bluetooth(), "first opening brings Bluetooth beside Device Logs")
-    XCTAssertTrue(panel.closeTab(id: opened.id, for: session))
-    XCTAssertNotNil(panel.activateDeviceLog(for: session))
-    XCTAssertNil(bluetooth(), "revealing Device Logs again must not reopen what the user closed")
+    XCTAssertTrue(PanelCommands.additionalCommands.contains {
+      $0.id == "panel.bluetoothLogs" && $0.panelTarget == .bluetoothLogs
+    })
+
+    XCTAssertTrue(panel.performPanelCommand(.deviceLogs, title: "", for: session))
+    XCTAssertEqual(sections(), ["regular"], "Device Logs must not also open a Bluetooth tab")
+    XCTAssertTrue(panel.performPanelCommand(.bluetoothLogs, title: "", for: session))
+    XCTAssertEqual(sections(), ["regular", "bluetooth"])
+    XCTAssertEqual(panel.activeTabID(for: session), panel.tabs(for: session).last?.id)
+
+    // Each command reveals its own tab again rather than adding one.
+    let bluetooth = try XCTUnwrap(panel.tabs(for: session).last)
+    XCTAssertTrue(panel.performPanelCommand(.deviceLogs, title: "", for: session))
+    XCTAssertEqual(panel.activeTabID(for: session), panel.tabs(for: session).first?.id)
+    XCTAssertTrue(panel.performPanelCommand(.bluetoothLogs, title: "", for: session))
+    XCTAssertEqual(panel.activeTabID(for: session), bluetooth.id)
+    XCTAssertEqual(sections(), ["regular", "bluetooth"])
+
+    XCTAssertTrue(panel.closeTab(id: bluetooth.id, for: session))
+    XCTAssertTrue(panel.performPanelCommand(.deviceLogs, title: "", for: session))
+    XCTAssertEqual(sections(), ["regular"], "revealing Device Logs must not reopen what the user closed")
+    panel.removeSession(session)
+  }
+
+  func testBluetoothOpensAloneBeforeDeviceLogs() throws {
+    try XCTSkipIf(NativePluginCatalog.deviceLogsBundle == nil, "Device Logs is not bundled in this build")
+    let panel = DisplayPaneController()
+    let session = SessionID()
+    panel.showSession(session)
+    func sections() -> [String] {
+      panel.tabs(for: session).compactMap { tab in
+        if case let .nativePlugin(plugin) = tab.body { return plugin.paneSection }
+        return nil
+      }
+    }
+    let bluetooth = try XCTUnwrap(panel.activateBluetoothLog(for: session))
+    XCTAssertEqual(sections(), ["bluetooth"])
+    let logs = try XCTUnwrap(panel.activateDeviceLog(for: session))
+    XCTAssertFalse(logs === bluetooth)
+    XCTAssertEqual(sections(), ["bluetooth", "regular"])
     panel.removeSession(session)
   }
 

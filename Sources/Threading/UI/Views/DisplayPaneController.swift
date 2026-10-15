@@ -625,6 +625,7 @@ final class DisplayPaneController: NSViewController {
     case .androidDevice: showSimulatorPlatform(android: true, for: sessionID); return true
     case .realDevice: activateRealDevice(for: sessionID); return true
     case .deviceLogs: return activateDeviceLog(for: sessionID) != nil
+    case .bluetoothLogs: return activateBluetoothLog(for: sessionID) != nil
     case .notificationTest: return activateNotificationTest(for: sessionID) != nil
     case .audit: return addAuditTab(for: sessionID) != nil
     case .browser: return addBrowserTab(for: sessionID) != nil
@@ -1009,29 +1010,42 @@ final class DisplayPaneController: NSViewController {
   @discardableResult
   func activateDeviceLog(for sessionID: SessionID) -> NativePluginPaneViewController? {
     guard let bundle = NativePluginCatalog.deviceLogsBundle else { return nil }
-    return activateNativePlugin(bundleURL: bundle, for: sessionID)
+    return activateNativePlugin(bundleURL: bundle, section: NativePluginCatalog.DeviceLogsSection.regular,
+                                for: sessionID)
+  }
+
+  /// Reveals this session's Bluetooth packet tab, creating it the first time.
+  ///
+  /// Its own command rather than a passenger of Device Logs: the tab shares the logs' plugin
+  /// instance and discovery, so opening it alone (or before the logs) still works, and opening
+  /// the logs never produces a second tab the user did not ask for.
+  @discardableResult
+  func activateBluetoothLog(for sessionID: SessionID) -> NativePluginPaneViewController? {
+    guard let bundle = NativePluginCatalog.deviceLogsBundle else { return nil }
+    return activateNativePlugin(bundleURL: bundle, section: NativePluginCatalog.DeviceLogsSection.bluetooth,
+                                for: sessionID)
   }
 
   /// Reveals a native plugin's pane, creating it the first time.
   ///
   /// One tab per bundle per session: a plugin owns whatever it started — a stream, a process, a
   /// window of its own — and a second instance would own a second one without either knowing.
+  /// A plugin that hosts sections (Device Logs) has one tab per section instead, all sharing it.
   @discardableResult
   func activateNativePlugin(
     bundleURL: URL,
+    section: String? = nil,
     for sessionID: SessionID
   ) -> NativePluginPaneViewController? {
-    let deviceLogs = bundleURL == NativePluginCatalog.deviceLogsBundle
-    if let existing = revealPeerTab?(sessionID, { tab in
-      if case let .nativePlugin(plugin) = tab.body { return plugin.bundleURL == bundleURL && (!deviceLogs || plugin.paneSection != "bluetooth") }
-      return false
-    }), case let .nativePlugin(plugin) = existing.body { return plugin }
+    let matches: (DisplayTab) -> Bool = { tab in
+      guard case let .nativePlugin(plugin) = tab.body, plugin.bundleURL == bundleURL else { return false }
+      return section == nil || plugin.paneSection == section
+    }
+    if let existing = revealPeerTab?(sessionID, matches),
+       case let .nativePlugin(plugin) = existing.body { return plugin }
     restoreIfNeeded(sessionID)
     var tabs = tabsBySession[sessionID] ?? []
-    if let existing = tabs.first(where: {
-      if case .nativePlugin(let plugin) = $0.body { return plugin.bundleURL == bundleURL && (!deviceLogs || plugin.paneSection != "bluetooth") }
-      return false
-    }) {
+    if let existing = tabs.first(where: matches) {
       activeTabIDBySession[sessionID] = existing.id
       persist(sessionID)
       if sessionID == currentSessionID { render() }
@@ -1039,31 +1053,15 @@ final class DisplayPaneController: NSViewController {
       return nil
     }
 
-    let controller = makeNativePluginPane(bundleURL: bundleURL, for: sessionID)
+    let controller = makeNativePluginPane(bundleURL: bundleURL, for: sessionID,
+                                          section: section ?? NativePluginCatalog.DeviceLogsSection.regular)
     let tab = DisplayTab(body: .nativePlugin(controller), owningSessionID: sessionID)
     tabs.append(tab)
     tabsBySession[sessionID] = tabs
     activeTabIDBySession[sessionID] = tab.id
     persist(sessionID)
     if sessionID == currentSessionID { render() }
-    // Bluetooth arrives beside Device Logs when the logs are first opened, not on every reveal:
-    // a Bluetooth tab the user closed stays closed while Device Logs is simply brought forward.
-    if deviceLogs { ensureBluetoothTab(bundleURL: bundleURL, for: sessionID) }
     return controller
-  }
-
-  private func ensureBluetoothTab(bundleURL: URL, for sessionID: SessionID) {
-    let all = (tabsBySession[sessionID] ?? []) + (peerTabs?(sessionID) ?? [])
-    guard !all.contains(where: { tab in
-      if case let .nativePlugin(plugin) = tab.body {
-        return plugin.bundleURL == bundleURL && plugin.paneSection == "bluetooth"
-      }
-      return false
-    }) else { return }
-    let bluetooth = makeNativePluginPane(bundleURL: bundleURL, for: sessionID, section: "bluetooth")
-    tabsBySession[sessionID, default: []].append(DisplayTab(body: .nativePlugin(bluetooth), owningSessionID: sessionID))
-    persist(sessionID)
-    if sessionID == currentSessionID { render() }
   }
 
   private func makeNativePluginPane(
@@ -3067,17 +3065,16 @@ final class DisplayPaneController: NSViewController {
 
       case .deviceLog:
         // A kind persisted before Device Logs became a plugin. It restores as the plugin, so an
-        // older row opens the pane the user had rather than disappearing.
+        // older row opens the pane the user had rather than disappearing. A row from before the
+        // streams had tabs of their own restores as Device Logs alone, like the command.
         guard let bundle = NativePluginCatalog.deviceLogsBundle else { continue }
         tabs.append(DisplayTab(
           id: id,
-          body: .nativePlugin(makeNativePluginPane(bundleURL: bundle, for: sessionID, section: persisted.mode ?? "regular")),
+          body: .nativePlugin(makeNativePluginPane(
+            bundleURL: bundle, for: sessionID,
+            section: persisted.mode ?? NativePluginCatalog.DeviceLogsSection.regular)),
           owningSessionID: sessionID
         ))
-        if persisted.mode == nil {
-          tabs.append(DisplayTab(body: .nativePlugin(makeNativePluginPane(
-            bundleURL: bundle, for: sessionID, section: "bluetooth")), owningSessionID: sessionID))
-        }
 
       case .simulator:
         let deviceID = persisted.simulatorDeviceID.flatMap(SimulatorDeviceID.init)

@@ -1338,6 +1338,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard let self else { return done(.failure(LaunchRecoveryStrings.chatNotCreated)) }
             self.proposeConversationRepair(arguments, for: sessionID, completion: done)
         }
+        NativePluginRuntime.shared.revealBluetoothLog = { [weak self] sessionID in
+            self?.agentToolCoordinator.revealBluetoothLog(for: sessionID)
+        }
         SupervisionActionRegistry.shared.register(.init(
             spawn: { [weak self] plan, brief, sideChatParentID, managerID in
                 guard let self else {
@@ -1695,7 +1698,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         for host in workspaceDock.hosts {
             if let existing = host.tabs(for: sessionID).first(where: {
                 if case let .nativePlugin(plugin) = $0.body {
-                    return plugin.bundleURL == NativePluginCatalog.deviceLogsBundle && plugin.paneSection == "regular"
+                    return plugin.bundleURL == NativePluginCatalog.deviceLogsBundle
+                        && plugin.paneSection == NativePluginCatalog.DeviceLogsSection.regular
                 }
                 return false
             }), case let .nativePlugin(plugin) = existing.body {
@@ -1709,6 +1713,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         if let existing = drawer.tabs(for: sessionID).first(where: {
             guard case .nativePlugin(let plugin) = $0.body else { return false }
             return plugin.bundleURL == NativePluginCatalog.deviceLogsBundle
+                && plugin.paneSection == NativePluginCatalog.DeviceLogsSection.regular
         }), case .nativePlugin(let plugin) = existing.body {
             plugin.activate(arguments: ["deviceID": deviceID])
             _ = drawer.activateTab(id: existing.id, for: sessionID)

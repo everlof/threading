@@ -800,3 +800,13 @@ Visibility is tracked per section: both can project rows simultaneously, an inac
 keeps its reader while another is visible, and hiding the last section stops both. Visibility
 loss is deferred one main turn so synchronous tab reparenting does not restart capture. Theme
 handoff repaints both section trees, including a section in another dock group.
+
+**One command opens one tab.** Device Logs (`panel.deviceLogs`) and Bluetooth
+(`panel.bluetoothLogs`) are separate panel commands, each revealing or creating only its own
+section tab, in either order. Device Logs first opened a Bluetooth tab beside itself, so one menu
+choice produced two tabs and a packet tab the user had not asked for; a legacy row persisted
+without a mode now restores as Device Logs alone for the same reason. A plugin cannot ask the host
+for a tab, so `NativePluginMCPToolProvider` opens the Bluetooth tab (through
+`NativePluginRuntime.revealBluetoothLog`, installed by the window) before the plugin's `bluetooth`
+tool starts a capture — otherwise an agent's capture would record packets no tab shows. See
+`WorkspaceDockTests.testDeviceLogsAndBluetoothCommandsEachOpenOnlyTheirOwnTab`.
