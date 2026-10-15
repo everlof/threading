@@ -81,15 +81,19 @@ struct PTYHostChildPlan: Sendable {
     /// directory at all, so the child inherits the app's; naming the app's here is what makes the
     /// two byte-identical rather than merely similar.
     let workingDirectory: String?
+    /// Remote PIDs belong to another kernel and must never enter the Mac's process ledger.
+    let isRemote: Bool
 
     init(
         identity: PTYHostSessionIdentity,
         factory: @escaping PTYHostTransportFactory,
-        workingDirectory: String? = FileManager.default.currentDirectoryPath
+        workingDirectory: String? = FileManager.default.currentDirectoryPath,
+        isRemote: Bool = false
     ) {
         self.identity = identity
         self.factory = factory
         self.workingDirectory = workingDirectory
+        self.isRemote = isRemote
     }
 }
 

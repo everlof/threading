@@ -365,7 +365,8 @@ final class RemoteExecutionHosts: @unchecked Sendable {
             startsPreparation = true
         case .ready(let context):
             // A tunnel that died since is a host that needs preparing again.
-            if tunnels[destination]?.isRunning != true || context.localSocketPath.isEmpty {
+            if tunnels[destination]?.isRunning != true || context.localSocketPath.isEmpty
+                || (appSocketPath != nil && context.toolRoute == nil) {
                 phases[destination] = .preparing
                 startsPreparation = true
             } else {
@@ -475,6 +476,15 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         let bridge = try? component(.bridge, for: architecture, from: components, on: destination)
         if let bridge, !facts.installedBridges.contains(bridge.installIdentifier) {
             try upload(bridge, to: destination)
+        }
+        if let bridge, appSocketPath != nil {
+            let result = try runCommand(destination, "sh -s",
+                input: .data(Data(RemoteHostBridgeProbe.script(executable: "\(facts.home)/\(bridge.remotePath)").utf8)),
+                timeout: RemoteHostBridgeProbe.timeout)
+            guard RemoteHostBridgeProbe.accepts(result) else {
+                throw RemoteHostFailure(token: "bridgeIncompatible", detail:
+                    L10n.string("The remote Threading tools helper is out of date or could not start. Update the Linux host components, then reconnect the host."))
+            }
         }
         // The unit template is shared by every instance, so writing it is an act on every
         // generation. Another installer's template is left alone, and with it the whole host:

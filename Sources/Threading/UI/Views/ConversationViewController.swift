@@ -200,6 +200,10 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }
 
     let stream: ConversationStreamSession
+    private let remoteConversation: RemoteNativeConversation
+    private var remotePreparation: Task<Void, Never>?
+    private var launchGeneration = UUID()
+    private var isLaunching = false
     private var pendingInitialPrompt: String?
 
     /// The one catalog consumed by the local composer and projected to remote clients. Provider
@@ -1014,6 +1018,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         currentSessionProjection: CurrentSessionProjection,
         subagentState: SubagentSessionState? = nil,
         launchPlanProvider: AgentLaunchPlanProvider? = nil,
+        remoteConversation: RemoteNativeConversation? = nil,
         customizationLookup: @escaping ComponentCustomizationHost.Lookup = {
             ComponentCustomizationProviderSlot.shared.customization(for: $0)
         }
@@ -1047,10 +1052,16 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // Claude and Codex each launch one persistent transport process. The closure is still
         // resolved at launch time so account routing and a newly stored resume identifier are
         // current when a dormant native conversation is reopened.
+        let remoteConversation = remoteConversation ?? RemoteNativeConversation()
+        self.remoteConversation = remoteConversation
         let plan = {
             let current = try currentSessionProjection.requireSession(for: sessionID)
             if let launchPlanProvider {
                 return try launchPlanProvider(current, project, nil)
+            }
+            if project.executionHost != nil {
+                guard let prepared = remoteConversation.launchPlan else { throw RemoteConversationFailure.notPrepared }
+                return prepared
             }
             return try AgentLauncher.streamPlan(for: current, in: project)
         }
@@ -1070,10 +1081,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // because a daemon started by launchd is somewhere else entirely.
         let hostPlan = { () throws -> PTYHostChildPlan? in
             let identity = TerminalInstanceIdentity.agentSession(sessionID)
-            // A project on a remote execution host runs its sessions there or not at all, and a
-            // native conversation cannot yet: its transports read transcripts on this Mac.
             if project.executionHost != nil {
-                throw RemoteAgentLaunchError.nativeConversation
+                guard let prepared = remoteConversation.childPlan else { throw RemoteConversationFailure.notPrepared }
+                return prepared
             }
             switch PTYHostPolicy.launchRoute(
                 for: identity,
@@ -1097,7 +1107,8 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 sessionID: sessionID,
                 effort: launchEffort,
                 subagentTranscriptPlan: {
-                    guard let current = currentSessionProjection.session(for: sessionID),
+                    guard project.executionHost == nil,
+                          let current = currentSessionProjection.session(for: sessionID),
                           let transcriptID = current.resumeState.transcriptID,
                           let transcriptAccount = AgentAccountDiscovery.account(
                               for: current.kind,
@@ -1119,7 +1130,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         case .codex:
             self.stream = CodexStreamSession(
                 sessionID: sessionID,
-                workingDirectory: agentSession.workingDirectory(in: project),
+                workingDirectory: project.executionHost?.remoteDirectory ?? agentSession.workingDirectory(in: project),
                 configurationProvider: {
                     guard let current = currentSessionProjection.session(for: sessionID)
                     else { return .inherited }
@@ -1179,6 +1190,11 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             return nil
         }
         super.init(nibName: nil, bundle: nil)
+        if project.executionHost != nil, let codex = stream as? CodexStreamSession {
+            codex.onTranscriptPath = { [weak remoteConversation] id, path in
+                remoteConversation?.recordTranscript(id: id, path: path)
+            }
+        }
         transcript.surface = self
         if let handoff = agentSession.handoff {
             let canOpenSource = handoff.source.flatMap {
@@ -2139,7 +2155,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     // MARK: - Public Methods
 
     func launch() {
-        guard !stream.isRunning else { return }
+        guard !stream.isRunning, !isLaunching else { return }
 
         // The native surface's half of the same line `AgentSessionViewController.launch` holds:
         // recovery starts no agent by any route, and this one would also write `hasLaunched`
@@ -2156,6 +2172,10 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
         let launchRecord = ProjectStore.shared.update(sessionID: sessionID) {
             $0.hasLaunched = true
+            if let host = project.executionHost, $0.remoteUsesCopiedAccount == nil {
+                $0.remoteUsesCopiedAccount = RemoteConversationAccount.usesCopiedAccount(
+                    for: $0, reuseCredentials: RemoteConversationAccount.reusesCredentials(on: host))
+            }
         }
         guard launchRecord.succeeded else {
             appendNotice(
@@ -2165,11 +2185,41 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             return
         }
 
+        isLaunching = true
+        launchGeneration = UUID()
+        let generation = launchGeneration
+        apply(.status(.loading))
+        if project.executionHost != nil {
+            let launchSession = currentSession ?? session
+            remotePreparation = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await remoteConversation.prepare(session: launchSession, project: project)
+                    try Task.checkCancellation()
+                    guard launchGeneration == generation else { return }
+                    remotePreparation = nil
+                    replayAndStart(session: launchSession, generation: generation)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard launchGeneration == generation else { return }
+                    remotePreparation = nil
+                    isLaunching = false
+                    apply(.status(.ended(code: 1)))
+                    appendNotice("Could not start the remote conversation: \(error.localizedDescription)", kind: .error)
+                }
+            }
+            return
+        }
+        replayAndStart(session: session, generation: generation)
+    }
+
+    private func replayAndStart(session: AgentSession, generation: UUID) {
         // Replay before starting, so past turns cannot interleave with new ones. The read is
         // off the main thread, and costs less than the CLI takes to boot.
         apply(.status(.loading))
         TranscriptReplay.load(for: session, in: project) { [weak self] events, isTruncated in
-            guard let self else { return }
+            guard let self, self.launchGeneration == generation else { return }
 
             AgentWorkTraceStore.shared.seedReplayIfEmpty(
                 events,
@@ -2199,23 +2249,24 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 "presentation_rows": String(self.presentationItems.count),
                 "folded_turns": String(self.foldedTurnStarts.count)
             ])
-            self.replaySubagentHistoryAndStart()
+            self.replaySubagentHistoryAndStart(generation: generation)
         }
     }
 
-    private func replaySubagentHistoryAndStart() {
+    private func replaySubagentHistoryAndStart(generation: UUID) {
         guard let history = stream as? SubagentHistoryConversation else {
             finishReplayAndStart()
             return
         }
         history.loadSubagentHistory { [weak self] events in
-            guard let self else { return }
+            guard let self, self.launchGeneration == generation else { return }
             for event in events { self.handleSubagent(event) }
             self.finishReplayAndStart()
         }
     }
 
     private func finishReplayAndStart() {
+        isLaunching = false
         finishReplayRendering()
         isReplaying = false
         // Replay changes the rail, controls and remote snapshot many times but exposes only the
@@ -2236,6 +2287,10 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }
 
     func terminate(preservingViewport: Bool = true) {
+        launchGeneration = UUID()
+        remotePreparation?.cancel()
+        remotePreparation = nil
+        isLaunching = false
         // Runtime ownership has an explicit end edge (`discard` and `terminateAll` both come
         // through here), so actor-isolated UI state is settled there rather than from `deinit`.
         // Swift 6 correctly treats a class deinitializer as nonisolated: the previous workaround
@@ -3106,6 +3161,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// `ConversationTimeline`'s, and tested there.
     private func handle(_ event: StreamEvent) {
         if !isReplaying, case .turnFinished = event {
+            if project.executionHost != nil {
+                RemoteTranscriptMirror.shared.refresh(sessionID: sessionID, then: {})
+            }
             isPreparingTurn = true
             refreshInputControl()
             GitTurnBaselineStore.shared.finishTurn(

@@ -90,8 +90,8 @@ against the backups of a login added through Settings:
   method", and the person signed in again.
 
 So once the status command has verified the login, `AgentAccountSetupProvider.settleFirstRun`
-sets that one key through `ClaudeOnboardingMarker`. This is the only write Threading makes into a
-provider-owned file, and it is deliberately narrow. It sets one key and only after verification.
+sets that one key through `ClaudeOnboardingMarker`. This local provider-state update is
+deliberately narrow. It sets one key and only after verification.
 It never creates the file, and it refuses a symlink, an oversized file, or anything that is not a
 JSON object. It takes the CLI's own `proper-lockfile` lock (`.claude.json.lock`, which goes stale
 after 10 s) and stays out if a live CLI holds it. It writes atomically with the original file mode.
@@ -137,13 +137,52 @@ What was measured or read from the 2.1.287 bundle, and what each fact decided:
 **Delivery is through the environment, never the command line.** `AgentAccountRouting.route`
 decides once per launch and returns the `env` words plus an `AgentCredentialEnvironment`. The
 plan carries that as `AgentLaunchPlan.credentialEnvironment`, which every transport merges: the
-local PTY, a local `threading-ptyd` spawn (a remote host gets none, since it is not routed to a
-login on this Mac), the native stream, the usage-window poke, and Settings research with its
+local PTY, a local `threading-ptyd` spawn, the native stream, the usage-window poke, and Settings research with its
 `auth status` check. The command line is what `EventLog` records at every launch, what the info
 panel and the daemon's journal derive from, and what `ps` shows. `ShellCommand` can only emit
 quoted words, so the token could not be expanded there safely, and it never is. The credential
 types print `<redacted>` in their descriptions and mirrors, so a plan or launch interpolated into
 a log line cannot carry the value.
+
+Remote chats have a separate, explicit transfer boundary. The host editor's **Use this Mac's
+login for remote chats** setting defaults off, including for old host records. Enabling it
+authorizes copying only the selected Claude or Codex login to that SSH destination; it does not
+remove the local login. `RemoteConversationAccount` reads a bounded regular credential file or
+an already-granted Claude Keychain item on a worker. Claude setup tokens use the existing token
+vault. Codex uses its documented `auth.json` file; keyring-only Codex logins cannot be exported
+by this path. No preferences, hooks, MCP configuration or conversation history are copied.
+
+Transfers use SSH stdin, never command arguments. Each copied account gets a deterministic
+private directory (0700), with atomically created credential files (0600). Existing remote
+credentials are preserved because the remote CLI owns refresh-token rotation. A chat remembers
+its chosen account namespace, so turning off future transfers cannot redirect an existing chat's
+history. An older remote terminal transcript keeps the host's default account when opened as a
+native chat. New chats with copying disabled also use the host's default login, regardless of the
+Mac account picker. Claude Keychain export never prompts from launch or polling: the existing Privacy
+grant flow remains authoritative. SSH trust and credential-copy consent are host-owned settings,
+not extension capabilities. Use a new chat after changing which login a host should use.
+An export refused by the Keychain records its availability and reports a specific access-required
+failure, with a Privacy Settings recovery action. A missing or invalid credential instead names
+only its own provider's reconnect steps. A valid credential file can still supply the login when
+Keychain access is unavailable; neither branch prompts during launch.
+Copied Claude accounts also set or clear the setup-token variable after the host's login profile
+runs. Copied accounts reassert their private configuration directory and clear provider API-key
+overrides exported by that profile, so those values cannot replace the selected login. Host-owned logins
+retain the host profile's authentication environment.
+
+Terminal and native launches both await `RemoteConversationAccount.prepared` before spawning.
+The terminal controller surveys the daemon first: reconnecting to an existing process neither
+copies a login nor changes its account. A fresh terminal launch pins the prepared namespace in
+the session, and generation checks discard late preparation results after cancellation/retry.
+Failure to prepare the selected login refuses launch instead of opening an unsigned-in CLI.
+Account discovery and the serial credential worker stay off-main; each launch handles one
+selected account and at most 64 KiB of credential data.
+
+A newly copied Claude account also gets a minimal `.claude.json` with
+`hasCompletedOnboarding: true`. This initializes only Threading's private remote account after
+the selected login has been copied; it does not copy local preferences or replace existing
+provider state. Without that flag the interactive CLI repeats its sign-in walkthrough even
+though its credential is present. Host-owned accounts are unchanged.
 
 **Every other login unsets the variable.** A login without a token gets `env -u
 CLAUDE_CODE_OAUTH_TOKEN` beside its config-directory word. `AgentEnvironment` already drops an

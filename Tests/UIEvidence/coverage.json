@@ -4,6 +4,69 @@
   "platform": "macOS",
   "entries": [
     {
+      "id": "remote-host-login",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Remote host login reuse",
+      "description": "Explicit selected-account login reuse in the shipping remote host dialog attached to the main window.",
+      "states": [
+        "Private login copy enabled"
+      ],
+      "matrix": {
+        "themes": [
+          "System"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "Shipping host dialog"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/RemoteHostLoginRenderTests.swift",
+        "test": "ThreadingTests/RemoteHostLoginRenderTests/testRendersLoginConsentInTheShippingHostDialog"
+      },
+      "capture": {
+        "glob": "remote-host-login-*.png"
+      }
+    },
+    {
+      "id": "remote-login-permission",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Remote login permission recovery",
+      "description": "The shipping session pane explains the missing Claude Keychain grant and opens its Privacy recovery path.",
+      "states": [
+        "Keychain access required"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Cyberpunk",
+          "Swiss Minimalist"
+        ],
+        "appearances": [
+          "Light",
+          "Dark",
+          "Authored"
+        ],
+        "sizes": [
+          "1100×760 shipping window"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/RemoteLoginFailureTests.swift",
+        "test": "ThreadingTests/RemoteLoginFailureTests/testPermissionRecoveryInTheShippingWindow"
+      },
+      "capture": {
+        "glob": "remote-login-permission-*.png"
+      }
+    },
+    {
       "id": "external-prompt-editor",
       "kind": "surface",
       "status": "implemented",

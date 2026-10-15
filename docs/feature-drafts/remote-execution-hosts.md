@@ -6,6 +6,10 @@
 > in debug and internal builds, with hooks and Threading's tools reaching back to the Mac (see
 > [The developer version](#the-developer-version-2026-09-17) and
 > [Hooks and tools, as built](#hooks-and-tools-as-built-2026-09-17)).
+> Native Claude and Codex chats now use that host connection too, including transcript replay
+> and opt-in reuse of the selected Mac login. Current contracts live in
+> [`native-conversations.md`](../architecture/native-conversations.md) and
+> [`accounts.md`](../architecture/accounts.md); the dated spike notes below describe earlier slices.
 > The remote-session spike (below) ran on 2026-09-17 and settles slice 2's transport, install and
 > upgrade shape. Slice 5 includes transcript mirroring, mirrored usage, and uncommitted Git
 > Review; its remaining surfaces are described below. This is the implementation plan for slice C of

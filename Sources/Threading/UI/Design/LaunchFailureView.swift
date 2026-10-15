@@ -103,6 +103,16 @@ final class LaunchFailureView: NSView, ThemedComponent {
 
     // MARK: - Private Methods
 
+    override func layout() {
+        super.layout()
+        // Recovery prose wraps at the column it actually received, including in narrow panes.
+        for label in [titleLabel, summaryLabel] {
+            if label.preferredMaxLayoutWidth != label.bounds.width {
+                label.preferredMaxLayoutWidth = label.bounds.width
+            }
+        }
+    }
+
     private func setupViews() {
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.contentTintColor = Design.Status.warning
@@ -121,6 +131,8 @@ final class LaunchFailureView: NSView, ThemedComponent {
         summaryLabel.textColor = Design.Text.secondary
         summaryLabel.alignment = .center
         summaryLabel.maximumNumberOfLines = 0
+        summaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         setupOutputWell()
 
@@ -199,6 +211,8 @@ final class LaunchFailureView: NSView, ThemedComponent {
             ),
             outputWell.widthAnchor.constraint(equalTo: stack.widthAnchor),
             announcement.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            titleLabel.widthAnchor.constraint(equalTo: announcement.widthAnchor),
+            summaryLabel.widthAnchor.constraint(equalTo: announcement.widthAnchor),
             wellHeight
         ])
     }

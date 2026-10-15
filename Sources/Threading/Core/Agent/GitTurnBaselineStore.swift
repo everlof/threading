@@ -1247,8 +1247,11 @@ enum NativeGitTurnAdmission {
         transport: @escaping @MainActor (GitTurnCheckpointID?) -> Bool,
         completion: @escaping @MainActor (_ admitted: Bool, _ checkpointID: GitTurnCheckpointID?) -> Void
     ) {
+        let runsRemotely = ProjectStore.shared.sessionRunsOnRemoteHost(sessionID)
         store.prepareTurn(sessionID: sessionID, userTurnID: userTurnID) { checkpointID in
-            guard let checkpointID else {
+            // Remote turns deliberately have no Mac checkpoint. That absence must not hold
+            // their messages in the outbox; local admission still requires its durable record.
+            guard checkpointID != nil || runsRemotely else {
                 completion(false, nil)
                 return
             }
@@ -1257,7 +1260,7 @@ enum NativeGitTurnAdmission {
                 // Direct sends, provider commands and queue drains share this accepted transport
                 // edge. Renderers may echo it afterwards; replay and rejected sends never enter.
                 ProjectStore.shared.noteTurnStarted(sessionID: sessionID)
-            } else {
+            } else if let checkpointID {
                 store.cancelPreparedTurn(checkpointID, sessionID: sessionID)
             }
             completion(admitted, checkpointID)

@@ -30,19 +30,23 @@ struct AgentLaunchPlan {
     /// PTY and `threading-ptyd` alike — because a terminal cannot state them the way it states
     /// its other variables: as `env NAME=value` words, they would land in `EventLog` and `ps`.
     let credentialEnvironment: AgentCredentialEnvironment
+    /// Remote children start from host facts, never this Mac's PATH or ambient secrets.
+    let baseEnvironment: [String: String]?
 
     init(
         executable: String,
         arguments: [String],
         resumeState: ResumeState,
         environmentOverrides: [String: String] = [:],
-        credentialEnvironment: AgentCredentialEnvironment = .none
+        credentialEnvironment: AgentCredentialEnvironment = .none,
+        baseEnvironment: [String: String]? = nil
     ) {
         self.executable = executable
         self.arguments = arguments
         self.resumeState = resumeState
         self.environmentOverrides = environmentOverrides
         self.credentialEnvironment = credentialEnvironment
+        self.baseEnvironment = baseEnvironment
     }
 
     /// Pure command composition; the host resolves its login shell and environment separately.
@@ -68,7 +72,8 @@ struct AgentLaunchPlan {
     /// overrides before credentials, replacing a prior entry for the same key in both cases.
     func environmentEntries(on inherited: [String]) -> [String] {
         let keys = Set(environmentOverrides.keys)
-        let kept = inherited.filter { entry in
+        let base = baseEnvironment.map { $0.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" } } ?? inherited
+        let kept = base.filter { entry in
             guard let separator = entry.firstIndex(of: "=") else { return true }
             return !keys.contains(String(entry[..<separator]))
         }

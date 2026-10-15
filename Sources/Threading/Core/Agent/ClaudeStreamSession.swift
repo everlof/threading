@@ -245,7 +245,7 @@ final class ClaudeStreamSession:
     /// One process serves the whole conversation here, so this is stable across turns.
     var rootProcessIdentifier: pid_t? {
         guard let process, process.isRunning else { return nil }
-        return process.processIdentifier
+        return process.localProcessIdentifier
     }
 
     @discardableResult

@@ -61,6 +61,7 @@ struct RemoteHostFacts: Equatable, Sendable {
     var daemonProvenance: [String: RemoteHostProvenance] = [:]
     /// The same for each bridge install directory.
     var bridgeProvenance: [String: RemoteHostProvenance] = [:]
+    var codexPath: String? = nil
 
     var architecture: RemoteHostArchitecture? { RemoteHostArchitecture(unameMachine: machine) }
 
@@ -96,6 +97,7 @@ enum RemoteHostFactsDefaults {
         static let active = "active"
         static let enabled = "enabled"
         static let claude = "claude"
+        static let codex = "codex"
         static let bridge = "bridge"
         static let curl = "curl"
         static let auth = "auth"
@@ -164,6 +166,7 @@ extension RemoteHostFacts {
             | awk '{print "active=" $1}'
         fi
         printf 'claude=%s\\n' "$("$shell" -lc 'command -v claude' </dev/null 2>/dev/null | tail -n 1)"
+        printf 'codex=%s\\n' "$("$shell" -lc 'command -v codex' </dev/null 2>/dev/null | tail -n 1)"
         printf 'curl=%s\\n' "$("$shell" -lc 'command -v curl' </dev/null 2>/dev/null | tail -n 1)"
         if [ -r "$HOME/\(RemoteHostFactsDefaults.claudeCredentialsPath)" ]; then
           printf 'auth=%s\\n' yes
@@ -205,7 +208,7 @@ extension RemoteHostFacts {
                     bridgeProvenance[identifier] = provenance
                 }
             case Key.machine, Key.home, Key.user, Key.shell, Key.systemctl, Key.linger, Key.claude,
-                 Key.curl, Key.auth:
+                 Key.curl, Key.auth, Key.codex:
                 single[key] = value
             default:
                 continue
@@ -249,7 +252,8 @@ extension RemoteHostFacts {
             curlPath: curl,
             claudeSignedIn: signedIn,
             daemonProvenance: daemonProvenance,
-            bridgeProvenance: bridgeProvenance
+            bridgeProvenance: bridgeProvenance,
+            codexPath: single[Key.codex].flatMap { $0.hasPrefix("/") ? $0 : nil }
         )
     }
 

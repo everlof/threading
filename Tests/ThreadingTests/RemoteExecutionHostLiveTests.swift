@@ -27,6 +27,107 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         static let binaries = "THREADING_REMOTE_HOST_BINARIES"
     }
 
+    /// Explicit opt-in copies one real login and spends two small turns on the selected host.
+    /// Ordinary test runs neither read credentials nor contact a model provider.
+    @MainActor
+    func testNativeCodexUsesCopiedLoginAndResumesOnTheRemoteHost() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let configPath = environment["THREADING_REMOTE_NATIVE_ACCOUNT"],
+              let alias = environment[Key.destination], let binaries = environment[Key.binaries]
+        else { throw XCTSkip("set THREADING_REMOTE_NATIVE_ACCOUNT and remote host variables for the native live test") }
+        let destination = RemoteHostDestination(alias: alias, configFile: environment[Key.sshConfig])
+        let sockets = URL(fileURLWithPath: "/tmp/threading-native-\(getpid())")
+        try FileManager.default.createDirectory(at: sockets, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: sockets) }
+        let app = try FakeAppListener(path: sockets.appendingPathComponent("app.sock").path)
+        defer { app.close() }
+        let hosts = RemoteExecutionHosts(localDirectory: sockets)
+        defer { hosts.closeAllTunnels() }
+        _ = hosts.readiness(for: destination, components: RemoteHostDirectoryComponents(directory: URL(fileURLWithPath: binaries)), appSocketPath: app.path)
+        let deadline = Date().addingTimeInterval(600)
+        var prepared: RemoteHostLaunchContext?
+        while prepared == nil, Date() < deadline {
+            switch hosts.phase(for: destination) {
+            case .ready(let context): prepared = context
+            case .failed(let failure): throw failure
+            case .idle, .preparing: try await Task.sleep(for: .milliseconds(200))
+            }
+        }
+        let context = try XCTUnwrap(prepared)
+        let local = AgentAccount(provider: .codex, handle: .standard, configPath: configPath)
+        let account = try RemoteConversationAccount.make(account: local, home: context.facts.home, reuse: true)
+        try await Task.detached {
+            try account.prepare(account: local, reuse: true, context: context)
+        }.value
+        let folder = "\(context.facts.home)/projects/remote-chat-test"
+        let host = ProjectExecutionHost(destination: alias, sshConfigFile: destination.configFile, remoteDirectory: folder)
+        var session = AgentSession(kind: .codex, title: "Native remote live test", usesNativeUI: true)
+        var transcriptID: TranscriptID?
+        var transcriptPath: String?
+        for iteration in 0..<2 {
+            let encoded = try RemoteNativeConversation.makeLaunch(session: session, host: host, context: context, account: account).encode()
+            let environment = Dictionary(uniqueKeysWithValues: encoded.environment.compactMap { entry -> (String, String)? in
+                guard let split = entry.firstIndex(of: "=") else { return nil }
+                return (String(entry[..<split]), String(entry[entry.index(after: split)...]))
+            })
+            let plan = AgentLaunchPlan(executable: encoded.plan.executable, arguments: encoded.plan.arguments,
+                resumeState: encoded.plan.resumeState, baseEnvironment: environment)
+            let child = PTYHostChildPlan(identity: .agentSession(session.id),
+                factory: PTYHostPolicy.attachingTransportFactory(socketPath: context.localSocketPath, retiresOlderDaemon: false),
+                workingDirectory: folder, isRemote: true)
+            let stream = CodexStreamSession(sessionID: session.id, workingDirectory: folder, hostPlan: { child }, plan: { plan })
+            defer { stream.terminate() }
+            var finished = false
+            var result = ""
+            var failure: String?
+            stream.onLaunchFailure = { failure = $0.localizedDescription }
+            stream.onTranscriptPath = { transcriptID = $0; transcriptPath = $1 }
+            stream.onEvent = { event in
+                if case .initialised(let id, _) = event { transcriptID = id }
+                if case .textDelta(let text) = event { result += text }
+                if case .turnFinished(let text, let outcome, _) = event {
+                    if let text { result = text }
+                    finished = true
+                    if outcome != .completed { failure = "turn did not complete: \(text ?? "")" }
+                }
+            }
+            stream.start()
+            let prompt = iteration == 0
+                ? "Run uname -s and pwd in the shell, then reply with their output and the word REMOTE-ORCHID. Remember that word. Do nothing else."
+                : "What was the special word from our previous turn? Reply with only that word; use no tools."
+            XCTAssertTrue(stream.send(prompt))
+            let end = Date().addingTimeInterval(180)
+            while !finished, failure == nil, Date() < end { try await Task.sleep(for: .milliseconds(100)) }
+            XCTAssertNil(failure)
+            XCTAssertTrue(finished, "remote turn timed out")
+            XCTAssertTrue(result.contains("REMOTE-ORCHID"), "remote reply: \(result)")
+            if iteration == 0 {
+                XCTAssertTrue(result.contains("Linux"), "the shell did not identify the remote kernel")
+                XCTAssertTrue(result.contains(folder), "the shell used another working directory")
+            }
+            XCTAssertNil(stream.rootProcessIdentifier, "a remote PID must never reach a local process inspector")
+            stream.terminate()
+            session.resumeState = .resumable(try XCTUnwrap(transcriptID))
+        }
+        let path = try XCTUnwrap(transcriptPath, "app-server must report its exact remote rollout path")
+        let id = try XCTUnwrap(transcriptID)
+        let aliasScript = try XCTUnwrap(RemoteNativeConversation.transcriptAliasScript(id: id, path: path, account: account))
+        let aliased = try await Task.detached {
+            try SystemSSHCommandRunner().run(on: destination, command: "sh -s", input: .data(Data(aliasScript.utf8)),
+                                             extraOptions: [], timeout: 30)
+        }.value
+        XCTAssertTrue(aliased.succeeded)
+        let aliasPath = RemoteNativeConversation.transcriptPath(kind: .codex, id: id, directory: folder, account: account)
+        let location = RemoteTranscriptLocation(destination: destination, remotePath: aliasPath,
+            localURL: sockets.appendingPathComponent("history.jsonl"))
+        let outcome = await Task.detached { RemoteTranscriptMirror.shared.synchronize(location) }.value
+        if case .failed(let message) = outcome { XCTFail(message) }
+        let data = try Data(contentsOf: location.localURL)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("REMOTE-ORCHID"))
+        XCTAssertTrue(path.hasPrefix(account.directory + "/sessions/"))
+        XCTAssertFalse(id.rawValue.isEmpty)
+    }
+
     private enum Fixture {
         /// A first preparation uploads a ~57 MB binary.
         static let preparationTimeout: TimeInterval = 600
@@ -215,7 +316,7 @@ final class RemoteExecutionHostLiveTests: XCTestCase {
         let handshake = #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#
         let spoke = try runner.run(
             on: destination,
-            command: "timeout 20 \(bridge) --socket \(route.socketPath) --token live-test --cache \(route.cacheDirectory)/live-test.json",
+            command: "env THREADING_SESSION_TOKEN=live-test timeout 20 \(bridge) --socket \(route.socketPath) --cache \(route.cacheDirectory)/live-test.json",
             input: .data(Data((handshake + "\n").utf8)),
             extraOptions: [],
             timeout: Fixture.childTimeout + 10

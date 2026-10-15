@@ -303,3 +303,13 @@ worked: a clear account of a conversation that cannot be saved is worth more tha
   quit, feeds the report and the agent brief, and is what those two need anyway.
 - **No new sidebar nesting.** `forkedFrom` is a real Claude fork operation with a transcript
   behind it, and a repair chat is not that. The chat's title names the conversation it is about.
+
+## Remote login access
+
+Remote login preparation keeps a refused Claude Keychain read distinct from a missing or invalid
+credential. The refusal uses the wrapping summary, never the unwrapped terminal-output well,
+and offers **Open Privacy Settings** before **Try Again**. It names the existing live-usage grant
+control and the macOS **Always Allow** choice. Claude and Codex receive separate recovery text;
+no login is inferred expired merely because macOS refused access. Credential bytes and OS errors
+never enter the failure record. The grant remains an explicit action in Privacy settings.
+`RemoteLoginFailureTests` drives the stored refusal and recovery button in the shipping window.

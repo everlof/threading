@@ -27,13 +27,15 @@ import Security
 /// also what keeps development builds sane: a rebuilt binary that no longer matches the ACL
 /// falls back to the local caches silently instead of prompting on every refresh tick.
 ///
-/// **The token is treated as radioactive.** It lives in memory only (keyed by config path,
+/// **Usage tokens stay in memory.** The usage token lives in memory only (keyed by config path,
 /// dropped on expiry or on a 401), is never written to disk, never logged, and never carried
 /// anywhere but the `Authorization` header of the usage request that
 /// `ClaudeUsageFetcher` already sends for on-disk tokens. Threading never refreshes it —
 /// the CLI owns the login, and rotates the item in place (the probe found the default item
 /// modified the same morning), which is why a 401 invalidates the cache and the next cycle
 /// re-reads instead of concluding the login is gone.
+/// Explicit remote-chat login reuse has a separate export below: an already granted credential
+/// is copied only to the chosen SSH host, under that host's persisted opt-in.
 enum ClaudeKeychainCredentials {
 
     // MARK: - Types
@@ -72,6 +74,21 @@ enum ClaudeKeychainCredentials {
     private static let observed = OSAllocatedUnfairLock(initialState: [String: Availability]())
 
     // MARK: - Public Methods
+
+    /// Explicit remote-host login reuse, separate from usage polling. Never prompts: the
+    /// Privacy page remains the only grant flow. The caller sends this to the chosen SSH host.
+    enum RemoteLoginExportError: Error { case accessRequired }
+
+    static func exportForRemoteLogin(configPath: String) throws -> Data? {
+        guard !isRunningInTests else { return nil }
+        let (status, data) = copyItemData(service: serviceName(forConfigPath: configPath), allowingPrompt: false)
+        record(availability(for: status), forConfigPath: configPath)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw RemoteLoginExportError.accessRequired
+        }
+        guard status == errSecSuccess, let data, data.count <= KeychainCredentialsDefaults.maxItemBytes else { return nil }
+        return data
+    }
 
     /// A token for the usage API, or nil — silently — when the setting is off duty for this
     /// account: no item, no grant yet, an unreadable payload, or a token past its expiry.

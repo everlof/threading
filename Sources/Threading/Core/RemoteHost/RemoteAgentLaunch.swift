@@ -17,8 +17,6 @@ enum RemoteAgentLaunchError: LocalizedError, Equatable {
     case sideChatFork
     /// A managed workspace's checkout is a worktree on this Mac.
     case managedWorkspace
-    /// A natively rendered conversation reads its transcript on this Mac.
-    case nativeConversation
 
     var errorDescription: String? {
         switch self {
@@ -32,8 +30,6 @@ enum RemoteAgentLaunchError: LocalizedError, Equatable {
             return L10n.string("Side chats can’t start on a remote host yet.")
         case .managedWorkspace:
             return L10n.string("Managed workspaces can’t run on a remote host yet.")
-        case .nativeConversation:
-            return L10n.string("Chats can’t run on a remote host yet. Use a terminal session.")
         }
     }
 
@@ -44,7 +40,6 @@ enum RemoteAgentLaunchError: LocalizedError, Equatable {
         case .agentNotInstalled: return "agentNotInstalled"
         case .sideChatFork: return "sideChatFork"
         case .managedWorkspace: return "managedWorkspace"
-        case .nativeConversation: return "nativeConversation"
         }
     }
 }
@@ -110,7 +105,8 @@ struct RemoteAgentLaunch: Sendable {
         initialPrompt: String?,
         reportsLifecycle: Bool = AppSettings.shared.reportsClaudeLifecycleEvents,
         allowedTools: [String]? = nil,
-        mailbox: RemoteSessionMailboxes.Binding? = nil
+        mailbox: RemoteSessionMailboxes.Binding? = nil,
+        account: RemoteConversationAccount? = nil
     ) throws -> RemoteAgentLaunch.Unencoded {
         guard session.kind.supports(.remoteExecutionHostLaunch) else {
             throw RemoteAgentLaunchError.unsupportedAgent(session.kind)
@@ -137,13 +133,24 @@ struct RemoteAgentLaunch: Sendable {
             prompt: initialPrompt,
             integration: integration.flags
         )
-        let transcript = remoteTranscriptPath(
+        guard session.remoteUsesCopiedAccount != true || account?.usesCopiedLogin == true else {
+            throw RemoteConversationFailure.notPrepared
+        }
+        let copiedAccount = account.flatMap { $0.usesCopiedLogin ? $0 : nil }
+        let transcript = copiedAccount.map {
+            RemoteNativeConversation.transcriptPath(kind: session.kind, id: commands.transcriptID,
+                directory: host.remoteDirectory, account: $0)
+        } ?? remoteTranscriptPath(
             home: facts.home,
             remoteDirectory: host.remoteDirectory,
             transcriptID: commands.transcriptID
         )
 
-        let script = (integration.scriptLines + [
+        var accountLines: [String] = []
+        if let credentialScript = copiedAccount?.credentialEnvironmentScript(for: session.kind) {
+            accountLines.append(credentialScript)
+        }
+        let script = (integration.scriptLines + accountLines + [
             "cd \(quoted(host.remoteDirectory)) || exit \(RemoteAgentLaunchDefaults.directoryFailureStatus)",
             "if [ -f \(quoted(transcript)) ]; then exec \(commands.resume.source); fi",
             "exec \(commands.fresh.source)"
@@ -156,7 +163,8 @@ struct RemoteAgentLaunch: Sendable {
         )
         return Unencoded(
             plan: plan,
-            environment: environment(for: facts) + integration.environment,
+            environment: environment(for: facts) + integration.environment
+                + (copiedAccount.map { ["\($0.environmentKey)=\($0.directory)"] } ?? []),
             payloads: integration.payloads
         )
     }
@@ -217,7 +225,8 @@ extension RemoteAgentLaunch {
             context: RemoteHostLaunchContext,
             reportsLifecycle: Bool,
             allowedTools: [String],
-            mailbox: RemoteSessionMailboxes.Binding? = nil
+            mailbox: RemoteSessionMailboxes.Binding? = nil,
+            brokersPermissions: Bool = false
         ) -> Integration {
             var integration = Integration()
             let facts = context.facts
@@ -251,7 +260,7 @@ extension RemoteAgentLaunch {
             // this Mac's logins, not the host's.
             var settings = route == nil ? nil : MCPSessionRegistry.hookSettings(
                 for: session.id,
-                brokersPermissions: false,
+                brokersPermissions: brokersPermissions,
                 reportsLifecycle: reportsLifecycle && facts.curlPath != nil,
                 remoteControl: AgentLauncher.remoteControlAtStartup(for: session),
                 fastMode: session.fastMode,

@@ -308,7 +308,30 @@ and resumes the conversation from its transcript**, because a request/response t
 rejoined half-way through a turn — the reasoning, and what that costs, is in
 [`pty-host.md`](pty-host.md#why-a-conversation-is-not-reattached).
 
+### Native chats on SSH hosts
+
+Claude and Codex native conversations can use a project's remote execution host. The Mac still
+owns presentation, permission decisions and the tool catalogue; the provider process, shell and
+working directory belong to the Linux host (including WSL). `RemoteNativeConversation` prepares
+the existing SSH tunnel before replay or spawn. Preparation is cancellable and its file, JSON and
+SSH work runs on bounded workers. A failed remote route never falls back to a local process.
+
+The pipe transport remains `AgentChildProcess`/`PTYHostPipeLink`. A remote child has no local
+process identifier and never enters or clears the Mac's PID ledger. Its termination and detach
+requests go through its remote transport. The initial environment contains only remote host
+facts, the selected account directory and the session's tool route; inherited Mac credentials,
+PATH and working-directory values do not cross the connection.
+
+Replay reads `RemoteTranscriptMirror` for both providers. Claude's path is computed under the
+selected remote account home. Codex reports its rollout path in app-server's thread response;
+the host records a stable alias by thread ID, avoiding a scan of its entire sessions tree. A
+reopen refreshes the mirror before replay, and completed turns request another bounded refresh.
+Remote Claude child-transcript replay is not available yet; live subagent events still arrive
+over the structured stream. Managed Mac worktrees and first-launch side-chat forks remain
+unsupported on remote hosts.
+
 ## Composer commands and skills
+
 
 Commands are a live transport capability, not a list copied from either CLI. The optional
 `ComposerCapabilityProviding` protocol exposes provider-neutral metadata — stable id, provider

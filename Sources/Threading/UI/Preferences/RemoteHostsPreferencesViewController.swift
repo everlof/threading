@@ -413,7 +413,7 @@ enum RemoteHostPresentation {
             // Reachable, installed, and still not able to run an agent: the CLI is missing, or
             // nobody has signed in to it there. Said here rather than discovered inside a session
             // that opens on a login prompt.
-            if context.facts.claudePath == nil {
+            if context.facts.claudePath == nil, context.facts.codexPath == nil {
                 return State(
                     label: RemoteHostsSettingsStrings.needsAgent,
                     color: Design.Status.warning,
@@ -421,7 +421,7 @@ enum RemoteHostPresentation {
                     allowsChecking: true
                 )
             }
-            if context.facts.claudeSignedIn == false {
+            if context.facts.claudeSignedIn == false, context.facts.codexPath == nil, !record.reusesLocalCredentials {
                 return State(
                     label: RemoteHostsSettingsStrings.needsSignIn,
                     color: Design.Status.warning,
@@ -510,13 +510,13 @@ enum RemoteHostsSettingsStrings {
     static var notChecked: String { L10n.string("Not checked") }
     static var unreachable: String { L10n.string("Unreachable") }
     static var unusable: String { L10n.string("Not usable") }
-    static var needsAgent: String { L10n.string("Claude missing") }
+    static var needsAgent: String { L10n.string("Agent CLI missing") }
     static var needsSignIn: String { L10n.string("Not signed in") }
     static var managedElsewhere: String { L10n.string("Managed elsewhere") }
 
     static func installAgent(_ destination: String) -> String {
         L10n.format(
-            "Ready, but the host’s login shell doesn’t find claude. Install it there, then check again: ssh %@ and follow claude.ai/install.",
+            "Connected, but the host’s login shell cannot find Claude or Codex. Install a CLI on the host, then check again: ssh %@.",
             destination
         )
     }

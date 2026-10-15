@@ -2949,6 +2949,37 @@ mid-flight, shell shortcuts, and some of the agent's richer rendering. Use it wh
 conversation to read like a conversation; use the terminal when you need the complete agent
 interface.
 
+## Chats on an SSH host (internal builds)
+
+Claude terminal sessions and Claude/Codex native chats can run on a configured SSH host while their conversation stays
+in Threading on your Mac. The host needs a POSIX login shell, its agent CLI, and Threading's
+compatible remote helpers. Windows hosts use Linux through WSL.
+
+Add the connection under **Settings > Remote Hosts**, then choose it from the project's
+**Remote Host…** menu and enter the absolute folder path on that host. New chats in that project
+run there. The local project folder is the sidebar entry; files and shell commands belong to
+the remote folder. Managed Mac worktrees and side-chat forks are not supported on this route.
+
+**Use this Mac's login for remote chats** copies only the selected account's login to a private
+account directory on that host when needed. Enable it only for a host you trust with that login.
+The Mac keeps its login, and an existing remote login is preserved so remote token refreshes are
+not overwritten. Claude supports a saved setup token or an already accessible OAuth login;
+Codex supports its `auth.json` login. Codex logins stored only in a credential keyring cannot be
+exported through this path.
+The same login reuse applies to new Claude terminal sessions. Their first-run setup is completed
+for the copied login, so opening the terminal does not ask you to sign in again.
+If macOS has not allowed Threading to read your Claude login, the failed-chat page offers
+**Open Privacy Settings**. Enable **Live usage from your Claude login** if it is off, click
+**Allow…**, and choose **Always Allow** in the macOS prompt. Return to the chat and click
+**Try Again**. This grants access to the existing Mac login; it does not require signing in again
+on the remote machine. Missing Claude or Codex credentials instead point to reconnecting that
+specific login under **Agents & Accounts**.
+
+Turning login reuse off stops future copies. It does not delete credentials already copied or
+move existing chats to a different account directory. Chat history is mirrored back for reopening
+and resumed by the provider on the remote host. Existing remote terminal chats keep their original
+host login when opened as native chats. New chats with login reuse disabled use the host's login.
+
 ## Remote Access (beta)
 
 A chat that cannot start because the Mac has paused writes after running out of storage reports
@@ -6395,9 +6426,11 @@ needed for the reading; they carry no install identifier and are not analytics.
 
 **Stored credentials** live in your login keychain, never in Threading's own database — the GitHub
 connection, paired-owner device credentials, any model API keys you enter, and secrets an
-extension stores. Agent logins are not
-among them: Threading reads *which* accounts exist under `~/.claude` and `~/.codex` so it can
-route a session to one, and never reads or copies their credentials.
+extension stores. Browser-based agent logins stay in the provider's credential store; saved
+Claude setup tokens live in Threading's Keychain storage. Account discovery reads which accounts
+exist so it can route a session to one. When you enable **Use this Mac's login for remote chats**
+for an SSH host, Threading copies the selected login securely to that host's private account
+directory. It leaves the Mac's login in place.
 
 Threading runs without the App Sandbox. A terminal that cannot open a pseudo-terminal or launch
 your shell is not a terminal, and that is the trade the app makes.

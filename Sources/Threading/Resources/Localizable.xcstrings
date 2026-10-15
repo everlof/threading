@@ -6961,6 +6961,23 @@
         }
       }
     },
+    "Agent CLI missing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent CLI missing"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentens CLI saknas"
+          }
+        }
+      }
+    },
     "Agent Session ID" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14342,6 +14359,23 @@
         }
       }
     },
+    "Claude and Codex chats, and Claude terminals, run on the machine you choose here, in the folder you name on it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude and Codex chats, and Claude terminals, run on the machine you choose here, in the folder you name on it."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude- och Codex-chattar samt Claude-terminaler körs på datorn du väljer här, i mappen du anger på den."
+          }
+        }
+      }
+    },
     "Claude and Codex publish authoritative windows" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16783,6 +16817,23 @@
         }
       }
     },
+    "Connected, but the host’s login shell cannot find Claude or Codex. Install a CLI on the host, then check again: ssh %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected, but the host’s login shell cannot find Claude or Codex. Install a CLI on the host, then check again: ssh %@."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ansluten, men värdens inloggningsskal hittar inte Claude eller Codex. Installera ett CLI på värden och kontrollera sedan igen: ssh %@."
+          }
+        }
+      }
+    },
     "Connecting" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17577,6 +17628,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopierat."
+          }
+        }
+      }
+    },
+    "Copies the selected Claude or Codex login to a private folder on this host. Your login stays on this Mac too. Only enable this for a machine you trust." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copies the selected Claude or Codex login to a private folder on this host. Your login stays on this Mac too. Only enable this for a machine you trust."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopierar den valda Claude- eller Codex-inloggningen till en privat mapp på värden. Inloggningen finns kvar på denna Mac. Aktivera bara detta för en dator du litar på."
           }
         }
       }
@@ -38720,6 +38788,23 @@
         }
       }
     },
+    "Open Privacy Settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Privacy Settings"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna integritetsinställningar"
+          }
+        }
+      }
+    },
     "Open Session Info" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41207,6 +41292,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Förbereder den privata lyssnaren på denna Mac…"
+          }
+        }
+      }
+    },
+    "Preparing the remote chat timed out. Check the host and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing the remote chat timed out. Check the host and try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förberedelsen av fjärrchatten tog för lång tid. Kontrollera värden och försök igen."
           }
         }
       }
@@ -59977,6 +60079,23 @@
         }
       }
     },
+    "The login could not be stored securely on the remote host. Check that the remote account can write to its home folder, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The login could not be stored securely on the remote host. Check that the remote account can write to its home folder, then try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inloggningen kunde inte lagras säkert på fjärrvärden. Kontrollera att fjärrkontot kan skriva till sin hemmapp och försök sedan igen."
+          }
+        }
+      }
+    },
     "The login this chat was set to continue on is not available." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60903,6 +61022,23 @@
         }
       }
     },
+    "The remote Threading tools helper is out of date or could not start. Update the Linux host components, then reconnect the host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The remote Threading tools helper is out of date or could not start. Update the Linux host components, then reconnect the host."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hjälpprogrammet för Threadings fjärrverktyg är föråldrat eller kunde inte starta. Uppdatera Linux-värdkomponenterna och anslut värden igen."
+          }
+        }
+      }
+    },
     "The remote automation changed. Inspect it again before retrying." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60910,6 +61046,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fjärrautomatiseringen har ändrats. Granska den igen innan du försöker på nytt."
+          }
+        }
+      }
+    },
+    "The remote chat is not ready. Try opening it again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The remote chat is not ready. Try opening it again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fjärrchatten är inte redo. Försök öppna den igen."
+          }
+        }
+      }
+    },
+    "The remote host needs a working connection back to Threading for chat tools and permission requests." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The remote host needs a working connection back to Threading for chat tools and permission requests."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fjärrvärden behöver en fungerande anslutning tillbaka till Threading för chattverktyg och behörighetsförfrågningar."
           }
         }
       }
@@ -61310,6 +61480,57 @@
         }
       }
     },
+    "The selected %@ login could not be read." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected %@ login could not be read."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den valda %@-inloggningen kunde inte läsas."
+          }
+        }
+      }
+    },
+    "The selected Claude login could not be read. Reconnect it in Agents & Accounts, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected Claude login could not be read. Reconnect it in Agents & Accounts, then try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den valda Claude-inloggningen kunde inte läsas. Anslut den igen under Agenter och konton och försök sedan igen."
+          }
+        }
+      }
+    },
+    "The selected Codex login has no readable auth.json file. Reconnect it in Agents & Accounts to save a login that can be copied, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected Codex login has no readable auth.json file. Reconnect it in Agents & Accounts to save a login that can be copied, then try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den valda Codex-inloggningen saknar en läsbar auth.json-fil. Anslut den igen under Agenter och konton för att spara en inloggning som kan kopieras och försök sedan igen."
+          }
+        }
+      }
+    },
     "The selected Simulator is no longer available. Choose another device." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -61372,6 +61593,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den valda utcheckningen är frånkopplad. Byt först till en gren."
+          }
+        }
+      }
+    },
+    "The selected login is no longer available on this Mac. Choose a login in Agents & Accounts, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected login is no longer available on this Mac. Choose a login in Agents & Accounts, then try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den valda inloggningen finns inte längre på denna Mac. Välj en inloggning under Agenter och konton och försök sedan igen."
           }
         }
       }
@@ -65680,6 +65918,23 @@
         }
       }
     },
+    "Threading needs permission to copy your Claude login from this Mac’s Keychain.\n\nOpen Privacy Settings and enable Live usage from your Claude login if it is off. Click Allow… if shown, then choose Always Allow in the macOS prompt. Return here and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading needs permission to copy your Claude login from this Mac’s Keychain.\n\nOpen Privacy Settings and enable Live usage from your Claude login if it is off. Click Allow… if shown, then choose Always Allow in the macOS prompt. Return here and try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading behöver behörighet för att kopiera din Claude-inloggning från nyckelringen på denna Mac.\n\nÖppna integritetsinställningarna och aktivera Liveanvändning från din Claude-inloggning om det är avstängt. Klicka på Tillåt… om knappen visas och välj sedan Tillåt alltid i macOS-dialogrutan. Återvänd hit och försök igen."
+          }
+        }
+      }
+    },
     "Threading never sees a password. When an agent reaches a sign-in field the browser is revealed with that field focused, and you complete it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -68844,6 +69099,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använda den reparerade “%@”?"
+          }
+        }
+      }
+    },
+    "Use this Mac’s login for remote chats" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use this Mac’s login for remote chats"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd inloggningen på denna Mac för fjärrchattar"
           }
         }
       }

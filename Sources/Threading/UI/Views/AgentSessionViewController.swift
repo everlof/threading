@@ -28,6 +28,7 @@ final class AgentSessionViewController: NSViewController {
     private let subagentState: SubagentSessionState
     private let launchPlanProvider: AgentLaunchPlanProvider
     private let projectStore: ProjectStore
+    private let remoteHosts: RemoteExecutionHosts
     private let appEvents = AppEventObservations()
 
     private(set) var isRunning = false
@@ -69,6 +70,7 @@ final class AgentSessionViewController: NSViewController {
     /// The local plan is then only a placeholder: the command line is composed from the host's
     /// facts once the host is prepared, which may take a while the first time.
     private var pendingRemoteLaunch: PendingRemoteLaunch?
+    private var remoteAccountPreparation: Task<Void, Never>?
     /// Retries a remote launch when its host's preparation settles. Registered only while one waits.
     private var remoteHostObserver: NSObjectProtocol?
     /// While the off-main process-table preflight decides whether another CLI owns this resume
@@ -141,10 +143,12 @@ final class AgentSessionViewController: NSViewController {
         agentSession: AgentSession,
         subagentState: SubagentSessionState? = nil,
         launchPlanProvider: AgentLaunchPlanProvider? = nil,
-        projectStore: ProjectStore = .shared
+        projectStore: ProjectStore = .shared,
+        remoteHosts: RemoteExecutionHosts = .shared
     ) {
         self.sessionID = agentSession.id
         self.projectStore = projectStore
+        self.remoteHosts = remoteHosts
         self.agentKind = agentSession.kind
         self.subagentState = subagentState
             ?? SubagentSessionState(sessionID: agentSession.id)
@@ -1104,6 +1108,7 @@ final class AgentSessionViewController: NSViewController {
     // MARK: - Private Methods — remote execution hosts
 
     private struct PendingRemoteLaunch {
+        let generation = UUID()
         let host: ProjectExecutionHost
         let initialPrompt: String?
         /// A reconnect: take back a running agent or report that it ended, and never spawn one.
@@ -1130,6 +1135,7 @@ final class AgentSessionViewController: NSViewController {
         case notStarted
         case encoding
         case encoded(RemoteAgentLaunch)
+        case failed(SessionLaunchFailure)
     }
 
     private enum RemoteHoldingsSurvey {
@@ -1154,7 +1160,7 @@ final class AgentSessionViewController: NSViewController {
     /// Where a remote launch stands. Never blocks: preparing a host is `ssh` work on
     /// `RemoteExecutionHosts`' own queue, and this waits for its change notification.
     private func resolveRemoteLaunch(_ remote: PendingRemoteLaunch) -> RemoteLaunchResolution {
-        let hosts = RemoteExecutionHosts.shared
+        let hosts = remoteHosts
         let destination = remote.host.sshDestination
         let phase: RemoteHostPhase
         if remote.requestedPreparation {
@@ -1249,50 +1255,58 @@ final class AgentSessionViewController: NSViewController {
             switch remote.encoding {
             case .encoded(let launch):
                 return .ready(launch, socketPath: context.localSocketPath)
+            case .failed(let failure):
+                return .refused(failure)
             case .encoding:
                 return .waiting
             case .notStarted:
                 break
             }
-            do {
-                let unencoded = try RemoteAgentLaunch.make(
-                    for: agentSession,
-                    in: project,
-                    host: remote.host,
-                    context: context,
-                    initialPrompt: remote.initialPrompt,
-                    mailbox: {
-                        if case .resolved(let binding) = remote.mailbox { return binding }
-                        return nil
-                    }()
-                )
-                pendingRemoteLaunch?.encoding = .encoding
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let launch = unencoded.encode()
-                    DispatchQueue.main.async { [weak self] in
-                        MainActor.assumeIsolated {
-                            guard let self, self.pendingRemoteLaunch != nil else { return }
-                            self.pendingRemoteLaunch?.encoding = .encoded(launch)
-                            self.startIfTerminalIsSized()
+            pendingRemoteLaunch?.encoding = .encoding
+            remoteAccountPreparation = Task { @MainActor [weak self] in
+                do {
+                    let account = try await RemoteConversationAccount.prepared(
+                        for: agentSession, on: remote.host, context: context)
+                    guard let self, self.pendingRemoteLaunch?.generation == remote.generation else { return }
+                    let unencoded = try RemoteAgentLaunch.make(
+                        for: agentSession,
+                        in: project,
+                        host: remote.host,
+                        context: context,
+                        initialPrompt: remote.initialPrompt,
+                        mailbox: {
+                            if case .resolved(let binding) = remote.mailbox { return binding }
+                            return nil
+                        }(),
+                        account: account
+                    )
+                    let pinned = self.projectStore.update(sessionID: self.sessionID) { stored in
+                        stored.remoteUsesCopiedAccount = account.usesCopiedLogin
+                    }
+                    guard pinned.succeeded else { throw RemoteConversationFailure.notPrepared }
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        let launch = unencoded.encode()
+                        DispatchQueue.main.async { [weak self] in
+                            MainActor.assumeIsolated {
+                                guard let self, self.pendingRemoteLaunch?.generation == remote.generation else { return }
+                                self.pendingRemoteLaunch?.encoding = .encoded(launch)
+                                self.startIfTerminalIsSized()
+                            }
                         }
                     }
+                } catch {
+                    guard let self, self.pendingRemoteLaunch?.generation == remote.generation else { return }
+                    let failure = (error as? RemoteConversationFailure)?.launchFailure ?? SessionLaunchFailure(
+                        origin: .preflight,
+                        summary: L10n.string("Couldn’t start this session on its remote host."),
+                        detail: [error.localizedDescription],
+                        knownCause: "remoteHost.\((error as? RemoteAgentLaunchError)?.token ?? "accountPreparation")"
+                    )
+                    self.pendingRemoteLaunch?.encoding = .failed(failure)
+                    self.startIfTerminalIsSized()
                 }
-                return .waiting
-            } catch let refusal as RemoteAgentLaunchError {
-                return .refused(SessionLaunchFailure(
-                    origin: .preflight,
-                    summary: L10n.string("Couldn’t start this session on its remote host."),
-                    detail: [refusal.localizedDescription],
-                    knownCause: "remoteHost.\(refusal.token)"
-                ))
-            } catch {
-                return .refused(SessionLaunchFailure(
-                    origin: .preflight,
-                    summary: L10n.string("Couldn’t start this session on its remote host."),
-                    detail: [error.localizedDescription],
-                    knownCause: "remoteHost.unexpected"
-                ))
             }
+            return .waiting
         }
     }
 
@@ -1363,6 +1377,8 @@ final class AgentSessionViewController: NSViewController {
     }
 
     private func clearPendingRemoteLaunch() {
+        remoteAccountPreparation?.cancel()
+        remoteAccountPreparation = nil
         pendingRemoteLaunch = nil
         if let remoteHostObserver {
             NotificationCenter.default.removeObserver(remoteHostObserver)

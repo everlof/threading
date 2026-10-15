@@ -1933,3 +1933,13 @@ wash with an accent edge and a `floating` caption, both through `applySurface` s
 appearance and Increase Contrast changes re-resolve them; it glides between landings at
 `Design.Motion.quick` and never intercepts the pointer. Strip drops paint the same drop role,
 so a row and a pane say "this is where it lands" in one voice.
+
+## Remote bridge compatibility
+
+Remote host preparation proves the installed bridge accepts the shipping launch contract. It runs
+one bounded handshake with a fixture token in `THREADING_SESSION_TOKEN`, a private temporary cache
+and an absent socket, then removes the scratch directory. The bridge must answer with its offline
+initialize result. Checking the executable/hash alone admitted an older Linux helper that required
+`--token`: every remote Claude MCP launch exited 64, while a live test still using `--token`
+passed. Linux smoke tests and the live forwarding test now use the shipping environment form.
+This probe runs once per host preparation on its worker, never per turn or on the main actor.

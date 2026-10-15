@@ -295,6 +295,55 @@ enum AgentLauncher {
         }
     }
 
+    /// Provider syntax for a native process on another machine. No local paths, account router,
+    /// transcript probes or hook-file writes belong in this adapter.
+    static func remoteStreamCommands(
+        for session: AgentSession,
+        integration: RemoteAgentIntegrationFlags,
+        toolRoute: RemoteHostToolRoute?
+    ) throws -> (fresh: ShellCommand, resume: ShellCommand, state: ResumeState) {
+        var command = ShellCommand(word: session.kind.executableName)
+        switch session.kind {
+        case .claude:
+            appendModelFlag(for: session, flag: AgentDefaults.claudeModelFlag, to: &command)
+            appendReasoningEffort(for: session, to: &command)
+            appendPermissionMode(for: session, to: &command)
+            command.append(flag: "--print")
+            command.append(flag: "--input-format", value: "stream-json")
+            command.append(flag: "--output-format", value: "stream-json")
+            for flag in ["--include-partial-messages", "--verbose", "--forward-subagent-text", "--include-hook-events"] {
+                command.append(flag: flag)
+            }
+            if let path = integration.settingsPath { command.append(flag: "--settings", value: path) }
+            if let path = integration.mcpConfigPath { command.append(flag: "--mcp-config", value: path) }
+            let id = session.resumeState.transcriptID ?? TranscriptID(session.id.uuidString.lowercased())
+            var resume = command
+            resume.append(flag: "--resume", value: id.rawValue)
+            command.append(flag: "--session-id", value: id.rawValue)
+            return (command, resume, .resumable(id))
+        case .codex:
+            appendModelFlag(for: session, flag: AgentDefaults.codexModelFlag, to: &command)
+            appendCodexConversationOverrides(for: session, to: &command)
+            if permissionMode(for: session) != nil {
+                appendPermissionMode(for: session, to: &command)
+            } else {
+                command.append(flag: AgentDefaults.codexSandboxFlag, value: AgentDefaults.codexSandboxWorkspaceWrite)
+            }
+            appendCodexConfigOverride("cli_auth_credentials_store", string: "file", to: &command)
+            if let route = toolRoute, let bridge = route.bridgePath {
+                appendCodexServerAddress(.stdio(MCPBridgeInvocation(command: bridge, arguments: [
+                    MCPBridgeDefaults.socketArgument, route.socketPath,
+                    MCPBridgeDefaults.cacheArgument, "\(route.cacheDirectory)/\(session.id.uuidString).json"
+                ])), under: "mcp_servers.threading", to: &command)
+            }
+            command.append(word: "app-server")
+            command.append(flag: "--listen", value: "stdio://")
+            return (command, command, session.resumeState)
+        case .grok, .openCode, .cursor:
+            throw RemoteAgentLaunchError.unsupportedAgent(session.kind)
+        }
+    }
+
     /// Claude keeps one bidirectional stream open for the lifetime of the conversation.
     private static func claudeStreamPlan(
         for session: AgentSession,
@@ -1492,7 +1541,7 @@ extension AgentLaunchPlan {
     /// The environment this plan's child is spawned with: the shared one, then this plan's own
     /// entries on top, then its credentials.
     func launchEnvironment() -> [String: String] {
-        var environment = AgentEnvironment.launchEnvironment()
+        var environment = baseEnvironment ?? AgentEnvironment.launchEnvironment()
         for (key, value) in environmentOverrides {
             environment[key] = value
         }

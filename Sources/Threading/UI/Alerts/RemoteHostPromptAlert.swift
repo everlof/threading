@@ -55,7 +55,7 @@ enum RemoteHostPromptAlert {
         alert.alertStyle = .informational
         alert.messageText = L10n.format("Run “%@” on a Remote Host", projectName)
         alert.informativeText = L10n.string(
-            "Claude Code terminal sessions in this project run on the machine you choose here, in the folder you name on it."
+            "Claude and Codex chats, and Claude terminals, run on the machine you choose here, in the folder you name on it."
         )
         alert.accessoryView = accessory
         alert.initialFirstResponder = accessory.firstField

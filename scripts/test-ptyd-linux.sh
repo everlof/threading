@@ -146,7 +146,7 @@ run_architecture() {
         echo "--- threading-mcp-bridge answers a handshake with nothing behind its socket"
         handshake="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
         answer="$(printf "%s\n" "${handshake}" \
-          | timeout 20 /out/threading-mcp-bridge --socket /tmp/no-threading.sock --token smoke \
+          | THREADING_SESSION_TOKEN=smoke timeout 20 /out/threading-mcp-bridge --socket /tmp/no-threading.sock \
             --cache /tmp/bridge-smoke-cache.json)"
         if ! grep -q "Threading is not running" <<<"${answer}"; then
           echo "test-ptyd-linux: the bridge did not answer the handshake: ${answer}" >&2

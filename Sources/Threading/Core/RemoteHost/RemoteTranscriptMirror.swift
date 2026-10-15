@@ -339,6 +339,15 @@ extension RemoteTranscriptMirror {
               let host = Self.host(for: session, in: nil, store: store),
               let transcriptID = session.resumeState.transcriptID,
               case .ready(let context) = hosts.phase(for: host.sshDestination) else { return nil }
+        if session.usesNativeUI || session.remoteUsesCopiedAccount == true {
+            guard let localAccount = AgentAccountDiscovery.account(for: session.kind, handle: session.accountHandle),
+                  localAccount.handle == session.accountHandle,
+                  let account = try? RemoteConversationAccount.make(account: localAccount, home: context.facts.home,
+                    reuse: RemoteConversationAccount.usesCopiedAccount(for: session,
+                        reuseCredentials: RemoteConversationAccount.reusesCredentials(on: host))) else { return nil }
+            return RemoteNativeConversation.transcriptLocation(session: session, id: transcriptID, host: host,
+                                                               context: context, account: account)
+        }
         return RemoteTranscriptLocation(
             destination: host.sshDestination,
             remotePath: RemoteAgentLaunch.remoteTranscriptPath(

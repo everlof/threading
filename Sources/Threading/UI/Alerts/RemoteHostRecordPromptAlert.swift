@@ -67,6 +67,7 @@ final class RemoteHostRecordPromptAccessory: NSView, NSTextFieldDelegate {
     let destinationField = ThemedTextField()
     let configFileField = ThemedTextField()
     let defaultDirectoryField = ThemedTextField()
+    let reuseCredentials = ThemedCheckbox(title: L10n.string("Use this Mac’s login for remote chats"), changed: { _ in })
     let helperLabel = NSTextField(wrappingLabelWithString: "")
 
     var firstField: ThemedTextField { destinationField }
@@ -74,21 +75,21 @@ final class RemoteHostRecordPromptAccessory: NSView, NSTextFieldDelegate {
     /// What was typed, keeping the identity of the record being edited so every project naming it
     /// follows the edit rather than losing its host.
     func record(replacing existing: RemoteHostRecord?) -> RemoteHostRecord {
-        let typed = RemoteHostRecord.typed(
+        var typed = RemoteHostRecord.typed(
             label: labelField.stringValue,
             destination: destinationField.stringValue,
             sshConfigFile: configFileField.stringValue,
             defaultDirectory: defaultDirectoryField.stringValue
         )
+        typed.reusesLocalCredentials = reuseCredentials.state == .on
         guard let existing else { return typed }
-        return RemoteHostRecord(
-            id: existing.id,
-            label: typed.label,
-            destination: typed.destination,
-            sshConfigFile: typed.sshConfigFile,
-            defaultDirectory: typed.defaultDirectory,
-            addedAt: existing.addedAt
-        )
+        var updated = existing
+        updated.label = typed.label
+        updated.destination = typed.destination
+        updated.sshConfigFile = typed.sshConfigFile
+        updated.defaultDirectory = typed.defaultDirectory
+        updated.reusesLocalCredentials = typed.reusesLocalCredentials
+        return updated
     }
 
     private static var helperText: String {
@@ -102,6 +103,7 @@ final class RemoteHostRecordPromptAccessory: NSView, NSTextFieldDelegate {
         destinationField.stringValue = current?.destination ?? ""
         configFileField.stringValue = current?.sshConfigFile ?? ""
         defaultDirectoryField.stringValue = current?.defaultDirectory ?? ""
+        reuseCredentials.state = current?.reusesLocalCredentials == true ? .on : .off
         setup()
     }
 
@@ -143,7 +145,14 @@ final class RemoteHostRecordPromptAccessory: NSView, NSTextFieldDelegate {
             )
         ]
 
-        let stack = NSStackView(views: rows + [helperLabel])
+        reuseCredentials.setAccessibilityIdentifier("remote-host-record.reuse-credentials")
+        let credentialDetail = NSTextField(wrappingLabelWithString: L10n.string(
+            "Copies the selected Claude or Codex login to a private folder on this host. Your login stays on this Mac too. Only enable this for a machine you trust."
+        ))
+        credentialDetail.applyFont(.caption)
+        credentialDetail.textColor = Design.Text.secondary
+        credentialDetail.preferredMaxLayoutWidth = RemoteHostPromptDefaults.width
+        let stack = NSStackView(views: rows + [helperLabel, reuseCredentials, credentialDetail])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.small
@@ -161,6 +170,8 @@ final class RemoteHostRecordPromptAccessory: NSView, NSTextFieldDelegate {
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         helperLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        reuseCredentials.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        credentialDetail.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
     private func row(

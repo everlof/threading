@@ -2068,6 +2068,21 @@ final class TerminalContainerViewController: NSViewController {
         if failure.knownCause == SessionLaunchDiagnosis.Cause.executableMissing {
             return missingExecutableActions(failure, sessionID: sessionID, kind: kind)
         }
+        if failure.knownCause == RemoteConversationFailure.keychainAccessCause {
+            return [
+                LaunchFailureAction(title: L10n.string("Open Privacy Settings"), emphasis: .primary) { [weak self] in
+                    (self?.view.window?.windowController as? MainWindowController)?.showSettingsPage(
+                        id: SettingsPages.privacyID, revealing: L10n.string("Live usage from your Claude login"))
+                },
+                LaunchFailureAction(title: L10n.string("Try Again")) { [weak self] in
+                    self?.relaunchAfterFailure(sessionID: sessionID)
+                },
+                LaunchFailureAction(title: L10n.string("Copy Details")) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(failure.report, forType: .string)
+                }
+            ]
+        }
         var actions: [LaunchFailureAction] = [
             LaunchFailureAction(
                 title: L10n.string("Try Again"),

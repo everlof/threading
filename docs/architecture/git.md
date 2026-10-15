@@ -1185,7 +1185,9 @@ agent's checkout — that one is on the host — so nothing here reads it for a 
 - **No turn checkpoints.** `GitTurnBaselineStore.prepareTurn` answers nil for a remote session.
   Snapshotting the Mac folder would record whatever changed on this Mac during the turn, a
   person's own edits included, as the agent's work, and write refs into a repository the agent
-  never touched.
+  never touched. `NativeGitTurnAdmission` explicitly permits this remote absence while retaining
+  the checkpoint requirement for local turns. The transport's acceptance still decides whether
+  the message leaves the outbox; a remote chat must not wait forever for a Mac checkpoint.
 - **No branch.** `refreshBranch` records none for a remote session, and `refreshBranches(forCheckoutAt:)`
   skips remote projects, so a HEAD moving on this Mac cannot relabel a session running elsewhere.
 - **No status card**, and no watcher: `GitReviewViewController.repositoryRoot` is nil for a remote

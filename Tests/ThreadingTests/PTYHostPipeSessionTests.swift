@@ -57,6 +57,22 @@ final class PTYHostPipeSessionTests: XCTestCase {
 
     // MARK: - The launch
 
+    func testRemotePIDNeverEntersOrClearsTheLocalLedger() throws {
+        let start = ProcessStartTime(seconds: 1, microseconds: 0)
+        XCTAssertEqual(ledger.recordHostBackedChild(pid: Fixture.hostPid, startTime: start,
+                                                   sessionID: "local-session", executable: "/bin/sh"), .recorded)
+        let box = TransportBox()
+        let ended = expectation(description: "remote exit delivered")
+        let process = try launch(answering: .spawned, into: box, isRemote: true, onExit: { _ in ended.fulfill() })
+        XCTAssertNil(process.localProcessIdentifier)
+        let transport = try XCTUnwrap(box.transport)
+        transport.send(.exited(PTYHostExited(id: transport.identity, status: 0, signalled: false)))
+        wait(for: [ended], timeout: Fixture.timeout)
+        guard case .loaded(let records) = ledger.consumeInheritedRecords() else { return XCTFail("ledger unreadable") }
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.sessionID, "local-session")
+    }
+
     /// The daemon's answer is what the launch reports: its pid, its start time, its child.
     func testALaunchTheHostAnswersRunsTheChildThere() throws {
         let transport = TransportBox()
@@ -426,6 +442,7 @@ final class PTYHostPipeSessionTests: XCTestCase {
     private func launch(
         answering answer: FakePipeTransport.Answer,
         into box: TransportBox,
+        isRemote: Bool = false,
         onExit: @escaping @Sendable (Int32) -> Void = { _ in }
     ) throws -> AgentChildProcess {
         let sessionID = SessionID()
@@ -441,7 +458,8 @@ final class PTYHostPipeSessionTests: XCTestCase {
                 box.adopt(transport)
                 return transport
             },
-            workingDirectory: NSTemporaryDirectory()
+            workingDirectory: NSTemporaryDirectory(),
+            isRemote: isRemote
         )
 
         let process = try AgentChildProcess.launch(

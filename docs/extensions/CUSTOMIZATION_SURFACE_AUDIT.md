@@ -694,6 +694,14 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+**Remote-chat login reuse** extends the host-only remote host editor with the shared themed
+checkbox and explanatory label. Threading owns SSH destination selection, explicit per-host
+credential-copy consent, selected-account custody, private remote storage, provider launch and
+transcript routing. Themes style those controls; extensions gain no credential or host authority.
+Its permission-failure recovery remains in the host-owned launch-failure surface: themes style
+the existing wrapping labels and actions; Threading owns diagnosis, Privacy navigation, the
+Keychain grant and retry. No credential or recovery authority is delegated to extensions.
+
 **Physical iPhone capture and presentation controls** extend the host-only device pane. The host
 owns frame custody, explicit snapshot/recording initiation, file destinations, recording lifecycle,
 preview demand, exact phone identity and input revocation. Themes style the existing buttons,

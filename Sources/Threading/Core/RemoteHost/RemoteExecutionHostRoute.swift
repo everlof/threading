@@ -33,9 +33,11 @@ enum RemoteExecutionHostRoute: Equatable {
     }
 }
 
-enum RemoteExecutionHostRefusal: Equatable {
+enum RemoteExecutionHostRefusal: Equatable, LocalizedError {
     case unsupportedBuild
     case invalid(ProjectExecutionHost.Problem)
+
+    var errorDescription: String? { message }
 
     var message: String {
         switch self {

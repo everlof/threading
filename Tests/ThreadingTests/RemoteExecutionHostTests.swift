@@ -375,6 +375,24 @@ final class RemoteExecutionHostTests: XCTestCase {
         XCTAssertFalse(launch.plan.arguments.joined().contains("--mcp-config"))
     }
 
+    func testTerminalLaunchUsesThePreparedCopiedAccountForLoginAndTranscript() throws {
+        var session = AgentSession(kind: .claude, title: "Remote terminal", usesNativeUI: false)
+        session.remoteUsesCopiedAccount = true
+        let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/project"))
+        let host = ProjectExecutionHost(destination: "pi", remoteDirectory: "/home/me/project")
+        let prepared = try RemoteConversationAccount.make(
+            account: AgentAccount(provider: .claude, handle: .named("work"), configPath: "/Users/me/.claude-work"),
+            home: "/home/me", reuse: true)
+        let launch = try RemoteAgentLaunch.make(for: session, in: project, host: host,
+            context: context(home: "/home/me"), initialPrompt: nil, account: prepared)
+        XCTAssertTrue(launch.environment.contains("CLAUDE_CONFIG_DIR=\(prepared.directory)"))
+        XCTAssertTrue(launch.plan.arguments.last?.contains("\(prepared.directory)/projects/") == true)
+        XCTAssertTrue(launch.plan.arguments.last?.contains("threading-login-token") == true)
+        XCTAssertFalse(launch.plan.arguments.joined().contains("/Users/me"))
+        XCTAssertThrowsError(try RemoteAgentLaunch.make(for: session, in: project, host: host,
+            context: context(home: "/home/me"), initialPrompt: nil), "A copied account must never silently use the host login")
+    }
+
     /// The host's shell chooses between resuming and starting, so the choice is asserted by running
     /// the script in a real shell against a fake `claude` that prints its arguments — once with no
     /// transcript, once with one — in a checkout whose name is hostile to quoting.

@@ -69,6 +69,29 @@ final class RemoteProjectGitTests: HostedStoreTestCase {
         XCTAssertTrue(GitTurnBaselineStore.shared.checkpoints(forSessionID: remote.id).isEmpty)
     }
 
+    func testRemoteNativeAdmissionSendsWithoutALocalCheckpointAndHonorsTransportRefusal() throws {
+        let checkout = try makeCheckout()
+        let remote = try session(remote: true, in: checkout)
+        for accepts in [true, false] {
+            let answered = expectation(description: "remote native admission")
+            var transportCalls = 0
+            NativeGitTurnAdmission.admit(sessionID: remote.id, userTurnID: UUID().uuidString,
+                transport: { checkpoint in
+                    XCTAssertNil(checkpoint)
+                    transportCalls += 1
+                    return accepts
+                }, completion: { admitted, checkpoint in
+                    XCTAssertEqual(admitted, accepts)
+                    XCTAssertNil(checkpoint)
+                    answered.fulfill()
+                })
+            wait(for: [answered], timeout: 5)
+            XCTAssertEqual(transportCalls, 1)
+        }
+        XCTAssertTrue(GitTurnBaselineStore.shared.checkpoints(forSessionID: remote.id).isEmpty)
+        XCTAssertEqual(try String(contentsOf: checkout.appendingPathComponent("a.txt"), encoding: .utf8), "one\ntwo\n")
+    }
+
     /// The review pane reads nothing here for a remote project, and says where the checkout is — for
     /// the modes a remote review does not offer yet, plainly.
     func testTheReviewPaneRefusesTheMacFolderAndNamesTheHost() throws {

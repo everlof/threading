@@ -401,6 +401,8 @@ struct AgentCapabilities: OptionSet {
   /// place it can ask. Grok and Cursor run no hook: ACP's `session/request_permission` is
   /// already the runtime asking.
   static let runtimeOwnedApprovals = Self(rawValue: 1 << 42)
+  /// A structured conversation transport that can run through a remote ptyd pipe channel.
+  static let remoteNativeConversation = Self(rawValue: 1 << 43)
 }
 
 /// How a runtime accepts a long-lived sign-in token: the variable its CLI reads, what every such
@@ -502,7 +504,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory,
         .modelAliasResolution, .selectableTerminalRenderer, .remoteExecutionHostLaunch,
-        .longLivedAccountToken, .answeringMailHooks
+        .longLivedAccountToken, .answeringMailHooks, .remoteNativeConversation
       ]
     case .codex:
       return [
@@ -512,7 +514,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .inlineTerminalViewport, .lifecycleReportedTranscriptPath,
         .lifecycleReportedWorkingDirectory, .detectableExternalResume, .bankedUsageReset,
-        .answeringMailHooks, .runtimeOwnedApprovals
+        .answeringMailHooks, .runtimeOwnedApprovals, .remoteNativeConversation
       ]
     case .grok:
       return [
