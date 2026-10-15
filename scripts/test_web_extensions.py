@@ -337,7 +337,7 @@ async def browser_e2e(browser, headless=True):
                 records = worker.journal.page(limit=200)['events']
                 if all(any(message in row['message'] for row in records)
                        for message in ['e2e-background-error', 'e2e-content-warning', 'e2e-unhandled']) and any(row['kind'] == 'message-failed' for row in records) \
-                        and any(row['context'] == 'extension-page' and 'Popup connected' in row['message'] for row in records):
+                        and any(row['context'] == 'popup' and 'Popup connected' in row['message'] for row in records):
                     break
                 await asyncio.sleep(0.1)
             else:

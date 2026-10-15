@@ -237,7 +237,7 @@ final class WebExtensionWorkbenchViewController: NSViewController, NSTableViewDa
         configuration.stringValue = target.map { ([$0.source] + ($0.build ?? [])).joined(separator: "  ") }
             ?? L10n.string("Open a manifest project, or choose Project → Create Starter Extension.")
         status.stringValue = run.map { "\($0.status) · \($0.browserVersion ?? $0.browser) · \($0.build)\n\(($0.contexts ?? []).joined(separator: ", "))\n\($0.instructions ?? "")" }
-            ?? L10n.string("Development copies report console, JavaScript errors and failed fetches. Browser-internal errors and MAIN-world scripts are not captured.")
+            ?? L10n.string("Development copies trace scripts, messages and failed requests. Some browser contexts require native inspection.")
         startButton.isEnabled = target != nil && run == nil && !operating
         reloadButton.isEnabled = run != nil && !operating
         stopButton.isEnabled = run != nil && !operating

@@ -19,7 +19,11 @@ extension MCPTools {
                 from background, content scripts and extension pages as one line each (pass event for one full record \
                 with its stack); source resolves an event to checkout code. page-exception records are the test \
                 site's own script errors, not the extension's. \
-                test runs the target's declared UI steps ({url,selector,text,click,fill} or {page:popup|options,selector}). \
+                test runs declared page steps ({url,selector,text,click,fill} or \
+                {page:popup|options|side-panel|new-tab,selector}), event assertions ({event:{kind,context,message,level}}), \
+                and lifecycle steps ({lifecycle:reload|restart|stop-worker}). stop-worker requires Chromium. \
+                MAIN-world and sandbox records are untrusted public-world observations. Registered MAIN scripts, \
+                legacy tabs.executeScript and native host internals need native inspection. \
                 debug opens the browser's extension inspector; popup/options opens those extension pages as tabs. \
                 package-safari generates an Xcode wrapper for Mac/iOS. \
                 Safari activation is user-owned; awaiting-installation is not a connected or tested extension. \

@@ -40,10 +40,25 @@ Build is an argv array executed in the checkout, never a shell string. Source mu
 loadable extension directory; an omitted `source` means the checkout root, and discovery returns
 every target with `source` and `build` filled in, so the panel, an agent and Start read one
 complete record. Use one browser-specific build target per output when API or
-manifest differences require it. `page` supports popup, options and side-panel content. `url`
-supports HTTP(S), or `fixture` for the bundled local test page. Assertions require exactly one
+manifest differences require it. `page` supports popup, options, side-panel and new-tab content. `url`
+supports HTTP(S), or `fixture` for the bundled local test page with a same-origin child frame. Assertions require exactly one
 CSS match; `text`, `click` and `fill` are supported. Test screenshots are written to the run's
 state directory (one success and one failure image, overwritten on subsequent runs).
+
+Tests also accept `{event: {kind, context, message, level}}` (any nonempty subset) and
+`{lifecycle: "reload" | "restart" | "stop-worker"}`. Event assertions wait up to ten seconds,
+match the selected target and current build, and consider only events since the test began or
+its latest lifecycle step. `message` is a substring; other fields are exact. A test verdict
+cannot itself satisfy a console assertion. `stop-worker` stops workers in the owned Chromium
+profile, briefly enabling the CDP ServiceWorker domain and immediately disabling it. It does
+not leave a debugger attached to a worker. Pair it with an extension interaction and a fresh
+background event to check wake-up. Firefox suspension still requires native inspection.
+`restart` uses the same Chromium profile; Firefox starts a fresh temporary profile. At most
+50 page, event and lifecycle steps are accepted per test run.
+
+[`Examples/WebExtensions`](../../Examples/WebExtensions/README.md) is an editable project with
+five ready-to-run targets. Open that directory as the chat's project to exercise the shipping
+workbench without creating a separate extension first.
 
 ### Python and PATH
 
@@ -112,9 +127,44 @@ files are unchanged so stack line numbers survive. A new build hash identifies e
 service-worker wrapper is written beside the original worker, not at the root: `importScripts()`
 and `self.location` resolve against the registered worker's URL, so a classic worker in
 `background/` keeps the base its relative imports were written against.
-Background workers/pages, isolated static content scripts and extension HTML pages report
-console calls, exceptions, rejected promises, failed `fetch` calls and message send/reply/failure operations (without message payloads). Events retain browser
+Background workers/pages, static and dynamically injected content scripts, and extension HTML
+pages report console calls, exceptions, rejected promises, failed `fetch`/XHR calls, message
+send/reply/failure and port connect/send/receive/disconnect operations (without message payloads). Events retain browser
 target, build, context ID, URL, tab/frame, stack and arrival order.
+
+HTML hooks distinguish popup, options, sidebar, new-tab and DevTools pages from generic extension
+pages. A URL shared by several surfaces keeps the generic label. Offscreen documents receive the generic HTML hook and are identified by URL. DevTools
+pages still need the real developer tools opened before they execute. Classic and module
+backgrounds retain their original import base, and Firefox MV2 background HTML is instrumented.
+`scripting.executeScript` prepends hooks for file injection and preflights the same target before
+function injection, keeping the caller's function, results and callback/Promise convention.
+A failed preflight reports `instrumentation-gap` and still runs the original injection.
+Isolated `registerContentScripts` entries keep their IDs and native lifecycle. Registered MAIN
+scripts and updates without an explicit `world: "ISOLATED"` remain unchanged: adding a companion
+registration would alter get/update/unregister behavior, and assuming an update's existing world
+could expose a private hook in MAIN.
+
+Static MAIN groups get an isolated companion receiver. MAIN hooks and declared sandbox HTML
+contain no collector endpoint or token; they relay bounded records through `postMessage`. The
+receiver checks the source window (or one of at most 32 declared sandbox iframes), supplies its
+own build and context identity, and labels the records `main-world-untrusted` or
+`sandbox-untrusted`. Page scripts can forge this public stream; it never establishes trusted
+extension provenance. Firefox's content-script `globalThis` differs from `window`, so source
+identity is compared to `window`. Source web-accessible wildcard patterns are expanded before
+hooks are written, excluding reserved `threading_` filenames; generated credential-bearing
+scripts are never added to public resources. Expansion permits at most 256 distinct patterns
+and 8,192 bindings, and the staged manifest still must fit 64 KiB. CSP is not relaxed.
+
+Selected API operations report call/result/failure without arguments: scripting, permission
+changes, DNR rule updates, offscreen documents, downloads, sidebar opening and proxy settings.
+Native messaging reports the extension-side send/connection and errors; it does not trace a
+native host process. API availability and permission behavior remain browser-owned. These
+hooks observe calls made after installation, not every internal browser request or event.
+
+Firefox extension tabs navigate through the browser's privileged `loadURI` path. That call
+returns before the document is ready, so tests wait for the previous document to become stale
+and the new document's `readyState` to be complete. URL equality alone caused intermittent
+clicks before the page's scripts installed their handlers.
 
 The background and extension pages hold the loopback host permission and post to the collector
 directly. A content script's requests follow its page's origin rules, so it batches events (at
@@ -138,8 +188,8 @@ The development manifest adds loopback host access. Each live target has a rando
 on a loopback-only collector; stopping revokes it. These are development artifacts and must not
 be published. No request bodies, headers or cookies are deliberately collected. Console values
 can contain secrets; redaction is best effort. Diagnostic text is untrusted data, never an agent
-instruction. MAIN-world scripts, dynamically injected scripts, XHR and browser-internal errors
-are outside the injected hook. Use the native debugger for breakpoints, startup/manifest errors,
+instruction. Registered MAIN scripts, legacy `tabs.executeScript` injection, browser-internal
+errors and native-host internals remain outside the injected hook. Use the native debugger for breakpoints, startup/manifest errors,
 permissions and anything the hook cannot execute or capture. CSP can prevent connection;
 `running` means launched, while `connected` requires telemetry from the current build.
 
@@ -216,8 +266,19 @@ nested worker wrapper, the port relay, page-exception attribution, compact agent
 cleanup and IDs) passed the 20 helper contracts and both `--e2e chromium firefox` lanes, with
 Playwright 1.64.0 and Selenium 4.51.0 installed outside the shared cache.
 
+The context expansion on 2026-10-15 passed 23 Python contracts, the JavaScript protocol checks,
+both starter regression lanes and all 73 declared steps across the five example targets on
+Chrome for Testing 156 and Firefox 158. The 35-step Chromium context target also passed headed.
+The Firefox rerun verifies document readiness before clicking, and the context harness checks
+child-frame attribution and absence of port/native-message payloads across the retained journal.
+This continuation changed worker resources and help text; it did not rerun the native XCTest
+or visual evidence lanes. Safari/mobile, native browser chrome and successful native hosts remain
+outside this automated evidence.
+
 - `python3 scripts/test_web_extensions.py`: staging, source-map confinement, scaffold safety and bounded journal/Unicode page contracts, collector authorization and route revocation, target normalization, the nested worker wrapper, stale cursors and generations, named deadlines and missing tools, page-exception attribution, and generation cleanup.
 - `python3 scripts/test_web_extensions.py --e2e chromium chrome firefox`: real-browser installation, content/background messaging, deliberate cross-context failures, source lookup, storage-preserving reload and failed-build recovery. Requires the setup dependencies and installed target browsers. Add `--headed` for a visible browser.
+- `node scripts/test_web_extension_hooks.js`: public-world provenance, callback/Promise results, original injection after preflight refusal, MAIN registration/update isolation, and port payload privacy.
+- `python3 scripts/test_web_extension_contexts.py --e2e`: the five editable example targets, including frame attribution, static/dynamic MAIN, file/function injection, registered scripts, ports, missing native hosts, DNR behavior, XHR, popup/options/sidebar/new-tab content, Chromium sandbox/offscreen/worker wake-up, module imports, Firefox MV2, reload and storage behavior. Add `--headed` to exercise a visible desktop browser.
 - `scripts/test.sh fast -only-testing:ThreadingTests/WebExtensionDevelopmentTests`: interpreter order, bundled worker resource and real Swift-to-Python pipe, refusal and undecodable-reply recovery, generation removal, an interpreter that exits first, stale-checkout rejection, read and command queueing, compact agent pages and cancellation. They skip without a Python 3. Set `THREADING_WEBEXT_E2E=1`
   and `THREADING_WEBEXT_PYTHON=/path/to/python` to also run a real Chromium loop through the bundled Swift transport.
 - With the same E2E environment, `scripts/test.sh fast -only-testing:ThreadingTests/SimulatorPaneRenderTests/testWebExtensionPanelRunsRealBrowserDevelopmentLoop` clicks the real panel’s Start, Run Tests, Rebuild & Reload and Stop against Chromium.
@@ -227,3 +288,7 @@ Primary adapter references: [Playwright extension testing](https://playwright.de
 [Chrome CDP Extensions](https://chromedevtools.github.io/devtools-protocol/tot/Extensions/),
 [Firefox web-ext](https://extensionworkshop.com/documentation/develop/getting-started-with-web-ext/),
 [Safari web extensions](https://developer.apple.com/documentation/safariservices/safari-web-extensions).
+Injection and context references: [Chrome scripting](https://developer.chrome.com/docs/extensions/reference/api/scripting),
+[Chrome offscreen documents](https://developer.chrome.com/docs/extensions/reference/api/offscreen),
+[Firefox background manifests](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/background),
+[native ports](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/runtime/connectNative).

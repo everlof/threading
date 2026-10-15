@@ -7267,6 +7267,15 @@ test site's own scripts appear as page exceptions, not extension errors. Search 
 error and choose **Open Source**, or use **Project → Open Browser Debugger** for native tools.
 Closing the panel removes its development profiles and copies; a generated Safari project stays.
 
+Dynamic `scripting.executeScript` injections, isolated registered scripts, message ports, native
+messaging calls, failed XHR and selected browser API calls also report diagnostics. MAIN-world
+and embedded sandbox messages are explicitly marked untrusted. Declared tests can check events,
+reload an extension, restart the development browser and stop a Chromium worker before checking
+its next interaction. Popup, options, sidebar and new-tab content can be tested as tabs; native
+popup dismissal, permission dialogs and DevTools activation still need browser UI checks.
+Open [Examples/WebExtensions](Examples/WebExtensions/README.md) as a project for five ready-to-run
+Chromium/Firefox fixtures, including module backgrounds and Firefox MV2.
+
 Chromium and installed Chrome-family browsers use separate development profiles. Firefox uses
 a temporary add-on. Safari requires activation in Safari; **Package Safari** creates its Xcode
 project for Mac or iOS Simulator. Android Firefox uses a configured dedicated adb device.

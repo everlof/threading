@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "Threading legacy background coverage",
+  "version": "1.0",
+  "background": {
+    "page": "background/index.html",
+    "persistent": false
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ]
+}

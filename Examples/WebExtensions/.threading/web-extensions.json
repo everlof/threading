@@ -1,0 +1,427 @@
+{
+  "version": 1,
+  "targets": [
+    {
+      "id": "chromium-contexts",
+      "browser": "chromium",
+      "source": "contexts",
+      "tests": [
+        {
+          "url": "fixture",
+          "selector": "#coverage-content",
+          "text": "background-ready"
+        },
+        {
+          "event": {
+            "kind": "console",
+            "context": "content-script",
+            "message": "coverage-content-child"
+          }
+        },
+        {
+          "event": {
+            "kind": "console",
+            "context": "main-world-untrusted",
+            "message": "coverage-static-main"
+          }
+        },
+        {
+          "page": "options",
+          "selector": "#exercise",
+          "click": true
+        },
+        {
+          "selector": "#result",
+          "text": "coverage-passed"
+        },
+        {
+          "event": {
+            "kind": "console",
+            "context": "content-script",
+            "message": "coverage-dynamic-file"
+          }
+        },
+        {
+          "event": {
+            "kind": "console",
+            "context": "content-script",
+            "message": "coverage-dynamic-function"
+          }
+        },
+        {
+          "event": {
+            "kind": "console",
+            "context": "main-world-untrusted",
+            "message": "coverage-dynamic-main"
+          }
+        },
+        {
+          "event": {
+            "kind": "port-received",
+            "context": "options"
+          }
+        },
+        {
+          "event": {
+            "kind": "message-failed",
+            "context": "options",
+            "message": "runtime.sendNativeMessage"
+          }
+        },
+        {
+          "event": {
+            "kind": "port-failed",
+            "context": "options",
+            "message": "runtime.connectNative"
+          }
+        },
+        {
+          "event": {
+            "kind": "network",
+            "context": "options",
+            "message": "XHR"
+          }
+        },
+        {
+          "url": "fixture",
+          "selector": "#coverage-content",
+          "text": "background-ready"
+        },
+        {
+          "event": {
+            "message": "coverage-registered-script",
+            "context": "content-script"
+          }
+        },
+        {
+          "event": {
+            "message": "coverage-offscreen-error"
+          }
+        },
+        {
+          "event": {
+            "message": "coverage-sandbox-error",
+            "context": "sandbox-untrusted"
+          }
+        },
+        {
+          "lifecycle": "stop-worker"
+        },
+        {
+          "page": "options",
+          "selector": "#ping",
+          "click": true
+        },
+        {
+          "selector": "#ping-result",
+          "text": "background-ready"
+        },
+        {
+          "event": {
+            "kind": "console",
+            "context": "background",
+            "message": "coverage-background-started"
+          }
+        },
+        {
+          "lifecycle": "reload"
+        },
+        {
+          "page": "options",
+          "selector": "#storage",
+          "click": true
+        },
+        {
+          "selector": "#storage-result",
+          "text": "retained"
+        },
+        {
+          "lifecycle": "restart"
+        },
+        {
+          "page": "options",
+          "selector": "#storage",
+          "click": true
+        },
+        {
+          "selector": "#storage-result",
+          "text": "retained"
+        },
+        {
+          "page": "popup",
+          "selector": "#ping",
+          "click": true
+        },
+        {
+          "selector": "#ping-result",
+          "text": "background-ready"
+        },
+        {
+          "event": {
+            "kind": "message-reply",
+            "context": "popup",
+            "message": "runtime.sendMessage"
+          }
+        },
+        {
+          "page": "side-panel",
+          "selector": "#ping",
+          "click": true
+        },
+        {
+          "selector": "#ping-result",
+          "text": "background-ready"
+        },
+        {
+          "event": {
+            "kind": "message-reply",
+            "context": "side-panel",
+            "message": "runtime.sendMessage"
+          }
+        },
+        {
+          "page": "new-tab",
+          "selector": "#ping",
+          "click": true
+        },
+        {
+          "selector": "#ping-result",
+          "text": "background-ready"
+        },
+        {
+          "event": {
+            "kind": "message-reply",
+            "context": "new-tab",
+            "message": "runtime.sendMessage"
+          }
+        }
+      ]
+    },
+    {
+      "id": "chromium-modules",
+      "browser": "chromium",
+      "source": "modules",
+      "tests": [
+        {
+          "url": "fixture",
+          "selector": "#module",
+          "text": "module-ready"
+        },
+        {
+          "lifecycle": "reload"
+        },
+        {
+          "url": "fixture",
+          "selector": "#module",
+          "text": "module-ready"
+        }
+      ]
+    },
+    {
+      "id": "firefox-contexts",
+      "browser": "firefox",
+      "source": "contexts",
+      "tests": [
+        {
+          "url": "fixture",
+          "selector": "#coverage-content",
+          "text": "background-ready"
+        },
+        {
+          "event": {
+            "kind": "console",
+            "context": "content-script",
+            "message": "coverage-content-child"
+          }
+        },
+        {
+          "event": {
+            "kind": "console",
+            "context": "main-world-untrusted",
+            "message": "coverage-static-main"
+          }
+        },
+        {
+          "page": "options",
+          "selector": "#exercise",
+          "click": true
+        },
+        {
+          "selector": "#result",
+          "text": "coverage-passed"
+        },
+        {
+          "event": {
+            "kind": "console",
+            "context": "content-script",
+            "message": "coverage-dynamic-file"
+          }
+        },
+        {
+          "event": {
+            "kind": "console",
+            "context": "content-script",
+            "message": "coverage-dynamic-function"
+          }
+        },
+        {
+          "event": {
+            "kind": "console",
+            "context": "main-world-untrusted",
+            "message": "coverage-dynamic-main"
+          }
+        },
+        {
+          "event": {
+            "kind": "port-received",
+            "context": "options"
+          }
+        },
+        {
+          "event": {
+            "kind": "message-failed",
+            "context": "options",
+            "message": "runtime.sendNativeMessage"
+          }
+        },
+        {
+          "event": {
+            "kind": "port-failed",
+            "context": "options",
+            "message": "runtime.connectNative"
+          }
+        },
+        {
+          "event": {
+            "kind": "network",
+            "context": "options",
+            "message": "XHR"
+          }
+        },
+        {
+          "url": "fixture",
+          "selector": "#coverage-content",
+          "text": "background-ready"
+        },
+        {
+          "event": {
+            "message": "coverage-registered-script",
+            "context": "content-script"
+          }
+        },
+        {
+          "lifecycle": "reload"
+        },
+        {
+          "page": "options",
+          "selector": "#storage",
+          "click": true
+        },
+        {
+          "selector": "#storage-result",
+          "text": "retained"
+        },
+        {
+          "lifecycle": "restart"
+        },
+        {
+          "page": "options",
+          "selector": "#storage",
+          "click": true
+        },
+        {
+          "selector": "#storage-result",
+          "text": "empty"
+        },
+        {
+          "page": "popup",
+          "selector": "#ping",
+          "click": true
+        },
+        {
+          "selector": "#ping-result",
+          "text": "background-ready"
+        },
+        {
+          "event": {
+            "kind": "message-reply",
+            "context": "popup",
+            "message": "runtime.sendMessage"
+          }
+        },
+        {
+          "page": "side-panel",
+          "selector": "#ping",
+          "click": true
+        },
+        {
+          "selector": "#ping-result",
+          "text": "background-ready"
+        },
+        {
+          "event": {
+            "kind": "message-reply",
+            "context": "side-panel",
+            "message": "runtime.sendMessage"
+          }
+        },
+        {
+          "page": "new-tab",
+          "selector": "#ping",
+          "click": true
+        },
+        {
+          "selector": "#ping-result",
+          "text": "background-ready"
+        },
+        {
+          "event": {
+            "kind": "message-reply",
+            "context": "new-tab",
+            "message": "runtime.sendMessage"
+          }
+        }
+      ]
+    },
+    {
+      "id": "firefox-modules",
+      "browser": "firefox",
+      "source": "modules",
+      "tests": [
+        {
+          "url": "fixture",
+          "selector": "#module",
+          "text": "module-ready"
+        },
+        {
+          "lifecycle": "reload"
+        },
+        {
+          "url": "fixture",
+          "selector": "#module",
+          "text": "module-ready"
+        }
+      ]
+    },
+    {
+      "id": "firefox-legacy",
+      "browser": "firefox",
+      "source": "legacy",
+      "tests": [
+        {
+          "url": "fixture",
+          "selector": "#legacy",
+          "text": "legacy-ready"
+        },
+        {
+          "lifecycle": "reload"
+        },
+        {
+          "url": "fixture",
+          "selector": "#legacy",
+          "text": "legacy-ready"
+        }
+      ]
+    }
+  ]
+}

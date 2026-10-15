@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Threading module worker coverage",
+  "version": "1.0",
+  "background": {
+    "service_worker": "background/worker.js",
+    "scripts": [
+      "background/worker.js"
+    ],
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ]
+}

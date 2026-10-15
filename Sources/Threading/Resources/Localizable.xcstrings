@@ -20950,19 +20950,19 @@
         }
       }
     },
-    "Development copies report console, JavaScript errors and failed fetches. Browser-internal errors and MAIN-world scripts are not captured." : {
+    "Development copies trace scripts, messages and failed requests. Some browser contexts require native inspection." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Development copies report console, JavaScript errors and failed fetches. Browser-internal errors and MAIN-world scripts are not captured."
+            "value" : "Development copies trace scripts, messages and failed requests. Some browser contexts require native inspection."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Utvecklingskopior rapporterar konsol, JavaScript-fel och misslyckade fetch-anrop. Interna webbläsarfel och MAIN-skript fångas inte."
+            "value" : "Utvecklingskopior spårar skript, meddelanden och misslyckade anrop. Vissa webbläsarkontexter kräver webbläsarens egna utvecklarverktyg."
           }
         }
       }

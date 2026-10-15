@@ -3,7 +3,8 @@
   if (globalThis.__threadingDiagnostics) return;
   Object.defineProperty(globalThis, '__threadingDiagnostics', {value: true});
   const config = __THREADING_CONFIG__;
-  const api = globalThis.browser || globalThis.chrome;
+  // Public worlds never receive collector credentials or trust a page-provided chrome object.
+  const api = config.public ? undefined : globalThis.browser || globalThis.chrome;
   // A sandboxed extension page has no extension API at all.
   const runtime = api?.runtime;
   const originalFetch = globalThis.fetch.bind(globalThis);
@@ -12,8 +13,8 @@
   const contextID = globalThis.crypto?.randomUUID?.() ??
     `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const location = () => globalThis.location?.href || '';
-  const context = config.background ? 'background' :
-    /^(chrome|moz|safari-web)-extension:/.test(location()) ? 'extension-page' : 'content-script';
+  const context = config.context || (config.background ? 'background' :
+    /^(chrome|moz|safari-web)-extension:/.test(location()) ? 'extension-page' : 'content-script');
   const relay = {name: 'threading-diagnostics', batch: 50, queue: 200, delay: 100, idle: 5000};
   let sequence = 0, sent = 0, windowStart = Date.now();
   const text = value => {
@@ -72,13 +73,18 @@
   const deliver = event => {
     // A bounded fire-and-forget diagnostics channel must never break the application.
     try {
+      if (config.public) {
+        const destination = config.context === 'sandbox-untrusted' ? globalThis.parent : globalThis;
+        destination.postMessage({threadingChannel: config.channel, event}, '*');
+        return;
+      }
       if (context !== 'content-script') return void post(event);
       if (pending.length < relay.queue) pending.push(event);
       if (!flushTimer) flushTimer = setTimeout(flush, relay.delay);
     } catch {}
   };
   if (context === 'content-script') globalThis.addEventListener('pagehide', flush);
-  const emit = (level, kind, message, stack = '') => {
+  const emit = (level, kind, message, stack = '', observedContext = context) => {
     const now = Date.now();
     if (now - windowStart > 1000) { windowStart = now; sent = 0; }
     if (++sent > 100) {
@@ -87,8 +93,31 @@
       return;
     }
     deliver({level, kind, message: message.slice(0, 8192), stack: stack.slice(0, 8192),
-      context, contextID, sequence: ++sequence, build: config.build, url: location(), time: now});
+      context: observedContext, contextID, sequence: ++sequence, build: config.build, url: location(), time: now});
   };
+  if (!config.public && globalThis.document) globalThis.addEventListener('message', received => {
+    if (received.data?.threadingChannel !== config.channel) return;
+    let observedContext;
+    // Firefox's content-script globalThis is a separate sandbox, even though it prints as
+    // [object Window]. MessageEvent.source is the document's window in both browser families.
+    if (context === 'content-script' && received.source === window) observedContext = 'main-world-untrusted';
+    else if (context !== 'content-script') {
+      // Only a declared sandbox frame embedded by this extension can use the parent relay.
+      const frames = document.getElementsByTagName('iframe');
+      for (let i = 0; i < Math.min(frames.length, 32); i++) {
+        if (frames[i].contentWindow === received.source &&
+            config.sandboxes?.some(path => frames[i].src === runtime?.getURL(path))) {
+          observedContext = 'sandbox-untrusted'; break;
+        }
+      }
+    }
+    const event = received.data?.event;
+    if (!observedContext || !event || typeof event.message !== 'string') return;
+    const level = ['debug', 'log', 'info', 'warning', 'error', 'trace'].includes(event.level) ? event.level : 'warning';
+    const kind = ['console', 'exception', 'unhandled-rejection', 'network', 'connected', 'dropped'].includes(event.kind)
+      ? event.kind : 'console';
+    emit(level, kind, event.message.slice(0, 8192), typeof event.stack === 'string' ? event.stack.slice(0, 8192) : '', observedContext);
+  });
   if (config.background && runtime) {
     runtime.onConnect.addListener(port => {
       if (port.name !== relay.name || port.sender?.id !== runtime.id) return;
@@ -107,15 +136,15 @@
   // Preserve callback/Promise behavior; record the operation, never its payload or reply.
   // Correlation is local to the sending context. Do not mutate application messages to carry IDs.
   let messageSequence = 0;
-  const traceMessages = (owner, key, label) => {
+  const traceMessages = (owner, key, label, family = 'message') => {
     if (!owner?.[key]) return;
     const original = owner[key].bind(owner);
     owner[key] = (...args) => {
       const operation = `${contextID}/${++messageSequence}`;
       const started = performance.now();
       const stack = new Error().stack || '';
-      emit('debug', 'message-sent', `${label} ${operation}`, stack);
-      const done = error => emit(error ? 'error' : 'debug', error ? 'message-failed' : 'message-reply',
+      emit('debug', family === 'message' ? 'message-sent' : 'api-call', `${label} ${operation}`, stack);
+      const done = error => emit(error ? 'error' : 'debug', error ? `${family}-failed` : `${family}-reply`,
         `${label} ${operation} (${Math.round(performance.now() - started)} ms)${error ? ': ' + text(error) : ''}`, stack);
       const callback = typeof args.at(-1) === 'function' ? args.pop() : null;
       if (callback) args.push((...reply) => { const error = runtime.lastError; done(error?.message); callback(...reply); });
@@ -127,7 +156,9 @@
     };
   };
   traceMessages(runtime, 'sendMessage', 'runtime.sendMessage');
+  traceMessages(runtime, 'sendNativeMessage', 'runtime.sendNativeMessage');
   traceMessages(api?.tabs, 'sendMessage', 'tabs.sendMessage');
+  /*__THREADING_RUNTIME_HOOKS__*/
   for (const level of ['debug', 'log', 'info', 'warn', 'error', 'trace']) {
     const original = console[level].bind(console);
     console[level] = (...args) => {
@@ -154,5 +185,24 @@
       throw error;
     }
   };
+  if (globalThis.XMLHttpRequest) {
+    const prototype = XMLHttpRequest.prototype, requests = new WeakMap();
+    const open = prototype.open, send = prototype.send;
+    prototype.open = function(...args) {
+      const result = Reflect.apply(open, this, args);
+      requests.set(this, {method: String(args[0]).slice(0, 16), url: String(args[1]).slice(0, 2048)});
+      return result;
+    };
+    prototype.send = function(...args) {
+      const request = requests.get(this), started = performance.now(), stack = new Error().stack || '';
+      const finished = () => {
+        if (request && (this.status === 0 || this.status >= 400)) emit('error', 'network',
+          `XHR ${request.method} ${this.status} ${request.url} (${Math.round(performance.now() - started)} ms)`, stack);
+      };
+      this.addEventListener('loadend', finished, {once: true});
+      try { return Reflect.apply(send, this, args); }
+      catch (error) { this.removeEventListener('loadend', finished); emit('error', 'network', `XHR: ${text(error)}`, stack); throw error; }
+    };
+  }
   emit('info', 'connected', `${context} connected`);
 })();

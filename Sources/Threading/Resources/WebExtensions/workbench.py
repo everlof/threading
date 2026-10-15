@@ -26,6 +26,7 @@ import urllib.parse
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).parent))
 from project import scaffold, resolve_source
+from instrumentation import instrument_pages
 
 MAX_FILES = 4096
 MAX_BYTES = 32 * 1024 * 1024
@@ -198,10 +199,11 @@ class CollectorRequest(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path != '/fixture':
+        if self.path not in ('/fixture', '/fixture-frame'):
             self.send_error(404)
             return
-        data = b'<!doctype html><title>Extension test page</title><body><h1>Extension test page</h1></body>'
+        frame = b'<iframe title="Extension test frame" src="/fixture-frame"></iframe>' if self.path == '/fixture' else b''
+        data = b'<!doctype html><title>Extension test page</title><body><h1>Extension test page</h1>' + frame + b'</body>'
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(data)))
@@ -316,12 +318,6 @@ def stage(source, destination, endpoint, token, target, project):
         if any((pending / name).exists() for name in RESERVED_FILES):
             raise ValueError('The extension uses a reserved threading_ development filename.')
         (pending / 'threading_reload.html').write_text('<!doctype html><title>Reload extension</title>')
-        bootstrap = Path(__file__).with_name('diagnostics.js').read_text()
-        for background, name in [(False, 'threading_diagnostics.js'), (True, 'threading_background.js')]:
-            if (pending / name).exists():
-                raise ValueError('The extension already uses a reserved __threading filename.')
-            config = dict(endpoint=endpoint, token=token, build=build, background=background)
-            (pending / name).write_text(bootstrap.replace('__THREADING_CONFIG__', json.dumps(config)))
         permission_key = 'host_permissions' if manifest['manifest_version'] == 3 else 'permissions'
         manifest.setdefault(permission_key, [])
         if 'http://127.0.0.1/*' not in manifest[permission_key]:
@@ -360,22 +356,11 @@ def stage(source, destination, endpoint, token, target, project):
             background.pop('service_worker', None)
         elif target in BROWSERS and target != 'safari' and background.get('service_worker'):
             background.pop('scripts', None)
-        for content in manifest.get('content_scripts', []):
-            if content.get('js') and content.get('world', 'ISOLATED') != 'MAIN':
-                content['js'].insert(0, 'threading_diagnostics.js')
-        # HTML is changed only by adding an external script, so CSP still disallows inline code.
-        for html in pending.rglob('*'):
-            if html.suffix.lower() not in ('.html', '.htm') or not html.is_file():
-                continue
-            relative = html.relative_to(pending).as_posix()
-            script = 'threading_background.js' if relative == background.get('page') else 'threading_diagnostics.js'
-            script = os.path.relpath(pending / script, html.parent)
-            data = html.read_text()
-            injection = '<script src=' + json.dumps(script) + '></script>'
-            match = re.search(r'<head\b[^>]*>', data, flags=re.I)
-            position = match.end() if match else 0
-            html.write_text(data[:position] + injection + data[position:])
-        (pending / 'manifest.json').write_text(json.dumps(manifest, indent=2))
+        instrument_pages(pending, manifest, endpoint, token, build)
+        encoded_manifest = json.dumps(manifest, indent=2)
+        if len(encoded_manifest.encode()) > MAX_LINE:
+            raise ValueError('The instrumented manifest exceeds 64 KiB; narrow web-accessible resource patterns.')
+        (pending / 'manifest.json').write_text(encoded_manifest)
         previous = destination.with_name(destination.name + '-previous')
         shutil.rmtree(previous, ignore_errors=True)
         if destination.exists():
@@ -469,7 +454,7 @@ class Workbench:
         build = await asyncio.to_thread(stage, source, directory, endpoint, token, config['browser'], self.project)
         self.collector.routes[route] = identity
         run = dict(target=identity, browser=config['browser'], source=str(source), directory=str(directory),
-                   build=build, status='starting', route=route, endpoint=endpoint, token=token, config=config)
+                   build=build, status='starting', route=route, endpoint=endpoint, token=token, config=config, headless=headless)
         self.runs[identity] = run
         try:
             await self.launch(run, headless)
@@ -654,6 +639,7 @@ class Workbench:
             'popup': (manifest.get('action') or manifest.get('browser_action') or {}).get('default_popup'),
             'options': manifest.get('options_ui', {}).get('page') or manifest.get('options_page'),
             'side-panel': manifest.get('side_panel', {}).get('default_path') or manifest.get('sidebar_action', {}).get('default_panel'),
+            'new-tab': manifest.get('chrome_url_overrides', {}).get('newtab'),
         }
         relative = paths.get(page)
         if not relative:
@@ -702,6 +688,39 @@ class Workbench:
         page = run.get('page')
         try:
             for step in steps:
+                if not isinstance(step, dict):
+                    raise ValueError('Each test step must be an object.')
+                if lifecycle := step.get('lifecycle'):
+                    started = self.journal.sequence
+                    if lifecycle == 'reload':
+                        await self.reload(identity)
+                    elif lifecycle == 'restart':
+                        headless = run['headless']
+                        await self.stop(identity)
+                        await self.start(identity, headless)
+                    elif lifecycle == 'stop-worker':
+                        if not run.get('context'):
+                            raise ValueError('stop-worker requires a Chromium target; Firefox background suspension needs native inspection.')
+                        context = run['context']
+                        # Stop workers in this owned profile without attaching a debugger or
+                        # leaving ServiceWorker.enable active, which changes worker lifetime.
+                        session = await context.attach(run['page'])
+                        await context.send('ServiceWorker.enable', session=session)
+                        try:
+                            await context.send('ServiceWorker.stopAllWorkers', session=session)
+                        finally:
+                            await context.send('ServiceWorker.disable', session=session)
+                        self.event(identity, 'lifecycle', 'Stopped service workers in the development profile', build=run['build'])
+                    else:
+                        raise ValueError('Unknown test lifecycle: ' + str(lifecycle))
+                    run = self.runs[identity]
+                    page = run.get('page')
+                    completed += 1
+                    continue
+                if expectation := step.get('event'):
+                    await self.expect_event(run, expectation, started)
+                    completed += 1
+                    continue
                 url = step.get('url')
                 if url == 'fixture':
                     url = f'http://127.0.0.1:{self.collector.server_port}/fixture'
@@ -735,6 +754,23 @@ class Workbench:
             if artifact:
                 self.event(identity, 'artifact', artifact, build=run['build'])
             raise
+
+    async def expect_event(self, run, expectation, after):
+        if not isinstance(expectation, dict) or not expectation or set(expectation) - {'kind', 'context', 'message', 'level'}:
+            raise ValueError('An event assertion accepts kind, context, message and level.')
+        if any(not isinstance(value, str) or len(value) > 2048 for value in expectation.values()):
+            raise ValueError('Event assertion values must be strings of at most 2048 characters.')
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            with self.journal.lock:
+                matched = any(row['id'] > after and row['target'] == run['target'] and row['build'] == run['build']
+                              and all(value in row[key] if key == 'message' else value == row[key]
+                                      for key, value in expectation.items()) for row in self.journal.events)
+            if matched:
+                self.event(run['target'], 'test', 'Diagnostic assertion passed: ' + json.dumps(expectation), build=run['build'])
+                return
+            await asyncio.sleep(0.1)
+        raise ValueError('Expected diagnostic was not captured: ' + json.dumps(expectation))
 
     async def capture_test(self, run, page, name):
         path = self.state / run['target'] / name
@@ -780,9 +816,16 @@ class Workbench:
             driver.get(url)
             return
         from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions
+        previous = driver.execute_script('return document.documentElement')
         with driver.context(driver.CONTEXT_CHROME):
             driver.execute_script('gBrowser.selectedBrowser.loadURI(Services.io.newURI(arguments[0]), {triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()});', url)
-        WebDriverWait(driver, 10).until(lambda browser: browser.current_url == url)
+        # loadURI returns before loading finishes. URL equality alone can click the new DOM
+        # before its scripts register listeners, or pass on the old document for a same-URL reload.
+        if previous is not None:
+            WebDriverWait(driver, 10).until(expected_conditions.staleness_of(previous))
+        WebDriverWait(driver, 10).until(lambda browser: browser.current_url == url
+                                      and browser.execute_script('return document.readyState') == 'complete')
 
     @staticmethod
     def selenium_step(run, step, url):
@@ -836,8 +879,11 @@ class Workbench:
             return dict(targets=discover(self.project), runs=[self.public_run(x) for x in self.runs.values()],
                 generation=self.generation,
                 runtime=dict(playwright=bool(importlib.util.find_spec('playwright')), selenium=bool(importlib.util.find_spec('selenium'))),
-                coverage=dict(instrumented=['console', 'exceptions', 'unhandled-rejections', 'failed-fetch', 'message-operations', 'context-lifecycle'],
-                    excluded=['MAIN-world and dynamically injected content scripts', 'browser-internal errors', 'XHR', 'request bodies', 'breakpoints'],
+                coverage=dict(instrumented=['console', 'exceptions', 'unhandled-rejections', 'failed-fetch', 'failed-XHR',
+                    'message-operations', 'ports', 'native-message-operations', 'selected-browser-API-operations', 'context-lifecycle',
+                    'scripting.executeScript', 'isolated-registered-scripts', 'static-MAIN-untrusted', 'embedded-sandbox-untrusted'],
+                    excluded=['registered MAIN scripts', 'legacy tabs.executeScript', 'browser-internal errors',
+                        'request bodies', 'breakpoints', 'native host process internals', 'closed shadow roots'],
                     mode='Development copy; background requires loopback host permission.'))
         if action == 'start':
             return await self.start(identity, request.get('headless', False))

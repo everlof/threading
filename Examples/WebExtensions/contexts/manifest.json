@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Threading context coverage",
+  "version": "1.0",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "nativeMessaging",
+    "declarativeNetRequest",
+    "offscreen",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "side_panel": {
+    "default_path": "sidebar.html"
+  },
+  "sidebar_action": {
+    "default_panel": "sidebar.html"
+  },
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "devtools_page": "devtools.html",
+  "sandbox": {
+    "pages": [
+      "sandbox.html"
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "main.js"
+      ],
+      "world": "MAIN",
+      "all_frames": true
+    }
+  ]
+}
