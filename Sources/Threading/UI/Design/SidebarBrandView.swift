@@ -1,5 +1,57 @@
 import AppKit
 
+enum SidebarBrandLayout {
+    /// The logo slot, sized to the band it lives in.
+    ///
+    /// 24 rather than 20: the mark is six strands and a hexagonal rim inside its own box,
+    /// so it carries more detail per point than an SF Symbol does, and at 20 its strokes
+    /// came out barely a point wide — thin enough that the whole thing read as soft even
+    /// once it was rasterising at the right scale. Four points is the difference between
+    /// a logo and a smudge, and the band has the room.
+    static let logoSide: CGFloat = 24
+}
+
+#if os(Linux)
+/// The house theme's brand, using the production mark and header measurements.
+/// The native host keeps navigation/menu identity in its accessible list and window title.
+final class SidebarBrandView: NSView, ThemedComponent {
+    private let mark = ThreadingMarkView(frame: .zero)
+    // localization-ignore: Threading is the product trademark.
+    private let wordmark = NSTextField(labelWithString: "Threading")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        translatesAutoresizingMaskIntoConstraints = false
+        let stack = NSStackView(views: [mark, wordmark])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = Design.Spacing.small
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        wordmark.font = SidebarAppearance.brandFont
+        wordmark.textColor = Design.Text.label
+        wordmark.lineBreakMode = .byTruncatingTail
+        wordmark.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            mark.widthAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
+            mark.heightAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide)
+        ])
+        mark.setAccessibilityElement(false)
+        wordmark.setAccessibilityElement(false)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        // localization-ignore: Threading is the product trademark.
+        setAccessibilityLabel("Threading")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+#else
+
 // MARK: - Sidebar Brand View
 
 /// The brand row at the sidebar's top: the Threading mark beside the app's name — unless the
@@ -22,16 +74,6 @@ final class SidebarBrandView: NSView, ThemedComponent {
 
     // MARK: - Properties
 
-    private enum Layout {
-        /// The logo slot, sized to the band it lives in.
-        ///
-        /// 24 rather than 20: the mark is six strands and a hexagonal rim inside its own box,
-        /// so it carries more detail per point than an SF Symbol does, and at 20 its strokes
-        /// came out barely a point wide — thin enough that the whole thing read as soft even
-        /// once it was rasterising at the right scale. Four points is the difference between
-        /// a logo and a smudge, and the band has the room.
-        static let logoSide: CGFloat = 24
-    }
 
     /// Weave is the compact treatment: its dots stay on the actual shield and thread paths,
     /// so the 24pt mark remains recognisable while the whole row is under the pointer.
@@ -73,10 +115,10 @@ final class SidebarBrandView: NSView, ThemedComponent {
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            mark.widthAnchor.constraint(equalToConstant: Layout.logoSide),
-            mark.heightAnchor.constraint(equalToConstant: Layout.logoSide),
-            customLogo.widthAnchor.constraint(equalToConstant: Layout.logoSide),
-            customLogo.heightAnchor.constraint(equalToConstant: Layout.logoSide),
+            mark.widthAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
+            mark.heightAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
+            customLogo.widthAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
+            customLogo.heightAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
             workloadAnalyzer.widthAnchor.constraint(equalToConstant: Design.WorkloadAnalyzer.size.width),
             workloadAnalyzer.heightAnchor.constraint(equalToConstant: Design.WorkloadAnalyzer.size.height),
             audioAnalyzer.widthAnchor.constraint(equalToConstant: Design.AudioSpectrum.size.width),
@@ -295,3 +337,5 @@ final class SidebarBrandView: NSView, ThemedComponent {
         toolTip = summary
     }
 }
+
+#endif

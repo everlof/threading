@@ -1,7 +1,9 @@
 """Exercise the production project-row + through the real X11 shell and host commands."""
 import os
+import json
 from pathlib import Path
 import subprocess
+import sqlite3
 import sys
 import time
 
@@ -66,9 +68,14 @@ def listing(app):
 
 def projects(app):
     listed = listing(app)
-    if listed.get_name() != 'Projects' or listed.get_child_count() != 2:
+    if listed.get_name() != 'Projects':
         return None
-    return [listed.get_child_at_index(index) for index in range(2)]
+    # The newly admitted terminal is a visible child of Beta's expanded branch. Find the
+    # project controls by their semantic identity, not by the outline's total row count.
+    rows = [listed.get_child_at_index(index) for index in range(listed.get_child_count())]
+    projects = [row for row in rows if row.get_child_count() == 2 and
+                row.get_child_at_index(1).get_accessible_id().startswith('sidebar.project.actions.')]
+    return projects if len(projects) == 2 else None
 
 
 def ids(listed):
@@ -122,9 +129,9 @@ try:
         row_rect = rows[1].get_component_iface().get_extents(Atspi.CoordType.WINDOW)
         action_rect = rows[1].get_child_at_index(1).get_component_iface().get_extents(
             Atspi.CoordType.WINDOW)
-        assert (create_rect.y, create_rect.width, create_rect.height) == (row_rect.y + 10, 40, 40)
-        assert action_rect.x == create_rect.x + create_rect.width + 4
-        assert 0 <= row_rect.x + row_rect.width - (action_rect.x + action_rect.width) <= 8
+        assert (create_rect.y, create_rect.width, create_rect.height) == (row_rect.y + 5, 20, 20)
+        assert action_rect.x == create_rect.x + create_rect.width + 2
+        assert 14 <= row_rect.x + row_rect.width - (action_rect.x + action_rect.width) <= 18
         assert create.get_action_iface().do_action(0)
         listed = menu(app, 'New in Project', ['linux.project.new-chat',
                       'linux.project.new-manager', 'linux.project.new-shell'], process)
@@ -169,9 +176,16 @@ try:
         assert listed.get_child_at_index(2).get_action_iface().do_action(1)
         eventually(lambda: visible_title(window).startswith('Threading terminal - ') and
                    'TERMINAL_FRAME' in window_log.read_text(), 'Beta terminal', process, timeout=20)
-        rows = eventually(lambda: projects(app) if projects(app) and selected(projects(app)[1])
-                          else None, 'Beta selected after new terminal', process)
-        assert not selected(rows[0])
+        beta_id = rows[1].get_accessible_id()
+        def created_terminal_id():
+            with sqlite3.connect(store / 'threading.db') as database:
+                beta = json.loads(database.execute('SELECT data FROM project WHERE id=?',
+                                                  (beta_id,)).fetchone()[0])
+            return beta['terminals'][0]['id'] if beta['terminals'] else None
+        terminal_id = eventually(created_terminal_id, 'durable Beta terminal', process)
+        eventually(lambda: listing(app).get_selection_iface().get_selected_child(0).get_accessible_id()
+                   == terminal_id, 'Beta terminal child selected after creation', process)
+        assert all(not selected(row) for row in projects(app))
         print('PASS project-row + exact-ID menu, manager refusal, nested chat provider and Beta terminal',
               flush=True)
 finally:

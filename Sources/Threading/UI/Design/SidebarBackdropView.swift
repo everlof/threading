@@ -1,5 +1,31 @@
 import AppKit
 
+#if os(Linux)
+/// The checked house-theme export admits a static two-stop vertical gradient. Keep this
+/// platform drawing leaf in the production backdrop boundary; the host only positions it.
+/// Theme export tests reject pictures, motion or a changed gradient geometry until supported.
+final class SidebarBackdropView: NSView {
+    private let gradient: NSGradient
+
+    init() {
+        guard let gradient = NSGradient(colors: SidebarAppearance.backgroundColors) else {
+            preconditionFailure("The exported sidebar needs its two gradient stops")
+        }
+        self.gradient = gradient
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        gradient.draw(in: bounds, angle: 90, clippedTo: visibleRect)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+#else
+
 /// The sidebar's ground: the platform's own sidebar material under the identity theme, an
 /// opaque themed surface under a style — and, when the style says so, that surface dressed
 /// with a gradient and an image.
@@ -199,3 +225,4 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
         view === material || view.isDescendant(of: material)
     }
 }
+#endif

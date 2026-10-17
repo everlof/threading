@@ -748,6 +748,14 @@ Enabling native wheel input for the shared prompt exposed a total-line scan in t
 the intersecting line range directly from the clip viewport and text inset. Text preparation
 and width changes still lay out the document; warm scrolling paints only visible lines.
 
+The document's minimum height also follows the clip viewport independently of text reflow.
+A short-window round trip in the opening composer exposed cached text retaining a short hit
+area after its viewport grew. `NSClipViewDocumentObserver` now updates `NSTextView`'s document
+height from the cached used height and current viewport floor in constant time. It neither
+invalidates nor reshapes lines for height-only resize or scrolling. The text-editor harness
+checks unchanged used-text geometry and a real window-dispatched click in the expanded blank
+area; the native composer journey exercises the compact/full-window round trip.
+
 The opt-in `THREADING_EDITOR_CONFIGURATION=release THREADING_EDITOR_SCROLL_BENCHMARK=1
 Platforms/Linux/tests/text_editor/run.sh` prepares 170 typical and 1,700 stress lines separately,
 then takes 30 warm scroll/draw samples after five warmups in a fixed 180×58 viewport. Three
@@ -7279,3 +7287,40 @@ read rounded to **0.0 ms median, 0.1 ms max** at one decimal place. Fixture save
 separately. This isolates the storage read, not daemon admission or the window. It proves session
 archive size no longer drives that read; a store with many projects or many terminals inside one
 project still requires a separate stress measurement before claiming that dimension is bounded.
+
+## Linux bundled UI fonts, 2026-10-17
+
+The Linux platform font adapter registers two fixed Inter 4.1 resource files once per process,
+through a serialized static initializer. The native host warms that gate on its existing
+background startup worker before UI construction. Plain labels, attributed text and complete
+worker-owned document maps share the family choice; per-frame/per-row font registration and
+font-directory enumeration are not allowed. The terminal's fixed-cell face is independent.
+
+The Release text benchmark with the bundled family reports 28.52ms median/29.22ms maximum for
+54 mounted navigator labels and 22.80/25.13ms for 18 compound readings. The storage-outline
+viewport remains bounded: 170 rows measure 1.55/1.85ms, 1,700 rows 1.63/1.78ms, each at 180px
+visible height and eight repaints. These are current measurements, not a before/after speedup.
+The real 5,100-project outline scrolling/resize/restoration journey also passes.
+Evidence: `Platforms/Linux/out/parity-font-{benchmark,large}.log` and FINDINGS §203.
+
+
+## Linux model matrix viewport groundwork, 2026-10-17
+
+The shared model/effort matrix derives the first and last dirty row arithmetically instead of
+scanning every model to discover intersecting rows. Linux `NSView.render` supplies the visible
+ancestor-clipped rectangle to `draw`, so a scroll document's full height is not mistaken for
+its dirty viewport. The control retains one view and model/effort values; drawing work is
+proportional to visible rows times effort columns. The Linux composer admits at most 512
+models and 32 distinct effort identifiers plus Auto. Settings/state reads cap at 1 MiB each;
+Codex catalogue bytes cap at 16 MiB. A serial worker allows one active read and one coalesced
+pending request, and a request identity rejects stale account receipts. Decoding, validation
+and fresh-launch revalidation stay off the window thread. At most 128 visible, clipped cells
+enter AT-SPI; the matrix still retains one drawing view. No provider-sized view tree is built.
+
+`ViewClippingHarness` exercises a 1,000-row document with a far-away focus rectangle: both axes
+scroll, a second reveal does nothing, and drawing receives exactly the viewport. It also checks
+that pointer movement visits the hit path, stops behind a cover, and resumes when the window
+becomes key. The radial gradient has no intermediate bitmap and visits only the path's
+transformed bounding rectangle intersected with the destination bitmap. Palette tinting is
+bounded by the existing image dimension limit. These are correctness and work-shape contracts,
+not end-to-end Linux picker latency measurements.

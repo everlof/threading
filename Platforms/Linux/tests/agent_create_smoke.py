@@ -1,4 +1,5 @@
 """Create a managed agent from the project window and revisit its retained terminal."""
+from saved_catalog_menu import open_saved_agents
 import fcntl
 import json
 import os
@@ -125,7 +126,8 @@ auth_home.mkdir()
 codex_home = auth_home / '.codex'
 foreign_home = root / 'foreign-home'
 foreign_home.mkdir()
-environment = dict(os.environ, HOME=str(auth_home), CODEX_HOME=str(foreign_home / '.codex'))
+environment = dict(os.environ, HOME=str(auth_home), CODEX_HOME=str(foreign_home / '.codex'),
+                   THREADING_LINUX_UI_SCALE='1')
 with log_path.open('w+') as log:
     process = subprocess.Popen([binary, '--app-codex-project', store, endpoint, '/bin/sh',
                                 str(child), str(project)],
@@ -137,7 +139,8 @@ with log_path.open('w+') as log:
         title(process, 'Threading terminal - CREATED AGENT READY', log_path)
         marker = project / 'created-agent.json'
         report = json.loads(marker.read_text())
-        assert report['cwd'] == str(project) and report['grid'] == [80, 18], report
+        # The 1× shell leaves 880×439 pixels beside its 240pt sidebar and 41pt header.
+        assert report['cwd'] == str(project) and report['grid'] == [88, 19], report
         assert report['term'] == 'xterm-256color' and report['color'] == 'truecolor', report
         argv = report['argv']
         assert '--no-alt-screen' in argv and '--ask-for-approval' in argv and '--sandbox' in argv, argv
@@ -171,10 +174,10 @@ with log_path.open('w+') as log:
         key(window, 'ctrl+shift+p')
         title(process, 'Threading experiment - ' + str(project), log_path)
         subprocess.run(['import', '-window', window, 'out/agent-create-returned.png'], check=True, timeout=5)
-        key(window, 'Left')
+        open_saved_agents(lambda value: key(window, value))
         title(process, 'Threading agents - ' + str(project), log_path)
         deadline = time.monotonic() + 5
-        while f'AGENT_PICKER_FRAME 320x480 mounted=1 selected={saved_id} total=1 capped=0' not in log_path.read_text():
+        while f'AGENT_PICKER_FRAME 240x480 mounted=1 selected={saved_id} total=1 capped=0' not in log_path.read_text():
             assert time.monotonic() < deadline, log_path.read_text()
             time.sleep(.05)
         subprocess.run(['import', '-window', window, 'out/agent-create-picker.png'], check=True, timeout=5)
@@ -218,7 +221,7 @@ with (root / 'agent-wrong-home.log').open('w+') as log:
                                stdout=log, stderr=log, env=wrong_environment)
     try:
         window = title(process, 'Threading experiment - ' + str(project), root / 'agent-wrong-home.log')
-        key(window, 'Left')
+        open_saved_agents(lambda value: key(window, value))
         title(process, 'Threading agents - ' + str(project), root / 'agent-wrong-home.log')
         key(window, 'Return')
         title(process, 'Threading terminal - unavailable', root / 'agent-wrong-home.log')
@@ -256,7 +259,7 @@ with (root / 'agent-resume-window.log').open('w+') as log:
         with sqlite3.connect(str(Path(store) / 'threading.db')) as database:
             database.execute('UPDATE session SET data = ? WHERE id = ?',
                              ('unreadable-future-payload', standing_id))
-        key(window, 'Left')
+        open_saved_agents(lambda value: key(window, value))
         title(process, 'Threading agents - ' + str(project), root / 'agent-resume-window.log')
         key(window, 'Return')
         title(process, 'Threading terminal - RESUMED AGENT READY', root / 'agent-resume-window.log')
@@ -300,7 +303,7 @@ with (root / 'agent-broken-rollout.log').open('w+') as log:
                                stdout=log, stderr=log, env=environment)
     try:
         window = title(process, 'Threading experiment - ' + str(project), root / 'agent-broken-rollout.log')
-        key(window, 'Left')
+        open_saved_agents(lambda value: key(window, value))
         title(process, 'Threading agents - ' + str(project), root / 'agent-broken-rollout.log')
         key(window, 'Return')
         title(process, 'Threading terminal - unavailable', root / 'agent-broken-rollout.log')

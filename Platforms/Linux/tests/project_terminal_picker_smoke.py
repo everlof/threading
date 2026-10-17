@@ -1,4 +1,5 @@
 """Select and reattach a persisted terminal from the graphical project browser."""
+from saved_catalog_menu import open_saved_terminals
 import json
 import os
 from pathlib import Path
@@ -87,7 +88,7 @@ with log_path.open('w+') as log:
         process = subprocess.Popen([binary, '--app', store, endpoint, '/bin/sh'],
                                    stdout=log, stderr=log)
         window = title('Threading experiment - ' + project)
-        key('Right')
+        open_saved_terminals(key)
         title('Threading terminals - ' + project)
         subprocess.run(['import', '-window', window, 'out/project-terminal-picker.png'],
                        check=True, timeout=15)
@@ -96,8 +97,8 @@ with log_path.open('w+') as log:
         key('Return')
         title('Threading terminal - ATTACH DETACHED [history cut]')
         geometry = xdo('getwindowgeometry', '--shell', window).stdout
-        # The 960px restored terminal pane sits beside a 320px workspace navigator.
-        assert 'WIDTH=1280\n' in geometry and 'HEIGHT=742\n' in geometry, geometry
+        # The 960px restored terminal pane sits beside the 240px navigator and below its 41px header.
+        assert 'WIDTH=1200\n' in geometry and 'HEIGHT=701\n' in geometry, geometry
         assert 'TERMINAL_FRAME 960x660' in log_path.read_text()
         assert json.loads((Path(project) / 'attach-child.json').read_text()) == original
         key('p')
@@ -108,11 +109,11 @@ with log_path.open('w+') as log:
         title('Threading terminals - ' + project)
         key('Left')
         title('Threading experiment - ' + project)
-        key('Right')
+        open_saved_terminals(key)
         title('Threading terminals - ' + project)
         key('Escape')
         title('Threading experiment - ' + project)
-        key('Right')
+        open_saved_terminals(key)
         title('Threading terminals - ' + project)
         key('alt+F4')
         assert process.wait(timeout=5) == 0, 'window close acted like picker back'

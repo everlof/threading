@@ -71,12 +71,11 @@ extension Design.Symbol {
 
 extension Design {
     @MainActor enum Text {
-        private static let chromeInk = Design.Ink(on: LinuxTheme.color("ground"))
         static var label: NSColor { LinuxTheme.color("label") }
         static var selected: NSColor { Design.Ink.selection.label }
-        static var secondary: NSColor { chromeInk.secondary }
-        static var tertiary: NSColor { chromeInk.tertiary }
-        static var quaternary: NSColor { chromeInk.quaternary }
+        static var secondary: NSColor { LinuxTheme.color("text.secondary") }
+        static var tertiary: NSColor { LinuxTheme.color("text.tertiary") }
+        static var quaternary: NSColor { LinuxTheme.color("text.quaternary") }
     }
 
     @MainActor enum Status {

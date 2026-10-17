@@ -164,6 +164,7 @@ final class ComponentGalleryViewController: NSViewController {
         "MermaidPreviewView",
         "MediaTransportView",
         "ModelEffortMatrixControl",
+        "ModelEffortPickerContentView",
         "ModelEffortPickerViewController",
         "MorphingMultilineTitleLabel",
         "MorphingTitleLabel",

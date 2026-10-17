@@ -35,6 +35,8 @@ private final class TreeSource: NSOutlineViewDataSource, NSOutlineViewDelegate {
     private(set) var constructedChromeRows = 0
     private(set) var selectionChanges = 0
     private(set) var heightRequests = 0
+    private(set) var childQueries = 0
+    private(set) var expansionChanges = 0
     var usesVariableHeights = false
     var firstRowHeight: CGFloat?
     private let identifier = NSUserInterfaceItemIdentifier("StressOutlineRow")
@@ -46,7 +48,8 @@ private final class TreeSource: NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
-        (item as? Node)?.children.count ?? roots.count
+        childQueries += 1
+        return (item as? Node)?.children.count ?? roots.count
     }
 
     func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
@@ -95,6 +98,9 @@ private final class TreeSource: NSOutlineViewDataSource, NSOutlineViewDelegate {
         row.representedID = (item as! Node).id
         return row
     }
+
+    func outlineViewItemDidExpand(_ notification: Notification) { expansionChanges += 1 }
+    func outlineViewItemDidCollapse(_ notification: Notification) { expansionChanges += 1 }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
         selectionChanges += 1
@@ -150,6 +156,17 @@ private func run() {
     outline.reloadData()
     precondition(outline.numberOfRows == 5_100, "collapsed project count")
     precondition(outline.mountedViewCount == 0, "detached outline eagerly built rows")
+    let initialQueries = source.childQueries
+    outline.restoreExpandedItems(source.roots)
+    precondition(source.childQueries - initialQueries == 2,
+                 "standing expansion must project roots and the one populated branch exactly once")
+    precondition(outline.numberOfRows == 6_124 && outline.mountedViewCount == 0,
+                 "restored expansion must retain bounded mounting")
+    precondition(source.expansionChanges == 0, "restoration emitted user mutations")
+    outline.collapseItem(source.roots[2_500])
+    outline.expandItem(source.roots[2_500])
+    precondition(source.expansionChanges == 2, "user disclosure callbacks missing")
+    outline.restoreExpandedItems([])
     scroll.documentView = outline
     assertViewportBound(outline, scroll, context: "first viewport")
     _ = root.layoutSubtreeIfNeeded()
@@ -324,5 +341,37 @@ struct Fixture {
     @MainActor static func main() {
         run()
         runVariableRows()
+        runInsetRows()
     }
+}
+
+@MainActor
+private func runInsetRows() {
+    let source = TreeSource()
+    let outline = NSOutlineView(frame: .zero)
+    outline.style = .inset
+    outline.rowHeight = 30
+    outline.dataSource = source
+    outline.delegate = source
+    outline.reloadData()
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 240, height: 90))
+    scroll.documentView = outline
+    precondition(outline.rect(ofRow: 0).minY == 10 && outline.rect(ofRow: 1).minY == 40)
+    precondition(outline.frame.height == 5_100 * 30 + 20)
+    precondition(outline.row(at: NSPoint(x: 20, y: 9.99)) == -1)
+    precondition(outline.row(at: NSPoint(x: 20, y: 10)) == 0)
+    precondition(outline.row(at: NSPoint(x: 20, y: outline.frame.height - 1)) == -1)
+    assertViewportBound(outline, scroll, context: "inset first viewport")
+    let measured = source.heightRequests
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: 40))
+    precondition(outline.visibleRowIndexes.first == 1)
+    assertViewportBound(outline, scroll, context: "scrolled inset viewport")
+    outline.scrollRowToVisible(5_099)
+    let last = outline.rect(ofRow: 5_099)
+    precondition(last.maxY <= scroll.contentView.documentVisibleRect.maxY)
+    precondition(source.heightRequests == measured, "inset scrolling remeasured the tree")
+    outline.style = .fullWidth
+    precondition(outline.rect(ofRow: 0).minY == 0 && outline.frame.height == 5_100 * 30)
+    assertViewportBound(outline, scroll, context: "restored full-width viewport")
+    print("inset outline fixture passed: document breathing, hit tests, scroll bounds and style changes")
 }

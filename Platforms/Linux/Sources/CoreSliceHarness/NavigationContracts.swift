@@ -21,9 +21,11 @@ func runNavigationContracts() throws {
     }
     var beta = Project(name: "beta", folderURL: root.appendingPathComponent("beta"))
     beta.sessions = newer
+    beta.isExpanded = false
     try database.save(ProjectsState(projects: [alpha, beta], selectedSessionID: older[0].id))
 
     let snapshot = try database.navigationSnapshot(recentSessionLimit: 2, recentTerminalLimit: 1)
+    try require(snapshot.projects.map(\.isExpanded) == [true, false], "navigation retains standing expansion")
     try require(snapshot.selectedSessionID == older[0].id, "navigation retains selected identity")
     try require(snapshot.projects.map(\.id) == [alpha.id, beta.id], "navigation preserves project order")
     try require(snapshot.projects.map(\.sessionCount) == [4, 3], "navigation counts all sessions")
@@ -49,6 +51,29 @@ func runNavigationContracts() throws {
     let partial = try database.navigationSnapshot(recentSessionLimit: 2, recentTerminalLimit: 1)
     try require(partial.projects[0].recentSessions.map(\.id) == [older[3].id, older[2].id],
                 "unreadable dormant row is not decoded for navigation")
+    let beforeExpansion = try raw.prepare("SELECT data FROM project WHERE id = ?")
+        .bind(1, alpha.id.uuidString)
+    try require(try beforeExpansion.step(), "missing project before expansion")
+    let originalProject = beforeExpansion.text(0)!
+    beforeExpansion.finalize()
+    try require(try database.updateProjectExpansion(id: alpha.id, expanded: false),
+                "disclosure update failed with unreadable unrelated session")
+    try require(try database.updateProjectExpansion(id: alpha.id, expanded: false),
+                "idempotent disclosure update failed")
+    try require(try !database.updateProjectExpansion(id: ProjectID(), expanded: true),
+                "disclosure recreated a missing project")
+    let changed = try database.navigationSnapshot(recentSessionLimit: 0, recentTerminalLimit: 0)
+    try require(changed.projects.map(\.isExpanded) == [false, false], "disclosure did not persist")
+    try require(changed.selectedSessionID == older[0].id, "disclosure changed runtime selection")
+    try require(try database.updateProjectExpansion(id: alpha.id, expanded: true), "disclosure restore failed")
+    let afterExpansion = try raw.prepare("SELECT data FROM project WHERE id = ?")
+        .bind(1, alpha.id.uuidString)
+    try require(try afterExpansion.step(), "missing project after expansion")
+    let originalFields = try JSONSerialization.jsonObject(with: Data(originalProject.utf8)) as! NSDictionary
+    let restoredFields = try JSONSerialization.jsonObject(with: Data(afterExpansion.text(0)!.utf8)) as! NSDictionary
+    try require(originalFields.isEqual(restoredFields),
+                "disclosure changed other project settings or terminals")
+    afterExpansion.finalize()
     let projectRecords = try database.projectRecords()
     try require(projectRecords.map(\.project.id) == [alpha.id, beta.id],
                 "terminal records retain project order without decoding sessions")

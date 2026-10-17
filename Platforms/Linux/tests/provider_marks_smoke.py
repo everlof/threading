@@ -1,4 +1,5 @@
 """Installed catalogue provider marks beside a live PTY, including absent-resource fallback."""
+from saved_catalog_menu import open_saved_agents, open_saved_terminals
 import json
 import os
 from pathlib import Path
@@ -22,7 +23,7 @@ root.mkdir()
 store, project, home = root / 'store', root / 'ProviderMarks', root / 'home'
 project.mkdir()
 home.mkdir()
-environment = dict(os.environ, HOME=str(home))
+environment = dict(os.environ, HOME=str(home), THREADING_LINUX_UI_SCALE='2')
 for name in ('THREADING_LINUX_CODEX_ACCOUNT', 'THREADING_LINUX_CLAUDE_ACCOUNT'):
     environment.pop(name, None)
 for provider in ('claude', 'codex'):
@@ -41,7 +42,7 @@ with sqlite3.connect(store / 'threading.db') as database:
         is_claude = kind == 'claude'
         provider = 'Claude Code' if is_claude else 'Codex'
         provider_ids[kind] = identifier
-        # Below the accessible byte bound, far beyond the 320px visual row. Provider/account/ID
+        # Below the accessible byte bound, far beyond the 480px visual row. Provider/account/ID
         # must remain available even when the visible title is ellipsized by shaped text.
         title = ('解析 Claude 界 e\u0301 — ' if is_claude else 'Ångström Codex 日本語 — ') + 'A readable long session title ' * 3
         account = 'provider-mark-work-account' if is_claude else 'provider-mark-personal-account'
@@ -104,7 +105,7 @@ def panes():
     assert children[1].get_accessible_id() == 'linux.page-title'
     assert children[3].get_accessible_id() == 'linux.actions'
     assert children[4].get_accessible_id() == 'linux.add-project'
-    assert terminal.get_component_iface().get_extents(Atspi.CoordType.WINDOW).x == 320
+    assert terminal.get_component_iface().get_extents(Atspi.CoordType.WINDOW).x == 480
     assert terminal.get_state_set().contains(Atspi.StateType.SHOWING)
     assert_header_controls(frame, children)
     return listed, terminal
@@ -223,10 +224,11 @@ def capture(name):
         title_pixels = [title[i:i + 4] for i in range(0, len(title), 4)]
         contrast = max(pixel_contrast(pixel, background) for pixel in title_pixels)
         assert contrast >= 4.5, (name, index, 'session title lost its contrast', contrast)
-        detail_geometry = f'120x8+{rect.x + 52}+{rect.y + 34}'
+        # Sample below the complete glyph line, including its descenders.
+        detail_geometry = f'120x4+{rect.x + 52}+{rect.y + 40}'
         detail = subprocess.run(['convert', str(destination), '-crop', detail_geometry, '+repage',
                                  '-depth', '8', 'rgba:-'], check=True, capture_output=True, timeout=5).stdout
-        assert len(detail) == 120 * 8 * 4
+        assert len(detail) == 120 * 4 * 4
         assert sum(detail[i:i + 4] != background for i in range(0, len(detail), 4)) < 5, \
             (name, index, 'diagnostic detail overlapped the production title')
         crops.append(mask)
@@ -248,6 +250,10 @@ try:
             isolated.mkdir()
             launch_binary = str(isolated / 'WindowHarness')
             shutil.copy2(binary, launch_binary)
+            # Remove only provider artwork. Fonts are a required runtime resource, and a
+            # source checkout can otherwise hide this omission through Bundle.module's fallback.
+            fonts = Path(binary).parent / 'LinuxAppKitSpike_AppKit.resources'
+            shutil.copytree(fonts, isolated / fonts.name)
             resources = Path(binary).parent / 'LinuxAppKitSpike_WindowHarness.resources'
             isolated_resources = isolated / resources.name
             shutil.copytree(resources, isolated_resources)
@@ -273,7 +279,7 @@ try:
                 window = title('^Threading experiment - ' + re.escape(str(project)) + '$')
                 app = eventually(application, 'native accessibility registration')
                 if not missing:
-                    key('Left')
+                    open_saved_agents(key)
                     title('^Threading agents - ' + re.escape(str(project)) + '$')
                     selected_id = eventually(idle_labels, 'snoozed row before any terminal exists')
                     subprocess.run(['import', '-window', window, 'out/provider-marks-idle-snoozed.png'],
@@ -288,7 +294,7 @@ try:
                     key('Escape')
                     title('^Threading experiment - ' + re.escape(str(project)) + '$')
                 if missing:
-                    key('Right')
+                    open_saved_terminals(key)
                     title('^Threading terminals - ' + re.escape(str(project)) + '$')
                 key('Return')
                 title(r'^Threading terminal - SAVED SHELL 1 READY( \[(history cut|restored)\])?$')
@@ -298,7 +304,7 @@ try:
                     title('^Threading terminals - ' + re.escape(str(project)) + '$')
                     key('Escape')
                 title('^Threading experiment - ' + re.escape(str(project)) + '$')
-                key('Left')
+                open_saved_agents(key)
                 title('^Threading agents - ' + re.escape(str(project)) + '$')
                 identifiers = [provider_ids['claude'], provider_ids['codex']]
                 select(identifiers[0])

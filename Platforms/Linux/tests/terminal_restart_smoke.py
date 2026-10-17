@@ -1,4 +1,5 @@
 """Explicit activation restarts a saved shell; ordinary relaunch only reattaches live children."""
+from saved_catalog_menu import open_saved_terminals
 import json
 import os
 from pathlib import Path
@@ -121,11 +122,12 @@ def ready(number):
     return title(r'^Threading terminal - SAVED SHELL ' + str(number) + r' (READY|LIVE)( \[(history cut|restored)\])?$')
 
 
-def close_from_terminal():
+def close_from_terminal(restored=False):
     global process, log
     key('ctrl+shift+p')
-    picker()
-    key('Escape')
+    if not restored:
+        picker()
+        key('Escape')
     projects()
     key('alt+F4')
     assert process.wait(timeout=5) == 0, Path(log.name).read_text()
@@ -138,15 +140,15 @@ try:
     window = projects()
     assert not starts(), 'opening the project must not restart its saved shell'
     assert xdo('windowsize', window, '960', '600').returncode == 0
-    eventually(lambda: 'FRAME 320x600' in Path(log.name).read_text()
-               and 'IDLE_PANE_FRAME 640x600' in Path(log.name).read_text(),
+    eventually(lambda: 'FRAME 240x600' in Path(log.name).read_text()
+               and 'IDLE_PANE_FRAME 720x600' in Path(log.name).read_text(),
                'resized split workspace')
-    key('Right')
+    open_saved_terminals(key)
     picker()
     key('Return')
     ready(1)
     first = assert_record(1, preferred)
-    assert (first['columns'], first['rows']) == (64, 23), first
+    assert (first['columns'], first['rows']) == (72, 25), first
     subprocess.run(['import', '-window', window, 'out/terminal-restart-recorded-directory.png'],
                    check=True, timeout=5)
 
@@ -172,7 +174,7 @@ try:
     launch('live-reopen')
     window = ready(2)
     assert_record(2, preferred)
-    close_from_terminal()
+    close_from_terminal(restored=True)
 
     # This activation has neither a cached surface nor startup restoration: openTerminal must
     # discover the live child and attach rather than create a duplicate incarnation.
@@ -180,7 +182,7 @@ try:
         database.execute("DELETE FROM app_state WHERE key = 'selectedTerminalID'")
     launch('uncached-live')
     window = projects()
-    key('Right')
+    open_saved_terminals(key)
     picker()
     key('Return')
     ready(2)
@@ -206,7 +208,7 @@ try:
     launch('fallback')
     window = projects()
     assert len(starts()) == 2
-    key('Right')
+    open_saved_terminals(key)
     picker()
     key('Return')
     ready(3)

@@ -15,6 +15,105 @@ by one, where the takeover is worn. See [The takeover](#the-takeover-a-theme-tha
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+The Linux preview's host applies its UI scale to the 1120×480-point startup request before
+opening the SDL workspace. The bridge fits this request to the primary display's usable area
+and the existing physical-pixel raster bounds, installs the sidebar-aware size constraints
+before presentation, and returns the actual native geometry for the first layout. Reusing the
+same pixel request at 2× halved the logical workspace; laying out with the requested size after
+the window was constrained produced an incorrectly sized first frame. The terminal content
+budget remains 320…1280 pixels wide and the window 180…900 pixels tall. These limits also bound
+saved-terminal grid admission and require a coordinated change with PTY/rendering policy;
+scaling them independently would break attachment assumptions. Startup fitting does not claim
+Mac minimum-size or full window-chrome parity, nor automatic per-monitor scaling. This is
+host-owned window geometry, with no extension presentation surface.
+
+The Linux shell page starts before its worker has committed a saved terminal record. That
+commit publishes the terminal's ID and name with its bounded catalog receipt; the runtime keeps
+the two scalar values after the receipt is consumed. Reconciliation updates the mounted page
+header and its reveal target together, only if that exact runtime still owns the active pane.
+Returning through the project's shell command uses the same retained identity. Neither path
+recreates the PTY or resets terminal input, and receipt handling performs no store reads on the
+UI actor. A header press selects the terminal child and reveals its parent through the ordinary
+outline route. Page identity and navigation remain host-owned; presentation uses `PageTitleView`.
+
+Explicit project-shell activation also selects that terminal child and reveals its parent without
+taking keyboard focus away from the terminal. For a new shell, one pending reveal belongs to the
+exact runtime until its committed receipt arrives. Returning to sidebar navigation or activating
+another pane cancels that intent; returning focus to the old terminal does not revive it. The
+receipt still updates the header and catalog, but cannot overwrite the user's newer selection.
+Creation publishes its receipt after closing the database and host lock, including when the
+subsequent durable-selection operation failed, so a parent-expansion write cannot race its own
+creation transaction. A controlled real-daemon handshake proves both normal and superseded launch
+intent at both display scales.
+
+The native empty navigator shares `SidebarEmptyState` between Mac and Linux: two centered themed
+labels, built lazily only when the project list is empty. It is not a selectable project row.
+Linux exposes the same text as the empty list's accessibility description and keeps the header's
+Add Project button as the control. SDL file drops enter the existing folder-import worker, which
+validates an existing directory and delegates identity/persistence to LinuxHost. The UI copies
+at most 1,023 path bytes, rejects oversized payloads without truncation, and admits only one
+pending import; directory checks, processes and database work remain off the UI actor. Import
+authority and empty-state visibility are host-owned, with shared themed presentation and no new
+extension slot. Real GTK-to-SDL drag input covers files refused, Unicode directories imported and
+duplicates preserving identity at both scales.
+
+The Linux idle workspace keeps one standing composer instead of an intermediate welcome action.
+Escape transfers focus to the navigator; selecting or importing a project updates the destination
+without replacing the editor or its draft identity. The explicit New Chat route starts a new brief.
+Launch resolves the current project/account from host state and is fenced while project selection
+or import is pending. Import receipts are applied before composer submission and presentation, so
+the first imported project appears in the form in the same frame. Missing project/agent choices
+disable both the visible controls and their AT-SPI actions. Project choice values are projected once
+per imported snapshot, account choices are capped at 64 and popup rows at six; typing checks cached
+admission booleans rather than scanning projects. Draft editing, selection and launch authority
+remain host-owned, with shared Design controls and no new extension slot. This lifecycle is an
+incremental Linux contract: theme-authored welcomes, the remaining prompt footer options and
+project-switch draft reset still differ from the complete Mac composer.
+
+The Linux house-theme welcome uses the shared `ComposerGreeting` calendar/selection policy and
+`ThreadingMarkView` geometry. A fresh form picks once; typing and changing its destination or
+identity do not reroll the welcome. `ComposerWelcomeLayout` owns the Mac/Linux mark size, reading
+measure, line cap and minimum clearance. The Linux boundary retains one wrapping label with
+cached metrics, centers the mark and greeting in the room above the form, and hides the entire
+group when that room is too short. AT-SPI exposes the visible greeting and its actual bounds,
+omitting it when hidden. This remains host-owned presentation with no new extension slot;
+theme-specific welcome content, scrims and animation remain outside the Linux preview's scope
+of implemented parity.
+
+The opening prompt now uses `PromptChrome` for its whole field surface and focus ring. The
+text document stays transparent: making the document paint the field left the cold empty box
+only one line tall until editing grew its document. Mac and Linux share the opening column's
+720-point cap and 116-point resting height; the Linux form uses the same 32-point pane inset and
+grows upward to the shared 180-point ceiling, yielding only when the native window is too short.
+Height comes from the editor's cached TextKit layout, with no separate text measurement on wheel
+or pointer callbacks. The focus callback's supplied state drives the border; reading the window's
+responder inside that callback observes the old responder during its transition. This is shared
+presentation within the existing host-owned composer, not a new extension slot.
+
+The Linux opening footer now carries the real permission chip inside that same prompt surface.
+The editor and footer share `PromptChrome` anatomy without increasing the 116/180-point limits.
+The key loop reaches project, identity, editor, model/effort, permissions and the enabled submit button;
+choosing a permission returns to typing. Accepted accessibility choice actions also move the
+Swift host's focus authority into the composer, keeping the visible focus border and native
+keyboard destination in agreement. Merely setting the C editor-input flag left them split.
+AT-SPI publishes the footer chip, bounded menu rows and
+full mode explanations. Wheel input over an open choice consumes accumulated fractional steps
+and moves only its bounded row viewport; it cannot scroll the prompt beneath the menu. The host retains the selected mode across destination/identity changes
+and resets it to Manual for an explicit New Chat; persistence and command mapping are described
+in `sessions.md`. This remains an existing host-owned composer control with no new extension slot.
+The model/effort chip mounts the shared picker body in a bounded overlay anchored to the chip.
+It chooses the available side, clamps to the pane and scrolls both axes. Escape dismisses;
+choosing a cell returns focus to the editor. The existing menu surface does not yet reproduce
+all Mac popover chrome. Catalogue/selection/launch remain host-owned behavior of the existing
+composer, with no additional extension slot.
+
+A single pointer motion crossing either way between the navigator and idle composer cancels the
+source hover and delivers the destination motion in the same host turn. Merely returning a leave
+event consumed the first motion into the composer, so the destination stayed visually stale until
+the user moved again. The bridge emits one combined event; no queued synthetic motion can be
+overtaken by a following click. Native pointer contracts and the real AT-SPI workspace journey
+exercise both directions.
+
 The visual source of truth for each takeover is its manifest in
 [`docs/references/chrome/`](../references/chrome/README.md). In particular, `aqua-cheetah` and
 `aqua-tiger` are not aliases: Cheetah owns the four-row `aqua_pinstripes` glass rib while Tiger

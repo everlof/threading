@@ -24,6 +24,16 @@ for project in projects:
     project.mkdir()
     subprocess.run([host, '--add-project', str(store), str(project)],
                    check=True, capture_output=True, timeout=10)
+# This journey walks twelve project siblings to test pane/PTY ownership. State that layout
+# explicitly: new projects inherit the product's expanded default, and admitting a shell would
+# otherwise insert a child into the fixture's project-only arrow sequence.
+with sqlite3.connect(store / 'threading.db') as database:
+    for identity, payload in database.execute('SELECT id,data FROM project').fetchall():
+        project_data = json.loads(payload)
+        assert project_data['isExpanded'] is True
+        project_data['isExpanded'] = False
+        database.execute('UPDATE project SET data=? WHERE id=?',
+                         (json.dumps(project_data).encode(), identity))
 home = root / 'home'
 home.mkdir()
 child = root / 'workspace_child.py'
@@ -131,6 +141,22 @@ def project_title(index):
     return title('^Threading experiment - ' + re.escape(str(projects[index])) + '$')
 
 
+def focus_project(index):
+    # Shell activation selects its child. This ownership journey deliberately walks only
+    # project siblings, so explicitly return to and fold the selected parent before doing so.
+    key('ctrl+shift+p')
+    project_title(index)
+    key('Left')
+    key('Left')
+    def folded():
+        selected = panes()[1].get_selection_iface().get_selected_child(0)
+        project = durable()[index]
+        log = log_path.read_text()
+        return (selected.get_accessible_id() == project['id'] and not project['isExpanded']
+                and log.count('OUTLINE_EXPANSION_PENDING ') == log.count('OUTLINE_EXPANSION_SAVED '))
+    eventually(folded, 'explicit collapsed project navigation')
+
+
 def terminal_title(index, mouse=False):
     return title('^Threading terminal - WORKSPACE ' + projects[index].name
                  + (' MOUSE' if mouse else '')
@@ -157,7 +183,7 @@ def panes():
     assert children[3].get_accessible_id() == 'linux.actions'
     assert children[4].get_accessible_id() == 'linux.add-project'
     assert len(lists) == len(terminals) == 1
-    assert 0 < lists[0].get_child_count() <= 12
+    assert 0 < lists[0].get_child_count() <= 32
     assert lists[0].get_state_set().contains(Atspi.StateType.SHOWING)
     assert terminals[0].get_state_set().contains(Atspi.StateType.SHOWING)
     return frame, lists[0], terminals[0]
@@ -219,7 +245,7 @@ def click_row(index):
     _, listed, _ = panes()
     item = listed.get_child_at_index(index)
     x, y, width, height = rect(item)
-    xdo('mousemove', '--window', window, str(x + min(30, width // 2)),
+    xdo('mousemove', '--window', window, str(x + min(60, width // 2)),
         str(y + height // 2), 'click', '1')
 
 
@@ -229,10 +255,10 @@ def geometry():
     tx, ty, tw, th = rect(terminal)
     lx, ly, lw, lh = rect(listed)
     assert (fx, fy) == (0, 0)
-    assert (tx, ty, tw, th) == (320, 82, fw - 320, fh - 82), (tx, ty, tw, th, fw, fh)
-    assert lx == 0 and lw == 320 and ly >= 0 and ly + lh <= fh, (lx, ly, lw, lh, fw, fh)
+    assert (tx, ty, tw, th) == (240, 41, fw - 240, fh - 41), (tx, ty, tw, th, fw, fh)
+    assert lx == 0 and lw == 240 and ly >= 0 and ly + lh <= fh, (lx, ly, lw, lh, fw, fh)
     # The native outline also mounts the final row when only part of it enters the clip.
-    assert listed.get_child_count() <= min(12, (lh + 47) // 48), (listed.get_child_count(), lh)
+    assert listed.get_child_count() <= min(32, (lh + 23) // 24), (listed.get_child_count(), lh)
     component = frame.get_component_iface()
     assert component.get_accessible_at_point(tx + 5, ty + 5,
                                              Atspi.CoordType.WINDOW).get_role_name() == 'terminal'
@@ -243,8 +269,8 @@ def geometry():
     assert screen.startswith('VISIBLE 界 e\u0301'), screen
     wide = screen.index('界')
     bounds = text.get_character_extents(wide, Atspi.CoordType.WINDOW)
-    assert (bounds.x, bounds.y, bounds.width, bounds.height) == (400, 82, 20, 22), bounds
-    assert text.get_offset_at_point(415, 93, Atspi.CoordType.WINDOW) == wide, wide
+    assert (bounds.x, bounds.y, bounds.width, bounds.height) == (320, 41, 20, 22), bounds
+    assert text.get_offset_at_point(335, 52, Atspi.CoordType.WINDOW) == wide, wide
     assert text.get_offset_at_point(95, 11, Atspi.CoordType.WINDOW) == -1
     parent = text.get_character_extents(wide, Atspi.CoordType.PARENT)
     assert (parent.x, parent.y, parent.width, parent.height) == (80, 0, 20, 22), parent
@@ -275,16 +301,17 @@ with log_path.open('w+') as log:
         terminal_title(0)
         first = verify_owner(0)
         eventually(panes, 'simultaneous navigator and terminal siblings')
+        eventually(lambda: panes()[0].get_child_at_index(1).get_name() == 'bash',
+                   'new shell header uses its saved terminal name')
         focus(True)
         initial_width, initial_height = eventually(geometry, 'initial pane and text geometry')
-        assert initial_width == 800, 'opening sidebar changed the initial terminal width'
+        assert initial_width == 880, 'opening sidebar changed the initial terminal width'
         eventually(lambda: state(0)['cols'] == initial_width // 10
                    and state(0)['rows'] == initial_height // 22, 'initial child PTY grid')
         assert first['input'] == ''
         screenshot('terminal-focused')
 
-        key('ctrl+shift+p')
-        project_title(0)
+        focus_project(0)
         focus(False)
         before = state(0)['input']
         key('Down')
@@ -307,8 +334,7 @@ with log_path.open('w+') as log:
         key('Tab')
         key('Escape')
         eventually(lambda: state(1)['input'] == '091b', 'terminal Tab and Escape reach child')
-        key('ctrl+shift+p')
-        project_title(1)
+        focus_project(1)
         focus(False)
         click_row(0)
         project_title(0)
@@ -319,14 +345,12 @@ with log_path.open('w+') as log:
         assert state(1)['input'] == '091b', 'sidebar activation leaked into second PTY'
 
         # Pane focus return must neither reopen the selected child nor forward the focus key.
-        key('ctrl+shift+p')
-        project_title(0)
+        focus_project(0)
         key('Tab')
         terminal_title(0)
         focus(True)
         before_sidebar_focus, _ = render_counts()
-        key('ctrl+shift+p')
-        project_title(0)
+        focus_project(0)
         eventually(lambda: render_counts()[0] > before_sidebar_focus,
                    'sidebar focus render completed before cache baseline')
         before_terminal_focus, _ = render_counts()
@@ -356,19 +380,18 @@ with log_path.open('w+') as log:
 
         # Growing an initially centered SDL window can put its trailing edge off the Xvfb
         # screen and crop the rendered evidence. Keep the complete resized shell visible.
-        xdo('windowmove', window, '0', '0', 'windowsize', window, '1280', '528')
-        eventually(lambda: geometry() == (960, 446), 'resized pane and text geometry')
-        eventually(lambda: state(0)['cols'] == 96 and state(0)['rows'] == 20,
+        xdo('windowmove', window, '0', '0', 'windowsize', window, '1280', '264')
+        eventually(lambda: geometry() == (1040, 223), 'resized pane and text geometry')
+        eventually(lambda: state(0)['cols'] == 104 and state(0)['rows'] == 10,
                    'actual child PTY resize excludes sidebar')
-        key('ctrl+shift+p')
-        project_title(0)
+        focus_project(0)
         # Seek beyond the mounted viewport without admitting more runtimes.
         for index in range(1, 12):
             key('Down')
             project_title(index)
         _, listed, _ = panes()
         assert listed.get_child_count() <= 10
-        assert listed.get_description() == 'Showing 6 through 12 of 12 items'
+        assert listed.get_description() == 'Showing 5 through 12 of 12 items'
         assert listed.get_selection_iface().get_selected_child(0).get_name().startswith('Workspace12 ')
         assert len([value for value in durable() if value['terminals']]) == 2
         assert state(0)['input'] == payload.encode().hex()
@@ -381,11 +404,10 @@ with log_path.open('w+') as log:
         verify_owner(0)
         verify_owner(1)
         screenshot('resized-terminal')
-        key('ctrl+shift+p')
-        project_title(11)
-        xdo('mousemove', '--window', window, '325', '87', 'mousedown', '1')
+        focus_project(11)
+        xdo('mousemove', '--window', window, '245', '46', 'mousedown', '1')
         time.sleep(.05)
-        xdo('mousemove', '--window', window, '395', '87')
+        xdo('mousemove', '--window', window, '315', '46')
         time.sleep(.05)
         xdo('mouseup', '1')
         terminal_title(0)
@@ -411,10 +433,9 @@ with log_path.open('w+') as log:
         press = b'\x1b[<0;3;2M'.hex()
         release = b'\x1b[<0;3;2m'.hex()
         try:
-            xdo('mousemove', '--window', window, '345', '115', 'mousedown', '1')
+            xdo('mousemove', '--window', window, '265', '74', 'mousedown', '1')
             eventually(lambda: state(0)['input'] == input_a + press, 'mouse press delivered to A')
-            key('ctrl+shift+p')
-            project_title(11)
+            focus_project(11)
             eventually(lambda: state(0)['input'] == input_a + press + release,
                        'focus loss completes held gesture on its original child')
             for index in range(10, 0, -1):
@@ -424,7 +445,7 @@ with log_path.open('w+') as log:
             terminal_title(1, mouse=True)
             focus(True)
             verify_owner(1)
-            xdo('mousemove', '--window', window, '365', '137')
+            xdo('mousemove', '--window', window, '285', '96')
         finally:
             # Always release the fixture's X button, including assertion failure paths.
             xdo('mouseup', '1')
@@ -439,7 +460,7 @@ with log_path.open('w+') as log:
         # Middle-click is unsupported in the sidebar and must not silently change only the
         # native focus owner. The following byte traverses the real terminal PTY worker.
         before = state(1)['input']
-        xdo('mousemove', '--window', window, '40', '108', 'click', '2')
+        xdo('mousemove', '--window', window, '20', '54', 'click', '2')
         key('x')
         eventually(lambda: state(1)['input'] == before + b'x'.hex(),
                    'unsupported middle-click preserves terminal input ownership')
@@ -452,14 +473,16 @@ with log_path.open('w+') as log:
         # active Workspace02 terminal without selecting the menu's target project.
         before = state(1)['input']
         _, listing, _ = panes()
-        active_id = durable()[1]['id']
+        project_records = durable()
+        active_id = project_records[1]['id']
+        other_projects = {row['id'] for row in project_records if row['id'] != active_id}
         target_row = next(listing.get_child_at_index(index)
                           for index in range(listing.get_child_count())
-                          if listing.get_child_at_index(index).get_accessible_id() != active_id)
+                          if listing.get_child_at_index(index).get_accessible_id() in other_projects)
         target_id = target_row.get_accessible_id()
         target_path = next(row['folderPath'] for row in durable() if row['id'] == target_id)
         rx, ry, rw, rh = rect(target_row)
-        xdo('mousemove', '--window', window, str(rx + min(30, rw // 2)),
+        xdo('mousemove', '--window', window, str(rx + min(60, rw // 2)),
             str(ry + rh // 2), 'click', '3')
         eventually(lambda: panes()[1].get_name() == 'Project actions',
                    'right-click opened project Actions')
@@ -476,8 +499,7 @@ with log_path.open('w+') as log:
         # A blocked durable selection must not suspend input to the still-visible old child.
         # SQLite's write lock holds the worker after it acquires host.lock, without adding
         # product hooks or relying on timing between Return and the selection commit.
-        key('ctrl+shift+p')
-        project_title(1)
+        focus_project(1)
         key('Up')
         project_title(0)
         old_input = state(1)['input']
@@ -512,19 +534,25 @@ with log_path.open('w+') as log:
         verify_owner(1)
         assert state(1)['input'] == old_input + b'v'.hex()
         screenshot('storage-pending-input')
-        # The production page title reveals its owning project after the outline has scrolled
+        # The production page title reveals its exact saved terminal after the outline has scrolled
         # elsewhere, without sending the header press to the still-running PTY.
-        key('ctrl+shift+p')
-        project_title(0)
+        focus_project(0)
         for index in range(1, 12):
             key('Down')
             project_title(index)
         before_reveal = state(0)['input']
-        xdo('mousemove', '--window', window, '380', '20', 'click', '1')
+        page_title = panes()[0].get_child_at_index(1)
+        assert page_title.get_name() == 'bash', 'cached project activation lost the terminal header'
+        px, py, pw, ph = rect(page_title)
+        xdo('mousemove', '--window', window, str(px + pw // 2), str(py + ph // 2), 'click', '1')
         project_title(0)
         focus(False)
         _, listed, _ = panes()
-        assert listed.get_selection_iface().get_selected_child(0).get_name().startswith('Workspace01 ')
+        saved_id = durable()[0]['terminals'][0]['id']
+        eventually(lambda: panes()[1].get_selection_iface().get_selected_child(0).get_accessible_id()
+                   == saved_id, 'page title reveals the exact terminal child')
+        eventually(lambda: durable()[0]['isExpanded'] is True,
+                   'terminal reveal persists its parent expansion')
         assert state(0)['input'] == before_reveal
         screenshot('page-title-reveal')
         key('Escape')

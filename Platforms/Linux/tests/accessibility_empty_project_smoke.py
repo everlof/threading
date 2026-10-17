@@ -51,36 +51,32 @@ with log_path.open('w+') as log:
         app = eventually(application, 'AT-SPI app registration')
         frame = app.get_child_at_index(0)
         listed = eventually(lambda: frame.get_child_at_index(0)
-                            if frame.get_child_at_index(0).get_child_count() == 1 else None,
-                            'empty project action row')
+                            if frame.get_child_at_index(0).get_child_count() == 0 else None,
+                            'empty navigator')
         assert listed.get_role_name() == 'list'
-        assert listed.get_description() == 'Showing 1 through 1 of 1 items'
-        row = listed.get_child_at_index(0)
-        assert row.get_accessible_id() == 'add-project'
-        assert row.get_name() == 'Add project folder'
-        assert row.get_state_set().contains(Atspi.StateType.SELECTED)
-        action = row.get_action_iface()
-        assert action.get_n_actions() == 2
-        assert action.get_action_name(0) == 'select'
-        assert action.get_action_name(1) == 'open'
-        assert action.do_action(0), 'AT-SPI select action was refused'
-        time.sleep(.2)
-        assert dialog_window() is None, 'selection opened the dialog before the open action'
-        assert action.do_action(1), 'AT-SPI import action was refused'
+        assert 'No Projects' in listed.get_description()
+        add = next(frame.get_child_at_index(i) for i in range(frame.get_child_count())
+                   if frame.get_child_at_index(i).get_accessible_id() == 'linux.add-project')
+        assert add.get_action_iface().do_action(0), 'Add Project accessible action refused'
+        menu = eventually(lambda: frame.get_child_at_index(0)
+                          if frame.get_child_at_index(0).get_name() == 'Add Project' else None,
+                          'Add Project menu')
+        existing = next(menu.get_child_at_index(i) for i in range(menu.get_child_count())
+                        if menu.get_child_at_index(i).get_name() == 'Use an Existing Folder…')
+        assert existing.get_action_iface().do_action(1), 'existing-folder accessible action refused'
         dialog = eventually(dialog_window, 'native project dialog')
         subprocess.run(['xdotool', 'windowfocus', '--sync', dialog, 'key', 'Escape'],
                        check=True, timeout=5)
         eventually(lambda: 'PROJECT_IMPORT_CANCELLED' in log_path.read_text(),
                    'dialog cancellation')
-        assert frame.get_child_at_index(0).get_child_count() == 1
-        assert row.get_accessible_id() == 'add-project'
+        assert frame.get_child_at_index(0).get_child_count() == 0
         window = subprocess.check_output(['xdotool', 'search', '--all', '--onlyvisible',
                                           '--pid', str(process.pid), '--name',
                                           '^Threading experiment - empty store$'], text=True).splitlines()[0]
-        subprocess.run(['xdotool', 'windowfocus', '--sync', window, 'key', 'Escape'],
+        subprocess.run(['xdotool', 'windowfocus', '--sync', window, 'key', 'alt+F4'],
                        check=True, timeout=5)
         assert process.wait(timeout=5) == 0
-        print('PASS empty project row AT-SPI open, GTK dialog, cancel and unchanged store')
+        print('PASS empty navigator Add Project AT-SPI menu, GTK dialog, cancel and unchanged store')
     finally:
         if process.poll() is None:
             process.kill()

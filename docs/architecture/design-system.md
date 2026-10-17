@@ -20,8 +20,89 @@ black after a dark-mode switch. The native provider-mark journey measures select
 every row title in both appearances; recording
 a tint or inspecting the ancestor background is insufficient.
 
+The Linux navigator uses the outline's existing identity index for every visible-row lookup.
+Its former second projection allowed only one expanded project and could attach child selection
+to that project rather than to the child's stable owner. Expansion remains host-owned: each
+project, including an empty one, can open independently. Disclosure clicks preserve unrelated
+selection; a selected child hidden by its own parent's collapse falls back to that parent. The
+shim builds lightweight row records on explicit reload/expansion and mounts only viewport cells.
+Physical Left/Right keys have distinct transport events from saved-catalog commands. Plain arrows
+therefore navigate the outline; catalog commands remain in the project menu. Right expands a closed project and stays on it; on a leaf or
+an already-open branch it leaves selection and rendering alone. Editors, terminal input and
+menu/catalog back navigation retain their own key routes.
+
+Linux standing expansion comes from the existing project-owned `isExpanded` field. The bounded
+navigation query retains it; startup and imported snapshots restore the complete expansion set
+in one outline projection without user callbacks. Replaying one `expandItem` per project would
+make startup quadratic. User and page-reveal changes pass through the outline delegate's expand/
+collapse callbacks and one off-actor exact-row write. Navigation waits for that receipt while
+resize and terminal input remain live; a refusal restores the prior state. Empty branches persist
+too, and restoring state never overwrites runtime selection. The native multi-project journey
+covers both input routes, restart and a held-store-lock refusal.
+A restored runtime is selected in that same ordinary outline rather than opening a saved-runtime
+catalog. After the standing projection exists, reveal only its parent before resolving and scrolling
+to the child. This matches Mac's `select(sessionID:)`/`select(terminalID:)`: an already-open parent
+writes nothing; a folded parent is an actual disclosure mutation. The bounded snapshot retains a
+selected identity even outside its recent window, so restoration must use identity rather than
+assuming the first child. The explicit catalog commands keep their existing selection behavior.
+
+Linux project disclosures request the same eight-point semibold chevron role as
+`ThemedOutlineView`, inside the existing 13-point hit slot. Their resting ink is
+`Design.Text.tertiary`; selected projects use the actual selection ground's label tier.
+These quiet markers do not opt into the separate provider-artwork contrast repair. Applying
+that repair after the theme's text ladder silently brightened the marker beyond the Mac role.
+Only mounted expandable rows retain a glyph, and changing selection does not rebuild its image.
+The portable path adapter must preserve explicit closure: flattening repeats the start vertex
+only for `close()`, strokes visit adjacent vertices, and fills close implicitly. Treating every
+three-point stroke as a polygon turned chevrons into triangles. The floating-glyph fixture
+checks both closure states and the native outline checks the resulting ink area at 1× and 2×.
+
+The Linux stroke adapter retains explicit subpath closure separately from its vertices: drawing
+a line back to the starting point still leaves two caps, while `close()` creates a join there.
+It expands butt/round/square caps and miter/round/bevel joins, including the miter limit, before
+applying the context transform. All expanded pieces use one winding and are rasterized as one
+union. Painting each segment and joint separately compounded translucent ink and antialias
+coverage at overlaps; adding a disc at every segment end also ignored the authored cap and join.
+The CoreGraphics current-path adapter submits the complete path through this same operation.
+`FloatingGlyphHarness` checks endpoint extent, outer corners, miter fallback, closed-path holes
+and single-composition alpha alongside the shared production marks. Geometry generation stays
+linear in the flattened path, and uses the existing bounded scan converter rather than a
+window-sized intermediate mask per stroke.
+
+Linux UI fonts are bundled Inter 4.1 variable upright/italic faces, registered once per process
+before the first `NSFont` measurement. Plain labels, attributed runs and worker-owned document
+maps share one family selector. This supplies actual regular/medium/semibold/bold faces instead
+of asking the two-weight DejaVu Sans installation to approximate four roles. The package carries
+both resource files and the upstream license; the installed-runtime check runs without a source
+checkout or global Inter installation. Code and terminal text keep their explicit DejaVu Sans
+Mono face. Inter improves the portable system-font approximation; it does not claim SF pixel
+identity. Font registration is bounded to two known files, never repeated per row or frame.
+
+The portable label bridge shares line-layout configuration across plain drawing, attributed
+drawing and selectable-label hit testing. Clipping shapes one complete line and crops its
+bounded output; Pango's single-paragraph flag does not disable word wrapping. A fitting line
+keeps its requested alignment, while an overflowing clipped line starts at the leading edge,
+matching AppKit. Do not repair lost words by widening a particular placeholder or menu label.
+The label fixture compares each clipped result with a crop of its complete line, and the native
+outline journey resizes the real placeholder to 360- and 320-point panes at both display scales.
+
 The shared session-content provider glyph opts into accessibility as an image. Its host supplies
 the provider/account label, so the generic glyph's decorative default would discard identity.
+
+Linux chrome text consumes an export of the production `LabelLegibility` ladder through cached
+dynamic colors. `Design.Ink(on:)` remains the neutral recipe for an arbitrary terminal or
+selection ground; using it for `Design.Text.secondary/tertiary/quaternary` discarded the house
+theme's blue/cream hue. The native empty-pane journey checks the actual glyph pixels through
+light/dark changes at both display scales, including antialiased 1× text.
+
+The Linux opening welcome is a `ComposerWelcomeView` boundary, not a terminal placeholder.
+It combines the retained shared mark paths with one primary-ink, 20-point semibold greeting,
+word-wrapped to at most three lines. `ComposerWelcomeLayout` shares its 40-point mark,
+620-point measure and 48-point minimum clearance with the Mac controller. Measurement is cached
+at unchanged width/text; no provider/project-sized tree or work is added to pointer callbacks.
+The app greeting is selected once from the shared calendar policy, whose daypart is the same
+portable grammar used by theme welcomes. Linux currently paints the house-theme static form;
+this does not implement theme-authored greetings, captions, alternate marks or motion.
 
 `ThemedControl` supplies accessibility hit testing for its drawn, cell-free controls. AppKit's
 default `NSControl` implementation returns the cell; without one, a button could appear in the
@@ -180,6 +261,7 @@ Components so far:
 | `RunPlanDisclosureView` | The compact, host-owned current-plan row shared by Terminal's session status card and Chat's status strip. It accepts only provider-neutral `RunProgress`, keeps its anchor as a full-row themed button, and opens a transient `ThemedPopover` whose checklist is a reusable `ThemedTableView`; provider hooks, transcripts, paging, and turn lifetime remain outside Design. |
 | `ThemedSegmentedControl` | Two or three fixed choices with all of them on screen: a track at `controlResting` with the selected segment lifted to `controlHover`. Built as a container of small `ThemedControl`s, the same shape as `ThemedTabStripView`, so each segment inherits hover, focus and its `.radioButton` role rather than one element re-deriving all three for parts of itself that are not views. An unselected segment answers the pointer in *ink* rather than taking a third fill step, because the scale has two control fills and a third invented here is how a scale stops being a scale. Arrow keys walk the run and take the selection with them; the ends hold rather than wrap. A pointer press leaves the segment as first responder so those arrows remain available, but the focus ring is drawn only when focus arrived from the keyboard: the filled plate is the held choice, and outlining it after a click is a second, misleading selection mark. The run publishes its titles' real `TextBaselineProviding` baseline for loose-text siblings. Each title also keeps a whole-point width floor above its fractional text measure at priority 999: fitting cannot turn a half-point rounding error into an ellipsis, while required margins still win in a genuinely narrow run. It states no intrinsic width by default, because a control row hands it a measure; `sizesToTitles` makes it state one instead — every segment as wide as the widest title (and mark) plus its margins — re-measured when a title's font changes. A host that had to pick a number cannot know the typeface or text size: Automations gave its four pages a three-choice constant, and a monospaced theme drew "Activi…". |
 | `PromptView` | A rounded container holding a growing text view and its submit control, as one input. |
+| `PromptChrome` | The prompt's shared surface, footer, send/stop affordance and bounded height policy, used by `PromptView` and the Linux native conversation host. Footer height belongs inside the resting size and ceiling; attachment/context strips add outside that allowance. Hosts keep draft, focus, submission and permission ownership. |
 | `AnnotatedImageView` / `ImageAnnotationRailView` | A picture you can point at, and one numbered field per place you pointed. `ThemedImagePreview`'s sibling rather than a mode on it: that control's whole gesture is *one press opens the inspector* — click, Space, force click and VoiceOver's press all land on the same action — and a click that sometimes drops a pin instead would make the most-used image affordance in the app conditional on a flag its call sites cannot see. Here the click is the mark and the **keyboard** opens the picture full size, which is the inverse contract stated once rather than a branch inside the shared one. The scale is `ThemedImagePreview.fittedRect` itself so the two never disagree about size; the placement differs deliberately (centred, not top-pinned — this view *is* its column and runs the full depth of the sheet). Neither view owns the list: the host does, because the same marks are shown by the picture, by the rail, and by the fullscreen inspector's canvas at the same time. Focus is the tie — a field taking the caret lights its own pin, and a click on a pin puts the caret in its field. Bounded at `ImageAnnotationDefaults.maximumCount` (20), which is what makes a retained stack of rows the right shape. The pin is **`BrowserAnnotationOverlay`'s pin**: same chip height, border weight, accent fill with the ground stroked around it, `numericDetail` number, top-most-wins hit test — a second numbered mark with its own anatomy would be two annotation vocabularies in one app. |
 | `PaneNoticeView` | A standing condition between a pane header and its content, pushed into layout rather than drawn over it. Ordinary notices are one message line; a technical diagnosis may add a short title above a two-line explanation. The warning/information mark, exact copy, compact intrinsic-width actions and keyboard-reachable dismissal remain one accessible group. It owns its ground because the pane beneath it may be an unrelated terminal palette. A condition whose evidence is a picture may add one `accessory` view, placed between the sentence and the answers and never squeezed by either: evidence belongs with the words it supports, not out at the margin among the controls. |
 | `LimitEscapeStripView` | The limit-recovery specialization of the pane ribbon: full pane width below the header, content pushed beneath it, opaque `background` ground, closing `SeparatorView`, and `PaneNoticeDefaults` height/inset. It stays separate from `PaneNoticeView` because its offer mutates through recovery-specific busy/error states and reports typed intentions to `LimitRecoveryCoordinator`; the host owns those semantics and extensions cannot replace this surface. |
@@ -226,7 +308,7 @@ Components so far:
 | `WorkspaceDockPreview` | Passive, themed landing geometry for a dragged workspace tab. The host supplies the exact prospective rectangle and a caption naming the action and scope ("Split Below · Side panel", "Move Here · This pane"). The region is the shared `Design.Surface.dropTarget` wash edged in the accent, the caption a `floating` plate — both recorded through `applySurface`, unbevelled, and re-fitted when a theme changes the typeface. It fades in where it lands, glides between landings at `Design.Motion.quick` (immediate under Reduce Motion), ignores unchanged input, never hit-tests and announces each new landing to VoiceOver. The first version drew a raw 20% accent slab with a 2pt stroke through `draw(_:)`, redrawing the whole workspace on every pointer move. Its Component Gallery story switches between whole-workspace, conversation and side-panel scope. |
 | `ThemedSurfaceView` | A pane's ground, and the one view that re-resolves its fill on a *system* light/dark switch. |
 | `SidebarBackdropView` | The sidebar's ground: the platform's sidebar material under the identity theme, an opaque themed surface under a style — plus the gradient and image layers a style's `SidebarStyle.Background` states, every frozen layer colour restated per apply. |
-| `ThreadingMarkView` | The Threading mark drawn live from `ThreadingMarkGeometry` (the same normalized silhouette the app icon and the SVG state): brand threads under System, the theme's accent held legible under a style, and a one-shot `playDrawIn()` that strokes the shield, stitches the six strands and lands the core. Its opt-in particle presentation samples that same geometry into individually tintable points and offers Weave, Breathe and Orbit cadences; a held Weave tumbles the shared field through a bounded irregular 3D route while its points keep travelling locally. No particle layer is built for passive marks, no cadence runs at rest, and none is constructed under Reduce Motion. Decorative; the brand row beside it carries the accessible name. |
+| `ThreadingMarkView` | The Threading mark drawn live from `ThreadingMarkGeometry` (the same normalized silhouette the app icon and the SVG state): brand threads under System, the theme's accent held legible under a style, and a one-shot `playDrawIn()` that strokes the shield, stitches the six strands and lands the core. Its opt-in particle presentation samples that same geometry into individually tintable points and offers Weave, Breathe and Orbit cadences; a held Weave tumbles the shared field through a bounded irregular 3D route while its points keep travelling locally. No particle layer is built for passive marks, no cadence runs at rest, and none is constructed under Reduce Motion. Decorative; the brand row beside it carries the accessible name. Linux uses the same normalized geometry through an NSBezierPath adapter and retains eight static paths per mark; the exported house-theme ink remains live across appearance changes. Particle/launch motion is not implemented in the Linux leaf. |
 | `SidebarBrandView` / `AgentWorkloadAnalyzerView` | The sidebar's brand row: the mark (or a theme's own logo, or nothing) beside the wordmark, a `MorphingTitleLabel` so a chrome that renames the row morphs it. A spectrum material replaces those identity pixels with the fixed-cost seven-band workload analyzer: working count in one-bit figures (`99+` overflow, with the exact count accessible), `MAX` at provider-relative top effort, and band height from the shared theme-independent `AgentIntensity` envelope. It is material-gated rather than theme-ID-gated, so all other themes keep their stated brand and player-derived themes opt in automatically. Self-wired to theme, appearance and intensity changes; one accessibility element states either the brand or the workload. The analyzer is decorative, stops its timer while hidden/idle, and has no timer under Reduce Motion. |
 | `ScreenshotReportDropTargetView` | The transient answer to the native titlebar's otherwise invisible screenshot destination: a quiet `dropTarget` wash, photo glyph and “Drop screenshot to report” beside the traffic lights. It never hit-tests and has no resting surface. A valid drag gets one short arrival; Reduce Motion shows the complete still state. |
 | `ControlButtonGroupView` / `ToolbarButtonGroupView` | Related icon actions as one compact run, so their internal spacing is the component's rather than an `NSStackView` decision at each call site. A content `ControlRowView` hands its live theme metrics to the group and the group promotes every button; the named toolbar subclass preserves the same contract when the group is one `NSToolbarItem`. |
@@ -904,7 +986,22 @@ surfaces. `scripts/config/theme-boundary.json` owns the list; the build and test
 its SwiftSyntax checker, while `.swiftlint.yml` provides fast editor feedback. A class with no
 wrapper yet gets one in `UI/Design/` first.
 
-### Confirmations
+The Linux compatibility layer also compiles the shared `ModelEffortMatrixControl`. Its
+tracking area receives movement while the pointer stays inside the grid, only along the current
+hit path; an overlay or inactive key window suppresses delivery. `scrollToVisible` reveals a
+focused cell through the nearest clip view on both axes. Symbol palette configuration preserves
+its point size/weight and applies actual tint and source alpha; the supported palette has one
+ink. Radial gradients interpolate once per device pixel under the inherited path clip, rather
+than accumulating translucent concentric fills. The opening composer mounts the shared
+`ModelEffortPickerContentView` and matrix; both hosts use the same presentation factory for
+inherited rows and effort columns. Mac retains native Auto Layout alignment and legacy-theme
+pixel rounding inside this shared body; Linux positions its children using the same metrics.
+The Linux host owns anchoring, dismissal, account admission and launch. Its existing menu
+surface is still a chrome approximation, not the complete Mac popover silhouette. Visible
+matrix cells expose their clipped bounds and distinct selected/focused/enabled state; the
+host validates each accessibility action against the current composer and popup identities.
+
+## Confirmations
 
 **A secure cell requires a secure field owner.** `ThemedSecureField` inherits from
 `NSSecureTextField`; `ThemedTextField` and the secure sibling share `ThemedFieldChrome` for the
@@ -1271,6 +1368,16 @@ overflows, the box is already at its cap and the constant has stopped moving.
 `PromptTextView.scrollingPrompt()` exposes the same text and scroll wiring to the Linux host,
 which supplies its surrounding session composer. The shared editor owns placeholder drawing,
 focus and Return/⌘Return behavior; Threading retains text admission, submission and drafts.
+`PromptChrome` also owns the opening column's 720-point cap and 116-point prompt minimum, used
+by the Mac controller and Linux host. Linux's transparent editor sits inside the shared field
+surface, so an empty document cannot shrink the visible field; its cached used-text height feeds
+the same bounded growth policy. `PromptChrome.contentFrames` gives the frame-based Linux host
+the same 12-point horizontal inset, 10-point vertical inset and gap, and 26-point footer within
+the existing height allowance. Its permission chip uses the shared `PermissionModeLabels`
+mark/inherit wording and `AgentPermissionMode` titles and descriptions. The remaining opening
+footer controls are separate parity work. The choice presenter measures the fixed seven-value
+permission list once when opened and mounts at most six shared rows; its chip coordinates are
+converted through the actual view hierarchy for placement and repeated-click dismissal.
 
 **Undo has two owners, and both are required.** `ThemedTextView.allowsUndo` makes user edits enter
 the text system's manager; the application menu then reaches that manager through AppKit's window

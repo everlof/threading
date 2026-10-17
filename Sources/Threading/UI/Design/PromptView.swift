@@ -531,29 +531,8 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     private func setupFooterRow() {
-        footerRow.orientation = .horizontal
-        footerRow.alignment = .centerY
-        footerRow.spacing = Design.Spacing.small
-        footerRow.detachesHiddenViews = true
-        footerRow.translatesAutoresizingMaskIntoConstraints = false
+        PromptChrome.configureFooter(footerRow, spacer: footerSpacer)
         footerRow.isHidden = true
-
-        footerSpacer.translatesAutoresizingMaskIntoConstraints = false
-        // **Below every member of the row**, which `defaultLow` was not: it is the usage
-        // reading's own compression resistance to the point, so the gap between the two runs and
-        // the reading beside it were two claims on the same slack at the same priority, and an
-        // ambiguous system resolves that however it likes. It resolved it by squeezing the
-        // reading to a third of its width and handing the difference to the gap — a row visibly
-        // holding 90 spare points while the number in it read `5h 86…`. The empty middle is
-        // never the thing worth keeping, so it stretches last and collapses first.
-        // `PromptViewDefaults.spacerPriority` is the composer's `spacerPriority`, for the same
-        // reason and stated the same way.
-        footerSpacer.setContentHuggingPriority(PromptViewDefaults.spacerPriority, for: .horizontal)
-        footerSpacer.setContentCompressionResistancePriority(
-            PromptViewDefaults.spacerPriority,
-            for: .horizontal
-        )
-        footerRow.addArrangedSubview(footerSpacer)
     }
 
     /// Puts the submit glyph where the placement says, and gives the text the width whatever
@@ -615,9 +594,7 @@ final class PromptView: NSView, ThemedComponent {
     /// The box's own top and bottom padding, which the control row changes — see
     /// `PromptViewDefaults.footerVerticalInset`.
     private var verticalInset: CGFloat {
-        showsFooterRow
-            ? PromptViewDefaults.footerVerticalInset
-            : PromptViewDefaults.verticalInset
+        PromptChrome.contentInset(showsFooter: showsFooterRow)
     }
 
     /// How tall the box stands with nothing in it.
@@ -632,13 +609,9 @@ final class PromptView: NSView, ThemedComponent {
     /// Stated in lines rather than as a constant so it stays right when the conversation's font
     /// or size changes; the chrome and the row are added on top by `updateHeight`.
     private var restingHeight: CGFloat {
-        guard showsFooterRow else { return minimumHeight }
-        let line = textRole.resolved(in: fontSurface).boundingRectForFont.height
-        let text = (line * PromptViewDefaults.restingLines).rounded()
-        return max(
-            minimumHeight,
-            text + verticalInset * 2 + Design.Size.chipHeight + contentStack.spacing
-        )
+        PromptChrome.restingHeight(minimum: minimumHeight,
+            lineHeight: textRole.resolved(in: fontSurface).boundingRectForFont.height,
+            showsFooter: showsFooterRow, spacing: contentStack.spacing)
     }
 
     /// Resolves the user's setting against this composer's own default, at the keystroke.
@@ -1455,16 +1428,7 @@ final class PromptView: NSView, ThemedComponent {
         let isStop = composerMode.canStop
         let canSubmit = isSubmissionAvailable
 
-        submitButton.image = NSImage(
-            systemSymbolName: isStop ? DesignSymbols.stop : DesignSymbols.submit,
-            accessibilityDescription: isStop
-                ? L10n.string("Stop")
-                : L10n.string("Start session")
-        )
-        submitButton.isEnabled = isStop || canSubmit
-        submitButton.contentTintColor = isStop || canSubmit
-            ? Design.Surface.accent
-            : Design.Text.tertiary
+        PromptChrome.updateSubmit(submitButton, canSubmit: canSubmit, isStop: isStop)
         refreshSubmitTitle()
         updateScheduleChevron(hasContent: hasContent, isStop: isStop)
         onSubmissionAvailabilityChange?(canSubmit)
@@ -1598,32 +1562,7 @@ final class PromptView: NSView, ThemedComponent {
         // *here* — and a wash rather than a plate, because a draft may be under it.
         let isEmphasized = isTextFocused || isDropTarget
         let fill = isDropTarget ? Design.Surface.fieldDropTarget : Design.Surface.field
-        if AppThemePalette.current.material(for: effectiveAppearance).fieldStyle == .outlined {
-            // A search bar's outline, there at rest and never bevelled. Focus and a drop
-            // thicken it by a point past the focus ring's own width, so the emphasised state
-            // still reads as more than the resting one.
-            applySurface(
-                fill: fill,
-                radius: .panel,
-                border: Design.Surface.accent,
-                borderWidth: isEmphasized
-                    ? Design.Accessibility.focusRingWidth + 1
-                    : OutlinedField.borderWidth,
-                glow: true,
-                bevel: .none
-            )
-            return
-        }
-        applySurface(
-            fill: fill,
-            radius: .panel,
-            border: isEmphasized ? Design.Surface.accent : Design.Surface.border,
-            borderWidth: isEmphasized
-                ? Design.Accessibility.focusRingWidth
-                : Design.Radius.border,
-            glow: true,
-            bevel: .sunken
-        )
+        PromptChrome.applySurface(to: self, fill: fill, emphasized: isEmphasized)
     }
 
     /// Sizes the box to its text, between one line and `inputMaxHeight`.
@@ -1633,43 +1572,19 @@ final class PromptView: NSView, ThemedComponent {
 
         layoutManager.ensureLayout(for: container)
         let textHeight = layoutManager.usedRect(for: container).height
-        let chrome = verticalInset * 2
         let attachmentHeight = attachments.isEmpty
-            ? 0
-            : Design.Size.promptAttachmentThumbnail + Design.Spacing.medium
+            ? 0 : Design.Size.promptAttachmentThumbnail + Design.Spacing.medium
         let contextHeight = contextAttachments.isEmpty
-            ? 0
-            : Design.Size.chipHeight + Design.Spacing.medium
-        let footerHeight = footerRow.isHidden
-            ? 0
-            : Design.Size.chipHeight + contentStack.spacing
-
-        // The control row comes *out of* the minimum rather than adding to it, which is the
-        // opposite of the attachment strip above: a strip is content the user put there and
-        // must not shrink the field they are typing in, while the row is the box's own chrome
-        // and is present from the first keystroke. Adding it instead opened an empty reply box
-        // at a hundred points — a paragraph of height asking for one line.
-        //
-        // What that left behind was a floor *below a single line*: 44 − 36 = 8, so the resting
-        // height of a box with a control row was decided entirely by how tall one line of body
-        // text happens to be, and nothing stated how much room a reply is worth. `restingLines`
-        // states it. The row still comes out of the total — the arithmetic is unchanged — it is
-        // the minimum the row is subtracted from that now knows there is a row.
-        let textFloor = max(0, restingHeight - footerHeight)
-        let cap = max(Design.Size.inputMaxHeight - footerHeight, textFloor)
-        let textFitted = min(max(textHeight + chrome, textFloor), cap)
-
-        let fitted = textFitted + attachmentHeight + contextHeight + footerHeight
-
-        // Past the cap the box stops growing, so the scroller has to take over. Decided before
-        // the height guard below, because the box is already at its cap by the time the text
-        // that overflows it arrives — gated behind that guard, the run of edits that actually
-        // needs a scroller is the one run that never reaches this line. Still compared before
-        // assigning: `hasVerticalScroller` re-tiles the scroll view, and `layout()` calls
-        // through here, so an unconditional write is a layout loop.
-        let needsScroller = textFitted >= cap
-        if scrollView.hasVerticalScroller != needsScroller {
-            scrollView.hasVerticalScroller = needsScroller
+            ? 0 : Design.Size.chipHeight + Design.Spacing.medium
+        let measurement = PromptChrome.fittedHeight(textHeight: textHeight,
+            restingHeight: restingHeight, showsFooter: !footerRow.isHidden,
+            spacing: contentStack.spacing, attachmentHeight: attachmentHeight,
+            contextHeight: contextHeight)
+        let fitted = measurement.height
+        // Decide before the height guard: once the box is capped, further edits still need
+        // scrolling. Avoid re-tiling an unchanged scroll view during layout.
+        if scrollView.hasVerticalScroller != measurement.scrolls {
+            scrollView.hasVerticalScroller = measurement.scrolls
         }
 
         // Growth is a preference; the resting size is the promise. AppKit derives a window's
@@ -2317,7 +2232,7 @@ enum PromptComposerMode: Equatable {
 // MARK: - Prompt View Defaults
 
 enum PromptViewDefaults {
-    static let submitSize = Design.Size.compactSubmitHeight
+    static let submitSize = PromptChrome.submitSize
     static let maximumImageAttachments = 32
 
     /// The plate under a movie thumbnail's play mark: the chooser height, so the mark reads as
@@ -2330,7 +2245,7 @@ enum PromptViewDefaults {
     /// what stretches when there is room and what disappears when there is not. Any real
     /// priority leaves the row's own members bidding against a gap for their width — see
     /// `setupFooterRow`.
-    static let spacerPriority = NSLayoutConstraint.Priority(1)
+    static let spacerPriority = PromptChrome.spacerPriority
 
     /// The chevron beside the send. Deliberately narrower than the glyph it sits next to: the
     /// press is the point of the pair and the chevron is the day the answer is different, which
@@ -2378,10 +2293,10 @@ enum PromptViewDefaults {
     ///
     /// It is only a resting size: `Design.Size.inputMaxHeight` is still the ceiling and the box
     /// grows between them, so nothing here costs anyone room to read the conversation.
-    static let restingLines: CGFloat = 2
+    static let restingLines = PromptChrome.restingLines
 
     /// Keeps a one-line prompt vertically centred in `Design.Size.inputHeight`.
-    static let verticalInset: CGFloat = 13
+    static let verticalInset = PromptChrome.verticalInset
     static let submitBottomInset: CGFloat = 13
 
     /// The padding a box with a control row uses instead.
@@ -2389,7 +2304,7 @@ enum PromptViewDefaults {
     /// 13 exists to centre one line in a 44pt box and means nothing once there is a second row
     /// under that line: kept, it padded the text by a line's worth of air at the top and left
     /// the row crowding the bottom edge. A panel's own step reads as one box holding two rows.
-    static let footerVerticalInset: CGFloat = Design.Spacing.medium
+    static let footerVerticalInset = PromptChrome.footerVerticalInset
 
     /// What the box's height asks for once its content has grown it past `minimumHeight`.
     ///

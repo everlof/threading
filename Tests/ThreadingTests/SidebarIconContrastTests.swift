@@ -6,6 +6,170 @@ import XCTest
 /// missed NSImageCell's emphasized white treatment, even when the property was correctly black.
 @MainActor
 final class SidebarIconContrastTests: HostedStoreTestCase {
+    /// A matched native-outline fixture for the Linux port, in the actual Mac window shell.
+    /// The row selection, depth and trailing band must come from the mounted outline.
+    func testRendersHouseThemeOutlineInShippingWindow() throws {
+        let previous = AppThemePalette.current
+        defer { AppThemeLibrary.apply(previous) }
+        AppThemeLibrary.apply(AppThemeStyles.threading)
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sidebar-house-outline-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var projects: [Project] = []
+        for name in ["AlphaCount", "BetaEmpty"] {
+            let directory = root.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            projects.append(try XCTUnwrap(ProjectStore.shared.addProject(folderURL: directory)))
+        }
+        let terminal = try XCTUnwrap(ProjectStore.shared.addTerminal(
+            to: projects[0].id, customTitle: "true"
+        ))
+        let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1120, height: 480))
+        let content = try XCTUnwrap(window.contentView)
+        let item = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        controller.splitViewController.setCollapsed(false, on: item, animated: false)
+        controller.splitViewController.splitView.setPosition(240, ofDividerAt: 0)
+        let sidebar = controller.sidebarViewController
+        sidebar.mountInitialTreeIfNeeded()
+        let outline = try XCTUnwrap(descendants(sidebar.view).compactMap { $0 as? ThemedOutlineView }.first)
+        outline.fixtureIsKey = true
+        sidebar.select(terminalID: terminal.id, notifyDelegate: false)
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            window.setContentSize(NSSize(width: 1120, height: 480))
+            content.appearance = try XCTUnwrap(NSAppearance(named: appearance))
+            AppThemeRefresh.repaint(content)
+            let bitmap = try capture(content)
+            let cell = try XCTUnwrap(descendants(content).compactMap { $0 as? ProjectTerminalRowView }.first)
+            XCTAssertTrue(try XCTUnwrap(cell.superview as? SidebarHoverRowView).isSelected)
+            XCTAssertEqual(cell.frame.minX, 39)
+            try write(bitmap, named: "sidebar-row-house-outline-\(name).png")
+            // Match the Linux pane's 880×480-point available area; the Mac shell also has
+            // a caption/toolbar region and one-point pane rules around that content.
+            window.setContentSize(NSSize(width: 1121, height: 521))
+            let matched = try capture(content)
+            let placeholder = try XCTUnwrap(descendants(content).compactMap { $0 as? SessionPlaceholderView }
+                .first { !$0.isHidden })
+            XCTAssertEqual(placeholder.bounds.size, NSSize(width: 880, height: 480))
+            for label in descendants(placeholder).compactMap({ $0 as? NSTextField }) {
+                print("PLACEHOLDER_LABEL \(name) \(label.stringValue) frame=\(label.convert(label.bounds, to: placeholder))")
+            }
+            print("PLACEHOLDER_ACTION \(name) frame=\(placeholder.actionAnchor.convert(placeholder.actionAnchor.bounds, to: placeholder))")
+            try write(matched, named: "sidebar-row-house-placeholder-\(name).png")
+            // A 360-point content pane supplies a narrow reference with the same 240-point
+            // sidebar. This states the fixture's geometry, not the shell's minimum size.
+            window.setContentSize(NSSize(width: 601, height: 281))
+            controller.splitViewController.splitView.setPosition(240, ofDividerAt: 0)
+            let narrow = try capture(content)
+            XCTAssertEqual(placeholder.bounds.size, NSSize(width: 360, height: 240))
+            for label in descendants(placeholder).compactMap({ $0 as? NSTextField }) {
+                print("PLACEHOLDER_NARROW_LABEL \(name) \(label.stringValue) frame=\(label.convert(label.bounds, to: placeholder)) mode=\(label.lineBreakMode.rawValue)")
+            }
+            try write(narrow, named: "sidebar-row-house-placeholder-narrow-\(name).png")
+        }
+    }
+
+    func testIndependentProjectDisclosureInShippingWindow() throws {
+        let previous = AppThemePalette.current
+        defer { AppThemeLibrary.apply(previous) }
+        AppThemeLibrary.apply(AppThemeStyles.threading)
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sidebar-multiple-projects-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var projects: [Project] = []
+        for name in ["Alpha", "Beta", "GammaEmpty"] {
+            let directory = root.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            projects.append(try XCTUnwrap(ProjectStore.shared.addProject(folderURL: directory)))
+        }
+        _ = try XCTUnwrap(ProjectStore.shared.addTerminal(to: projects[0].id, customTitle: "true"))
+        let selected = try XCTUnwrap(ProjectStore.shared.addTerminal(to: projects[1].id, customTitle: "true"))
+        let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1121, height: 521))
+        let content = try XCTUnwrap(window.contentView)
+        let sidebarItem = try XCTUnwrap(controller.splitViewController.splitViewItems.first)
+        controller.splitViewController.setCollapsed(false, on: sidebarItem, animated: false)
+        controller.splitViewController.splitView.setPosition(240, ofDividerAt: 0)
+        let sidebar = controller.sidebarViewController
+        sidebar.mountInitialTreeIfNeeded()
+        let outline = try XCTUnwrap(descendants(sidebar.view).compactMap { $0 as? ThemedOutlineView }.first)
+        outline.fixtureIsKey = true
+        sidebar.select(terminalID: selected.id, notifyDelegate: false)
+        _ = try capture(content)
+        XCTAssertEqual(outline.numberOfRows, 5)
+        let alpha = try XCTUnwrap(outline.item(atRow: 0))
+        let beta = try XCTUnwrap(outline.item(atRow: 2))
+        let empty = try XCTUnwrap(outline.item(atRow: 4))
+        XCTAssertTrue(outline.isItemExpanded(alpha))
+        XCTAssertTrue(outline.isItemExpanded(beta))
+        XCTAssertTrue(outline.isExpandable(empty))
+        let selectedItem = try XCTUnwrap(outline.item(atRow: outline.selectedRow))
+        // Capture the stable initial expansion before exercising AppKit's animated disclosure.
+        // Offscreen windows do not reliably deliver animation completion callbacks.
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            content.appearance = try XCTUnwrap(NSAppearance(named: appearance))
+            AppThemeRefresh.repaint(content)
+            let bitmap = try capture(content)
+            XCTAssertEqual(outline.numberOfRows, 5)
+            XCTAssertEqual(outline.selectedRow, outline.row(forItem: selectedItem))
+            for index in 0..<outline.numberOfRows {
+                let row = try XCTUnwrap(outline.rowView(atRow: index, makeIfNecessary: true))
+                XCTAssertEqual(row.frame, outline.rect(ofRow: index))
+            }
+            try write(bitmap, named: "sidebar-row-multiple-projects-\(name).png")
+        }
+        let alphaRow = try XCTUnwrap(outline.rowView(atRow: 0, makeIfNecessary: true))
+        let disclosure = try XCTUnwrap(alphaRow.subviews.first {
+            $0.identifier == NSOutlineView.disclosureButtonIdentifier
+        } as? NSButton)
+        disclosure.performClick(nil)
+        XCTAssertEqual(outline.numberOfRows, 4)
+        XCTAssertTrue(outline.isItemExpanded(beta))
+        XCTAssertEqual(outline.selectedRow, outline.row(forItem: selectedItem))
+        XCTAssertEqual(sidebar.selectedTerminalID, selected.id)
+        outline.expandItem(alpha)
+        outline.expandItem(empty)
+        XCTAssertEqual(outline.numberOfRows, 5)
+        XCTAssertEqual(sidebar.selectedTerminalID, selected.id)
+
+        sidebar.delegate = nil // Test navigation without launching the newly selected terminal.
+        func pressArrow(right: Bool) throws {
+            let character = String(UnicodeScalar(right ? 0xF703 : 0xF702)!)
+            let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                characters: character, charactersIgnoringModifiers: character,
+                isARepeat: false, keyCode: right ? 124 : 123))
+            outline.keyDown(with: event)
+        }
+        outline.collapseItem(alpha)
+        outline.selectRowIndexes(IndexSet(integer: outline.row(forItem: alpha)), byExtendingSelection: false)
+        try pressArrow(right: true)
+        XCTAssertTrue(outline.isItemExpanded(alpha))
+        XCTAssertEqual(outline.selectedRow, outline.row(forItem: alpha))
+        try pressArrow(right: true)
+        let alphaChildRow = outline.row(forItem: alpha) + 1
+        XCTAssertEqual(outline.selectedRow, outline.row(forItem: alpha))
+        outline.selectRowIndexes(IndexSet(integer: alphaChildRow), byExtendingSelection: false)
+        try pressArrow(right: true)
+        XCTAssertEqual(outline.selectedRow, alphaChildRow)
+        try pressArrow(right: false)
+        XCTAssertEqual(outline.selectedRow, outline.row(forItem: alpha))
+        try pressArrow(right: false)
+        XCTAssertFalse(outline.isItemExpanded(alpha))
+        try pressArrow(right: false)
+        XCTAssertEqual(outline.selectedRow, outline.row(forItem: alpha))
+        outline.collapseItem(empty)
+        outline.selectRowIndexes(IndexSet(integer: outline.row(forItem: empty)), byExtendingSelection: false)
+        try pressArrow(right: true)
+        XCTAssertTrue(outline.isItemExpanded(empty))
+        try pressArrow(right: true)
+        XCTAssertEqual(outline.selectedRow, outline.row(forItem: empty))
+        try pressArrow(right: false)
+        XCTAssertFalse(outline.isItemExpanded(empty))
+    }
+
     func testDormantTemplateReplacementDoesNotInheritArtworkDimming() throws {
         let previous = AppThemePalette.current
         defer { AppThemeLibrary.apply(previous) }

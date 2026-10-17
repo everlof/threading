@@ -1,4 +1,5 @@
 """A native Codex conversation asks for approval and answers through the production cards."""
+from saved_catalog_menu import open_saved_agents
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,8 @@ import sys
 import time
 
 binary, host, daemon, endpoint, fixture, evidence = sys.argv[1:]
+scale = int(os.environ.get('THREADING_LINUX_UI_SCALE', '1'))
+sidebar_width = 240 * scale
 root = Path(fixture) / 'native-permission'
 root.mkdir()
 store, project, home = root / 'store', root / 'PermissionProject', root / 'home'
@@ -178,10 +181,11 @@ def capture(name):
 
 
 try:
+    eventually(lambda: 'IDLE_PANE_FRAME ' in log_path.read_text(), 'workspace presentation')
     window = eventually(lambda: xdo('search', '--onlyvisible', '--name', '^Threading').splitlines()[0], 'window')
     xdo('windowmove', window, 0, 0)
     xdo('windowsize', window, 1120, 900)
-    key('Left')
+    open_saved_agents(key)
     eventually(lambda: xdo('getwindowname', window).startswith('Threading agents -'), 'saved agent picker')
     key('Return')
     eventually(lambda: ready(0), 'native pane ready')
@@ -191,7 +195,7 @@ try:
     xdo('windowsize', window, 1120, 900)
     eventually(lambda: 'WIDTH=1120' in (geometry := xdo('getwindowgeometry', '--shell', window))
                and 'HEIGHT=900' in geometry, 'native resize')
-    eventually(lambda: ready(0) and 'AGENT_PICKER_FRAME 320x900' in log_path.read_text(), 'resized pane')
+    eventually(lambda: ready(0) and f'AGENT_PICKER_FRAME {sidebar_width}x900' in log_path.read_text(), 'resized pane')
 
     paste('Run the fixture commands')
     key('Return')
@@ -229,14 +233,20 @@ try:
                         'tool row opened by a click')
     capture('tool-row-open.png')
     # The open body takes clicks for its own text selection; the header closes the row. The
-    # logged centre is in window pixels and the height in points, so the top is centre - height.
+    # logged centre is in window pixels and the height in points, so the top subtracts
+    # half the scaled height.
     (x, y), height, _ = opened[0]
-    click((x, y - height + 18))
+    click((x, y - height * scale // 2 + 9 * scale))
     eventually(lambda: (lambda r: r and r[0][2] == 0 and r[0][1] == collapsed)(tool_rows()), 'tool row closed again')
 
     # The production button takes the keyboard when clicked, as on the Mac, and its card has
-    # left; return to the composer as a person would. 1120x900 puts it at this point.
-    click((720, 736))
+    # left. Focus the editor above its footer using the geometry of the presented composer.
+    def focus_composer():
+        line = next(line for line in reversed(frames()) if line.startswith('COMPOSER_FRAME '))
+        frame = dict(part.split('=', 1) for part in line.split()[1:])
+        click((int(frame['x']) + 24, int(frame['y']) + 24))
+
+    focus_composer()
     paste('Run them again')
     key('Return')
     actions = eventually(lambda: (card() or {}).get('Allow_for_Session') and card(), 'second permission card')
@@ -250,7 +260,7 @@ try:
     assert not any(line.startswith('PERMISSION_FRAME 3 ') for line in frames()), 'session approval still asked'
     capture('permission-allowed.png')
 
-    click((720, 736))
+    focus_composer()
     paste('Ask me two things')
     key('Return')
     controls = eventually(lambda: (question() or {}).get('Blue') and question(), 'question card')

@@ -1,4 +1,5 @@
 """A clean Linux profile imports a project, then reopens its saved navigator and terminal."""
+from saved_catalog_menu import open_saved_terminals
 import json
 import os
 from pathlib import Path
@@ -207,7 +208,12 @@ try:
     assert (store / 'threading.db').is_file()
     assert held() == [], 'opening an empty project list spawned a child'
     subprocess.run(['import', '-window', window, 'out/startup-empty-projects.png'], check=True, timeout=5)
-    assert xdo('mousemove', '--window', window, '100', '108', 'click', '1').returncode == 0
+    scale = int(environment.get('THREADING_LINUX_UI_SCALE', '1'))
+    assert xdo('mousemove', '--window', window, str(196 * scale), str(20 * scale),
+               'click', '1').returncode == 0
+    title(process, 'Threading Add Project')
+    key(window, 'Down') # Existing folder, after New Project.
+    key(window, 'Return')
     choose_folder(project)
     wait_event('PROJECT_IMPORTED ', 1)
     window = title(process, 'Threading experiment - ' + str(project))
@@ -266,6 +272,8 @@ try:
     assert after.count(str(project)) == 1 and after.count(str(other_project)) == 1, after
     assert sum(line.startswith('  ') for line in after.splitlines()) == 1, after
     key(window, 'ctrl+shift+p')
+    title(process, 'Threading experiment - ' + str(project))
+    open_saved_terminals(lambda stroke: key(window, stroke))
     title(process, 'Threading terminals - ' + str(project))
     key(window, 'Escape')
     title(process, 'Threading experiment - ' + str(project))
@@ -288,6 +296,8 @@ try:
         time.sleep(.05)
     assert next(row for row in held() if row['id'] == first['id'])['pid'] == first['pid']
     key(window, 'ctrl+shift+p')
+    title(process, 'Threading experiment - ' + str(project))
+    open_saved_terminals(lambda stroke: key(window, stroke))
     title(process, 'Threading terminals - ' + str(project))
     key(window, 'Escape')
     title(process, 'Threading experiment - ' + str(project))
@@ -301,13 +311,20 @@ try:
                           codex='/bin/true', claude='/bin/true')
     window = title(process, 'Threading terminal - .*')
     key(window, 'ctrl+shift+p')
+    title(process, 'Threading experiment - ' + str(project))
+    open_saved_terminals(lambda stroke: key(window, stroke))
     title(process, 'Threading terminals - ' + str(project))
     key(window, 'Escape')
     title(process, 'Threading experiment - ' + str(project))
+    # Returning from an explicit catalog selects its project. Fold its visible terminal
+    # before moving to the following project; the expanded default is now honored.
+    saved_disclosures = Path(log.name).read_text().count('OUTLINE_EXPANSION_SAVED ')
+    key(window, 'Left')
+    wait_event('OUTLINE_EXPANSION_SAVED ', saved_disclosures + 1)
     key(window, 'Down')
     title(process, 'Threading experiment - ' + str(other_project))
     key(window, 'Right')
-    title(process, 'Threading experiment - no saved terminals')
+    title(process, 'Threading experiment - ' + str(other_project))
     assert len(held()) == 1 and held()[0]['pid'] == first['pid'], held()
     key(window, 'alt+F4')
     assert process.wait(timeout=5) == 0

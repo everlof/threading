@@ -74,6 +74,8 @@ done
 if [[ $THREADING_WAYLAND_SMOKE_MODE != --composer ]]; then
   dbus-run-session -- python3 /wayland_render_smoke.py \
     /opt/threading-linux-preview/run-app.sh /evidence/render
+  dbus-run-session -- python3 /wayland_render_smoke.py \
+    /opt/threading-linux-preview/run-app.sh /evidence/render-2x 2
 fi
 if [[ $THREADING_WAYLAND_SMOKE_MODE == --actions ]]; then
   mkdir -p /evidence/actions

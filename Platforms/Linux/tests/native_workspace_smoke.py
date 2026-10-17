@@ -1,4 +1,5 @@
 """A saved native conversation selected from the ordinary workspace, with a real daemon child."""
+from saved_catalog_menu import open_saved_agents, selected_outline_row
 import json
 import os
 from pathlib import Path
@@ -7,23 +8,31 @@ import subprocess
 import sys
 import time
 
+from runtime_pixel_contract import assert_composer_focus_chrome, assert_sidebar_pane_chrome, assert_sidebar_region_colors
+
 binary, host, daemon, endpoint, fixture, evidence, *selected = sys.argv[1:]
+theme = json.loads((Path(binary).parent / 'LinuxAppKitSpike_WindowHarness.resources/Theme/threading.json').read_text())
 provider = selected[0] if selected else 'codex'
-assert provider in ('codex', 'claude'), provider
+assert provider in ('codex', 'claude', 'grok', 'cursor'), provider
+# The ACP providers are seeded as Codex records and re-kinded below; LinuxHost seeds only the
+# two providers it can launch as terminal agents.
+seed = provider if provider in ('codex', 'claude') else 'codex'
+scale = int(os.environ.get('THREADING_LINUX_UI_SCALE', '1'))
+sidebar_width = 240 * scale
 root = Path(fixture) / ('native-workspace' if provider == 'codex' else 'native-workspace-' + provider)
 root.mkdir()
 store, project, home = root / 'store', root / 'NativeProject', root / 'home'
 project.mkdir()
 home.mkdir()
 environment = dict(os.environ, HOME=str(home), THREADING_LINUX_DATA_DIR=str(root / 'data'))
-subprocess.run([host, str(store), endpoint, provider, str(project), '/bin/sh', '/bin/true', 'Seed'],
+subprocess.run([host, str(store), endpoint, seed, str(project), '/bin/sh', '/bin/true', 'Seed'],
                input=b'', env=environment, check=True, capture_output=True, timeout=20)
 with sqlite3.connect(store / 'threading.db') as database:
     identifier, payload = database.execute('SELECT id, data FROM session').fetchone()
     record = json.loads(payload)
     record.update(nativeUI=True, hasLaunched=False, lastExitCode=None, agentSessionID=None,
-                  customTitle='Native conversation')
-    database.execute('UPDATE session SET data = ? WHERE id = ?', (json.dumps(record), identifier))
+                  customTitle='Native conversation', kind=provider)
+    database.execute('UPDATE session SET data = ?, kind = ? WHERE id = ?', (json.dumps(record), provider, identifier))
 
 peer = root / (provider + '-peer')
 codex_peer = r'''#!/usr/bin/python3
@@ -123,13 +132,72 @@ for line in sys.stdin:
     emit({'type': 'result', 'subtype': 'success', 'result': answer, 'is_error': False,
           'session_id': thread, 'duration_ms': 10})
 '''
-peer.write_text(codex_peer if provider == 'codex' else claude_peer)
+# The Agent Client Protocol peer for Grok and Cursor: initialize, session/new or session/load,
+# then a prompt per turn answered with message chunks. It keeps its own history and replays it on
+# load, as the real CLIs do, so a restart shows the conversation the provider remembers.
+acp_peer = r'''#!/usr/bin/python3
+import json, os, sys, uuid
+from pathlib import Path
+args = sys.argv[1:]
+kind = os.environ['ACP_FIXTURE_KIND']
+if kind == 'grok':
+    assert args[0] == 'agent' and args[-1] == 'stdio', args
+else:
+    assert args == ['acp'], args
+    assert os.environ.get('NO_OPEN_BROWSER') == '1', os.environ
+history_root = Path(os.environ['HOME']) / '.acp-fixture'
+history_root.mkdir(exist_ok=True)
+def emit(value): print(json.dumps(value, ensure_ascii=False), flush=True)
+def reply(request, result): emit({'jsonrpc': '2.0', 'id': request['id'], 'result': result})
+def chunk(session, update, text):
+    emit({'jsonrpc': '2.0', 'method': 'session/update', 'params': {'sessionId': session,
+          'update': {'sessionUpdate': update, 'content': {'type': 'text', 'text': text}}}})
+session = None
+turn = 0
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get('method')
+    if method == 'initialize':
+        reply(request, {'protocolVersion': 1, 'agentCapabilities': {'loadSession': True}})
+    elif method == 'session/new':
+        session = str(uuid.uuid4())
+        reply(request, {'sessionId': session})
+    elif method == 'session/load':
+        session = request['params']['sessionId']
+        history = history_root / (session + '.jsonl')
+        assert history.exists(), history
+        for entry in history.read_text().splitlines():
+            role, text = json.loads(entry)
+            chunk(session, 'user_message_chunk' if role == 'user' else 'agent_message_chunk', text)
+        reply(request, None)
+    elif method == 'session/prompt':
+        turn += 1
+        text = ''.join(block['text'] for block in request['params']['prompt'] if block.get('type') == 'text')
+        with Path('native-turns.jsonl').open('a') as target:
+            target.write(json.dumps({'pid': os.getpid(), 'text': text, 'thread': session}, ensure_ascii=False) + '\n')
+        answer = f'## Native reply {turn}\n\nUnicode 日本語 café 👩🏽‍🚀 is intact.\n\nYou said: {text}'
+        with (history_root / (session + '.jsonl')).open('a') as target:
+            target.write(json.dumps(['user', text], ensure_ascii=False) + '\n')
+            target.write(json.dumps(['agent', answer], ensure_ascii=False) + '\n')
+        chunk(session, 'agent_message_chunk', answer)
+        reply(request, {'stopReason': 'end_turn'})
+    elif method == 'session/cancel':
+        pass
+    else:
+        raise AssertionError(request)
+'''
+peer.write_text({'codex': codex_peer, 'claude': claude_peer}.get(provider, acp_peer))
 peer.chmod(0o700)
 output = Path(evidence)
 output.mkdir(parents=True)
 log_path = output / 'window.log'
 log = log_path.open('w')
-command = [binary, '--app-' + provider, str(store), endpoint, '/bin/sh', str(peer)]
+if provider in ('grok', 'cursor'):
+    # The ACP CLIs reach a saved native conversation through the launcher's environment.
+    environment.update({'THREADING_LINUX_' + provider.upper(): str(peer), 'ACP_FIXTURE_KIND': provider})
+app_mode = '--app-' + (provider if provider in ('codex', 'claude') else 'codex')
+app_agent = str(peer) if provider in ('codex', 'claude') else '/bin/false'
+command = [binary, app_mode, str(store), endpoint, '/bin/sh', app_agent]
 if environment.get('THREADING_NATIVE_GDB') == '1':
     command = ['gdb', '-q', '-batch', '-ex', 'run', '-ex', 'thread apply all bt', '--args'] + command
 process = subprocess.Popen(command, env=environment, stdout=log, stderr=log)
@@ -162,6 +230,15 @@ def paste(value):
     key('ctrl+v')
 
 
+def composer_frame():
+    frames = [line for line in log_path.read_text().splitlines() if line.startswith('COMPOSER_FRAME ')]
+    return dict(part.split('=', 1) for part in frames[-1].split()[1:]) if frames else {}
+
+
+def click(x, y):
+    xdo('mousemove', '--window', window, str(x), str(y), 'click', '1')
+
+
 def turns():
     return [json.loads(line) for line in (project / 'native-turns.jsonl').read_text().splitlines()]
 
@@ -176,6 +253,28 @@ def ready(turn=0, dark=None):
 
 
 def capture(name):
+    # SDL can publish the resized conversation before it repaints the sidebar. Capture only
+    # once both retained surfaces report the same appearance and the requested full height.
+    def shell_prepared():
+        lines = log_path.read_text().splitlines()
+        sidebar = conversation = None
+        dark = False
+        for line in lines:
+            if line.startswith('WORKSPACE_GEOMETRY '):
+                sidebar = conversation = None
+                dark = False
+            elif line.startswith('THEME_APPEARANCE '):
+                dark = line.endswith('dark')
+            elif line.startswith('AGENT_PICKER_FRAME '):
+                sidebar = (line.split()[1], 'dark=true' in line)
+            elif line.startswith('FRAME '):
+                sidebar = (line.split()[1], dark)
+            elif line.startswith('CONVERSATION_FRAME '):
+                conversation = line
+        return (sidebar == (f'{sidebar_width}x900', 'dark=true' in (conversation or ''))
+                and conversation and 'prepared=true' in conversation)
+
+    eventually(shell_prepared, 'complete native shell ready for capture')
     subprocess.run(['import', '-window', window, str(output / name)], check=True, timeout=5)
 
 
@@ -205,23 +304,49 @@ def resize_native(turn=0):
 
 
 try:
+    # SDL briefly owns a startup window while preparing the workspace. A title search alone
+    # can return that soon-destroyed XID; wait for the retained product pane before selecting it.
+    eventually(lambda: 'IDLE_PANE_FRAME ' in log_path.read_text(), 'workspace presentation')
+    assert f'WORKSPACE_GEOMETRY scale={scale} sidebar={sidebar_width} header={41 * scale}' in log_path.read_text()
     window = eventually(lambda: xdo('search', '--onlyvisible', '--name', '^Threading').splitlines()[0], 'window')
     xdo('windowsize', window, '1120', '900')
-    key('Left')
+    open_saved_agents(key)
     eventually(lambda: xdo('getwindowname', window).startswith('Threading agents -'), 'saved agent picker')
     key('Return')
     eventually(ready, 'ordinary native pane ready')
     resize_native()
     assert 'TERMINAL_FRAME ' not in log_path.read_text(), 'saved native UI opened an emulator'
     capture('native-ready.png')
+    assert_sidebar_pane_chrome(output / 'native-ready.png', sidebar_width, scale)
+    assert_sidebar_region_colors(output / 'native-ready.png', theme['light'], scale)
+    resting_height = int(composer_frame()['height'])
+    assert composer_frame()['enabled'] == 'false', 'empty draft can submit'
+    paste('\n'.join(f'Composer growth line {index}' for index in range(12)))
+    eventually(lambda: composer_frame().get('scrolls') == 'true', 'long draft reaches scrolling ceiling')
+    assert int(composer_frame()['height']) == 180 * scale > resting_height, composer_frame()
+    capture('native-composer-grown.png')
+    key('ctrl+a')
+    key('BackSpace')
+    eventually(lambda: composer_frame().get('enabled') == 'false'
+               and int(composer_frame()['height']) == resting_height, 'cleared draft returns to resting height')
     first = 'First native prompt 日本語 café 👩🏽‍🚀'
     paste(first)
-    key('Return')
+    eventually(lambda: composer_frame().get('enabled') == 'true', 'draft enables send')
+    capture('native-composer-focused.png')
+    click(100, 450)
+    eventually(lambda: composer_frame().get('focused') == 'false', 'sidebar focus releases reply editor')
+    capture('native-composer-unfocused.png')
+    assert_composer_focus_chrome(output / 'native-composer-focused.png',
+                                output / 'native-composer-unfocused.png', composer_frame(), scale)
+    click(*map(int, composer_frame()['send'].split(',')))
     eventually(lambda: len(turns()) == 1, 'first prompt received')
     eventually(lambda: ready(1), 'first native reply')
     assert turns()[0]['text'] == first, turns()
     pid = turns()[0]['pid']
     capture('native-first-reply.png')
+    frame = composer_frame()
+    click(int(frame['x']) + 24, int(frame['y']) + 24)
+    eventually(lambda: composer_frame().get('focused') == 'true', 'pointer focuses reply editor')
     paste('Second line 日本語')
     key('shift+Return')
     paste('Another line café 👩🏽‍🚀')
@@ -233,10 +358,14 @@ try:
     key('ctrl+shift+t')
     eventually(lambda: ready(2, dark=True), 'dark theme')
     capture('native-dark.png')
-    # The 1120x900 window puts the agent list left of x=320 and the status label in the strip
-    # under the composer; a stale light sidebar or retained light-mode ink fails here.
-    assert brightness(output / 'native-dark.png', 20, 200, 280, 100, 'mean') < .2, 'sidebar stayed light'
-    assert brightness(output / 'native-dark.png', 340, 815, 560, 45, 'maxima') > .5, 'status ink stayed dark'
+    assert_sidebar_pane_chrome(output / 'native-dark.png', sidebar_width, scale)
+    assert_sidebar_region_colors(output / 'native-dark.png', theme['dark'], scale)
+    # Sample the navigator and the status strip below the measured composer.
+    assert brightness(output / 'native-dark.png', 20, 200, sidebar_width - 40, 100, 'mean') < .2, 'sidebar stayed light'
+    frame = composer_frame()
+    status_top = int(frame['y']) + int(frame['height']) + 6 * scale
+    assert brightness(output / 'native-dark.png', int(frame['x']), status_top,
+                      int(frame['width']), 22 * scale, 'maxima') > .5, 'status ink stayed dark'
 
     draft = 'Retained draft 日本語 café'
     paste(draft)
@@ -249,7 +378,7 @@ try:
     key('Return')
     eventually(lambda: 'TERMINAL_FRAME ' in log_path.read_text(), 'project terminal beside conversation')
     key('ctrl+shift+p')
-    key('Left')
+    open_saved_agents(key)
     key('Return')
     eventually(lambda: ready(2), 'retained native pane')
     key('Return')
@@ -265,12 +394,25 @@ try:
     capture('native-return.png')
     key('alt+F4')
     assert process.wait(timeout=8) == 0
-    process = subprocess.Popen([binary, '--app-' + provider, str(store), endpoint, '/bin/sh', str(peer)],
+    # Reopening the selected conversation must reveal it even if its project was folded away.
+    with sqlite3.connect(store / 'threading.db') as database:
+        project_id, payload = database.execute('SELECT id,data FROM project').fetchone()
+        project_record = json.loads(payload)
+        project_record['isExpanded'] = False
+        database.execute('UPDATE project SET data=? WHERE id=?', (json.dumps(project_record), project_id))
+    previous_frames = log_path.read_text().count('CONVERSATION_FRAME ')
+    process = subprocess.Popen([binary, app_mode, str(store), endpoint, '/bin/sh', app_agent],
                                env=environment, stdout=log, stderr=log)
+    eventually(lambda: log_path.read_text().count('CONVERSATION_FRAME ') > previous_frames,
+               'reopened conversation presentation')
     window = eventually(lambda: xdo('search', '--onlyvisible', '--name', '^Threading').splitlines()[0], 'reopened window')
     xdo('windowsize', window, '1120', '900')
     eventually(ready, 'replayed native conversation after restart')
     resize_native()
+    eventually(lambda: selected_outline_row(process.pid, identifier), 'restored conversation selected in ordinary outline')
+    eventually(lambda: 'OUTLINE_EXPANSION_SAVED ' in log_path.read_text(), 'restored conversation parent expansion persisted')
+    with sqlite3.connect(store / 'threading.db') as database:
+        assert json.loads(database.execute('SELECT data FROM project WHERE id=?', (project_id,)).fetchone()[0])['isExpanded']
     frames = [line for line in log_path.read_text().splitlines() if line.startswith('CONVERSATION_FRAME ')]
     assert int(frames[-1].split('rows=')[1].split()[0]) >= 6, frames[-1]
     capture('native-replayed.png')
@@ -280,8 +422,8 @@ try:
     eventually(lambda: ready(1), 'resumed native reply')
     assert turns()[3]['thread'] == turns()[0]['thread'] and turns()[3]['pid'] != pid, turns()
     capture('native-resumed.png')
-    wire = 'Codex app-server' if provider == 'codex' else 'Claude stream-json'
-    print(f'PASS ordinary saved native UI: production {wire}, Unicode/multiline input, three turns on one daemon child, retained draft/pane, terminal switch, dark theme, durable provider identity, restart replay and same-thread resume')
+    wire = {'codex': 'Codex app-server', 'claude': 'Claude stream-json'}.get(provider, provider.capitalize() + ' ACP')
+    print(f'PASS ordinary saved native UI: production {wire}, composer growth/scroll ceiling/reset, rendered focus border, pointer send, Unicode/multiline input, three turns on one daemon child, retained draft/pane, terminal switch, dark theme, durable provider identity, restart replay and same-thread resume')
 finally:
     subprocess.run(['xdotool', 'key', 'alt+F4'], check=False)
     try: process.wait(timeout=8)

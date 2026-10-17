@@ -27,6 +27,7 @@ open class NSResponder: Equatable {
     open func mouseUp(with event: NSEvent) {}
     open func mouseEntered(with event: NSEvent) {}
     open func mouseExited(with event: NSEvent) {}
+    open func mouseMoved(with event: NSEvent) {}
     open func rightMouseDown(with event: NSEvent) {}
     open func keyDown(with event: NSEvent) {}
     open func scrollWheel(with event: NSEvent) {}
@@ -195,7 +196,7 @@ open class NSView: NSResponder, NSLayoutItem {
     }
     open var layer: CALayer?
     open var wantsUpdateLayer: Bool { false }
-    private var appliedSurface: (fill: NSColor, radius: CGFloat, border: NSColor?)?
+    private var appliedSurface: (fill: NSColor, radius: CGFloat, border: NSColor?, borderWidth: CGFloat)?
 
     /// The host's ground-resolution policy can inspect the same retained fill that is drawn.
     /// Application palette and ancestor composition remain outside the AppKit shim.
@@ -204,9 +205,11 @@ open class NSView: NSResponder, NSLayoutItem {
     /// Layer-backed controls retain their resolved surface recipe. The Linux raster tree paints
     /// that recipe before the control's own drawing and children, just as AppKit's backing layer
     /// sits behind a view's contents.
-    public func setAppliedSurface(fill: NSColor, radius: CGFloat, border: NSColor? = nil) {
+    public func setAppliedSurface(fill: NSColor, radius: CGFloat, border: NSColor? = nil,
+                                  borderWidth: CGFloat = 1) {
         precondition(radius.isFinite && radius >= 0, "invalid surface radius")
-        appliedSurface = (fill, radius, border)
+        precondition(borderWidth.isFinite && borderWidth >= 0, "invalid surface border width")
+        appliedSurface = (fill, radius, border, borderWidth)
         needsDisplay = true
     }
 
@@ -215,7 +218,7 @@ open class NSView: NSResponder, NSLayoutItem {
         guard let surface = appliedSurface else {
             preconditionFailure("a surface border needs an applied surface")
         }
-        appliedSurface = (surface.fill, surface.radius, border)
+        appliedSurface = (surface.fill, surface.radius, border, surface.borderWidth)
         needsDisplay = true
     }
     open var identifier: NSUserInterfaceItemIdentifier?
@@ -619,7 +622,7 @@ open class NSView: NSResponder, NSLayoutItem {
                 NSBezierPath(rect: bounds).fill()
             }
             if let appliedSurface {
-                let borderWidth: CGFloat = 1
+                let borderWidth = appliedSurface.borderWidth
                 let rect = appliedSurface.border == nil ? bounds
                     : bounds.insetBy(dx: borderWidth / 2, dy: borderWidth / 2)
                 let corner = min(appliedSurface.radius, max(0, min(rect.width, rect.height) / 2))
@@ -632,7 +635,8 @@ open class NSView: NSResponder, NSLayoutItem {
                     surface.stroke()
                 }
             }
-            draw(bounds)
+            let dirtyRect = visibleRect
+            if !dirtyRect.isEmpty { draw(dirtyRect) }
             for subview in subviews { subview.render(in: context) }
             if let mask, let deviceToLayer {
                 context.endMaskedGroup { x, y in
@@ -750,17 +754,50 @@ open class NSView: NSResponder, NSLayoutItem {
     private func deliverOwnTracking(at point: NSPoint, onHitPath: Bool, event: NSEvent) {
         let local = convert(point, from: nil)
         for area in installedTrackingAreas {
-            guard area.options.contains(.mouseEnteredAndExited) else { continue }
             let rect = area.options.contains(.inVisibleRect) ? visibleRect : area.rect
             let active = !area.options.contains(.activeInKeyWindow) || window?.isKeyWindow == true
             let inside = active && !isHiddenOrHasHiddenAncestor
                 && onHitPath && rect.contains(local)
-            guard inside != area.isEntered else { continue }
-            area.isEntered = inside
-            let crossing = event.trackingCrossing(inside ? .mouseEntered : .mouseExited, area: area)
-            if inside { area.owner?.mouseEntered(with: crossing) }
-            else { area.owner?.mouseExited(with: crossing) }
+            if inside != area.isEntered {
+                area.isEntered = inside
+                if area.options.contains(.mouseEnteredAndExited) {
+                    let crossing = event.trackingCrossing(inside ? .mouseEntered : .mouseExited, area: area)
+                    if inside { area.owner?.mouseEntered(with: crossing) }
+                    else { area.owner?.mouseExited(with: crossing) }
+                }
+            }
+            if inside, area.options.contains(.mouseMoved), event.type == .mouseMoved {
+                area.owner?.mouseMoved(with: event)
+            }
         }
+    }
+
+    /// Reveal the requested local rectangle using the nearest document viewport. Oversized
+    /// rectangles align their leading edge; an already visible rectangle does no scrolling.
+    @discardableResult
+    open func scrollToVisible(_ rect: NSRect) -> Bool {
+        guard !rect.isEmpty else { return false }
+        var ancestor = superview
+        while let view = ancestor {
+            if let clip = view as? NSClipView {
+                let first = convert(rect.origin, to: clip)
+                let last = convert(NSPoint(x: rect.maxX, y: rect.maxY), to: clip)
+                let target = NSRect(x: min(first.x, last.x), y: min(first.y, last.y),
+                                    width: abs(last.x - first.x), height: abs(last.y - first.y))
+                let before = clip.bounds
+                func origin(_ start: CGFloat, _ end: CGFloat, _ current: CGFloat, _ length: CGFloat) -> CGFloat {
+                    if start < current || end - start > length { return start }
+                    return end > current + length ? end - length : current
+                }
+                clip.scroll(to: NSPoint(x: origin(target.minX, target.maxX, before.minX, before.width),
+                                        y: origin(target.minY, target.maxY, before.minY, before.height)))
+                guard clip.bounds.origin != before.origin else { return false }
+                (clip.superview as? NSScrollView)?.reflectScrolledClipView(clip)
+                return true
+            }
+            ancestor = view.superview
+        }
+        return false
     }
 
     /// The same screen-space and visibility rule used by the production hover-staleness helper.
@@ -904,6 +941,7 @@ public enum NSAccessibility {
         case textField
         case button
         case radioButton
+        case radioGroup
         case table
         case group
         case menu

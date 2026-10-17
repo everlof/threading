@@ -204,6 +204,98 @@ private func checkGradientMasks(flipped: Bool) {
     expect(bitmap, 6, 21, flipped: flipped, equal: [0, 0, 0, 255], "removed mask still faded")
 }
 
+@MainActor
+private final class TrackedDocument: NSView {
+    var moves = 0, entries = 0, exits = 0
+    var dirtyRects: [NSRect] = []
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) { dirtyRects.append(dirtyRect) }
+    override func mouseMoved(with event: NSEvent) { moves += 1 }
+    override func mouseEntered(with event: NSEvent) { entries += 1 }
+    override func mouseExited(with event: NSEvent) { exits += 1 }
+}
+
+@MainActor
+private func checkTrackedDocumentViewport() {
+    let root = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 120))
+    let scroll = NSScrollView(frame: NSRect(x: 10, y: 10, width: 100, height: 80))
+    let document = TrackedDocument(frame: NSRect(x: 0, y: 0, width: 400, height: 48_000))
+    root.addSubview(scroll)
+    scroll.documentView = document
+    let window = NSWindow()
+    window.contentView = root
+    window.isKeyWindow = true
+    root.layoutSubtreeIfNeeded()
+    document.addTrackingArea(NSTrackingArea(rect: .zero,
+        options: [.mouseMoved, .mouseEnteredAndExited, .inVisibleRect, .activeInKeyWindow], owner: document))
+    let target = NSRect(x: 280, y: 24_000, width: 60, height: 48)
+    precondition(document.scrollToVisible(target), "far focused cell must reveal both axes")
+    precondition(document.visibleRect.contains(target), "focused cell remains clipped after reveal")
+    precondition(!document.scrollToVisible(target), "revealing a visible cell must not scroll again")
+    let bitmap = Bitmap(width: 160, height: 120)
+    root.render(in: NSGraphicsContext(bitmap: bitmap, scale: 1))
+    precondition(document.dirtyRects == [document.visibleRect],
+                 "a large document must receive the viewport dirty rect, not all 1,000 rows")
+    let point = document.convert(NSPoint(x: target.midX, y: target.midY), to: nil)
+    let event = NSEvent(type: .mouseMoved, window: window, locationInWindow: point)
+    _ = window.dispatchToContent(event)
+    _ = window.dispatchToContent(event)
+    precondition(document.moves == 2 && document.entries == 1 && document.exits == 0,
+                 "movement inside one tracking area must deliver every move without duplicate entry")
+    let cover = NSView(frame: scroll.frame)
+    root.addSubview(cover)
+    _ = window.dispatchToContent(event)
+    precondition(document.moves == 2 && document.exits == 1, "covered document received a pointer move")
+    cover.removeFromSuperview()
+    window.isKeyWindow = false
+    _ = window.dispatchToContent(event)
+    precondition(document.moves == 2, "inactive tracking area received a move")
+    window.isKeyWindow = true
+    _ = window.dispatchToContent(event)
+    precondition(document.moves == 3 && document.entries == 2, "reactivated tracking area did not recover")
+}
+
+@MainActor
+private func checkRadialGradientAndSymbolPalette() {
+    let bitmap = Bitmap(width: 80, height: 80)
+    let context = NSGraphicsContext(bitmap: bitmap, scale: 2)
+    NSGraphicsContext.current = context
+    defer { NSGraphicsContext.current = nil }
+    context.translateBy(x: 4, y: 6)
+    context.alpha = 0.5
+    let path = NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: 20, height: 16))
+    let gradient = NSGradient(starting: NSColor(red: 1, green: 0, blue: 0, alpha: 0.8),
+                              ending: NSColor(red: 0, green: 0, blue: 1, alpha: 0))!
+    gradient.draw(in: path, relativeCenterPosition: .zero)
+    // Device point (28.5, 51.5) is user point (10.25, 8.25), close to the radial center.
+    let center = pixel(bitmap, 28, 51, flipped: true).map(Int.init)
+    let fraction = hypot(0.25, 0.25) / hypot(10, 8)
+    let expected = [Int((255 * (1 - fraction)).rounded()), 0,
+                    Int((255 * fraction).rounded()), Int((255 * 0.4 * (1 - fraction)).rounded())]
+    precondition(zip(center, expected).allSatisfy { abs($0 - $1) <= 1 },
+                 "radial interpolation, transform or inherited alpha differs: \(center) != \(expected)")
+    expect(bitmap, 8, 67, flipped: true, equal: [0, 0, 0, 0], "halo escaped its oval clip")
+    precondition(bitmap.pixels.enumerated().filter { $0.offset % 4 == 3 }.allSatisfy { $0.element <= 102 },
+                 "translucent radial halo accumulated overlapping fills")
+
+    let source = NSImage(rgba: [0, 0, 0, 255, 0, 0, 0, 128], width: 2, height: 1,
+                         size: NSSize(width: 2, height: 1))!
+    source.isTemplate = true
+    let ink = NSColor(red: 0.2, green: 0.6, blue: 1, alpha: 0.5)
+    let palette = NSImage.SymbolConfiguration(paletteColors: [ink])
+    let tinted = source.withSymbolConfiguration(palette)
+    precondition(tinted.size == source.size && !tinted.isTemplate,
+                 "palette-only configuration changed artwork geometry or left its ink as a template")
+    let composed = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium).applying(palette)
+    precondition(composed.pointSize == 12 && composed.weight == .medium,
+                 "palette composition discarded symbol size/weight")
+    let destination = Bitmap(width: 2, height: 1)
+    NSGraphicsContext.current = NSGraphicsContext(bitmap: destination, scale: 1)
+    tinted.draw(in: NSRect(x: 0, y: 0, width: 2, height: 1))
+    expect(destination, 0, 0, flipped: true, equal: [51, 153, 255, 128], "palette ink was not applied")
+    expect(destination, 1, 0, flipped: true, equal: [51, 153, 255, 64], "palette discarded source alpha")
+}
+
 @main
 private struct ViewClippingFixture {
     @MainActor static func main() {
@@ -217,6 +309,8 @@ private struct ViewClippingFixture {
         checkGradientMasks(flipped: false)
         checkGradientMasks(flipped: true)
         checkScrollViewport()
+        checkTrackedDocumentViewport()
+        checkRadialGradientAndSymbolPalette()
         print("PASS view bounds, clipping, ordering, layer masks, and scroll viewport geometry, rendering and wheel routing")
     }
 }

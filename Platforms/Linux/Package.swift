@@ -22,7 +22,8 @@ let package = Package(
     ],
     targets: [
         .target(name: "AppKit", dependencies: [
-            .target(name: "AppKitTextBridge", condition: .when(platforms: [.linux]))]),
+            .target(name: "AppKitTextBridge", condition: .when(platforms: [.linux]))],
+            resources: [.copy("Resources/Fonts")]),
         .target(name: "CoreText"),
         .target(name: "CNativeAgentProcess"),
         // Exact shared Markdown package sources, compiled against this host AppKit module.
@@ -41,7 +42,9 @@ let package = Package(
         .systemLibrary(name: "CGIO", pkgConfig: "gio-2.0"),
         .systemLibrary(name: "CGdkPixbuf", pkgConfig: "gdk-pixbuf-2.0"),
         .target(name: "AppKitTextBridge", dependencies: [
-            .target(name: "CPango", condition: .when(platforms: [.linux]))]),
+            .target(name: "CPango", condition: .when(platforms: [.linux]))],
+            linkerSettings: [.linkedLibrary("fontconfig", .when(platforms: [.linux])),
+                             .linkedLibrary("pangoft2-1.0", .when(platforms: [.linux]))]),
         .systemLibrary(name: "CAtk", pkgConfig: "atk-bridge-2.0"),
         .target(name: "LinuxWindowBridge", dependencies: [
             .target(name: "CSDL2", condition: .when(platforms: [.linux])),
@@ -117,6 +120,8 @@ let package = Package(
             path: "tests/paragraph_wrapping", linkerSettings: [.linkedLibrary("m")]),
         .executableTarget(name: "OutlineViewHarness", dependencies: ["AppKit"],
             path: "tests/outline_view", exclude: ["run.sh", "README.md"]),
+        .executableTarget(name: "SidebarVisibleRowsHarness", dependencies: ["AppKit"],
+            path: "tests/sidebar_visible_rows", exclude: ["run.sh"]),
         .executableTarget(name: "TableHeightHarness", dependencies: ["AppKit"],
             path: "tests/table_heights",
             sources: ["Fixture.swift", "AutomaticRows.swift", "StructuralRows.swift",

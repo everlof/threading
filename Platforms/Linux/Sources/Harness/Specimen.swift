@@ -124,6 +124,10 @@ enum Specimen {
         #if THREADING_WINDOW_HARNESS
         private(set) var bodyInk = Ink(on: Specimen.resolvedGround("surface"))
         private(set) var headerInk = Ink(on: Specimen.resolvedGround("panel"))
+        private var workspaceBackdrop: SidebarBackdropView?
+        private var workspaceBackdropClip: NSView?
+        private var workspaceWell: NSView?
+        private var workspaceScratchpadRule: SeparatorView?
         #else
         let bodyInk = Ink(on: Specimen.bodyGround)
         let headerInk = Ink(on: Specimen.headerGround)
@@ -166,11 +170,36 @@ enum Specimen {
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
         #if THREADING_WINDOW_HARNESS
+        /// The ordinary workspace uses the production sidebar region recipe. Diagnostic
+        /// pickers keep their specimen ground until a workspace explicitly installs it.
+        func installWorkspaceBackdrop() {
+            precondition(workspaceBackdrop == nil)
+            let backdrop = SidebarBackdropView()
+            let backdropClip = NSView(frame: .zero)
+            let well = NSView(frame: .zero)
+            let rule = SeparatorView()
+            rule.translatesAutoresizingMaskIntoConstraints = true
+            rule.isHidden = !separatesScratchpad
+            backdrop.translatesAutoresizingMaskIntoConstraints = true
+            backdropClip.addSubview(backdrop)
+            addSubview(backdropClip, positioned: .below, relativeTo: rowLayer)
+            addSubview(well, positioned: .above, relativeTo: backdropClip)
+            addSubview(rule, positioned: .above, relativeTo: well)
+            workspaceBackdrop = backdrop
+            workspaceBackdropClip = backdropClip
+            workspaceWell = well
+            workspaceScratchpadRule = rule
+        }
+
         /// The SDL host keeps this tree mounted across mode changes. Re-resolve the neutral
         /// ink outside drawing and let the appearance hook invalidate every descendant.
         func setThemeAppearance() {
-            bodyInk = Ink(on: Specimen.resolvedGround("surface"))
-            headerInk = Ink(on: Specimen.resolvedGround("panel"))
+            let hasBackdrop = workspaceBackdrop != nil
+            bodyInk = Ink(on: Specimen.resolvedGround(hasBackdrop ? "sidebar.navigatorWell" : "surface"))
+            headerInk = Ink(on: Specimen.resolvedGround(hasBackdrop ? "sidebar.gradientStart" : "panel"))
+            if let workspaceWell {
+                workspaceWell.setAppliedSurface(fill: SidebarAppearance.navigatorFill, radius: 0)
+            }
             appearance = LinuxTheme.appearance
             needsDisplay = true
         }
@@ -180,6 +209,19 @@ enum Specimen {
         /// bounded by the viewport and reused through selection and resize.
         func prepareNavigatorFrame(_ rect: NSRect) {
             if frame != rect { frame = rect }
+            #if THREADING_WINDOW_HARNESS
+            let wellFrame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - headerHeight))
+            if let workspaceWell, workspaceWell.frame != wellFrame { workspaceWell.frame = wellFrame }
+            // The well is opaque. Clip the backdrop to the exposed band while retaining its
+            // full-column coordinate space, so scrolling never repaints the covered wash.
+            let bandFrame = NSRect(x: 0, y: wellFrame.maxY, width: bounds.width,
+                height: bounds.height - wellFrame.height)
+            if let workspaceBackdropClip, workspaceBackdropClip.frame != bandFrame {
+                workspaceBackdropClip.frame = bandFrame
+            }
+            let backdropFrame = NSRect(x: 0, y: -wellFrame.height, width: bounds.width, height: bounds.height)
+            if let workspaceBackdrop, workspaceBackdrop.frame != backdropFrame { workspaceBackdrop.frame = backdropFrame }
+            #endif
             if rowLayer.frame != bounds { rowLayer.frame = bounds }
             if textLayer.frame != bounds { textLayer.frame = bounds }
             if menuLayer.frame != bounds { menuLayer.frame = bounds }
@@ -187,13 +229,18 @@ enum Specimen {
         }
 
         /// The outline owns the project viewport. The fixed slots remain for the bounded
-        /// saved-runtime picker and empty-state row, and never sit behind an active outline.
+        /// saved-runtime picker, and never sit behind an active outline.
         func setNavigatorOutline(_ scrollView: NSScrollView, visible: Bool) {
             if scrollView.superview !== self {
                 addSubview(scrollView, positioned: .below, relativeTo: menuLayer)
             }
-            let viewport = NSRect(x: 6, y: 0, width: max(0, bounds.width - 12),
-                                  height: max(0, bounds.height - headerHeight - 2))
+            #if THREADING_WINDOW_HARNESS
+            let topInset = SidebarDefaults.contentTopInset
+            #else
+            let topInset: CGFloat = 2
+            #endif
+            let viewport = NSRect(x: 0, y: 0, width: bounds.width,
+                                  height: max(0, bounds.height - headerHeight - topInset))
             if scrollView.frame != viewport { scrollView.frame = viewport }
             scrollView.isHidden = !visible
             rowLayer.isHidden = visible
@@ -204,13 +251,24 @@ enum Specimen {
         /// bounded visible page and retains command identity in its own presentation model.
         /// Rows that stay visible stay mounted: detaching a row mid-press would end the
         /// gesture its release is meant to complete.
-        func mountMenuRows(_ rows: [NSView]) {
+        func mountMenuRows(_ rows: [NSView], separatorBeforeRow: Int? = nil) {
             let kept = Set(rows.map(ObjectIdentifier.init))
             for row in mountedMenuRows where !kept.contains(ObjectIdentifier(row)) {
                 row.removeFromSuperview()
             }
             mountedMenuRows = rows
             for row in rows where row.superview !== menuLayer { menuLayer.addSubview(row) }
+            #if THREADING_WINDOW_HARNESS
+            workspaceScratchpadRule?.isHidden = true
+            if let index = separatorBeforeRow, index > 0, rows.indices.contains(index),
+               let workspaceScratchpadRule {
+                // The third choice follows the two folder choices. Measure their actual
+                // boundary; the old fixed offset ran the rule through the second label.
+                workspaceScratchpadRule.isHidden = false
+                workspaceScratchpadRule.frame = NSRect(x: 8, y: rows[index].frame.maxY - 0.25,
+                    width: max(0, bounds.width - 16), height: 0.5)
+            }
+            #endif
         }
 
         func mountedMenuRow(at slot: Int) -> NSView? {
@@ -340,8 +398,17 @@ enum Specimen {
         }
 
         override func draw(_ dirtyRect: NSRect) {
+            #if THREADING_WINDOW_HARNESS
+            if workspaceBackdrop != nil { return }
+            #endif
             Specimen.bodyGround.setFill()
+            #if THREADING_WINDOW_HARNESS
+            // This root is a pane in the native workspace. The specimen's surrounding frame
+            // belongs only to the standalone drawing laboratory; the host owns the split rule.
+            bounds.fill()
+            #else
             NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
+            #endif
             if separatesScratchpad {
                 // The third Add Project choice owns no project folder. Keep its visual
                 // separation in this diagnostic shell, outside all actionable row bounds.
@@ -354,10 +421,12 @@ enum Specimen {
                              width: bounds.width, height: headerHeight)
             Specimen.headerGround.setFill()
             bar.fill()
+            #if !THREADING_WINDOW_HARNESS
             NSColor(white: 0.45, alpha: 1).setStroke()
             let frame = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
             frame.lineWidth = 1
             frame.stroke()
+            #endif
 
             // An em-dash is not in the face, and the real file answers that by returning false
             // rather than drawing a blank — which is exactly what it did here on the first run.
@@ -432,6 +501,12 @@ enum Specimen {
         private(set) var disclosure: DisclosureTriangleDrawing.Direction?
         private var iconView: GlyphView?
         #if THREADING_WINDOW_HARNESS
+        // AppKit's inset outline owns this band outside the cell. The Linux host supplies
+        // its measured width; standalone specimens retain their explicit full-width layout.
+        var productionTrailingInset: CGFloat = 0
+        var productionLeadingInset: CGFloat = 0
+        private var productionDisclosureView: GlyphView?
+        private var productionDisclosureExpanded: Bool?
         private var productionProjectView: ThemedProjectRowView?
         private var productionSessionView: ThemedSessionRowContentView?
         private var productionTerminalView: ThemedTerminalRowContentView?
@@ -619,6 +694,44 @@ enum Specimen {
         }
 
         #if THREADING_WINDOW_HARNESS
+        /// The platform outline gutter belongs outside the row's native content. The cell
+        /// keeps the full row hit target while the shared content and marker occupy their
+        /// measured AppKit slots. Only mounted, expandable rows materialize a marker.
+        func configureProductionOutline(density: SidebarDensity, level: Int, expanded: Bool?) {
+            let depth = CGFloat(level) * density.indentationPerLevel
+            productionLeadingInset = SidebarDefaults.insetCellLeadingMargin + depth
+            productionTrailingInset = SidebarDefaults.insetCellTrailingMargin - density.trailingCellReclaim
+            guard let expanded else {
+                productionDisclosureView?.isHidden = true
+                return
+            }
+            let marker: GlyphView
+            if let productionDisclosureView {
+                marker = productionDisclosureView
+            } else {
+                marker = GlyphView()
+                marker.translatesAutoresizingMaskIntoConstraints = true
+                addSubview(marker)
+                productionDisclosureView = marker
+            }
+            if productionDisclosureExpanded != expanded {
+                marker.setSymbol(expanded ? "chevron.down" : "chevron.right",
+                                 role: .chevron, weight: .semibold)
+                productionDisclosureExpanded = expanded
+            }
+            // Match SidebarHoverRowView's marker contract: quiet chrome at rest, the
+            // selected ground's label tier when the project itself is selected.
+            marker.tint = selected ? ink.label : Design.Text.tertiary
+            marker.frame = NSRect(x: SidebarDefaults.insetDisclosureLeading + depth,
+                y: bounds.midY - 6.5, width: 13, height: 13)
+            marker.isHidden = false
+        }
+
+        func productionDisclosureContains(_ point: NSPoint) -> Bool {
+            guard let marker = productionDisclosureView, !marker.isHidden else { return false }
+            return bounds.contains(point) && point.x >= marker.frame.minX && point.x < marker.frame.maxX
+        }
+
         func configureProductionSession(title: String, icon: NSImage?, selected: Bool,
                                         trailingInset: CGFloat, leadingIndent: CGFloat = 0) {
             productionProjectView?.isHidden = true
@@ -632,8 +745,8 @@ enum Specimen {
                 addSubview(content)
                 productionSessionView = content
             }
-            let leading = leadingIndent + SidebarRowDefaults.leadingInset
-            let width = max(0, bounds.width - leading - trailingInset)
+            let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
+            let width = max(0, bounds.width - leading - trailingInset - productionTrailingInset)
             let frame = NSRect(x: leading, y: 0, width: width, height: bounds.height)
             if content.frame != frame { content.frame = frame }
             content.setTitle(title)
@@ -657,11 +770,11 @@ enum Specimen {
                 addSubview(content)
                 productionTerminalView = content
             }
-            let leading = leadingIndent + SidebarRowDefaults.leadingInset
+            let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
             let trailing = SidebarRowDefaults.trailingInset +
                 SidebarRowDefaults.trailingSlotSize + SidebarRowDefaults.horizontalSpacing
             let frame = NSRect(x: leading, y: 0,
-                               width: max(0, bounds.width - leading - trailing),
+                               width: max(0, bounds.width - leading - trailing - productionTrailingInset),
                                height: bounds.height)
             if content.frame != frame { content.frame = frame }
             content.setTitle(title)
@@ -691,8 +804,8 @@ enum Specimen {
             }
             if label.stringValue != status { label.stringValue = status }
             label.textColor = color
-            label.frame = NSRect(x: max(0, bounds.width - 70), y: 0,
-                                 width: min(64, bounds.width), height: bounds.height)
+            label.frame = NSRect(x: max(0, bounds.width - productionTrailingInset - 70), y: 0,
+                                 width: min(64, max(0, bounds.width - productionTrailingInset)), height: bounds.height)
             label.isHidden = false
         }
 
@@ -722,7 +835,10 @@ enum Specimen {
                 addSubview(content)
                 productionProjectView = content
             }
-            if content.frame != bounds { content.frame = bounds }
+            let contentFrame = NSRect(x: productionLeadingInset, y: 0,
+                width: max(0, bounds.width - productionLeadingInset - productionTrailingInset),
+                height: bounds.height)
+            if content.frame != contentFrame { content.frame = contentFrame }
             content.isHidden = false
             content.configure(presentation, icon: icon, count: count,
                               moreSymbol: projectID == nil ? nil : SidebarRowDefaults.actionSymbol,

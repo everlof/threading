@@ -40,6 +40,9 @@ final class LinuxThemeSnapshotTests: XCTestCase {
 
     private static func snapshot() throws -> Data {
         let theme = AppThemeStyles.threading
+        let previous = AppThemePalette.current
+        AppThemePalette.set(theme)
+        defer { AppThemePalette.set(previous) }
         var variants: [String: [String: [Double]]] = [:]
         for (name, appearanceName) in [("light", NSAppearance.Name.aqua),
                                        ("dark", NSAppearance.Name.darkAqua)] {
@@ -66,7 +69,31 @@ final class LinuxThemeSnapshotTests: XCTestCase {
                 for (key, color) in terminalColors {
                     roles["terminal.\(key)"] = rgba(color)
                 }
+                // These are the held Design tiers, not the raw authored alpha values and
+                // not neutral ink intended for an arbitrary terminal/selection background.
+                roles["text.secondary"] = rgba(Design.Text.secondary)
+                roles["text.tertiary"] = rgba(Design.Text.tertiary)
+                roles["text.quaternary"] = rgba(Design.Text.quaternary)
             }
+            // The native Linux sidebar supports the house theme's static vertical wash and
+            // flat navigator well. Fail at export if that authored shape changes; never keep
+            // silently projecting it as generic surface/panel colors.
+            let sidebar = try XCTUnwrap(theme.variant(for: appearance)?.sidebar)
+            let gradient = try XCTUnwrap(sidebar.background?.gradient)
+            XCTAssertEqual(gradient.angleDegrees, 180)
+            XCTAssertEqual(gradient.stops.map(\.position), [0, 1])
+            XCTAssertNil(gradient.drift)
+            XCTAssertNil(sidebar.background?.image)
+            XCTAssertNil(sidebar.background?.particles)
+            let well = try XCTUnwrap(sidebar.navigatorWell)
+            XCTAssertEqual(well.bevel, .none)
+            XCTAssertEqual(well.fill.alphaComponent, 1)
+            roles["sidebar.gradientStart"] = rgba(gradient.stops[0].color)
+            roles["sidebar.gradientEnd"] = rgba(gradient.stops[1].color)
+            roles["sidebar.navigatorWell"] = rgba(well.fill)
+            XCTAssertNil(sidebar.brand, "Linux currently renders the default Threading brand")
+            roles["sidebar.brandMark"] = rgba(theme.resolved(.accent, appearance: appearance)
+                .legible(on: theme.resolved(.ground, appearance: appearance)))
             variants[name] = roles
         }
         var data = try JSONSerialization.data(

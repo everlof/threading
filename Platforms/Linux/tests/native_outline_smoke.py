@@ -45,6 +45,7 @@ with sqlite3.connect(store / 'threading.db') as database:
         terminal_ids.append(identity)
         terminals.append({'id': identity, 'title': f'Saved outline shell {index:04d}',
                           'currentDirectory': str(project_paths[0]), 'createdAt': 0})
+    original['isExpanded'] = False
     original['terminals'] = terminals
     database.execute('UPDATE project SET position = 0, data = ? WHERE id = ?',
                      (json.dumps(original), original_id))
@@ -128,8 +129,8 @@ def verify_viewport(app, log_path, expected, total):
     assert frame is not None, 'native outline did not report a frame'
     count, first, visible, mounted, reusable, scroll_y = frame
     assert count == total, frame
-    assert 0 <= first < count and 1 <= visible <= 10, frame
-    assert mounted == visible and mounted <= 10 and reusable <= 32, frame
+    assert 0 <= first < count and 1 <= visible <= 20, frame
+    assert mounted == visible and mounted <= 20 and reusable <= 32, frame
     assert scroll_y >= 0, frame
     listed = project_list(app)
     assert listed is not None and listed.get_role_name() == 'list'
@@ -146,13 +147,13 @@ def verify_viewport(app, log_path, expected, total):
     for index in range(listed.get_child_count()):
         row = listed.get_child_at_index(index)
         rect = row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert 0 < rect.height <= 60 and rect.width in (264, 296), \
+        assert 0 < rect.height <= 30 and rect.width == 240, \
             (index, rect.x, rect.y, rect.width, rect.height)
-        assert 82 <= rect.y and rect.y + rect.height <= window_height, \
+        assert 41 <= rect.y and rect.y + rect.height <= window_height, \
             (index, rect.y, rect.height, window_height)
-        assert rect.x == (12 if expected[first + index] in project_id_set else 44), \
+        assert rect.x == 0, \
             (index, rect.x, expected[first + index])
-        row_height = 60 if expected[first + index] in project_id_set else 56
+        row_height = 30 if expected[first + index] in project_id_set else 28
         if index > 0 and rect.y + rect.height < window_height:
             assert rect.height == row_height, \
                 (index, expected[first + index], rect.height, row_height)
@@ -186,11 +187,14 @@ def run_window(name, selected_index, expanded=False):
             window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
                                             str(process.pid), '--name', '^Threading experiment - ')
                                 .splitlines()[0], f'{name} native window', process, log_path)
-            expected = project_ids
+            expected = (project_ids if selected_index == 0 else
+                        [project_ids[0]] + list(reversed(terminal_ids[-512:])) + project_ids[1:])
+            initial_total = len(expected)
             frame, listed = eventually(
-                lambda: verify_viewport(app, log_path, expected, project_count),
+                lambda: verify_viewport(app, log_path, expected, initial_total),
                 f'{name} native outline viewport', process, log_path)
-            assert frame[1] <= selected_index < frame[1] + frame[2], frame
+            selected_row = expected.index(project_ids[selected_index])
+            assert frame[1] <= selected_row < frame[1] + frame[2], frame
             assert selected_id(listed) == project_ids[selected_index]
             assert xdo('getwindowname', window).endswith(str(project_paths[selected_index]))
             baseline = capture(window, f'{name}-first.png')
@@ -216,7 +220,7 @@ def run_window(name, selected_index, expanded=False):
                     'wheel returned to first project', process, log_path)
                 assert selected_id(listed) == project_ids[0]
 
-                xdo('mousemove', '--window', window, '72', '108', 'click', '1')
+                xdo('mousemove', '--window', window, '18', '70', 'click', '1')
                 expected = [project_ids[0]] + list(reversed(terminal_ids[-512:])) + project_ids[1:]
                 total = project_count + 512
                 frame, listed = eventually(
@@ -271,9 +275,9 @@ def run_window(name, selected_index, expanded=False):
                 xdo('windowsize', window, '800', '360')
                 resized, listed = eventually(
                     lambda: verify_viewport(app, log_path, expected, total)
-                    if latest_frame(log_path) and latest_frame(log_path)[2] <= 7 else None,
+                    if latest_frame(log_path) and latest_frame(log_path)[2] <= 12 else None,
                     'resized outline viewport', process, log_path)
-                assert resized[3] <= 7
+                assert resized[3] <= 12
                 capture(window, f'{name}-resized.png', size=(800, 360))
             xdo('windowfocus', '--sync', window, 'key', 'alt+F4')
             assert process.wait(timeout=12) == 0

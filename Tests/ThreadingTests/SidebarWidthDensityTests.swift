@@ -591,6 +591,29 @@ final class SidebarWidthDensityTests: XCTestCase {
 
     // MARK: - Rendered
 
+    /// The software outline mirrors AppKit's inset cell placement. Keep that platform
+    /// boundary measured in the production sidebar, including its depth-dependent gutter.
+    func testInsetCellGeometryUsedByLinuxOutline() throws {
+        let (controller, _) = makeSidebar(width: SidebarDefaults.relaxedDensityWidth)
+        let rows = builtRows(controller)
+        XCTAssertFalse(rows.isEmpty)
+        for (row, cell) in rows {
+            let outline = try XCTUnwrap(row.superview as? NSOutlineView)
+            let index = outline.row(for: cell)
+            let level = outline.level(forRow: index)
+            XCTAssertEqual(outline.intercellSpacing.height, 0)
+            XCTAssertEqual(outline.rect(ofRow: 0).minY, 10)
+            print("LINUX_OUTLINE_ROW index=\(index) frame=\(outline.rect(ofRow: index))")
+            XCTAssertEqual(cell.frame.minX, 25 + CGFloat(level) * 14)
+            XCTAssertEqual(cell.frame.maxX, 224)
+            if let marker = disclosureButton(in: row) {
+                XCTAssertEqual(marker.frame.minX, 12 + CGFloat(level) * 14)
+                print("LINUX_OUTLINE_MARKER level=\(level) frame=\(marker.frame)")
+            }
+            print("LINUX_OUTLINE_CELL level=\(level) frame=\(cell.frame)")
+        }
+    }
+
     /// The column at both ends of the band, light and dark — the review surface for how much a
     /// narrow sidebar actually wins, which no frame assertion can judge the look of. One fixture,
     /// resized between the renders, which is the path a divider drag takes in the app.

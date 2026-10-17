@@ -95,16 +95,31 @@ of production `ThemedMenuRowView` rows. The scoped Linux menu copies the saved s
 owning project path; the host revalidates the active page and project before each command.
 Pointer, keyboard and AT-SPI actions reach the same menu and clipboard path. Terminal
 paint, PTY grid size, pointer input, IME caret and AT-SPI text geometry share the resulting
-82-pixel content inset. The right header is retained separately from terminal frames, so PTY
+41-point content inset (41 pixels at 1×, 82 at 2×). The right header is retained separately from terminal frames, so PTY
 output does not rerasterize it.
+New project shells replace their temporary header with the saved terminal's name and identity
+when the worker's creation receipt arrives. Cached project activation keeps that identity, and
+pressing the header reveals the exact terminal child, expanding its parent when needed. The
+header updates in place without restarting the shell or changing terminal input ownership.
+Opening a new or cached project shell selects its terminal row and reveals the parent while
+keyboard input stays in the terminal. Returning to sidebar navigation before a delayed creation
+receipt arrives cancels automatic reveal, preserving the user's newer selection. The native
+`terminal_creation_selection_smoke.py` journey verifies both paths with a gated real daemon
+handshake at 1× and 2×; ordinary window and installed-package runners include it.
 
-Before a terminal is selected, `--app` now opens the same 320-pixel navigator beside the
-production `SessionPlaceholderView`. It shows **No Session Selected** and a **New Session**
-button, or **No Projects Yet** and **Add Project** for an empty store. The host supplies the
-fixed diagnostic colors, symbol artwork and action admission; the view owns its layout and
-button behavior. The idle pane retains one bitmap and republishes it only on resize or
-interaction. Its button is available through pointer, keyboard and AT-SPI, and the terminal
-node enters the accessibility tree only after a terminal opens.
+Before a terminal is selected, `--app` opens the 240-point navigator beside a standing session
+composer. Project and agent choices, the brief editor and Start Session are present immediately,
+including for an empty store. Missing choices disable launch and their unavailable chooser
+actions. Escape returns focus to the navigator while preserving the draft; selecting or importing
+a project updates the destination without clearing it. Start requires a valid project, an available
+agent and a nonempty committed draft, and waits for pending project selection/import to finish.
+The idle pane retains one bitmap and republishes it only on resize or interaction. Its controls
+are available through pointer, keyboard and AT-SPI, and the terminal node enters the accessibility
+tree only after a terminal opens. The welcome uses the shared Threading mark and calendar-aware
+greeting picker, with the Mac's 40-point mark, 20-point semibold greeting, 12-point gap and
+620-point reading measure. One greeting stays put through edits and chooser changes; the whole
+welcome hides when it cannot fit with 48 points of clearance. Theme-specific welcome overrides,
+animation and the remaining composer controls are not yet available in this fixed-theme host.
 
 Visible project slots now mount the same `ThemedProjectRowView` subtree as the Mac
 `ProjectRowView`: icon, shaped title, optional count and trailing `+`/`⋯` controls share one
@@ -130,11 +145,23 @@ project, saved-agent and saved-terminal cells reuse the production row content. 
 owns exact selection, actions, terminal admission and AT-SPI publication. The installed X11
 `native_outline_smoke.py` checks 5,100 projects, expanded children, scrolling, pointer and
 keyboard selection, resize and middle/tail project restoration.
-`tests/sidebar_visible_rows/run.sh` checks a 5,100-project tree with
-bounded child projection; `--session-row-layout-fixture` and `--terminal-row-layout-fixture`
-check the shared title/icon stacks at their native slot sizes. The installed X11 smoke captures an
-expanded project and verifies
-pointer, keyboard, AT-SPI and inline saved-terminal activation.
+`tests/sidebar_visible_rows/run.sh` (in the Linux build environment) checks the actual outline
+source and row resolver with 5,100 projects, two independently expanded branches and 2,048
+bounded children. It keeps mounted views within the viewport and preserves selection through
+project/child reorder. The host now queries the outline's identity index rather than keeping a
+second single-expanded-project projection. Empty projects retain a disclosure, and clicking a
+sibling disclosure leaves the selected child in place. `multi_project_outline_smoke.py` checks
+these behaviors in the native shell, including keyboard traversal and durable terminal identity.
+`--session-row-layout-fixture` and `--terminal-row-layout-fixture` check the shared title/icon
+stacks at their native slot sizes. Plain Right expands a project while keeping it selected; Left collapses a project or selects
+a child’s parent. The navigator restores each project's persisted `isExpanded` value, including
+empty projects, and inherits the shared expanded default for new projects. Pointer, keyboard and
+page-reveal expansion save the same exact project row on a worker. A refused write restores the
+previous disclosure state. Initial restoration applies all branches in one outline projection;
+it does not replay gestures or write the store. Restoring a selected live runtime then reveals
+its parent and selects that exact child in the ordinary outline, including an identity outside
+the recent page. Only a folded parent needs an expansion write. Agent and terminal catalogs stay
+available as explicit project-menu commands; startup no longer replaces the sidebar with one.
 The table and outline shims now mount each visible cell inside a reusable `NSTableRowView`,
 with row-view delegate hooks and selection state tied to stable row identity. The focused
 outline fixture bounds row chrome allocation while scrolling a 5,100-project tree and checks
@@ -144,6 +171,14 @@ or viewport changes. The native navigator mounts the unchanged production
 `SidebarHoverRowView` for hover and selected-row chrome, including live Threading theme colors
 and native-window selection strength. The Linux snapshot does not yet carry a verified working
 state, so its activity beam remains inactive.
+UI text uses bundled Inter 4.1 upright/italic variable fonts. The AppKit module registers the two
+known files once per process, and every plain/attributed/document text path shares the same
+family choice. The four requested weights render distinctly; code and terminal cells retain
+DejaVu Sans Mono. The archive and Debian package carry the font resources and OFL license.
+This improves Mac typography parity without depending on fonts installed in the user's profile;
+it remains an approximation of the Mac system face. Provenance and hashes are in
+`Sources/AppKit/Resources/Fonts/Inter/SOURCE.md`.
+
 `tests/text_label/run.sh` checks the Linux-only, Pango-backed `NSTextField` label against
 Unicode shaping, clipping, ellipsis, intrinsic size, baseline behavior and shared neutral-ink
 contrast on eight grounds, then renders that
@@ -315,7 +350,8 @@ this preview; broader production chrome remains outside the diagnostic shell. Se
 `FINDINGS.md` §§126–129, 131, 136–139, 147.
 
 `tests/wayland_smoke.sh` installs the current `.deb` into Swift-free Ubuntu under headless Weston,
-checks two distinct rendered project frames, and verifies Wayland toplevel/buffer commits. Its
+checks two distinct rendered project frames at both 1× and 2×, including display-fitted startup
+on the fixed 1280×800 output, and verifies Wayland toplevel/buffer commits. Its
 separate `--actions` mode checks AT-SPI Actions open/close and changed pixels. A `--composer`
 mode types a two-line Swedish brief through Weston's seat, checks the editable text and rendered
 frame, and launches one agent in the exact project. The package selects Ubuntu's Cairo libdecor
@@ -406,10 +442,15 @@ and `flock` installed:
 The first command imports the canonical project directory into a local store and opens that
 project even when the store contains others. The no-argument command follows a saved selected
 agent or standalone terminal to its project; with no selected runtime, it opens the saved project
-list, including from a clean profile. In an empty list, activate **Add project folder** with
-Enter or a click; Ctrl+Shift+P opens the same native folder dialog from any project list.
+list, including from a clean profile. The empty sidebar shows the shared **No Projects** hint,
+with no selected placeholder row. Drop a project folder into the window or use the header `+`;
+Enter in the empty list and Ctrl+Shift+P open the native folder dialog.
 Choosing an existing directory imports and selects it without starting a child. Cancellation
 leaves the list unchanged; choosing an already imported directory selects its existing row.
+Native file drops use the same worker and durable identity path. Ordinary files are refused,
+and a drop path must fit the bridge's 1,023-byte bound without truncation. The two-scale
+`empty_sidebar_smoke.py` journey drives real GTK-to-SDL drag input, checks duplicate identity,
+and captures the shared empty message in both appearances.
 The header `+` opens **Add Project** with **Start New Project…**, **Use an Existing Folder…**,
 and a separated **New Scratchpad** choice. New Project asks for a folder name and place;
 Scratchpad creates or reopens `~/Threading/Scratchpad` without a chooser. Both select their
@@ -587,16 +628,72 @@ See `FINDINGS.md`.
 
 ## Current platform gaps
 
+UI parity with the macOS product remains in progress. The native sidebar now fills its pane
+without the drawing specimen's rounded gray outer frame; its trailing seam is the shared
+`SeparatorView`, using the Threading rule ink and weight. The native workspace journey checks
+the complete light/dark shell edges after both panes finish resizing and changing appearance.
+The reply field now shares the Mac prompt's surface, focus border, footer, send/stop symbols and
+bounded height policy through `PromptChrome`. Its native journey checks growth, scrolling, reset,
+focus pixels and pointer submission. Chrome text now consumes the Mac's held secondary, tertiary
+and quaternary theme tiers; neutral ink is reserved for surfaces that supply their own ground.
+The sidebar now uses the exported production gradient and
+navigator well, and saved-session selections use the theme's selection fill. Its sampled region
+colors match the Mac Threading shell in both appearances. Attachments, the full composer footer,
+sidebar footer controls and window chrome still need comparison and implementation. The header
+now uses the shared 24-point Threading mark geometry and 13-point wordmark in both appearances;
+brand hover/launch motion and theme-supplied brand variants remain unsupported on Linux.
+The project outline uses the Mac's full-width row silhouette, inset content and disclosure
+slots, depth steps and four-point breathing below the header. Its disclosure hit target follows
+the mounted chevron, and accessibility describes the complete row at every depth. The inset
+table keeps its ten-point document padding separate from that fixed header gap and has no
+intercell spacing, matching the measured Mac outline.
+The Linux terminal symbol now keeps its optical size inside the full placeholder image slot,
+with a thin screen border and open prompt contour shared by the smaller sidebar mark. Native
+light/dark captures cover both scales; the artwork is still a Linux vector approximation, not
+pixel-identical SF Symbols rendering.
+The path adapter now honors authored butt/round/square caps and miter/round/bevel joins with
+miter-limit fallback. It composites a complete stroke once, preserving translucent ink at
+intersections; this is covered by the floating-glyph fixture and native 1×/2× windows.
+The ordinary app now uses 1× pixels per point by default; `THREADING_LINUX_UI_SCALE=2` selects
+2× for a dense display. Painting, input, IME and accessibility share that scale, with the Mac's
+240-point sidebar width. Startup requests 1120×480 points, fits that request to the primary
+display's usable area within the existing raster limits, and paints at the actual native window
+size from its first frame. Automatic per-monitor scaling and fractional scales remain unsupported;
+the bounded software window still caps height at 900 pixels and terminal content at 1280 pixels wide. Sharing individual
+controls is not evidence that the assembled Linux screen matches the Mac.
+
 The installed preview runs a native window, project and session navigation, terminal and provider
 journeys, text shaping, and an accessibility tree. Visible project, agent and terminal rows mount
-shared production content, the idle pane mounts the production placeholder, and command menus use
+shared production content, the idle pane mounts a standing composer, and command menus use
 production rows. Account rows remain diagnostic;
 a complete production screen is not mounted.
-The right-pane New Session path now mounts the production `PromptTextView`, `ChipView`, and
-`ThemedButton` from shared Design sources. The primary action sits below the editor, uses the
+The right-pane composer mounts the production `PromptTextView`, `ChipView`, and
+`ThemedButton` from shared Design sources. `PromptChrome` paints the whole field and its focus
+ring independently of the text document. The centered column fills the available pane up to
+720 points with 32-point margins; the prompt starts at 116 points and grows upward to 180 before
+scrolling, yielding to the supported compact window. These opening dimensions are shared with
+the Mac composer. The primary action sits below the editor, uses the
 production shortcut cue, and is disabled for an empty or provisional IME draft. The Linux host
 presents project and provider choices in bounded, visible
 production menu rows; project and provider identities, availability, and launch remain host-owned.
+The prompt footer now exposes permissions through the shared hand-mark chip and mode labels.
+It starts at Manual, preserving the preview's existing launch policy. The six explicit modes
+and Use Agent's Setting pass through the shared session record and provider command builders;
+the latter emits no permission override. The bounded menu shows the provider-specific
+explanations, including Codex's Plan limitation, and exposes them to AT-SPI. Its six-row viewport
+can reach all seven choices by keyboard or scrolling.
+The model/effort chip opens the shared production matrix. An account-scoped worker reads Codex's
+model cache or Claude's aliases and additional models, admitting at most 512 models and 32 effort
+columns plus Auto. The marked default row and Auto preserve CLI inheritance; explicit values
+are saved with the session and reused on resume. Fresh launches revalidate explicit choices
+against the account catalogue before creating a session. A refreshed catalogue never silently
+clears a withdrawn explicit choice. Account changes clear choices while preserving the brief.
+Arrow keys skip unsupported combinations; Home/End and Page Up/Down reveal distant rows.
+Only visible cells enter the accessibility tree. Missing Codex metadata disables the picker
+while still allowing a launch using the CLI's own defaults. Speed, surface, attachments,
+last-used choice restoration, hidden-model preferences and full popover chrome remain parity work.
+The composer-only journey checks permission choices and model/effort selection against both
+providers' exact launch arguments and saved records, including Codex resume.
 The second composer chip now presents provider-qualified account choices with cached provider
 marks. The host discovers at most 32 accounts per provider and passes the selected handle to
 the exact agent launch; the menu mounts only the rows that fit. Run
@@ -629,11 +726,11 @@ indexed by viewport before drawing, so scrolling does not scan the entire brief.
 `THREADING_EDITOR_CONFIGURATION=release THREADING_EDITOR_SCROLL_BENCHMARK=1
 tests/text_editor/run.sh` measures preparation separately from warm scroll/draw for 170 and
 1,700 lines in the same fixed viewport.
-The composer declares a four-control key-view loop in the shim window. Tab/Shift+Tab skip
+The composer declares its project, identity, editor, model/effort, permission and submit key-view loop in the shim window. Tab/Shift+Tab skip
 disabled, hidden and detached controls; choice keyboard activation does not edit the draft.
 AT-SPI focus follows the retained first responder. Home/End, Ctrl+Home/End and Page Up/Down
 preserve text and grapheme boundaries, and vertical movement retains its column across short
-lines. The compact form fits the supported 640×180 minimum window; its submit label becomes
+lines. The compact form fits the supported 560×180 minimum window at 1×; its submit label becomes
 **Start** while keeping the full accessible action name and shortcut. Resize may temporarily
 crop a retained pane frame until new layout arrives, without aborting the window.
 `THREADING_LINUX_COMPOSER_IME_ONLY=1 ./window-smoke.sh` checks real IBus Pinyin preedit,
@@ -641,7 +738,8 @@ Escape cancellation, `你好` commit, and exact session launch in the same X11 c
 The installed `bundle-smoke.sh` repeats that journey from the packaged binary. AT-SPI publishes
 up to 64 KiB of composer text and queues programmatic text, selection and clipboard edits through
 the same TextKit editor as keyboard input. Each queued edit carries a fresh composer identity so
-closing or reopening the pane cannot apply an old edit to a new brief. Full Mac composer
+starting a new brief cannot apply an old edit to it. Escape preserves the current brief's identity.
+Full Mac composer
 behavior, including attachments and durable drafts, remains open. Other editing surfaces,
 full table and outline behavior, animation,
 system services, and the remaining AppKit shims need work. The layout solver still solves a whole
@@ -838,19 +936,21 @@ WindowHarness --app-agents /path/to/experimental-store /path/to/ptyd.sock /bin/b
 ```
 
 Select a project with Up/Down or a click, then press Enter to open its shell. Click the disclosure
-before a project name, or press Space on its selected row, to show saved agents and terminals
-under that project. Up/Down selects an inline child and Enter opens that exact saved runtime.
-The navigator stays beside the idle pane or terminal in a 320-pixel leading pane. The idle
+before a project name, press Right, or press Space on its selected row to show saved agents and
+terminals under that project. Right on an expanded project keeps it selected. Left moves a
+child selection to its parent, or collapses an expanded project. Up/Down selects an inline child
+and Enter opens that exact saved runtime.
+The navigator stays beside the idle pane or terminal in a 240-point leading pane. The idle
 button opens the selected project's session menu, or the Add Project menu in an empty store.
 Ctrl+Shift+P focuses navigation without hiding
 the terminal; from the focused project list it opens the folder dialog. Tab returns keyboard
 focus to the terminal. Clicking either pane focuses it. Enter revisits
 that project's existing terminal, including its child and
-emulator state. Right opens the selected project's saved terminals, newest first. Up/Down or a
-click selects one and Enter opens it, attaching a live child or starting the same saved terminal
-again after confirmed exit/absence; Left or Escape returns to projects. A star marks a
-runtime retained by this window. Left from projects opens saved agent sessions, also newest
-first; Enter attaches the selected agent through its own persisted identity. Both pickers retain
+emulator state. The project Actions menu (Shift+F10) exposes Saved terminals and Saved agents,
+newest first. Up/Down or a click selects a catalog row; Enter opens that exact saved runtime,
+attaching a live child or starting the same saved terminal after confirmed exit/absence.
+Left or Escape returns from a catalog to projects. A star marks a runtime retained by this window.
+Saved agents attach through their own persisted identity. Both catalogs retain
 their selection when returning from a terminal with Ctrl+Shift+P. Alt+F4 closes the window.
 
 Project rows reserve a trailing numeric slot for a nonzero collapsed agent-plus-terminal count;
@@ -862,7 +962,7 @@ Escape moves out of an account/saved picker, then returns from Projects to the v
 before any terminal is opened, Escape closes the project window. Escape and Tab remain terminal
 input while the shell has focus. The sidebar and terminal retain separate frame textures, so
 shell output does not rebuild navigation. Attached grids retain their terminal dimensions when
-the window grows to include navigation; the combined window is capped at 1600×900 pixels.
+the window grows to include navigation; the combined window is capped at 1520×900 pixels at 1× (1760×900 at 2×).
 Agent rows use the same title precedence as macOS: a user rename wins, then the agent's title,
 then the prompt title, then **New Session**. The preview follows agent titles by default; it has
 no title-preference control yet. Saved agent rows show the bundled provider mark when available

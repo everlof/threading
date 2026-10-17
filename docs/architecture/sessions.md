@@ -861,6 +861,12 @@ account move on the session — including the move away from an exhausted model-
 the next fresh chat's starting point. Merely looking away from an unfinished composer changes
 nothing about it.
 
+Provider model value types live in `AgentModelOption.swift`; pure Codex cache decoding and
+Claude catalogue/settings interpretation live in `ProviderModelCatalog.swift`. The Linux core
+slice copies both byte-for-byte. `AgentModels` retains Mac account discovery, bounded file reads,
+cache freshness, direct-catalogue precedence and default-resolution policy. Sharing the decoder
+does not implement Linux account loading or chooser/launch integration by itself.
+
 The draft footer has one model-and-effort chip, titled `model · effort` when the selected
 model advertises reasoning choices, and just the model otherwise. It is the sole anchor for
 `composerModelEffortPicker`; selection and launch validation remain host-owned under the existing
@@ -1746,6 +1752,28 @@ a running session out from under an in-flight turn.
 How much a session may do before it stops to ask, chosen in the composer, overridable from a
 session's `⋯` menu, defaulted in Settings ▸ Chats. `AgentPermissionMode` owns the whole
 translation; `AgentLauncher.permissionMode(for:)` resolves session → app default → nil.
+
+The Linux preview's opening composer also exposes all six shared modes, plus Use Agent's Setting.
+A new brief starts at Manual, preserving its previous explicit launch policy; Linux does not
+claim the Mac Settings/account-derived inheritance resolution. Choosing Agent's Setting stores
+nil and leaves permission flags to the CLI. The host passes this value to the bounded launch
+worker, which constructs and saves `AgentSessionCreation` before asking the existing
+`ClaudeLaunchCommand`/`CodexLaunchCommand` builders for argv. Resuming uses that same saved mode.
+The native composer permission journey chooses each value for both providers and verifies the
+one durable record and exact launched argv, including a literal shell-looking prompt. Choosing
+or changing the chip performs no filesystem or process work on the window thread.
+
+The Linux model/effort picker uses an account-scoped bounded catalogue worker and the shared
+presentation factory. The default row and Auto answer nil; explicit choices enter the same
+`AgentSessionCreation` model/reasoning fields. Codex's portable terminal builder quotes an
+explicit reasoning effort as a TOML string in a separate `-c` operand, on both fresh and resume
+commands. Claude uses its existing model/effort builder. Fresh Linux launches re-read the
+account catalogue before creating a record and reject withdrawn combinations. Refresh keeps
+an invalid explicit choice visible and disables submission until it is changed; it never
+silently switches to inheritance. Changing accounts or choosing New Chat clears model/effort,
+while project changes preserve them. Resumes use the saved values without requiring the current
+catalogue to retain them. Per-account last-successful preference restoration and hidden-model
+preferences remain separate Linux parity work.
 
 **The whole translation, including which flags each runtime takes.** `launchFlags(for:)` returns
 the `AgentLaunchFlag` values for one mode on one runtime; the launcher appends whatever it gets

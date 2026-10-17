@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+// Register the two bundled UI faces once before concurrent shaping starts. Does not install
+// fonts in the user's profile. Returns zero when either required resource cannot be loaded.
+int tat_register_ui_fonts(const char *regular_path, const char *italic_path);
+
 typedef struct {
     int width;
     int height;

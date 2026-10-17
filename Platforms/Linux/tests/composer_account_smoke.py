@@ -116,15 +116,7 @@ try:
                                         str(process.pid), '--name', '^Threading experiment - '),
                             'native window').splitlines()[0]
         xdo('windowfocus', '--sync', window)
-        idle = eventually(lambda: panel() if panel().get_child_at_index(0).get_name()
-                          == 'No Session Selected' else None, 'idle pane')
-        assert idle.get_child_at_index(2).get_action_iface().do_action(0)
-        assert eventually(lambda: menu('New in Project'), 'project creation menu')
-        assert menu('New in Project').get_child_at_index(0).get_action_iface().do_action(1)
-        providers = eventually(lambda: menu('New Chat providers'), 'provider creation menu')
-        assert providers.get_child_at_index(0).get_action_iface().do_action(1)
-        composer = eventually(lambda: panel() if panel().get_child_at_index(0).get_name()
-                              == 'Start a Codex session' else None, 'composer')
+        composer = eventually(lambda: panel() if child(panel(), 'linux.composer.editor') else None, 'composer')
         chip = eventually(lambda: child(composer, 'linux.composer.provider'), 'identity chip')
         assert chip.get_action_iface().do_action(0)
         choices = eventually(lambda: child(composer, 'linux.composer.choices'), 'identity choices')

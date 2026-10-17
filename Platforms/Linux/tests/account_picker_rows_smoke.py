@@ -93,12 +93,12 @@ try:
         xdo('windowfocus', '--sync', window, 'key', 'ctrl+shift+i')
         listed = eventually(lambda: account_list(app), 'account list', process)
         initial = rows(listed)
-        assert len(initial) == 7, (len(initial), log_path.read_text())
-        assert listed.get_description() == 'Showing 1 through 7 of 32 items'
+        assert len(initial) == 15, (len(initial), log_path.read_text())
+        assert listed.get_description() == 'Showing 1 through 15 of 32 items'
         assert selected_id(listed) == 'default'
         for index, row in enumerate(initial):
             rect = bounds(row)
-            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 56, 296, 56), \
+            assert (rect.x, rect.y, rect.width, rect.height) == (6, 43 + index * 28, 228, 28), \
                 (index, rect.x, rect.y, rect.width, rect.height)
         capture(window, 'account-picker-first.png')
 
@@ -106,18 +106,18 @@ try:
         eventually(lambda: 'selected=codex-30 total=32' in log_path.read_text(),
                    'keyboard scroll to last account', process)
         listed = account_list(app)
-        assert listed.get_description() == 'Showing 26 through 32 of 32 items'
+        assert listed.get_description() == 'Showing 18 through 32 of 32 items'
         assert selected_id(listed) == 'codex-30'
         last = rows(listed)
-        assert len(last) == 7
+        assert len(last) == 15
         for index, row in enumerate(last):
             rect = bounds(row)
-            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 56, 296, 56), \
+            assert (rect.x, rect.y, rect.width, rect.height) == (6, 43 + index * 28, 228, 28), \
                 (index, rect.x, rect.y, rect.width, rect.height)
         capture(window, 'account-picker-last.png')
 
         assert listed.get_selection_iface().select_child(0)
-        eventually(lambda: selected_id(account_list(app)) == 'codex-24',
+        eventually(lambda: selected_id(account_list(app)) == 'codex-16',
                    'AT-SPI selection of first visible account', process)
         last_row = bounds(rows(account_list(app))[-1])
         xdo('mousemove', '--window', window, str(last_row.x + 100),
@@ -136,4 +136,4 @@ finally:
         process.kill()
         process.wait(timeout=3)
 
-print('PASS account picker: 32 identities, 7 mounted 28pt rows, AT-SPI geometry, scroll and pointer choice')
+print('PASS account picker: 32 identities, 15 mounted 28pt rows, AT-SPI geometry, scroll and pointer choice')

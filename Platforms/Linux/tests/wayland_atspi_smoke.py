@@ -103,31 +103,32 @@ with log_path.open('w') as log:
         placeholder = eventually(lambda: next((item for item in descendants()
                                                if item.get_role_name() == 'panel'
                                                and item.get_name() == 'Session placeholder'
-                                               and item.get_child_count() == 3), None),
+                                               and item.get_child_count() == 7), None),
                                  'production idle placeholder')
-        title, detail, new_session = [placeholder.get_child_at_index(index) for index in range(3)]
-        assert (title.get_name(), detail.get_name(), new_session.get_name()) == (
-            'No Session Selected', 'Select a session in the sidebar, or start one here.',
-            'New Session')
+        title = placeholder.get_child_at_index(0)
+        new_session = next(item for item in descendants() if item.get_accessible_id() == 'linux.placeholder.action')
+        assert title.get_accessible_id() == 'linux.composer.greeting' and title.get_name()
+        assert new_session.get_name() == 'Start Session'
         assert new_session.get_role_name() == 'push button'
         assert new_session.get_accessible_id() == 'linux.placeholder.action'
-        assert new_session.get_action_iface().get_n_actions() == 1
+        assert new_session.get_action_iface().get_n_actions() == 0
+        assert not new_session.get_state_set().contains(Atspi.StateType.ENABLED)
         placeholder_bounds = placeholder.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
         assert (placeholder_bounds.x, placeholder_bounds.y,
-                placeholder_bounds.width, placeholder_bounds.height) == (320, 0, 800, 480), \
+                placeholder_bounds.width, placeholder_bounds.height) == (240, 0, 880, 480), \
             placeholder_bounds
         action_bounds = new_session.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert (action_bounds.x >= 320 and action_bounds.x + action_bounds.width <= 1120
-                and 240 <= action_bounds.y <= 400
+        assert (action_bounds.x >= 240 and action_bounds.x + action_bounds.width <= 1120
+                and 0 <= action_bounds.y < 480
                 and action_bounds.y + action_bounds.height <= 480), \
             action_bounds
         assert button.get_role_name() == 'push button'
         assert button.get_state_set().contains(Atspi.StateType.ENABLED)
         bounds = button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
         pane_bounds = listing().get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert pane_bounds.y == 82, pane_bounds
+        assert pane_bounds.y == 41, pane_bounds
         assert (bounds.x, bounds.y, bounds.width, bounds.height) == (
-            pane_bounds.width - 56, 20, 40, 40), bounds
+            pane_bounds.width - 28, 10, 20, 20), bounds
         add_project = eventually(lambda: next((item for item in descendants()
                                                if item.get_accessible_id() == 'linux.add-project'), None),
                                  'Add project control')
@@ -136,7 +137,7 @@ with log_path.open('w') as log:
         assert add_project.get_state_set().contains(Atspi.StateType.ENABLED)
         add_bounds = add_project.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
         assert (add_bounds.x, add_bounds.y, add_bounds.width, add_bounds.height) == (
-            pane_bounds.width - 108, 20, 40, 40), add_bounds
+            pane_bounds.width - 54, 10, 20, 20), add_bounds
         add_action = add_project.get_action_iface()
         assert add_action.get_n_actions() == 1 and add_action.get_action_name(0) == 'press'
         eventually(lambda: (capture / 'normal.bmp').is_file(), 'normal rendered frame')
@@ -166,7 +167,7 @@ with log_path.open('w') as log:
         assert project_button.get_accessible_id() == (
             'sidebar.project.actions.' + project_row.get_accessible_id())
         project_bounds = project_button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert (project_bounds.width, project_bounds.height) == (40, 40), project_bounds
+        assert (project_bounds.width, project_bounds.height) == (20, 20), project_bounds
         assert project_button.get_action_iface().do_action(0), 'project-row AT-SPI press refused'
         eventually(lambda: listing().get_name() == 'Project actions', 'project-row Actions menu')
         assert button.get_action_iface().do_action(0)
@@ -178,7 +179,7 @@ with log_path.open('w') as log:
         assert create_button.get_accessible_id() == (
             'sidebar.project.create.' + project_row.get_accessible_id())
         create_bounds = create_button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert (create_bounds.width, create_bounds.height) == (40, 40), create_bounds
+        assert (create_bounds.width, create_bounds.height) == (20, 20), create_bounds
         assert create_button.get_action_iface().do_action(0), 'project-row Create AT-SPI press refused'
         create_menu = eventually(lambda: listing() if listing().get_name() == 'New in Project' else None,
                                  'project-row Create menu')

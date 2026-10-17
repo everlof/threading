@@ -75,6 +75,90 @@ private func paintedPixels(_ bitmap: Bitmap) -> [(Int, Int)] {
     require((1...5).allSatisfy { rgb($0, 10) != [0, 0, 255] }, "nested ink leaked")
 }
 
+@MainActor private func testBezierPathClosure() {
+    for closed in [false, true] {
+        let bitmap = Bitmap(width: 32, height: 32, background: (1, 1, 1, 1))
+        let context = NSGraphicsContext(bitmap: bitmap, scale: 1)
+        NSGraphicsContext.current = context
+        defer { NSGraphicsContext.current = nil }
+        NSColor.black.setStroke()
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: 5, y: 8))
+        path.line(to: NSPoint(x: 16, y: 24))
+        path.line(to: NSPoint(x: 27, y: 8))
+        if closed { path.close() }
+        path.lineWidth = 2
+        path.stroke()
+        let closingEdge = ((bitmap.height - 8) * bitmap.width + 16) * 4
+        require((bitmap.pixels[closingEdge] < 128) == closed,
+                "NSBezierPath stroke ignored explicit closure state")
+        // Fills close even an open subpath; preserving stroke endpoints must not change that.
+        NSColor.black.setFill()
+        path.fill()
+        let interior = (15 * bitmap.width + 16) * 4
+        require(bitmap.pixels[interior] == 0, "open NSBezierPath fill lost its implicit closing edge")
+    }
+}
+
+@MainActor private func testStrokeGeometry() {
+    func render(_ points: [NSPoint], cap: NSLineCapStyle = .butt,
+                join: NSLineJoinStyle = .miter, width: CGFloat = 8,
+                limit: CGFloat = 10, closed: Bool = false, coreGraphics: Bool = false) -> Bitmap {
+        let bitmap = Bitmap(width: 32, height: 32, background: (1, 1, 1, 1))
+        let graphics = NSGraphicsContext(bitmap: bitmap, scale: 1)
+        graphics.shouldAntialias = false
+        NSGraphicsContext.current = graphics
+        defer { NSGraphicsContext.current = nil }
+        let ink = NSColor.black.withAlphaComponent(0.5)
+        ink.setStroke()
+        if coreGraphics {
+            let context = graphics.cgContext
+            context.setLineWidth(width)
+            context.move(to: points[0])
+            for point in points.dropFirst() { context.addLine(to: point) }
+            if closed { context.closePath() }
+            context.strokePath()
+        } else {
+            let path = NSBezierPath()
+            path.move(to: points[0])
+            for point in points.dropFirst() { path.line(to: point) }
+            if closed { path.close() }
+            path.lineWidth = width
+            path.lineCapStyle = cap
+            path.lineJoinStyle = join
+            path.miterLimit = limit
+            path.stroke()
+        }
+        require(bitmap.pixels.enumerated().allSatisfy { $0.offset % 4 == 3 || $0.element >= 127 },
+                "overlapping stroke pieces compounded translucent ink")
+        return bitmap
+    }
+    func red(_ bitmap: Bitmap, _ x: Int, _ y: Int) -> UInt8 {
+        bitmap.pixels[((bitmap.height - 1 - y) * bitmap.width + x) * 4]
+    }
+    let line = [NSPoint(x: 8, y: 16), NSPoint(x: 24, y: 16)]
+    let butt = render(line, width: 10)
+    let round = render(line, cap: .round, width: 10)
+    let square = render(line, cap: .square, width: 10)
+    require(red(butt, 6, 16) == 255 && red(butt, 25, 16) == 255, "butt caps extend past endpoints")
+    require(red(round, 6, 16) < 255 && red(round, 25, 16) < 255, "round caps must cover both endpoints")
+    require(red(round, 3, 11) == 255 && red(square, 3, 11) < 255, "square cap corner was rounded")
+    let corner = [NSPoint(x: 8, y: 8), NSPoint(x: 20, y: 8), NSPoint(x: 20, y: 20)]
+    let miter = render(corner)
+    let bevel = render(corner, join: .bevel)
+    let roundJoin = render(corner, join: .round)
+    require(red(miter, 23, 4) < 255 && red(bevel, 23, 4) == 255, "miter and bevel joins are identical")
+    require(red(roundJoin, 22, 5) < 255 && red(bevel, 22, 5) == 255, "round join lost its outer arc")
+    require(render(corner, limit: 1).pixels == bevel.pixels, "miter limit did not fall back to bevel")
+    require(render(corner, coreGraphics: true).pixels == miter.pixels, "CoreGraphics stroke split its joints")
+    let rectangle = [NSPoint(x: 8, y: 8), NSPoint(x: 24, y: 8), NSPoint(x: 24, y: 24),
+                     NSPoint(x: 8, y: 24), NSPoint(x: 8, y: 8)]
+    require(red(render(rectangle), 5, 5) == 255, "an open path ending at its start acquired a closing join")
+    let closed = render(rectangle, closed: true)
+    require(red(closed, 5, 5) < 255, "closed path lost its first join")
+    require(red(closed, 16, 16) == 255, "closed stroke filled its interior")
+}
+
 @main struct FloatingGlyphHarness {
     @MainActor static func main() throws {
         require(CommandLine.arguments.count == 2, "usage: FloatingGlyphHarness OUTPUT_DIRECTORY")
@@ -101,6 +185,8 @@ private func paintedPixels(_ bitmap: Bitmap) -> [(Int, Int)] {
         require(paintedPixels(systemBitmap).count >= 40, "system template path drew no ink")
         try PNGWriter.write(systemBitmap, to: output.appendingPathComponent("system.png"))
         testPathState()
-        print("floating glyph: nine classic marks, system template, path state pass")
+        testBezierPathClosure()
+        testStrokeGeometry()
+        print("floating glyph: nine classic marks, system template, path state, Bezier closure, stroke caps/joins and single-composition ink pass")
     }
 }

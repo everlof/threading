@@ -31,10 +31,31 @@ public final class NSImage {
     public struct SymbolConfiguration: Sendable {
         public let pointSize: CGFloat
         public let weight: NSFont.Weight
+        public let paletteColors: [NSColor]
 
         public init(pointSize: CGFloat, weight: NSFont.Weight) {
             self.pointSize = pointSize
             self.weight = weight
+            self.paletteColors = []
+        }
+
+        public init(paletteColors: [NSColor]) {
+            precondition(paletteColors.count == 1, "Linux symbols support a single palette ink")
+            self.pointSize = 0
+            self.weight = .regular
+            self.paletteColors = paletteColors
+        }
+
+        private init(pointSize: CGFloat, weight: NSFont.Weight, paletteColors: [NSColor]) {
+            self.pointSize = pointSize
+            self.weight = weight
+            self.paletteColors = paletteColors
+        }
+
+        public func applying(_ other: SymbolConfiguration) -> SymbolConfiguration {
+            SymbolConfiguration(pointSize: other.pointSize > 0 ? other.pointSize : pointSize,
+                                weight: other.pointSize > 0 ? other.weight : weight,
+                                paletteColors: other.paletteColors.isEmpty ? paletteColors : other.paletteColors)
         }
     }
 
@@ -85,23 +106,40 @@ public final class NSImage {
     /// keeps its raster and takes the requested point-size canvas.
     @MainActor
     public func withSymbolConfiguration(_ configuration: SymbolConfiguration) -> NSImage {
-        precondition(configuration.pointSize.isFinite && configuration.pointSize > 0,
+        precondition(configuration.pointSize.isFinite && configuration.pointSize >= 0,
                      "invalid symbol configuration")
+        let resolved = SymbolConfiguration(pointSize: configuration.pointSize > 0 ? configuration.pointSize : size.height,
+                                           weight: configuration.weight).applying(configuration)
         if let symbolName,
-           let symbol = Self.systemSymbolProvider?(symbolName, accessibilityDescription, configuration) {
-            let image = NSImage(validatedRGBA: symbol.rgba, width: symbol.width, height: symbol.height,
+           let symbol = Self.systemSymbolProvider?(symbolName, accessibilityDescription, resolved) {
+            let image = NSImage(validatedRGBA: symbol.palettePixels(resolved.paletteColors), width: symbol.width, height: symbol.height,
                                 size: symbol.size)
-            image.isTemplate = symbol.isTemplate
+            image.isTemplate = resolved.paletteColors.isEmpty && symbol.isTemplate
             image.accessibilityDescription = accessibilityDescription
             image.symbolName = symbolName
             return image
         }
-        let image = NSImage(validatedRGBA: rgba, width: width, height: height,
-                            size: NSSize(width: configuration.pointSize,
-                                         height: configuration.pointSize))
-        image.isTemplate = isTemplate
+        let image = NSImage(validatedRGBA: palettePixels(resolved.paletteColors), width: width, height: height,
+                            size: configuration.pointSize > 0
+                                ? NSSize(width: resolved.pointSize, height: resolved.pointSize) : size)
+        image.isTemplate = resolved.paletteColors.isEmpty && isTemplate
         image.accessibilityDescription = accessibilityDescription
         return image
+    }
+
+    private func palettePixels(_ colors: [NSColor]) -> [UInt8] {
+        guard let color = colors.first else { return rgba }
+        let ink = [color.redComponent, color.greenComponent, color.blueComponent]
+            .map { UInt8((min(1, max(0, $0)) * 255).rounded()) }
+        let alpha = min(1, max(0, color.alphaComponent))
+        var pixels = rgba
+        for offset in stride(from: 0, to: pixels.count, by: 4) {
+            pixels[offset] = ink[0]
+            pixels[offset + 1] = ink[1]
+            pixels[offset + 2] = ink[2]
+            pixels[offset + 3] = UInt8((CGFloat(pixels[offset + 3]) * alpha).rounded())
+        }
+        return pixels
     }
 
     /// A small AppKit drawing-handler image, rasterized eagerly at the diagnostic window's 2×

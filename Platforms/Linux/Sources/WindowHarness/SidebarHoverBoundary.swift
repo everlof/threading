@@ -3,6 +3,15 @@ import AppKit
 // Values from Core/Constants/TerminalConstants.swift's SidebarDefaults. That source also
 // contains unrelated application constants and cannot be linked into this bounded UI host.
 enum SidebarDefaults {
+    static let defaultWidth: CGFloat = 240
+    // Measured AppKit inset-style cell band; see window-chrome.md, "The trailing side".
+    static let insetCellTrailingMargin: CGFloat = 16
+    // Production inset outline at depth zero; checked by SidebarWidthDensityTests.
+    static let insetCellLeadingMargin: CGFloat = 25
+    static let insetDisclosureLeading: CGFloat = 12
+    static let contentTopInset: CGFloat = 4
+    static let emptyStateSpacing: CGFloat = 4
+    static let emptyStateInset: CGFloat = 20
     static let rowHeight: CGFloat = 28
     static let projectCompactRowHeight: CGFloat = 30
     static let headingRowHeight: CGFloat = 32
@@ -56,6 +65,11 @@ extension NSTableRowView {
 }
 
 extension NSView {
+    func uncoveredPointerLocation(in event: NSEvent) -> NSPoint? {
+        guard !isPointerCovered(at: event.locationInWindow) else { return nil }
+        return convert(event.locationInWindow, from: nil)
+    }
+
     func isPointerCovered(at pointInWindow: CGPoint) -> Bool {
         guard let hit = window?.contentView?.hitTest(pointInWindow) else { return false }
         return !hit.isDescendant(of: self) && !isDescendant(of: hit)

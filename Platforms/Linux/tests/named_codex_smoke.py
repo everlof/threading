@@ -1,4 +1,5 @@
 """A named Codex login stays bound to its own home through create and resume."""
+from saved_catalog_menu import open_saved_agents
 import datetime
 import json
 import os
@@ -53,6 +54,7 @@ sys.exit(0)
 ''')
 child.chmod(0o700)
 environment = dict(os.environ, HOME=str(home), CODEX_HOME=str(foreign),
+                   THREADING_LINUX_UI_SCALE='2',
                    THREADING_LINUX_CODEX_ACCOUNT='codex-missing')
 subprocess.run([host, '--add-project', store, str(project)], check=True, capture_output=True,
                timeout=10)
@@ -150,7 +152,7 @@ def create(process, window, log):
     title(process, 'Threading terminal - exited 0', log)
     key(window, 'ctrl+shift+p')
     title(process, 'Threading experiment - ' + str(project), log)
-    key(window, 'Left')
+    open_saved_agents(lambda value: key(window, value))
     title(process, 'Threading agents - ' + str(project), log)
     subprocess.run(['import', '-window', window, 'out/named-codex-picker.png'],
                    check=True, timeout=5)
@@ -170,7 +172,7 @@ await_release(saved_id)
 
 
 def open_saved(process, window, log, expected):
-    key(window, 'Left')
+    open_saved_agents(lambda value: key(window, value))
     title(process, 'Threading agents - ' + str(project), log)
     key(window, 'Return')
     title(process, 'Threading terminal - ' + expected, log)

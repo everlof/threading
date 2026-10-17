@@ -1,4 +1,5 @@
 """A named Claude login stays bound to its own config home through create and resume."""
+from saved_catalog_menu import open_saved_agents
 import json
 import os
 from pathlib import Path
@@ -164,7 +165,7 @@ await_release(saved_id)
 
 
 def open_saved(process, window, log, expected):
-    key(window, 'Left')
+    open_saved_agents(lambda value: key(window, value))
     title(process, 'Threading agents - ' + str(project), log)
     key(window, 'Return')
     title(process, 'Threading terminal - ' + expected, log)

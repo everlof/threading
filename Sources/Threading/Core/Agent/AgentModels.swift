@@ -1,111 +1,6 @@
 import Foundation
 import os
 
-/// One provider-native reasoning level an installed runtime says a model can use.
-struct AgentReasoningLevel: Equatable, Codable, Sendable {
-    let effort: String
-    let description: String
-
-    /// Provider config values are stable machine identifiers; the UI uses familiar names while
-    /// preserving an unfamiliar future value rather than dropping it.
-    var displayName: String {
-        switch effort {
-        case "low": return L10n.string("Light")
-        case "medium": return L10n.string("Medium")
-        case "high": return L10n.string("High")
-        case "xhigh": return L10n.string("Extra High")
-        case "max": return L10n.string("Max")
-        case "ultra": return L10n.string("Ultra")
-        default:
-            return effort
-                .replacingOccurrences(of: "_", with: " ")
-                .replacingOccurrences(of: "-", with: " ")
-                .capitalized
-        }
-    }
-}
-
-/// The model a conversation runs when nothing pinned one, and where that name was read from.
-///
-/// `identifier` is nil when no source can name it — an account that configures no model whose
-/// runtime has not announced one yet — which is the one case a caller must render as a generic
-/// "Default model" rather than guessing the CLI's own fallback.
-struct ResolvedDefaultModel: Equatable {
-
-    /// Which source answered. Both mean "the CLI picks"; only one of them is a setting the user
-    /// can go and look at, so they are qualified differently on screen.
-    enum Source: Equatable {
-        /// The `model` key in the account's own `settings.json` (Claude) or `config.toml`
-        /// (Codex), or failing that its organisation's default.
-        case accountConfiguration
-        /// The id this session's runtime announced when it started.
-        case reportedByRuntime
-        /// What this account's runtime resolved an unpinned session to on an earlier run. A
-        /// report about the past, not a setting, and qualified differently on screen for it.
-        case rememberedFromEarlierRun
-    }
-
-    var identifier: String?
-    var source: Source
-
-    /// The model this may be *metered* by, which is narrower than the one it may be named after.
-    ///
-    /// A scoped window wrongly applied puts a session in the red over a model it is not running,
-    /// so only sources that speak for the session itself qualify: what the runtime reported, and
-    /// what the account is configured to run. An earlier run is a recollection — good enough to
-    /// print beside "last used", not good enough to charge a Fable window against.
-    var meteredIdentifier: String? {
-        switch source {
-        case .accountConfiguration, .reportedByRuntime: return identifier
-        case .rememberedFromEarlierRun: return nil
-        }
-    }
-}
-
-/// One model the installed CLI says the current account can use.
-struct AgentModelOption: Equatable, Codable, Sendable {
-    let identifier: String
-    let displayName: String
-
-    /// The catalog's request id for its Fast tier (`priority` today), when this model offers
-    /// one. This is deliberately not inferred from the model name: Fast is a service tier,
-    /// while Spark and other low-latency models are separate model choices.
-    let fastServiceTier: String?
-
-    /// The service tier Codex selects when no caller overrides it.
-    let defaultServiceTier: String?
-
-    /// The model's own fallback and the exact reasoning levels this account may select.
-    ///
-    /// These are catalog data, not a hard-coded enum: Sol and Terra currently expose Ultra,
-    /// Luna stops at Max, and older models stop at Extra High.
-    let defaultReasoningLevel: String?
-    let reasoningLevels: [AgentReasoningLevel]
-
-    init(
-        identifier: String,
-        displayName: String,
-        fastServiceTier: String?,
-        defaultServiceTier: String?,
-        defaultReasoningLevel: String? = nil,
-        reasoningLevels: [AgentReasoningLevel] = []
-    ) {
-        self.identifier = identifier
-        self.displayName = displayName
-        self.fastServiceTier = fastServiceTier
-        self.defaultServiceTier = defaultServiceTier
-        self.defaultReasoningLevel = defaultReasoningLevel
-        self.reasoningLevels = reasoningLevels
-    }
-
-    var supportsFastMode: Bool { fastServiceTier != nil }
-
-    func supports(reasoningEffort: String?) -> Bool {
-        guard let reasoningEffort else { return true }
-        return reasoningLevels.contains { $0.effort == reasoningEffort }
-    }
-}
-
 /// The model choices offered when starting or reconfiguring a session.
 ///
 /// Claude documents stable aliases. Codex publishes a per-account model catalog, which is a
@@ -713,18 +608,7 @@ enum AgentModels {
 
     /// The organisation default as it reads in one parsed state file.
     private static func organisationModel(inClaudeState state: [String: Any]) -> String? {
-        guard let value = state[AgentDefaults.claudeOrgDefaultModelKey] else { return nil }
-
-        if let identifier = value as? String {
-            return identifier.isEmpty ? nil : identifier
-        }
-        guard let nested = value as? [String: Any] else { return nil }
-        for key in AgentDefaults.claudeOrgDefaultNestedKeys {
-            if let identifier = nested[key] as? String, !identifier.isEmpty {
-                return identifier
-            }
-        }
-        return nil
+        ProviderModelCatalog.organisationModel(inClaudeState: state)
     }
 
     /// The models this login may select beyond the documented aliases.
@@ -744,46 +628,7 @@ enum AgentModels {
 
     /// The extra models as they read in one parsed state file.
     private static func additionalModels(inClaudeState state: [String: Any]) -> [AgentModelOption] {
-        guard let entries = WireList.objects(
-            state[AgentDefaults.claudeAdditionalModelsKey],
-            site: WireListSite.claudeAdditionalModels,
-            log: ThreadingLogger.agent
-        ) else { return [] }
-
-        return entries.compactMap { entry in
-            guard let identifier = entry["value"] as? String, !identifier.isEmpty else {
-                return nil
-            }
-            return claudeOption(
-                identifier: identifier,
-                displayName: cachedModelName(identifier: identifier, entry: entry)
-            )
-        }
-    }
-
-    /// Ours where the id can be read, so one model reads the same on the chip, the pill and
-    /// the row; the service's own words where it cannot.
-    ///
-    /// The description is preferred to the label because it says more: the CLI caches
-    /// `claude-fable-5-1[1m]` with the label "Fable" and the description "Fable 5.1 · Most
-    /// capable…", and a row that borrowed the label would drop the version that is the whole
-    /// difference between this entry and the alias above it. Only a description in the CLI's
-    /// `<name> · <blurb>` shape is read; one without the separator is a blurb alone.
-    private static func cachedModelName(identifier: String, entry: [String: Any]) -> String {
-        if ModelName.read(identifier) != nil {
-            return ModelName.display(for: identifier)
-        }
-        let described: String? = (entry["description"] as? String).flatMap { description in
-            let parts = description.components(
-                separatedBy: AgentDefaults.claudeModelDescriptionSeparator
-            )
-            return parts.count > 1 ? parts[0] : nil
-        }
-        let name = [described, entry["label"] as? String]
-            .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
-            .first { !$0.isEmpty && $0.utf8.count <= AgentDefaults.claudeModelLabelMaximumBytes }
-        guard let name else { return ModelName.display(for: identifier) }
-        return ModelName.display(serviceLabel: name, for: identifier)
+        ProviderModelCatalog.additionalModels(inClaudeState: state)
     }
 
     /// The alias row named after what this login watched it resolve to, or the row as it was.
@@ -823,15 +668,7 @@ enum AgentModels {
         identifier: String,
         displayName: String
     ) -> AgentModelOption {
-        AgentModelOption(
-            identifier: identifier,
-            displayName: displayName,
-            fastServiceTier: nil,
-            defaultServiceTier: nil,
-            reasoningLevels: AgentDefaults.claudeReasoningEfforts.map {
-                AgentReasoningLevel(effort: $0, description: "")
-            }
-        )
+        ProviderModelCatalog.claudeOption(identifier: identifier, displayName: displayName)
     }
 
     /// Everything this app reads out of the Claude CLI's own state file.
@@ -941,26 +778,7 @@ enum AgentModels {
     /// returned nil when that match was empty rather than looking for a later one. So an empty
     /// value is kept here and refused at the lookup, not skipped while collecting.
     private static func codexAssignments(in contents: String) -> [String: String] {
-        var assignments: [String: String] = [:]
-
-        for line in contents.split(separator: "\n") {
-            // A `[table]` header carries no `=` and drops out here. Keys *under* one are still
-            // collected, exactly as the previous scan matched them wherever they appeared.
-            let parts = line.trimmingCharacters(in: .whitespaces).split(
-                separator: "=",
-                maxSplits: 1
-            )
-            guard parts.count == 2 else { continue }
-
-            let key = parts[0].trimmingCharacters(in: .whitespaces)
-            guard !key.isEmpty, assignments[key] == nil else { continue }
-
-            assignments[key] = parts[1]
-                .trimmingCharacters(in: .whitespaces)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-        }
-
-        return assignments
+        ProviderModelCatalog.codexAssignments(in: contents)
     }
 
     /// The catalogue as last decoded for one login, with the file identity it was read from.
@@ -1042,81 +860,8 @@ enum AgentModels {
 
     /// One read of the file, or nil when it cannot be read or decoded whole.
     private static func decodeCodexCatalog(at url: URL) -> (options: [AgentModelOption], version: String?)? {
-        guard let data = try? BoundedFileReader.read(
-            url,
-            maximumBytes: maximumProviderCatalogBytes
-        ),
-              let cache = try? JSONDecoder().decode(CodexModelsCache.self, from: data)
+        guard let data = try? BoundedFileReader.read(url, maximumBytes: maximumProviderCatalogBytes)
         else { return nil }
-
-        let options = cache.models
-            .filter { $0.visibility == AgentDefaults.codexVisibleModel }
-            .map { model in
-                let fastTier = model.serviceTiers?.first {
-                    $0.name.caseInsensitiveCompare(AgentDefaults.codexFastModeName) == .orderedSame
-                }?.id ?? (
-                    model.additionalSpeedTiers?.contains(
-                        AgentDefaults.codexFastServiceTierAlias
-                    ) == true
-                        ? AgentDefaults.codexFastServiceTier
-                        : nil
-                )
-
-                return AgentModelOption(
-                    identifier: model.slug,
-                    displayName: model.displayName,
-                    fastServiceTier: fastTier,
-                    defaultServiceTier: model.defaultServiceTier,
-                    defaultReasoningLevel: model.defaultReasoningLevel,
-                    reasoningLevels: model.supportedReasoningLevels?.map {
-                        AgentReasoningLevel(
-                            effort: $0.effort,
-                            description: $0.description
-                        )
-                    } ?? []
-                )
-            }
-        return (options, cache.clientVersion)
-    }
-}
-
-private struct CodexModelsCache: Decodable {
-    let models: [Model]
-    let clientVersion: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case models
-        case clientVersion = "client_version"
-    }
-
-    struct Model: Decodable {
-        let slug: String
-        let displayName: String
-        let visibility: String?
-        let additionalSpeedTiers: [String]?
-        let serviceTiers: [ServiceTier]?
-        let defaultServiceTier: String?
-        let defaultReasoningLevel: String?
-        let supportedReasoningLevels: [ReasoningLevel]?
-
-        private enum CodingKeys: String, CodingKey {
-            case slug, visibility
-            case displayName = "display_name"
-            case additionalSpeedTiers = "additional_speed_tiers"
-            case serviceTiers = "service_tiers"
-            case defaultServiceTier = "default_service_tier"
-            case defaultReasoningLevel = "default_reasoning_level"
-            case supportedReasoningLevels = "supported_reasoning_levels"
-        }
-    }
-
-    struct ServiceTier: Decodable {
-        let id: String
-        let name: String
-    }
-
-    struct ReasoningLevel: Decodable {
-        let effort: String
-        let description: String
+        return ProviderModelCatalog.decodeCodex(data)
     }
 }

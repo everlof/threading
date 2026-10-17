@@ -1,4 +1,5 @@
 """Real bash cwd tracking survives same-ID restart and attach without OSC 7."""
+from saved_catalog_menu import open_saved_terminals
 import copy
 import json
 import os
@@ -42,6 +43,7 @@ environment.pop('ENV', None)
 process = None
 log = None
 saved_id = None
+expected_expanded = False
 owned_pids = set()
 
 
@@ -117,7 +119,7 @@ def record():
         result = json.loads(database.execute('SELECT data FROM project WHERE id = ?',
                                             (project_id,)).fetchone()[0])
     assert result['id'] == project_id and result['folderPath'] == str(project)
-    assert result['notificationsMuted'] is True and result['isExpanded'] is False
+    assert result['notificationsMuted'] is True and result['isExpanded'] is expected_expanded
     return result
 
 
@@ -192,6 +194,8 @@ try:
     window = projects()
     key('Return')
     title(r'^Threading terminal - running( \[(history cut|restored)\])?$')
+    eventually(lambda: 'OUTLINE_EXPANSION_SAVED ' in tail(), 'new terminal parent revealed')
+    expected_expanded = True
     baseline = record()
     assert len(baseline['terminals']) == 1
     saved_id = baseline['terminals'][0]['id']
@@ -202,7 +206,7 @@ try:
     exit_shell()
     key('ctrl+shift+p')
     projects()
-    key('Right')
+    open_saved_terminals(key)
     picker()
     key('Return')
     title(r'^Threading terminal - running( \[(history cut|restored)\])?$')
@@ -213,6 +217,7 @@ try:
     # The live daemon incarnation must survive the app, then acquire fresh cwd observations.
     launch('attach')
     window = title(r'^Threading terminal - running( \[(history cut|restored)\])?$')
+    assert 'OUTLINE_EXPANSION_SAVED ' not in tail(), 'restoring an open parent rewrote its expansion'
     assert live(nested) == second_pid, 'normal reopening replaced the live shell'
     change_directory(other, 'OTHER')
     assert live(other) == second_pid
@@ -222,6 +227,7 @@ try:
     # Removing the remembered directory must not remove either durable owning project record.
     other.rmdir()
     key('ctrl+shift+p')
+    open_saved_terminals(key)
     picker()
     key('Return')
     title(r'^Threading terminal - running( \[(history cut|restored)\])?$')

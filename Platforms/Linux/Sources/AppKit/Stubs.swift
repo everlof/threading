@@ -113,6 +113,9 @@ public final class NSFont: Equatable, Hashable {
     private var fontBoundsCache: NSRect?
     init(familyName: String, pointSize: CGFloat, weight: Weight = .regular,
          italic: Bool = false) {
+#if os(Linux)
+        _ = BundledFonts.registered
+#endif
         storedFamilyName = familyName
         self.pointSize = pointSize
         self.weight = weight

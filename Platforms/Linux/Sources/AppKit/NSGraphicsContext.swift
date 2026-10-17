@@ -203,17 +203,8 @@ public final class NSGraphicsContext {
 
     fileprivate func strokePath() {
         defer { beginPath() }
-        for subpath in currentPath {
-            let points = subpath.points
-            guard points.count > 1 else { continue }
-            for (first, second) in zip(points, points.dropFirst()) {
-                stroke(polygons: [[first, second]], width: pathLineWidth, color: strokeColor)
-            }
-            if subpath.closed {
-                stroke(polygons: [[points[points.count - 1], points[0]]],
-                       width: pathLineWidth, color: strokeColor)
-            }
-        }
+        let subpaths = currentPath.map { NSBezierPath.Subpath(points: $0.points, closed: $0.closed) }
+        stroke(subpaths: subpaths, width: pathLineWidth, color: strokeColor)
     }
 
     fileprivate func fillPath() {
@@ -265,33 +256,14 @@ public final class NSGraphicsContext {
         }
     }
 
-    func stroke(polygons: [[NSPoint]], width: CGFloat, color: NSColor) {
-        // A stroke is filled as its outline: each segment becomes a quad, each joint a disc.
-        // Coarse next to a real backend's stroker, and enough for the hairlines and rings the
-        // themed surfaces draw.
-        let half = max(width, 0.1) / 2
-        var outline: [[NSPoint]] = []
-        for polygon in polygons {
-            guard polygon.count > 1 else { continue }
-            for index in 0..<polygon.count where index + 1 < polygon.count || polygon.count > 2 {
-                let a = polygon[index]
-                let b = polygon[(index + 1) % polygon.count]
-                let dx = b.x - a.x, dy = b.y - a.y
-                let length = (dx * dx + dy * dy).squareRoot()
-                guard length > 0 else { continue }
-                let nx = -dy / length * half, ny = dx / length * half
-                outline.append([
-                    NSPoint(x: a.x + nx, y: a.y + ny), NSPoint(x: b.x + nx, y: b.y + ny),
-                    NSPoint(x: b.x - nx, y: b.y - ny), NSPoint(x: a.x - nx, y: a.y - ny)
-                ])
-                let joint = NSBezierPath(ovalIn: NSRect(x: b.x - half, y: b.y - half, width: half * 2, height: half * 2))
-                outline.append(contentsOf: joint.polygons())
-            }
-        }
-        // Each quad filled separately, so overlapping joins do not cancel under nonzero winding.
-        for piece in outline {
-            fill(polygons: [piece], evenOdd: false, color: color)
-        }
+    func stroke(subpaths: [NSBezierPath.Subpath], width: CGFloat,
+                cap: NSLineCapStyle = .butt, join: NSLineJoinStyle = .miter,
+                miterLimit: CGFloat = 10, color: NSColor) {
+        let outline = StrokeOutline.polygons(subpaths: subpaths, width: width, cap: cap,
+                                             join: join, miterLimit: miterLimit)
+        // One nonzero-winding fill unions all pieces before compositing. Painting segments
+        // separately compounds translucent ink and antialias coverage at every intersection.
+        fill(polygons: outline, evenOdd: false, color: color)
     }
 
     func composite(x: Int, y: Int, color: (CGFloat, CGFloat, CGFloat, CGFloat), coverage: CGFloat) {
@@ -515,7 +487,7 @@ public struct CGContextShim {
                    color: owner.fillColor)
     }
     public func stroke(_ rect: CGRect) {
-        owner.stroke(polygons: NSBezierPath(rect: rect).polygons(),
+        owner.stroke(subpaths: NSBezierPath(rect: rect).subpaths(),
                      width: owner.pathLineWidth, color: owner.strokeColor)
     }
     public func saveGState() { owner.saveGraphicsState() }

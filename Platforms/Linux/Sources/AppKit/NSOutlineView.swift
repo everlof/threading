@@ -14,7 +14,11 @@ public protocol NSOutlineViewDelegate: AnyObject {
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView?
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool
+    func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool
+    func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool
     func outlineViewSelectionDidChange(_ notification: Notification)
+    func outlineViewItemDidExpand(_ notification: Notification)
+    func outlineViewItemDidCollapse(_ notification: Notification)
 }
 
 public extension NSOutlineViewDelegate {
@@ -23,7 +27,11 @@ public extension NSOutlineViewDelegate {
         outlineView.rowHeight
     }
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { true }
+    func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool { true }
+    func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool { true }
     func outlineViewSelectionDidChange(_ notification: Notification) {}
+    func outlineViewItemDidExpand(_ notification: Notification) {}
+    func outlineViewItemDidCollapse(_ notification: Notification) {}
 }
 
 public extension Notification.Name {
@@ -107,14 +115,33 @@ open class NSOutlineView: NSTableView {
         (dataSource as? NSOutlineViewDataSource)?.outlineView(self, isItemExpandable: item) ?? false
     }
 
-    open func expandItem(_ item: Any) {
-        guard isExpandable(item), expanded.insert(identity(of: item)).inserted else { return }
+    /// Restores host-owned standing state in one projection, without emitting user mutations.
+    /// Calling expandItem repeatedly would rebuild the entire tree once per restored branch.
+    public func restoreExpandedItems(_ items: [Any]) {
+        expanded = Set(items.map { identity(of: $0) })
         reloadData()
     }
 
-    open func collapseItem(_ item: Any) {
-        guard expanded.remove(identity(of: item)) != nil else { return }
+    open func expandItem(_ item: Any) {
+        guard isExpandable(item), !isItemExpanded(item),
+              (delegate as? NSOutlineViewDelegate)?.outlineView(self, shouldExpandItem: item) ?? true
+        else { return }
+        expanded.insert(identity(of: item))
         reloadData()
+        (delegate as? NSOutlineViewDelegate)?.outlineViewItemDidExpand(
+            Notification(name: Notification.Name("NSOutlineViewItemDidExpand"),
+                         object: self, userInfo: ["NSObject": item]))
+    }
+
+    open func collapseItem(_ item: Any) {
+        guard isItemExpanded(item),
+              (delegate as? NSOutlineViewDelegate)?.outlineView(self, shouldCollapseItem: item) ?? true
+        else { return }
+        expanded.remove(identity(of: item))
+        reloadData()
+        (delegate as? NSOutlineViewDelegate)?.outlineViewItemDidCollapse(
+            Notification(name: Notification.Name("NSOutlineViewItemDidCollapse"),
+                         object: self, userInfo: ["NSObject": item]))
     }
 
     /// Value changes refresh one visible row. A changed branch structure must request children,

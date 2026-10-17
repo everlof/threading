@@ -1,7 +1,9 @@
 """Exercise the mounted project-row control in the real X11 window and AT-SPI tree."""
 import os
+import json
 from pathlib import Path
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -66,9 +68,14 @@ def listing(app):
 
 def project_rows(app):
     listed = listing(app)
-    if listed.get_name() != 'Projects' or listed.get_child_count() != 2:
+    if listed.get_name() != 'Projects':
         return None
-    return [listed.get_child_at_index(index) for index in range(2)]
+    # A newly created terminal is visible under its expanded project. Identify the two
+    # project controls without assuming that project rows are the entire outline.
+    rows = [listed.get_child_at_index(index) for index in range(listed.get_child_count())]
+    projects = [row for row in rows if row.get_child_count() == 2 and
+                row.get_child_at_index(1).get_accessible_id().startswith('sidebar.project.actions.')]
+    return projects if len(projects) == 2 else None
 
 
 def selected(row):
@@ -145,7 +152,7 @@ try:
             raise AssertionError('daemon unavailable: ' + daemon_log_path.read_text())
     with log_path.open('w+') as log:
         process = subprocess.Popen([binary, '--app', str(store), str(socket), '/bin/sh'],
-                                   env=dict(os.environ, THREADING_LINUX_NAVIGATION_TRACE='1'),
+                                   env=dict(os.environ, THREADING_LINUX_NAVIGATION_TRACE='1', THREADING_LINUX_UI_SCALE='2'),
                                    stdout=log, stderr=log)
         app = eventually(lambda: application(process), 'AT-SPI registration', process)
         rows = eventually(lambda: project_rows(app), 'two project rows', process)
@@ -155,13 +162,15 @@ try:
         window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
                                         str(process.pid), '--name', '^Threading experiment - '),
                             'native window', process).splitlines()[0]
+        xdo('windowsize', '--sync', window, '1120', '480')
+        eventually(lambda: 'IDLE_PANE_FRAME 640x480 ' in log_path.read_text(), 'fixed action viewport', process)
         xdo('windowfocus', '--sync', window)
         actions = []
         creates = []
         for index, row in enumerate(rows):
             row_rect = extents(row)
             assert (row_rect.x, row_rect.y, row_rect.width, row_rect.height) == (
-                12, 86 + index * 64, 296, 60)
+                0, 110 + index * 60, 480, 60)
             assert row.get_child_count() == 2
             create = row.get_child_at_index(0)
             assert create.get_role_name() == 'push button'
@@ -181,7 +190,7 @@ try:
             rect = extents(button)
             assert (rect.y, rect.width, rect.height) == (row_rect.y + 10, 40, 40)
             assert rect.x == create_rect.x + create_rect.width + 4
-            assert 0 <= row_rect.x + row_rect.width - (rect.x + rect.width) <= 8
+            assert 28 <= row_rect.x + row_rect.width - (rect.x + rect.width) <= 36
             actions.append(button)
 
         normal = capture(window, 'project-actions-normal.png')
@@ -240,7 +249,7 @@ try:
         header_button = header_actions(app)
         header_rect = extents(header_button)
         assert (header_rect.x, header_rect.y, header_rect.width, header_rect.height) == (
-            264, 20, 40, 40)
+            424, 20, 40, 40)
         move_pointer(window, header_button)
         xdo('click', '--window', window, '1')
         eventually(lambda: listing(app).get_name() == 'Project actions',
@@ -269,13 +278,20 @@ try:
         eventually(lambda: listing(app).get_child_at_index(1).get_state_set().contains(
             Atspi.StateType.SELECTED), 'drag highlighted Open shell', process)
         xdo('mouseup', '--window', window, '1')
-        rows = eventually(lambda: project_rows(app) if project_rows(app) and
-                          selected(project_rows(app)[1]) else None,
-                          'drag release opened Beta shell', process, timeout=20)
+        beta_id = rows[1].get_accessible_id()
+        def beta_terminal_selected():
+            with sqlite3.connect(store / 'threading.db') as database:
+                beta = json.loads(database.execute('SELECT data FROM project WHERE id=?',
+                                                  (beta_id,)).fetchone()[0])
+            chosen = listing(app).get_selection_iface().get_selected_child(0)
+            if beta['terminals'] and chosen and chosen.get_accessible_id() == beta['terminals'][0]['id']:
+                return project_rows(app)
+        rows = eventually(beta_terminal_selected, 'drag release selected the exact Beta shell child',
+                          process, timeout=20)
         frame = app.get_child_at_index(0)
         assert any(frame.get_child_at_index(index).get_role_name() == 'terminal'
                    for index in range(frame.get_child_count())), 'menu release did not mount terminal'
-        assert selected(rows[1]) and not selected(rows[0])
+        assert all(not selected(row) for row in rows)
         print('PASS project ellipsis pixels, per-row AT-SPI bounds/actions, exact-ID pointer '
               'and keyboard menus, preserved menu selection, header pointer, row right-click, '
               'drag release target')

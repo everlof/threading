@@ -158,6 +158,41 @@ private func measured(_ text: String, scale: CGFloat = 1) -> TATMetrics {
     override var isFlipped: Bool { true }
 }
 
+@MainActor private func checkClippedSingleLine() {
+    let text = "MMMM WWWW XXXX YYYY ZZZZ"
+    for attributed in [false, true] {
+        for selectable in [false, true] {
+            let label = NSTextField(labelWithString: text)
+            label.font = .monospacedSystemFont(ofSize: 14)
+            label.textColor = .black
+            label.lineBreakMode = .byClipping
+            label.isSelectable = selectable
+            if attributed {
+                label.attributedStringValue = NSAttributedString(string: text, attributes: [
+                    .font: label.font!, .foregroundColor: NSColor.black
+                ])
+            }
+            label.frame = NSRect(x: 10, y: 10, width: 360, height: 24)
+            label.alignment = .left
+            let whole = render(label, width: 400)
+            label.frame.size.width = 66
+            for alignment: NSTextAlignment in [.left, .center, .right] {
+                label.alignment = alignment
+                let clipped = render(label, width: 400)
+                // macOS starts an overflowing clipped line at its leading edge for all three
+                // alignments. Its pixels must be a crop of one line, never its first wrapped word.
+                for y in 0..<40 {
+                    for x in 10..<76 {
+                        let offset = (y * 400 + x) * 4
+                        precondition(clipped.pixels[offset..<(offset + 4)] == whole.pixels[offset..<(offset + 4)],
+                            "clipped label wrapped or shifted: attributed=\(attributed), selectable=\(selectable), alignment=\(alignment)")
+                    }
+                }
+            }
+        }
+    }
+}
+
 @MainActor private final class AppearanceProbe: NSView {
     private(set) var changes = 0
     override func viewDidChangeEffectiveAppearance() {
@@ -454,6 +489,7 @@ private struct InkPolicy: Decodable {
             try checkNeutralInkLabels(at: CommandLine.arguments[index + 1])
         }
         let composed = measured("é")
+        checkClippedSingleLine()
         let decomposed = measured("e\u{301}")
         precondition(composed.glyphs == 1 && decomposed.glyphs == 1,
                      "Pango must shape combining accent as one glyph")
@@ -1144,13 +1180,17 @@ private struct InkPolicy: Decodable {
         weightLabel.frame = NSRect(x: 6, y: 6, width: 110, height: 28)
         weightLabel.font = .systemFont(ofSize: 17, weight: .regular)
         let regularPixels = render(weightLabel, width: 125)
+        weightLabel.font = .systemFont(ofSize: 17, weight: .medium)
+        let mediumPixels = render(weightLabel, width: 125)
         weightLabel.font = .systemFont(ofSize: 17, weight: .semibold)
         let semiboldPixels = render(weightLabel, width: 125)
         weightLabel.font = .systemFont(ofSize: 17, weight: .bold)
         let boldPixels = render(weightLabel, width: 125)
         print("font-weight pixels regular/semibold=\(regularPixels.pixels == semiboldPixels.pixels) semibold/bold=\(semiboldPixels.pixels == boldPixels.pixels)")
-        precondition(regularPixels.pixels != semiboldPixels.pixels,
-                     "Pango semibold must change the regular glyph ink")
+        precondition(regularPixels.pixels != mediumPixels.pixels &&
+                     mediumPixels.pixels != semiboldPixels.pixels &&
+                     semiboldPixels.pixels != boldPixels.pixels,
+                     "The bundled UI face must render four distinct requested weights")
 
         let alphaLabel = NSTextField(labelWithString: "MMMM")
         alphaLabel.frame = NSRect(x: 5, y: 5, width: 90, height: 27)

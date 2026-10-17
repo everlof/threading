@@ -1,4 +1,5 @@
 """Shared session names reach the native picker and AT-SPI, including fresh admission."""
+from saved_catalog_menu import open_saved_agents
 import json
 import os
 from pathlib import Path
@@ -22,7 +23,8 @@ log_path = Path('out/session-titles-native.log')
 database_path = store / 'threading.db'
 home = root / 'session-title-home'
 home.mkdir()
-environment = dict(os.environ, HOME=str(home), THREADING_LINUX_STARTUP_TRACE='1')
+environment = dict(os.environ, HOME=str(home), THREADING_LINUX_STARTUP_TRACE='1',
+                   THREADING_LINUX_UI_SCALE='2')
 for key in ('THREADING_LINUX_CODEX_ACCOUNT', 'THREADING_LINUX_CLAUDE_ACCOUNT'):
     environment.pop(key, None)
 
@@ -127,8 +129,10 @@ with log_path.open('w+') as log:
                                 '/bin/sh', '/bin/true'], env=environment, stdout=log, stderr=log)
     try:
         window = await_title('Threading experiment - ' + str(project))
+        # The deep-selection check below intentionally uses an eight-row viewport.
+        xdo('windowsize', '--sync', window, '1120', '480')
         app = eventually(application, 'AT-SPI application registration')
-        key('Left')
+        open_saved_agents(key)
         await_title('Threading agents - ' + str(project))
         assert_names(expected)
         subprocess.run(['import', '-window', window, 'out/session-titles-native.png'],
@@ -141,7 +145,7 @@ with log_path.open('w+') as log:
         await_title('Threading terminal - exited 0')
         key('ctrl+shift+p')
         await_title('Threading experiment - ' + str(project))
-        key('Left')
+        open_saved_agents(key)
         await_title('Threading agents - ' + str(project))
         after = stored_rows()
         added = set(after) - set(before)
@@ -187,8 +191,10 @@ with log_path.open('a') as log:
                                env=environment, stdout=log, stderr=log)
     try:
         window = await_title('Threading experiment - ' + str(project))
+        # The deep-selection check below intentionally uses an eight-row viewport.
+        xdo('windowsize', '--sync', window, '1120', '480')
         app = eventually(application, 'restored AT-SPI application')
-        key('Left')
+        open_saved_agents(key)
         await_title('Threading agents - ' + str(project))
 
         def deep_row():

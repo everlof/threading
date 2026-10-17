@@ -7,6 +7,8 @@ child and resized viewports, scrolling through the wheel route, stable item
 selection across expansion, and an O(visible) cell and reuse-pool bound. It also checks
 cached 28/30/32pt per-item heights over the full tree, row gaps, scrolling, hit
 testing, expansion, and refreshing changed heights on reload.
+The inset-style lane checks ten-point scrollable document padding, row hits excluding that
+padding, last-row visibility, bounded reuse and returning to full-width layout.
 
 This is a focused AppKit subset. Rows have one full-width view. It does not implement
 multiple columns, editing, drag and drop, sorting, animated disclosure, native accessibility projection,

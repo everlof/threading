@@ -65,6 +65,7 @@ public enum Design {
         }
     }
     public enum Surface {
+        public static var accentMuted: NSColor { LinuxTheme.color("accentMuted") }
         public static var accent: NSColor { LinuxTheme.color("accent") }
         public static var bevelHighlight: NSColor { LinuxTheme.color("bevelHighlight") }
         public static var bevelShadow: NSColor { LinuxTheme.color("bevelShadow") }
@@ -97,29 +98,35 @@ public enum Design {
     }
 
     public enum Symbol {
-        public enum Role { case toolbar, control
-            public var pointSize: CGFloat { self == .toolbar ? 14 : 12 }
+        public enum Role { case toolbar, control, chevron
+            public var pointSize: CGFloat {
+                switch self {
+                case .toolbar: 14
+                case .control: 12
+                case .chevron: 8
+                }
+            }
         }
         public static func slot(inControlOfHeight height: CGFloat) -> CGFloat { height - 10 }
         public static func role(forSlot slot: CGFloat) -> Role { slot >= 14 ? .toolbar : .control }
 
         /// Explicit diagnostic symbols for project actions and the saved-terminal identity.
         /// An unfamiliar name is a missing platform service and fails visibly.
-        /// Images rasterize once per visible control at 2×, capped to a 32-point canvas.
+        /// Images rasterize once per visible control at 2×, capped to a 44-point canvas.
         public static func image(_ name: String, slot: CGFloat, pointSize: CGFloat,
                                  weight: NSFont.Weight) -> NSImage? {
             precondition(name == "ellipsis" || name == "plus" || name == "terminal"
                          || name == "chevron.down" || name == "chevron.right"
                          || name == "folder" || name == "doc.text"
-                         || name == "text.bubble" || name == "hand.raised"
+                         || name == "text.bubble" || name == "hand.raised" || name == "cpu"
                          || name == "questionmark.bubble" || name == "circle"
-                         || name == "checkmark.circle.fill",
+                         || name == "checkmark.circle.fill" || name == "return" || name == "stop.fill",
                          "No Linux diagnostic symbol artwork for \(name)")
             precondition(slot.isFinite && pointSize.isFinite && slot > 0 && pointSize > 0)
             // Keep the artwork at its optical point size inside the requested layout slot.
             // GlyphView's intrinsic width is the image canvas, and a header may require the
             // full 16pt slot even though the visible terminal mark is only 12pt wide.
-            let canvasSide = min(32, max(4, slot))
+            let canvasSide = min(44, max(4, slot))
             let side = min(canvasSide, max(4, pointSize))
             let origin = (canvasSide - side) / 2
             let weightFactor: CGFloat = weight.rawValue >= NSFont.Weight.bold.rawValue ? 1.25
@@ -127,7 +134,21 @@ public enum Design {
             let size = NSSize(width: canvasSide, height: canvasSide)
             let image = NSImage(size: size, flipped: false) { canvas in
                 NSColor.white.setFill()
-                if name == "text.bubble" {
+                if name == "stop.fill" {
+                    NSBezierPath(roundedRect: NSRect(x: origin + side * 0.18, y: origin + side * 0.18,
+                        width: side * 0.64, height: side * 0.64), xRadius: side * 0.06, yRadius: side * 0.06).fill()
+                } else if name == "return" {
+                    let mark = NSBezierPath()
+                    mark.move(to: NSPoint(x: origin + side * 0.8, y: origin + side * 0.8))
+                    mark.line(to: NSPoint(x: origin + side * 0.8, y: origin + side * 0.4))
+                    mark.line(to: NSPoint(x: origin + side * 0.2, y: origin + side * 0.4))
+                    mark.move(to: NSPoint(x: origin + side * 0.4, y: origin + side * 0.6))
+                    mark.line(to: NSPoint(x: origin + side * 0.2, y: origin + side * 0.4))
+                    mark.line(to: NSPoint(x: origin + side * 0.4, y: origin + side * 0.2))
+                    mark.lineWidth = max(1, side * 0.09 * weightFactor)
+                    NSColor.white.setStroke()
+                    mark.stroke()
+                } else if name == "text.bubble" {
                     let bubble = NSBezierPath()
                     bubble.move(to: NSPoint(x: origin + side * 0.15, y: origin + side * 0.25))
                     bubble.line(to: NSPoint(x: origin + side * 0.15, y: origin + side * 0.82))
@@ -194,6 +215,25 @@ public enum Design {
                     mark.stroke()
                     NSBezierPath(ovalIn: NSRect(x: origin + side * 0.46, y: origin + side * 0.31,
                                                 width: side * 0.08, height: side * 0.08)).fill()
+                } else if name == "cpu" {
+                    let chip = NSBezierPath(roundedRect: NSRect(x: origin + side * 0.22,
+                        y: origin + side * 0.22, width: side * 0.56, height: side * 0.56),
+                        xRadius: side * 0.06, yRadius: side * 0.06)
+                    chip.append(NSBezierPath(rect: NSRect(x: origin + side * 0.36,
+                        y: origin + side * 0.36, width: side * 0.28, height: side * 0.28)))
+                    for fraction: CGFloat in [0.34, 0.50, 0.66] {
+                        let offset = origin + side * fraction
+                        for (a, b) in [(0.08, 0.22), (0.78, 0.92)] as [(CGFloat, CGFloat)] {
+                            chip.move(to: NSPoint(x: origin + side * a, y: offset))
+                            chip.line(to: NSPoint(x: origin + side * b, y: offset))
+                            chip.move(to: NSPoint(x: offset, y: origin + side * a))
+                            chip.line(to: NSPoint(x: offset, y: origin + side * b))
+                        }
+                    }
+                    chip.lineWidth = max(0.8, side * 0.065 * weightFactor)
+                    chip.lineCapStyle = .round
+                    NSColor.white.setStroke()
+                    chip.stroke()
                 } else if name == "hand.raised" {
                     // The permission card's mark: an open palm, four raised fingers and a thumb.
                     let hand = NSBezierPath(roundedRect: NSRect(
@@ -232,22 +272,7 @@ public enum Design {
                     detail.lineWidth = paper.lineWidth
                     detail.stroke()
                 } else if name == "terminal" {
-                    let screen = NSBezierPath(roundedRect: NSRect(
-                        x: origin + side * 0.1, y: origin + side * 0.16,
-                        width: side * 0.8, height: side * 0.68),
-                        xRadius: side * 0.08, yRadius: side * 0.08)
-                    screen.lineWidth = max(1, side * 0.11 * weightFactor)
-                    NSColor.white.setStroke()
-                    screen.stroke()
-
-                    let prompt = NSBezierPath()
-                    prompt.move(to: NSPoint(x: origin + side * 0.27, y: origin + side * 0.61))
-                    prompt.line(to: NSPoint(x: origin + side * 0.42, y: origin + side * 0.5))
-                    prompt.line(to: NSPoint(x: origin + side * 0.27, y: origin + side * 0.39))
-                    prompt.move(to: NSPoint(x: origin + side * 0.5, y: origin + side * 0.38))
-                    prompt.line(to: NSPoint(x: origin + side * 0.69, y: origin + side * 0.38))
-                    prompt.lineWidth = max(1, side * 0.1 * weightFactor)
-                    prompt.stroke()
+                    drawTerminal(in: canvas, pointSize: side, weightFactor: weightFactor)
                 } else if name == "plus" {
                     let stroke = max(1.5, side * 0.15 * weightFactor)
                     let span = side * 0.72
@@ -261,7 +286,11 @@ public enum Design {
                     chevron.move(to: NSPoint(x: origin + side * 0.39, y: origin + side * 0.22))
                     chevron.line(to: NSPoint(x: origin + side * 0.65, y: origin + side * 0.5))
                     chevron.line(to: NSPoint(x: origin + side * 0.39, y: origin + side * 0.78))
-                    chevron.lineWidth = max(1.5, side * 0.15 * weightFactor)
+                    // Small chevrons need an open counter. The former 1.5pt floor filled
+                    // the eight-point navigator mark into a triangle at either scale.
+                    chevron.lineWidth = max(0.6, side * 0.08 * weightFactor)
+                    chevron.lineCapStyle = .round
+                    chevron.lineJoinStyle = .round
                     NSColor.white.setStroke()
                     chevron.stroke()
                 } else if name == "chevron.down" {
@@ -276,7 +305,9 @@ public enum Design {
                                               y: origin + side * 0.61))
                     // ChipView asks for semibold at a nine-point slot. The provider is
                     // materialized before image configuration, so author that weight here.
-                    chevron.lineWidth = max(1.5, side * 0.15 * weightFactor)
+                    chevron.lineWidth = max(0.6, side * 0.08 * weightFactor)
+                    chevron.lineCapStyle = .round
+                    chevron.lineJoinStyle = .round
                     NSColor.white.setStroke()
                     chevron.stroke()
                 } else if name == "folder" {
@@ -309,6 +340,46 @@ public enum Design {
             }
             image.isTemplate = true
             return image
+        }
+
+        /// Filled contours keep the screen border and open prompt distinct at small sizes.
+        /// The 36pt mark occupies about 34×29pt inside the placeholder's 44pt image slot;
+        /// the same proportions serve the 12pt sidebar mark without enlarging its stroke.
+        private static func drawTerminal(in canvas: NSRect, pointSize: CGFloat,
+                                         weightFactor: CGFloat) {
+            let width = pointSize * 0.94
+            let height = pointSize * 0.80
+            let border = pointSize / 16 * weightFactor
+            let radius = pointSize * 0.105
+            let screen = NSRect(x: canvas.midX - width / 2, y: canvas.midY - height / 2,
+                                width: width, height: height)
+            let outline = NSBezierPath(roundedRect: screen, xRadius: radius, yRadius: radius)
+            let innerRadius = max(0, radius - border)
+            outline.append(NSBezierPath(roundedRect: screen.insetBy(dx: border, dy: border),
+                                        xRadius: innerRadius, yRadius: innerRadius))
+            outline.windingRule = .evenOdd
+            outline.fill()
+
+            let tip = NSPoint(x: screen.minX + width * 0.34, y: screen.minY + height * 0.66)
+            let armWidth = pointSize * 0.15
+            let armHeight = pointSize * 0.11
+            let thickness = pointSize * 0.055 * weightFactor
+            let prompt = NSBezierPath()
+            prompt.move(to: NSPoint(x: tip.x - armWidth, y: tip.y + armHeight - thickness / 2))
+            prompt.line(to: NSPoint(x: tip.x - armWidth + thickness / 2, y: tip.y + armHeight))
+            prompt.line(to: NSPoint(x: tip.x + thickness / 2, y: tip.y + thickness / 2))
+            prompt.line(to: NSPoint(x: tip.x + thickness / 2, y: tip.y - thickness / 2))
+            prompt.line(to: NSPoint(x: tip.x - armWidth + thickness / 2, y: tip.y - armHeight))
+            prompt.line(to: NSPoint(x: tip.x - armWidth, y: tip.y - armHeight + thickness / 2))
+            prompt.line(to: NSPoint(x: tip.x - thickness, y: tip.y))
+            prompt.close()
+            prompt.fill()
+
+            let cursor = NSRect(x: screen.minX + width * 0.38,
+                                y: tip.y - armHeight - thickness / 2,
+                                width: pointSize * 0.19, height: thickness)
+            NSBezierPath(roundedRect: cursor, xRadius: thickness / 2,
+                         yRadius: thickness / 2).fill()
         }
     }
 }

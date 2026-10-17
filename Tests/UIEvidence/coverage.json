@@ -428,18 +428,20 @@
       "status": "implemented",
       "priority": "important",
       "title": "Sidebar activity rows",
-      "description": "Session rows at rest, working, blocked, hovered, selected, pinned, scheduled and under title truncation pressure, plus a selected standalone terminal running a foreground command. Dynamic identity and pin contrast is also captured in the shipping window under custom bright-green and navy themes.",
+      "description": "Session rows at rest, working, blocked, hovered, selected, pinned, scheduled and under title truncation pressure, plus a selected standalone terminal running a foreground command. Dynamic identity and pin contrast is captured in the shipping window under custom bright-green and navy themes. A Threading-theme project/terminal outline supplies the matched Linux layout reference.",
       "states": ["Idle", "Working", "Blocked", "Hovered", "Selected", "Pinned", "Scheduled", "Long title", "Terminal command running", "Custom-theme icon contrast"],
       "matrix": {
-        "themes": ["System", "Custom bright green", "Custom navy", "Custom tinted identities"],
+        "themes": ["System", "Threading", "Custom bright green", "Custom navy", "Custom tinted identities"],
         "appearances": ["Light", "Dark"],
-        "sizes": ["240×28 points", "1120×720-point shipping window"]
+        "sizes": ["240×28 points", "1120×720-point shipping window", "1120×480-point shipping window", "1121×521-point shipping window", "601×281-point shipping window"]
       },
       "source": {
         "path": "Tests/ThreadingTests/SidebarRowRenderTests.swift",
         "tests": [
           "ThreadingTests/SidebarRowRenderTests/testRendersTheStorybook",
-          "ThreadingTests/SidebarIconContrastTests/testSelectedMarkPixelsReadOnCustomGroundsInShippingSidebar"
+          "ThreadingTests/SidebarIconContrastTests/testSelectedMarkPixelsReadOnCustomGroundsInShippingSidebar",
+          "ThreadingTests/SidebarIconContrastTests/testRendersHouseThemeOutlineInShippingWindow",
+          "ThreadingTests/SidebarIconContrastTests/testIndependentProjectDisclosureInShippingWindow"
         ]
       },
       "capture": {
@@ -476,7 +478,7 @@
       "description": "The real main-window shell with its sidebar fully collapsed and temporarily restored from the invisible leading-edge hover target, proving the trigger adds no chrome and reuses the navigable sidebar.",
       "states": ["Collapsed edge target", "Hover-revealed navigable sidebar"],
       "matrix": {
-        "themes": ["System"],
+        "themes": ["System", "Threading"],
         "appearances": ["Light", "Dark"],
         "sizes": ["960×620-point main window"]
       },

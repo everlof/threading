@@ -6455,3 +6455,1657 @@ identity tests pass, and the build ran the repository boundaries. `scripts/test.
 fails on master (§191). The disk filled after the Mac half finished, which is what the run's
 exit reports; the iOS half would not have started after a Mac failure in any case. An approved
 storage cleanup reclaimed 20.7 GB.
+
+## 193. The native sidebar is a pane, not the drawing specimen's framed window
+
+The ordinary Linux window still used `Specimen.Window`'s rounded gray outline around the whole
+sidebar. That outline was useful in the original standalone rendering laboratory, but it put a
+second frame inside the native window: a line along the left and bottom edges and curved corners
+where the Mac's sidebar continues to the window edge. The light-mode native capture reproduces
+it in `out/parity-before-20261016/native-first-reply.png`.
+
+The native build now fills the complete pane. Its host mounts one unchanged production vertical
+`SeparatorView` at the trailing edge, using the theme's rule ink and border weight. The Threading
+light/dark rule colors exceed the Mac split's 1.2 contrast floor against their conversation
+grounds, so the rule is also the Mac split's first-choice ink for these surfaces. The standalone
+`Harness` retains its diagnostic outline. This adds one retained view and three constraints per
+window, independent of project/session counts; it adds no discovery, data traversal or workers.
+It changes existing host-owned chrome, with navigation, selection and actions still host-owned,
+and publishes no new extension component.
+
+The new pixel check fails on the old native capture's left edge. It checks the flat outer edges
+and full-height two-device-pixel divider in both appearances. The first rerun also exposed a
+capture race: SDL had published the 900-pixel conversation while the sidebar still held its
+480-pixel bitmap. Waiting for the conversation alone admitted that partial shell. Picker frame
+receipts now include appearance, and the journey waits for both retained surfaces to report the
+requested height and matching appearance before capturing. It does not retry pixel assertions.
+
+The corrected light and dark captures are in `out/parity-verified-20261016`. This is a sidebar
+frame correction: exact RGBA comparison of the first-reply and dark captures finds 4,924 changed
+pixels in each, all on the sidebar edges, and no changed pixels elsewhere. The runner's 12
+failure contracts, the standalone layout/render harness, theme boundaries and both source-copy
+verifiers pass. The Debug native journey passed its light/dark edge checks but timed out waiting
+for third-turn row preparation during concurrent clean compilation; that run is not a full
+journey pass.
+
+The optimized source build (`-c release --static-swift-stdlib -Xswiftc -enable-testing`) then
+passed the complete native workspace journey, including both edge checks, Unicode/multiline
+turns, the retained draft and daemon child, a terminal switch, restart replay and same-thread
+resume. Its inspected captures and log are `out/parity-release-20261016` and
+`out/parity-release-20261016.log`. This revision has not been run through the full installed
+Debian bundle suite.
+
+This is not a claim of complete UI parity. The source and captures still show the
+simplified composer, missing sidebar gradient/well and incomplete window chrome; display-scale
+geometry also needs a matched logical-size comparison.
+
+The fresh Mac `sidebar-edge-reveal` evidence also passed and was inspected; its report is
+`.build/ui-evidence-reports/20261016-201754-53131/report/index.html`. No baseline was approved.
+
+## 194. The reply composer shares production prompt anatomy
+
+The native reply used a fixed 72-point editor on an elevated plate and a separate titled Send
+button. The Mac prompt is one field with its own footer, a compact send/stop glyph, a two-line
+resting text area and a bounded growing viewport. `PromptChrome` now owns those existing Mac
+policies, called by both `PromptView` and `WorkspaceConversationPane`. This is a shared source
+symlink on Linux, not a second set of copied visual constants. The field uses the exported
+Threading field surface; the Linux drawing leaf now preserves the supplied border width instead
+of forcing every applied surface to one point. The return and stop symbols have supported vector
+artwork at that leaf.
+
+The Linux host mounts one retained composer, stack, footer, spacer and button. It reads the
+editor's cached TextKit used rect to fit the draft, grows to the shared 180-point ceiling, then
+scrolls. It compares scroller state before assignment to avoid repeated tiling. No files,
+transcripts or provider discovery enter the layout path. Draft admission, marked-text handling,
+submit/interrupt and permission decisions remain host-owned; this extends the existing host-only
+conversation composer and adds no extension capability or replacement slot.
+
+Focus callbacks report the new focus state before `NSWindow.firstResponder` changes. Reading
+that property inside the callback painted the previous state's border; the host now retains the
+callback's Boolean, as the production prompt does. The native journey moves focus between the
+editor and sidebar and checks actual rendered border ink and exact four/two-device-pixel weights
+at the fixed 2x backing scale. It also pastes a long draft, verifies the 360-pixel height ceiling
+and scrolling, clears back to the resting height, and clicks the presented send glyph to submit.
+Its startup waits for the first retained pane rather than selecting SDL's transient startup
+window. The permission journey now focuses the editor from presented composer geometry, since
+its old hard-coded point lies in the new footer.
+
+The optimized native workspace journey passes with these checks, Unicode/multiline input, three
+turns on one daemon child, retained drafts, terminal switching, light/dark appearance, durable
+identity, restart replay and same-thread resume. Its inspected captures are in
+`out/parity-prompt-review-20261016`. The permission journey passes denial, session approval,
+opening/closing a tool row and a two-page question with an edited answer; its captures are in
+`out/parity-prompt-permission-final-20261016`. The Mac's 63 `PromptInputTests` and eight
+`ComposerWindowFitTests` pass. The 12 Python runner contracts and both source-copy verifiers pass.
+The standalone rendering/layout harness passes with its specimen frame retained. The final
+optimized Linux build succeeds. Mac `session-composer-layout` evidence passes, with the short
+light System, tall dark System and short Swiss Minimalist renders inspected in
+`.build/ui-evidence-reports/20261016-203721-18167/report/index.html`. No baseline was approved.
+
+This is still partial parity. Linux does not yet mount attachments or the Mac's complete model,
+effort, scheduling and usage footer. Its status strip, sidebar backdrop/well, window chrome and
+display-scale geometry also remain separate work. These source-built journeys do not replace the
+full installed Debian bundle suite or the complete Mac visual catalogue.
+
+## 195. Sidebar region colors and saved-session selection come from the production theme
+
+The checked Linux palette exported ordinary roles but omitted the sidebar's authored background
+and navigator well. Consequently the native host painted `panel` above `surface`; its saved-agent
+and terminal pickers also retained the original drawing specimen's hard-coded blue selection.
+The project tree already used the production selection role, so two lists in the same sidebar
+could disagree about the same selected state.
+
+`LinuxThemeSnapshotTests` now exports the two sidebar gradient stops and navigator fill from
+`AppThemeStyles.threading`. It checks that the supported house recipe remains a static vertical
+two-stop gradient and an opaque, unbevelled well; a future authored change fails verification
+instead of silently losing unsupported dressing. All previously exported numeric role values are
+unchanged. `SidebarBackdropView` owns the Linux drawing leaf in the shared production component
+source, linked into the host by symlink. The native root mounts that backdrop and the well;
+diagnostic specimen windows retain their original ground. Saved-session selection now uses
+`Design.Surface.selectionFill`, resolving its paired neutral ink in the active appearance.
+
+The first measured implementation painted the complete wash behind the opaque well and took
+roughly 55–63 ms for the sampled 900-pixel navigator frames. A structural clipping parent now
+exposes only the header while keeping the backdrop's full-column coordinate space, and the Linux
+`NSGradient` leaf skips rows outside that visible interval. The same samples take about 35–36 ms.
+Exact decoded RGBA comparison of the ready, first-reply and dark captures finds zero changed
+pixels after this optimization. The gradient stores two colors and constructs no window-sized
+intermediate image; the small retained decoration tree is independent of project/session count.
+This extends existing host-owned chrome, with no extension slot or change to navigation authority.
+
+The final native workspace journey passes its exact exported-region/selection pixel checks in
+both appearances, pane edges, composer focus/growth, pointer submission, Unicode/multiline turns,
+retained draft and child, terminal switching, restart replay and same-thread resume. The inspected
+captures are in `out/parity-sidebar-visible-20261016`. The existing Add Project journey passes its
+pointer and AT-SPI choices, folder creation and durable Scratchpad identity. Inspection of its
+menu also exposed a pre-existing fixed separator offset crossing the second label; the rule now
+uses the boundary of the mounted rows and follows the visible page.
+The final optimized build and Add Project rerun pass; the corrected menu was inspected in
+`out/parity-sidebar-menu-verified-20261016/add-project-menu.png`.
+
+The existing Mac `sidebar-edge-reveal` catalogue entry now captures both System and Threading,
+in light and dark, from the real main-window controller. Its inspected Threading images are in
+`.build/ui-evidence-reports/20261016-204943-60510/current`. The navigator fill and top-of-gradient
+samples match Linux exactly: light `(235,245,253)` / `(217,234,250)`, dark `(6,19,33)` /
+`(11,34,55)`. This is a color comparison at different logical window sizes, not geometric parity.
+The Mac snapshot verification passes after export, as do the 12 Python runner contracts, both
+source-copy verifiers and the standalone rendering/layout harness. No visual baseline was approved.
+
+Sidebar branding, footer controls, window chrome and logical display scaling remain visibly
+incomplete, as do the composer's full controls and attachments. The complete installed bundle
+suite and complete Mac visual catalogue have not been rerun for this pass.
+
+## 196. Native workspace geometry uses an explicit display scale
+
+The ordinary SDL window passed pixel dimensions into an AppKit tree fixed at 2 pixels per
+point. A 1120×900 X11 window therefore exposed only 560×450 logical points, while its fixed
+320-pixel sidebar was narrower than the Mac's 240-point default. The same literal conversion
+was repeated across pane headers, composer painting, menus, input, IME and accessibility.
+
+`WorkspaceDisplay` now owns that conversion. The ordinary app defaults to 1× and accepts
+`THREADING_LINUX_UI_SCALE=2`; other values fail explicitly. Standalone drawing probes retain
+2×. The native sidebar follows `SidebarDefaults.defaultWidth` at 240 points, yielding 240 or
+480 pixels. SDL retains bounded surfaces: 320…1280 pixels of content beside the sidebar,
+180…900 pixels in height. Its minimum and maximum window widths now follow the sidebar's
+actual pixel width. Saved-agent title/status regions are laid out in points before conversion.
+
+This is explicit integer scale selection, not automatic monitor-DPI discovery. Fractional
+scales, changing scale while the window is open and automatic per-monitor transitions remain
+unimplemented. Terminal cells retain their existing physical metrics; only their header and
+workspace origin follow the chrome scale. The current 900-pixel height cap also limits the
+logical height available at 2×.
+
+The release build passes. The real native conversation journey passes at both scales, including
+light/dark region pixels, the one-point pane rule, two-point focused/one-point resting composer
+borders, the 180-point editor ceiling, pointer sending, Unicode/multiline input, retained draft
+and process, switching to a terminal and restart/resume. Both permission journeys pass policy,
+keyboard, pointer, expandable tool rows and questions. The installed-runtime runner now includes
+these two journeys at 2× as well as its default 1× lanes.
+
+Inspected captures: `out/parity-scale-{1x,2x}-20261016/native-dark.png`, and the Add Project
+menus in `out/parity-scale-menu-{1x,2x}-20261016`. Both menu journeys pass pointer and AT-SPI
+choices, folder creation and durable Scratchpad identity. An interactive before/after comparison
+of the ordinary desktop layout is available in this chat's display panel. The Mac Threading
+sidebar capture from §195 confirms the matching 240-point width; the header's missing brand,
+window chrome and footer remain visible differences.
+
+The default-scale workspace journey passes exact terminal character geometry, selection and
+clipboard offsets, focus isolation, real PTY resize, retained children and input while storage
+is blocked (`out/parity-scale-workspace-r2.log`). The full AT-SPI geometry journey passes,
+including odd-sized windows (`out/parity-scale-accessibility.log`). The native outline journey
+passes 5,100 projects and 1,024 saved terminals, bounded visible rows, wheel/pointer/keyboard,
+resizing and restoration near the middle/end (`out/parity-scale-outline-r2.log`). A 480-pixel
+window now mounts 14 project rows rather than 7; tests keep explicit viewport bounds and use a
+shorter workspace when testing offscreen selection.
+
+The session Actions and Open In journeys pass at 1×. The new-session composer passes focus,
+scrolling, choices, native and AT-SPI Unicode editing and exact launch; its 560×180 minimum
+window is covered in `out/parity-scale-composer-minimum-20261016`. Account identity choices
+also pass. The 12 Python runner contracts and both vendored-source verifiers pass.
+
+The wider outline exposed a real trailing-content defect: its project count and hover
+controls could extend beyond the selection capsule. The host had supplied the production row
+background but omitted AppKit's outer cell band. The Linux boundary now supplies the measured
+16-point trailing band minus the same `SidebarDensity.trailingCellReclaim` used by the row;
+project, session, terminal and status content respect it. This remains viewport-only work and
+does not change the mounted row count. The inspected count/hover captures in
+`out/parity-scale-inset-journeys-20261016/project-count` show the controls inside the capsule.
+Project count, per-row Actions, project creation, and saved-shell restart journeys pass. The
+workspace and large-outline journeys were rerun successfully after this correction
+(`out/parity-scale-inset-{workspace,outline}.log`).
+
+Provider marks pass at explicit 2×, including selected/unselected contrast and missing-artwork
+fallback. The account picker passes 32 identities with 15 visible 28-point rows at 1×. Its
+source-check helper must receive an absolute evidence directory because the fixture derives its
+isolated HOME there. Terminal failure rendering also uses the shared scale; the saved-terminal
+refusal journey passes lost-reply, missing/unavailable ownership surveys and explicit retry
+without changing durable identity (`out/parity-scale-failure.log`).
+
+At 1120×900, sampled navigator raster medians were 28.24 ms at 1× and 52.68 ms at 2× (21
+frames each). These are software-raster costs under Docker/Xvfb, not display latency or a new
+performance target. The larger 2× sidebar paints more pixels than the previous narrow fixture.
+The complete installed Debian suite, Wayland lane and complete Mac visual catalogue have not
+been rerun for this scale change. No visual baseline was approved; full UI parity remains open.
+
+## 197. The native sidebar keeps the production brand in its header
+
+The Linux pane previously used a 12-point text field whose label changed between Projects,
+Agents, Terminals and menu names. The Mac header instead keeps the Threading identity beside
+the Add Project and arrangement controls. Linux now mounts `SidebarBrandView` in that retained
+`PaneHeaderView`. The accessible list and window title continue to state the current navigation
+context, and the existing Actions control keeps its actual command semantics.
+
+`ThreadingMarkGeometry` is now a shared Design source rather than embedded in the Mac layer
+view. Its normalized points, six strands, shield, core and particle geometry are unchanged.
+The Mac still receives CGPaths. The Linux adapter expresses the same paths as NSBezierPaths,
+including exact quadratic-to-cubic conversion, and its static mark retains the eight paths
+until bounds or backing scale changes. The 24-point slot is shared with the Mac brand view;
+the house-theme wordmark uses its default 13-point semibold role. The palette export now checks
+that Threading has no custom brand and exports the Mac's legibility-adjusted mark ink in both
+appearances. Existing palette role values were verified unchanged.
+
+Customization remains the existing theme-owned brand presentation, with no new extension
+contract. The Linux leaf currently supports only the checked house theme's default identity.
+Navigation, input, command availability and accessible state remain host-owned. Theme-supplied
+logos/wordmarks/analyzers, particle hover/press treatments and launch animation are still absent
+on Linux; this is a still-presentation port, not an implementation of those behaviors.
+
+The release build passes. All 23 Mac SidebarBrandViewTests plus the theme export test pass
+(`out/parity-brand-mac-export.log`). The real native conversation journey passes at both scales,
+including light/dark appearance, input, retained process/draft, terminal switching and resume.
+The inspected screenshots are `out/parity-brand-{1x,2x}-20261016/native-{ready,dark}.png`.
+The installed-runtime pixel helper now requires exported brand ink and wordmark ink inside
+these measured header slots, in addition to its existing gradient, well and selection checks;
+all four captures pass. Add Project also passes its pointer/AT-SPI menu choices, folder
+creation and Scratchpad identity (`out/parity-brand-menu.log`).
+
+The canonical Mac `sidebar-edge-reveal` capture also passes. Its report is
+`.build/ui-evidence-reports/20261016-212856-83986/report/index.html`; the inspected dark
+capture retains the production header. Comparing decoded RGBA for the full 240×40-point
+header against the preceding `20261016-204943-60510` capture finds zero changed pixels in
+both Threading appearances. This establishes that extracting the geometry preserved the Mac
+header, not that the complete Linux and Mac shells are pixel-identical. The Linux Add Project
+menu capture was inspected as well: the brand remains in place above its menu choices.
+
+The 12 Python runner contracts, both vendor identity checks (including all 129 core sources),
+and `git diff --check` pass. No visual baseline was approved. The complete Mac catalogue,
+installed Debian suite and Wayland lane have not been rerun for this slice. Full UI parity
+remains open, including window chrome, sidebar footer, composer controls and brand motion.
+
+## 198. The project outline separates row chrome from inset content
+
+The Linux host gave its outline a six-point outer gutter while mounting each cell's content
+across the whole row. Consequently the production selection capsule was inset twice and the
+project icon straddled its left edge. The disclosure was a Unicode prefix inside the title,
+so it appeared after the project icon and its pointer target depended on title-slot arithmetic.
+
+The outline now spans the sidebar width. Its full-width mounted cells retain selection and
+input ownership, while their shared project/session/terminal content receives the platform's
+inset geometry: 25 points before a root cell, 14 points for each depth step, and 16 points after
+the cell at the default 240-point width. The existing density policy supplies any trailing
+reclaim. `SidebarWidthDensityTests/testInsetCellGeometryUsedByLinuxOutline` measures these
+values in the real Mac sidebar, including 25/39/53-point leading edges through three levels.
+The Mac test passes (`out/parity-outline-mac-geometry.log`).
+
+Expandable rows lazily mount one shared `GlyphView` in the measured 13-point disclosure slot
+starting at 12 points. The marker follows expanded state and selected-row ink; the project name
+contains only its name. Pointer disclosure uses that mounted marker's horizontal bounds across
+the row height, while keyboard and accessibility continue through the existing project action.
+The first pointer journey exposed the old title-based target after the glyph moved; that
+coordinate duplication was removed. Accessibility row extents now cover the entire visible row
+for projects and children alike, rather than starting at an unrelated manual child indent.
+The outline also takes the production four-point `contentTopInset` below its header.
+
+The matched shipping-window capture exposed the remaining vertical mismatch: AppKit's inset
+table starts its first row ten points into the document, with zero intercell spacing. The Mac
+geometry test now verifies both (`out/parity-outline-mac-vertical.log`). The shim's explicit
+`.inset` style owns that ten-point document breathing at both ends; row offsets, hit testing,
+viewport lookup, reading anchors and document height all use it. It scrolls away with the rows,
+unlike the header's four-point fixed breathing. Full-width tables retain their existing zero
+inset. The focused outline fixture covers both styles, variable heights, top/bottom non-row hit
+regions, last-row visibility and viewport-bounded construction without height remeasurement.
+
+This remains the existing navigator presentation contract. Themes own ink and silhouette;
+Threading owns project identity, selection, expansion, actions and accessibility. No new
+extension surface or data authority is introduced. Construction stays bounded by mounted
+viewport rows, with one optional marker per expandable mounted cell and no offscreen tree of
+views. The retained outline and its cheap item projection are unchanged.
+
+The release build and all three focused outline fixtures pass (`out/parity-outline-build-r4.log`,
+`out/parity-outline-shim.log`). Final-source native journeys pass for 5,100 projects and 1,024
+saved terminals, including disclosure pointer input, keyboard, wheel, resize and restoration
+near the middle and end (`out/parity-outline-matched-large.log`). The exact AT-SPI and complete
+workspace journeys pass (`out/parity-outline-matched-{accessibility,workspace}-r2.log`). Their
+expected visible counts changed with the zero-gap rows; the AT-SPI test checks the partially
+clipped first row and fully visible selected last row after scrolling, not just the count.
+The 2× project count, project actions, project creation and saved-shell restart journeys pass
+in `out/parity-outline-matched-20261016/`.
+
+Canonical Mac evidence is `.build/ui-evidence-reports/20261016-213925-25000/report/index.html`.
+All three selected tests pass, including the new house-theme outline fixture in the shipping
+window. Both Mac appearances and the Linux 1× large outline and 2× project/terminal captures
+were inspected. At the selected terminal's centre, both light captures have exact RGB
+`(211, 108, 0)` and horizontal fill bounds 10…230 points. The vertical fill bounds are 86…112
+points in both after subtracting the Mac's 40-point caption region. This proves those measured
+placement and fill properties, not equality of all rendered pixels: font rasterization and
+several glyph shapes still differ. Empty-project disclosure and multiple expanded projects
+also retain Linux's existing behavior and remain parity work.
+
+The added live light-to-dark project journey passes and its dark capture was inspected
+(`out/parity-outline-appearance-20261016/project-count/`). The dark terminal selection has
+the same measured bounds as above and exact RGB `(255, 154, 61)` in both platforms. The
+12 Python runner contracts, vendor identity checks and `git diff --check` pass. No baselines
+were approved. The complete Mac catalogue, installed Debian suite and Wayland lane were not
+rerun; full UI parity remains open.
+
+## 199. Chrome text consumes the production held theme tiers
+
+The idle workspace already mounts the shared `SessionPlaceholderView`. Its gray text was not a
+placeholder styling override: the Linux `Design.Text` adapter replaced secondary, tertiary and
+quaternary theme roles with `Design.Ink(on: ground)`, the neutral ink recipe intended for an
+arbitrary terminal or selection background. That loses the house theme's authored blue/cream
+hue and its label-legibility ladder across every control using those chrome roles.
+
+The Mac palette export now records the actual `Design.Text` tiers after `LabelLegibility` holds
+them against the theme's chrome grounds. It temporarily selects the Threading palette and
+restores the previous palette afterward. Linux consumes these six appearance-specific RGBA
+values through its existing cached dynamic colors, preserving their alpha and live appearance
+behavior. The explicit arbitrary-ground/selection `Design.Ink` path is unchanged. This adds
+constant palette data and no view, per-frame contrast search, or size-dependent callback work.
+It preserves the existing theme presentation contract; command routing, input and accessible
+identity remain host-owned.
+
+The theme export test passes (`out/parity-placeholder-theme-export.log`). Existing palette role
+values are retained. The native Add Project journey now inspects the empty pane before opening
+its menu, toggles both appearances, and checks actual title/detail pixels against the exported
+roles. At 1× a small glyph need not contain any fully covered pixel, so the check enumerates the
+exact 8-bit source-over colors for strongly covered glyph pixels instead of requiring a solid
+foreground sample. The new 1× capture passes; the preceding neutral-gray capture is rejected by
+the same check. Both display scales pass the full Add Project pointer/accessibility journey
+(`out/parity-placeholder-1x-r2.log`, `out/parity-placeholder-2x.log`).
+
+The native conversation and permission/question/tool-expansion journeys pass after the shared
+ink change (`out/parity-placeholder-native.log`, `out/parity-placeholder-permission-r2.log`).
+The first permission command used an old helper without Xvfb and could not find a window; its
+result was discarded and the supported Xvfb helper completed the journey.
+
+Canonical Mac evidence passes all three selected tests at
+`.build/ui-evidence-reports/20261016-215647-69830/report/index.html`. The added placeholder
+captures measure an actual 880×480-point available pane in a 1121×521-point shipping window;
+the extra region is the Mac caption/toolbar and pane rules. Both appearances were inspected
+beside the real Linux shell captures. This removes differing available pane sizes from the
+comparison, but does not prove identical text rasterization/compositing or symbol artwork.
+Linux's DejaVu Sans medium request resolves to the installed Book face, and its terminal glyph
+still uses the diagnostic symbol geometry; those remain visible parity differences.
+
+The normalized checked palette was reverified against Mac without exporting it again
+(`out/parity-placeholder-theme-verify.log`). The final release resource build, 12 Python runner contracts, both vendor identity checks and
+`git diff --check` pass. No baselines were approved. The full Mac catalogue, installed Debian
+suite and Wayland lane were not rerun; full UI parity remains open.
+
+
+## 200. Terminal artwork retains its optical size inside the placeholder slot
+
+The platform symbol adapter capped every image canvas at 32pt. The unconfigured placeholder
+requested a 44pt slot and 36pt artwork, but both were clamped to 32pt, then enlarged to fill the
+44pt image view. Its diagnostic terminal border also used an 11% stroke and a closed-looking
+prompt. In the real 1× shell this occupied 42×37 pixels, compared with the Mac reference's
+34×30-pixel footprint.
+
+The bounded canvas now admits the existing 44pt slot without changing the requested optical
+size. Terminal artwork uses filled screen/inner contours and a separate open prompt silhouette,
+with proportional border and corner geometry. The 12pt sidebar mark uses the same definition.
+This remains a Linux-owned symbol service behind the shared Design components; there is no new
+extension surface, command or input authority. Rasterization stays bounded at 88×88 pixels per
+image, with no additional views or per-frame work. It does not import or redistribute SF Symbols.
+
+Inspected final real-shell captures show a 34×29-pixel empty-pane mark at 1× and 68×59 at 2×.
+The native Add Project journey checks those optical bounds in both appearances as well as its
+existing text-color and interaction contracts. The previous 42×37 capture fails the new check.
+The capture wait now observes both the idle pane and sidebar presentation after changing theme;
+waiting only for the former could record a transient mixture of two appearances at 2×.
+
+The final release build passes (`out/parity-terminal-final-build.log`). Both Add Project journeys
+pass (`out/parity-terminal-final-{1x,2x}.log`), with inspected light/dark images under the matching
+`out/parity-terminal-final-{1x,2x}-20261017/` folders. The selected terminal, expansion, keyboard,
+click and accessibility journey passes at 2× (`out/parity-terminal-final-outline-20261017/`).
+The retained terminal-row layout fixture and native conversation journey pass
+(`out/parity-terminal-native.log`), along with 12 Python runner contracts, both vendor identity
+checks and `git diff --check`.
+
+The Mac reference is the unchanged canonical shipping-window evidence at
+`.build/ui-evidence-reports/20261016-215647-69830/report/index.html`. This is an improvement in
+optical size, stroke weight and shape, not exact pixel equality: rasterization, typography,
+remaining symbols and window chrome still differ. No baselines were approved. The full Mac
+catalogue, installed Debian suite and Wayland lane were not rerun.
+
+## 201. Independent project expansion uses the outline's own row index
+
+The Linux host had two row models: the virtual `NSOutlineView` already supported independent
+branches, but `SidebarVisibleRows` flattened only one `expandedProjectID`. Opening a second
+project therefore collapsed the first. Child reconciliation also inferred ownership from that
+single expanded project, and empty projects had no disclosure at all.
+
+The native outline data source and stable item identities now live in `NavigatorOutline.swift`.
+`SidebarVisibleRows` queries the outline's existing index instead of rebuilding another tree.
+Selection retains the project ID and child ID, with positions used only as lookup hints. Both
+projects can stay expanded, empty projects can change disclosure direction, and a disclosure
+click preserves a selected child in another project. Collapsing the selected child's own parent
+resolves selection back to that parent. The host retains expansion, selection, command routing,
+persistence and runtime admission; this extends the existing host-owned navigator rather than
+adding an extension surface.
+
+The scaling gate covers ordinary small project sets and 5,100-project stress inputs. Explicit
+reload/expansion rebuilds the outline's lightweight records; scroll, paint and keyboard movement
+query its index and mount only viewport cells. The exact production source/resolver fixture uses
+two branches with 600 runtimes of each kind, caps each kind at 512, and observes 18 created/mounted
+views for 7,148 logical rows. It checks independent/empty expansion and stable selection after
+project reorder plus a prepended child (`out/parity-expansion-index-final.log`). Its former
+Foundation-only test now links the real shim outline, and the bundle contract lane runs it.
+
+The native multiple-project journey passes at 1× and 2× in both appearances, including an exact
+persisted terminal-ID check after activation (`out/parity-expansion-identity-{1x,2x}.log`).
+Inspected images are under `out/parity-expansion-final-{1x,2x}-20261017/multi-project/`.
+The existing 5,100-project/1,024-terminal scrolling, resize and restoration journey, project-count
+journey and native conversation journey pass (`out/parity-expansion-{large,count,native}.log`).
+The 12 Python runner contracts, source identity checks and `git diff --check` pass. The runner
+fixture now supplies the newly added `SidebarVisibleRowsHarness` executable.
+
+The added shipping Mac test confirms the same independent/empty expansion and sibling-selection
+behavior. Its first images caught an unfinished disclosure animation. An attempted animation
+completion wait did not finish in the offscreen host; a process sample showed XCTest waiting
+with idle workers, and that test run was explicitly stopped. The fixture now captures the stable
+initial expanded tree before exercising the disclosure action. All four canonical tests pass
+(`out/parity-expansion-mac-final.log`), and the inspected light/dark report is
+`.build/ui-evidence-reports/20261016-222308-46521/report/index.html`. The selected Beta terminal
+fill has identical measured bounds `(10, 144, 230, 170)` in both 1× sidebars after removing the
+Mac’s 40pt caption offset, with exact light RGB `(211, 108, 0)`. This verifies row placement and
+selection fill, not equality of text or disclosure pixels.
+Startup expansion preferences remain different: the Mac honors stored `Project.isExpanded`,
+while Linux starts collapsed. Left/Right navigation, disclosure artwork, typography and window
+chrome also remain parity work. No baselines were approved, and the full Mac catalogue,
+installed Debian suite and Wayland lane have not been rerun for this change.
+
+## 202. Plain arrow keys navigate the outline instead of opening catalogs
+
+The native input bridge previously encoded physical Right and Left as the same events used to
+open saved terminal and agent catalogs. That made ordinary outline traversal impossible. Physical
+arrows now have distinct events (53/54); explicit catalog commands retain 10/11 and remain in the
+existing project Actions menu, reachable with Shift+F10. Existing menu/catalog back navigation,
+terminal input and editor caret movement retain their routes.
+
+`SidebarVisibleRows.navigate` queries the outline index directly. Right expands a closed project
+and stays on it, matching the Mac reference; Left returns a child to its project, then collapses
+that project.
+An open project stays selected, including an empty one, and leaf/collapsed-root boundary presses do
+not repaint. Expansion still rebuilds lightweight row records; ordinary selection movement is an
+indexed lookup and mounts only viewport cells. This is existing host-owned navigation, with no
+new customization surface or provider operation.
+
+The production-source fixture verifies expand/open-project no-op/parent/collapse plus empty and leaf
+boundaries while retaining the 7,148-row, 18-mounted-cell stress check
+(`out/parity-arrow-reference-index.log`). The release build and C input/pointer contracts pass
+(`out/parity-arrow-reference-build.log`, `out/parity-arrow-pointer.log`). Native multiple-project
+journeys pass at 1× and 2× in both appearances and verify the exact terminal ID after Return.
+Inspected captures are in `out/parity-arrow-reference-{1x,2x}-20261017/multi-project/`, including
+`keyboard-expanded.png`. The 2× capture also exposes clipped empty-pane explanatory text at the
+fixed 1,120px window width; this remains a separate layout gap.
+
+Saved-catalog journeys now use the actual Actions menu through a shared test helper, also mounted
+by the bundle runner. Broader validation exposed stale fixtures, not failed arrow handling:
+several eight-row catalog checks implicitly assumed 2×, a named-account click assumed 2×, the
+agent-create grid still expected the old navigator size, and attach tests still expected a
+full-width catalog or the former 320px navigator/82px header. These assertions now declare their
+scale or use the current 240px navigator/41px header. The startup journey now clicks the header
+Add Project menu and chooses Existing Folder instead of the removed tile.
+
+Native conversation and permission journeys pass, as do terminal restart, refused saved-terminal
+admission, terminal catalogs and their 512-row/runtime bounds, remembered working directories,
+terminal picker reattachment/back navigation, clean-profile startup, agent creation, named Codex
+and Claude admission, native Claude resume, agent reattachment and shared session titles. Logs
+are under `out/parity-arrow-*` (final reruns: `terminals-r2`, `terminals-r3`, `startup`,
+`agents-r3`, `agents-r4`, `agents-r5`). Twelve Python runner contracts and both vendor identity
+checks pass. Full installed-Debian and Wayland suites have not been rerun for this change.
+
+The Mac reference rejected the initial assumption that a second Right should select the first
+child: real AppKit key events leave the open project selected. Linux now matches that observed
+behavior; Down visits its first child. The Mac test explicitly selects a child before checking
+Right-on-leaf and Left-to-parent, so a failed first-child assumption cannot make those checks
+vacuously pass. Earlier test attempts used an unsupported text-view selector and then the wrong
+Swift argument label; the final reference uses `keyDown(with:)` with real arrow-key events.
+
+All four targeted canonical Mac tests pass (`out/parity-arrow-mac-reference.log`). The inspected
+light/dark report is `.build/ui-evidence-reports/20261016-224303-97769/report/index.html`.
+Provider-artwork and late-agent-admission journeys also pass in the `agents-r5` evidence folder.
+The native 1×/2× outline journeys were rerun after matching the Mac Right-key behavior.
+Typography, disclosure artwork, footer/window chrome, startup expansion persistence and the
+2× placeholder clipping remain parity work. No baselines were approved. The complete Mac
+evidence catalogue has not been rerun for this targeted navigation change.
+
+## 203. Bundle real UI font weights and share the family across text paths
+
+The Linux label bridge asked DejaVu Sans for regular, medium, semibold and bold, but the installed
+family only provided Book and Bold. The missing intermediate faces collapsed the intended
+hierarchy, and its wider metrics increased the difference from the Mac reference. An isolated
+Fontconfig trial of upstream Inter 4.1 produced closer label metrics before changing the app.
+For the same dark `GammaEmpty` row, the measured bright-ink bounds were `(52,181,139,193)` on
+Mac, `(52,181,154,193)` with DejaVu Sans, and `(52,181,139,193)` with Inter. This is one concrete
+width/placement match, not pixel equality or proof that every string matches SF.
+
+The AppKit module now carries unmodified Inter 4.1 variable upright/italic fonts, their upstream
+OFL 1.1 license and source/hash record. `NSFont` enters one serialized registration gate; the
+native host prepares it on the existing detached startup worker before mounting UI. Fontconfig
+registration is process-local and reads two known resource files, never a per-label directory
+scan or a font installation into the user's profile. Plain labels, attributed runs and complete
+worker-owned document layouts share `FontFamily.h`. Monospaced code and the fixed-cell terminal
+retain DejaVu Sans Mono. This changes the host's existing platform typography adapter and adds
+no extension presentation contract or user-facing setting.
+
+The archive and Debian package now include `LinuxAppKitSpike_AppKit.resources` and the Inter
+license/provenance directory. The package explicitly declares its Fontconfig/PangoFT2 runtime
+libraries; the manual stack fixture links them too. The installed bundle runner checks both
+font hashes and license files. A source-free Ubuntu run installs the actual Debian package,
+checks that Swift, `/repo` and a global Inter installation are absent, exercises all three shared
+row-layout fixtures and both native outline scales, then verifies the same Inter label ink
+bounds. Evidence is in `out/parity-font-installed-final-20261017/` and `out/parity-font-installed-final.log`.
+
+The text-label fixture now requires all four requested weights to render differently, including
+medium versus regular and semibold versus bold (`out/parity-font-text.log`). The native multiple-
+project, native conversation, Add Project/placeholder ink and 5,100-project scrolling/resize
+journeys pass (`out/parity-font-{1x,2x,native,ink-final-1x,ink-final-2x,large}.log`). Inter's line
+metrics shift the centered empty-state stack's raster phase: measured mark bounds are now
+34×30 at 1× (the Mac reference footprint) and 68×58 at 2×. The optical test records those exact
+measured bounds; no symbol path was changed. The 12 Python runner contracts pass.
+
+The current Release label benchmark reports 28.52ms median/29.22ms maximum for 54 mounted labels,
+22.80/25.13ms for 18 compound readings, and 1.55/1.85ms versus 1.63/1.78ms for 170 versus 1,700
+storage rows at the same 180px viewport (`out/parity-font-benchmark.log`). These are current
+measurements, not a claimed before/after speedup. Work remains viewport-bounded.
+
+All four targeted canonical Mac tests pass. The expanded reference includes a 360×240-point
+placeholder pane in a 601×281 shell; inspected report:
+`.build/ui-evidence-reports/20261016-225158-17713/report/index.html`. A first request for a
+320-point pane produced a 360-point pane while the shell changed the sidebar/window geometry.
+That observation does not establish a 360-point minimum: the declared content minimum is 320.
+Narrow resizing and the clipped 2× Linux placeholder still need a dedicated matching check.
+Typography/rasterization, placeholder ink contrast, disclosure art, footer/window chrome and
+persisted expansion remain parity work. No baselines were approved. The complete Mac catalogue,
+full Debian journey suite and Wayland lane were not rerun for this font change.
+
+The final package with font preparation on the startup worker passes the same source-free
+installed checks (`out/parity-font-package-final.log`, `out/parity-font-installed-final.log`).
+Its 1×/2× selected-outline captures are pixel-identical to the inspected first installed captures.
+The archive and Debian artifacts were rebuilt; source changes remain uncommitted.
+
+## 204. Preserve open strokes and match navigator disclosure roles
+
+The navigator asked for a generic control symbol capped to 10 points and secondary neutral ink.
+The real Mac outline requests the eight-point semibold chevron role and tertiary theme ink,
+switching to the selected ground's label tier only when the project itself is selected. Linux
+now makes that same request inside the existing 13-point disclosure/hit slot. The marker no
+longer opts into the separate provider-artwork contrast repair, which brightened the authored
+tertiary tier. Glyph ownership remains viewport-bounded; an expansion-state change materializes
+one marker image, while selection only changes its ink. This is an existing host-owned outline
+adapter, with no new extension surface or capability.
+
+A separate reference investigation found that the canonical hidden-window capture composites
+placeholder labels more strongly than their authored alpha: a 0.7 title measured about 0.91;
+light/dark detail labels measured about 0.859/0.773 instead of 0.627/0.523. An isolated AppKit
+probe reproduced two draws of a translucent `NSTextField`; a displayed probe produced a single
+composition. That does not yet prove the complete shipping window's displayed result. Priming
+backing layers did not fix the shipping fixture, and directly rendering its layer tree omitted
+large portions of the window. Those experimental capture edits and the temporary failing opacity
+assertion were removed. The established canonical capture path remains unchanged, and Linux's
+placeholder palette was not changed to imitate the questionable reference. Logs and isolated
+probes remain under `out/parity-label-*` and `out/label-*.swift`. A reliable full-window opacity
+comparison remains open; no visual baseline was approved.
+
+The first smaller-role captures still looked triangular. Reducing the chevron stroke exposed
+an actual closing edge: `NSGraphicsContext.stroke(polygons:)` joined the last vertex to the
+first whenever a subpath had at least three points. `NSBezierPath.polygons()` had discarded the
+explicit closure state. Flattening now repeats the start point only for `.close`, and the
+stroker visits consecutive segments without inventing an edge. Polygon fills retain implicit
+closure. The existing CoreGraphics current-path route already handles closure explicitly and
+keeps that behavior. The portable chevron stroke also scales to its small role instead of
+forcing a 1.5-point minimum. General cap/join fidelity remains outside this correction.
+
+`FloatingGlyphHarness` now checks open and explicitly closed Bezier strokes plus implicit fill
+closure, alongside its existing CoreGraphics path-state and nine-mark checks. The final Release
+fixture passes (`out/parity-chevron-path-final.log`); its first attempt sampled the wrong Y-up
+bitmap coordinate, which was corrected before passing. Native 1×/2× outlines pass with real
+light/dark pixels, independent/empty expansion, stable child identity, selection and keyboard
+activation (`out/parity-chevron-open-{1x,2x}-20261017`). The native check limits optical size,
+authored alpha and covered ink area, catching both the oversized role and the extra closing edge.
+Selected-project and initially collapsed captures are included for inspection. Native conversation
+and permission/tool/question journeys pass (`out/parity-chevron-{native,permission}.log`).
+
+The old standalone raster comparison runner could not compile the current shim on macOS because
+its source list includes `NSTextFieldEditing` without the Linux-only `NSTextView` declaration
+(`out/parity-chevron-raster.log`). It provides no equivalence result for this change. The Release
+package fixture and actual native window remain the valid rendering paths. The full targeted Mac
+reference passes all four tests after restoring its original capture helper; report:
+`.build/ui-evidence-reports/20261016-231830-94605/report/index.html`.
+
+The final archive and Debian package were rebuilt (`out/parity-chevron-open-package.log`). A
+source-free Ubuntu installation passes the native outline and new pixel checks at both scales,
+all three shared row-layout fixtures and bundled-font checks
+(`out/parity-chevron-open-installed.log`, `out/parity-chevron-open-installed-20261017/`). Its
+expanded dark captures are decoded-RGB-identical to the inspected build captures; the installed
+collapsed and selected-project states were also inspected. Add Project/menu/placeholder-ink
+journeys pass at both scales (`out/parity-chevron-open-ink-{1x,2x}.log`), as do 12 Python runner
+contracts and both vendor identity checks. The portable mark remains an approximation of SF:
+at 1× its faint antialias bounds are still taller than the Mac reference. Typography,
+placeholder capture/contrast, narrow layouts, footer/window chrome and persisted expansion
+remain parity work. The complete Mac catalogue, full Debian suite and Wayland lane were not
+rerun. No baselines were approved; source changes remain uncommitted.
+
+## 205. Clipped labels keep one complete line instead of silently wrapping
+
+The narrow 2× placeholder stopped after “start” despite space for more glyphs. The label bridge
+set a finite Pango width and single-paragraph mode, but single-paragraph mode still permits word
+wrapping. With ellipsizing disabled, its negative height did not enforce one line. The first
+word-wrapped line was drawn and the remaining words fell outside the label's height.
+
+An isolated real-AppKit probe confirms that overflowing `.byClipping` labels keep the start of
+one line for left, center and right alignment. Fitting labels retain their requested alignment.
+The shared `LabelLayout.h` now configures that behavior for plain rendering, attributed rendering
+and selectable-label geometry. For clipping it first obtains the complete line's logical width
+and uses the larger of that width and the visible field width; the destination remains bounded
+and crops the result. Wrapping, truncating and complete-paragraph modes retain their separate
+contracts. This removes two copies of layout configuration instead of fixing only the placeholder.
+It changes an existing host text adapter, with no new user setting or extension surface.
+
+`TextLabelHarness` checks exact pixel equality between a narrow label and a crop of its full
+line for plain/attributed and selectable/nonselectable labels under all three alignments. Its
+existing Unicode, mixed runs, wrapping, truncation, selection, theme and production component
+checks pass (`out/parity-clip-text.log`). Native 1×/2× outline journeys now resize the real window
+to 360- and 320-point content panes, check the accessible action stays inside the pane and retain
+the selected terminal through resize and activation (`out/parity-clip-{1x,2x}-20261017`).
+Inspected images show the full detail at 360 points and ordinary single-line clipping at 320.
+The narrower case still cannot display the entire sentence; wrapping it would change the shared
+Mac component's stated behavior. The matched 360-point Mac reference remains the inspected
+`20261016-231830-94605` canonical report; its placeholder opacity uncertainty is documented above.
+
+The input bound remains 4,096 UTF-8 bytes/64 attributed spans, with the same bounded raster output.
+No file scan or unbounded history work was added. Current Release measurements are 26.73ms median /
+30.25ms maximum for 54 labels, 21.58/21.92ms for 18 compound readings, and 1.69/2.18ms versus
+1.68/1.90ms for 170 versus 1,700 storage rows at the same viewport (`out/parity-clip-benchmark.log`).
+These are current bounds observations, not a claimed speedup. Native conversation and
+permission/tool/question journeys pass (`out/parity-clip-{native,permission}.log`).
+
+The rebuilt Debian package passes the same resize and navigation journey at both scales in a
+clean Ubuntu container without the checkout, Swift or globally installed Inter
+(`out/parity-clip-installed.log`). All four installed narrow captures are decoded-RGB-identical
+to the inspected build captures. The full-size 1× dark outline is also pixel-identical to the
+prior turn; at 2× the only changed rectangle is the clipped placeholder detail line
+`(561,255)-(1040,276)`. Twelve Python runner contracts, both vendor identity checks and
+`git diff --check` pass. Artifacts were rebuilt (`out/parity-clip-package.log`).
+
+The standalone Mac probe pins its root width explicitly; without that constraint AppKit grows
+the content view past the requested window width. That observation is not a new 360-point
+window minimum. Window scaling/minimum policy, placeholder opacity, typography and full chrome
+remain parity work. No Mac product sources or visual baselines changed in this iteration. The
+complete Mac catalogue, full Debian suite and Wayland lane were not rerun.
+
+## 206. Startup sizing applies UI scale and uses the native fitted geometry
+
+The ordinary workspace requested 1120×480 physical pixels at both scales. At 2× this halved
+its logical area and left the 240-point sidebar beside a needlessly narrow placeholder. Startup
+now applies the UI scale to the requested 1120×480 points. `tw_open_workspace` fits that request
+to the primary display's usable bounds and the existing rendering budget, and installs the
+sidebar-aware native size constraints before creating the renderer. The Swift host reads back
+the actual window dimensions for its initial pane layout instead of painting at the unconstrained
+request. Standalone diagnostics keep their existing opening path.
+
+This does not double terminal budgets. The 320…1280-pixel terminal width and 180…900-pixel window
+height remain physical limits shared with saved-grid admission and software rendering. Expanding
+those limits requires a coordinated PTY/rendering change. The fit respects those minima even on
+a display smaller than the minimum; automatic display scaling and complete Mac window-size
+policy remain open. No new customization surface was added: native geometry stays host-owned.
+
+The native outline journey asserts the actual startup window and its very first pane frame,
+then retains its independent expansion, stable selection, light/dark pixels, narrow resize and
+terminal activation checks. At 1× the 1400×1000 Xvfb display still opens a 1120×480 window. At 2×
+it opens 1400×900 with a 920×900 pane. Startup-only 2× probes on 1000×700 and 2400×1400 displays
+open 1000×700 and 1760×900 respectively. Their real-window captures were inspected: the large
+pane displays the complete placeholder detail, while the small display retains ordinary clipping
+in its 260-point pane. Evidence is under `out/parity-window-start-{1x,2x}-20261017` and
+`out/parity-window-{small,large}-2x-20261017`.
+
+Fixed-viewport count, action and eight-row catalogue fixtures now request their intended
+1120×480 test window explicitly instead of inheriting startup dimensions. The Add Project pixel
+fixture reads its capture dimensions rather than assuming a fixed image stride. Count/action
+pixels, session titles, provider artwork, late agent admission, 512-row terminal catalogue and
+eight-runtime limits, remembered working directories, and native conversation/composer journeys
+pass. The latter's grown-composer capture was inspected. Logs are the corresponding
+`out/parity-window-*-20261017` directories and `out/parity-window-native.log`.
+
+The saved-terminal picker and clean-profile startup journeys pass against the final Release
+binary (`out/parity-window-terminal-release-20261017`). Earlier helper attempts omitted the
+picker's project directory or defaulted to an older Debug binary; neither supplied valid evidence
+for this build. The valid run verifies the same child/grid/history on attachment and native
+same-child reattachment on reopening. Twelve Python runner contracts, both vendor identity
+checks and `git diff --check` pass.
+
+The archive and Debian package were rebuilt (`out/parity-window-package.log`). A clean Ubuntu
+installation without Swift, the checkout or globally installed Inter passes both scale journeys,
+three shared row-layout fixtures and bundled-font checks (`out/parity-window-installed.log`).
+Its two initial captures and four narrow-pane captures are decoded-RGB-identical to the inspected
+Release captures. Installed evidence is `out/parity-window-installed-20261017`.
+
+The Wayland runner now includes a 2× render pass on its fixed 1280×800 Weston output. Extending
+that coverage exposed test assumptions left from the old 2× default: row buttons were expected
+to be 40×40 at 1×, the placeholder ink probe sampled a doubled offset, and title interaction used
+old fixed coordinates. The fixture now uses the current 20-point row targets, the production
+icon slot and the title's published accessible geometry. Its compositor pointer helper previously
+identified a window by 800/1120×480 dimensions, rejecting the correctly rendered 1280×800 2×
+window. It now finds a mapped desktop surface with Threading's title, excluding the compositor
+background even when the app fills the display. The module compiles with warnings treated as
+errors against Weston 13. The failed intermediate runs are retained in
+`out/parity-window-wayland{,-final}.log`; their successful render frames are not presented as a
+complete interaction-suite pass.
+
+The final installed Wayland `--actions` lane passes completely
+(`out/parity-window-wayland-verified.log`, `out/wayland-smoke.z9UOgroP/`): both scale render
+journeys, AT-SPI actions, physical pointer/keyboard menus, title reveal/focus return, drag release,
+and Unicode composer wheel/smooth scrolling with exact project launch and PTY isolation. The
+2× startup, dark idle pane, title-reveal terminal and composer captures were inspected. Weston
+uses a software headless output; this does not verify a physical compositor's display scaling.
+The complete Mac catalogue and full Debian suite were not rerun. The last canonical Mac reference
+is unchanged; full window chrome, typography, placeholder opacity and persisted expansion remain
+parity work. No visual baselines were approved and source changes remain uncommitted.
+
+## 207. Stroke caps, joins and translucent ink follow the authored path
+
+The existing `NSBezierPath.lineCapStyle` and `lineJoinStyle` properties were accepted but ignored.
+The software stroker built a quad per segment and a disc at each segment's end, including the
+last endpoint but not the first. It then painted every piece independently. Besides rounding
+miter/bevel corners and making open caps asymmetric, this compounded translucent ink and
+antialias coverage at overlaps. The CoreGraphics current-path adapter compounded this again by
+submitting each segment as a separate stroke.
+
+`StrokeOutline` now expands butt/round/square caps and miter/round/bevel joins, with the authored
+miter limit, in user space. Its pieces have a consistent winding and pass through one nonzero
+fill, so intersections receive one composition. Explicit closure is retained separately from
+vertices: an open line returning to its start has caps there, while `close()` adds the first
+join. Closed strokes retain their holes. Both Bezier and CoreGraphics path consumers use this
+operation; the latter preserves its complete subpaths instead of splitting them into lines.
+This changes the existing rendering adapter, with no extension or user-facing settings surface.
+
+The Release floating-glyph fixture passes the nine shared classic marks, template mark, path
+state/closure checks, and new cap, join, miter-limit, closed-hole and alpha assertions
+(`out/parity-stroke-glyphs.log`). An isolated native AppKit probe confirms the same cap extents,
+join distinctions, miter fallback and single-composition alpha
+(`out/parity-stroke-mac-probe.swift`, `out/parity-stroke-mac-20261017`). Its first very small
+aliased round-cap sample differed because Quartz covers an edge pixel that the portable
+center-sampled aliased rasterizer does not; the cross-platform geometry check uses a larger
+corner away from that sampling ambiguity. These are geometry/ink contracts, not a claim that
+the two rasterizers produce identical antialias pixels.
+
+Native outline journeys pass at both scales in both appearances, including disclosure size/ink,
+independent expansion, narrow resize and terminal activation (`out/parity-stroke-{1x,2x}-20261017`).
+Conversation/composer and permission/tool/question journeys pass
+(`out/parity-stroke-{native,permission}.log`). The actual initial window and focused composer
+captures were inspected; an interactive before/after comparison was opened for the 2× window.
+The production label fixture passes (`out/parity-stroke-text.log`). Current Release measurements
+are 21.35ms median / 21.96ms maximum for 54 labels, 16.73/16.86ms for 18 compound readings and
+1.56/1.58ms versus 1.66/2.16ms for 170 versus 1,700 storage rows at the same viewport
+(`out/parity-stroke-benchmark.log`). Geometry expansion is linear in flattened path size and
+reuses the bounded raster leaf; there is no per-stroke full-window alpha allocation. These
+measurements show no observed regression, not a controlled speedup claim.
+
+The placeholder opacity investigation also tried a WindowServer readback of a displayed native
+probe, including launching it as an application bundle. Screen capture access was available,
+but the process remained inactive and WindowServer returned wholly transparent pixels. That
+provides no color evidence. The Linux palette and canonical Mac capture helper were left
+unchanged; the uncertainty recorded in finding 204 remains open.
+
+Both native Add Project/placeholder-ink journeys pass (`out/parity-stroke-add-{1x,2x}.log`).
+The initial-window comparison changes 200 pixels at 1× and 429 at 2×, confined to the authored
+sidebar mark and disclosures; the initial placeholder remains pixel-identical. The rebuilt
+package also passes the full installed Wayland `--actions` lane at both render scales
+(`out/parity-stroke-wayland.log`, `out/wayland-smoke.heohEkls/`), including accessibility,
+physical pointer/keyboard navigation and Unicode composer scrolling. Its 2× window was inspected.
+
+The full `bundle-smoke.sh` build and contract phase passes, including the production PTY/native
+provider paths, virtualization, clipping and 10,000-row document contracts. Archive startup,
+non-root installed startup, live `.deb` reinstallation, workspace input/resize, session Actions,
+Open In and late agent admission also pass. That run then exposed old assumptions in
+`actions_smoke.py`: it inherited the new 1× default while asserting 2× button geometry, and
+expected a mouse column based on the old 320-pixel sidebar. The fixture now explicitly requests
+its bounded 2× viewport and derives the expected terminal cell from the actual pane origin and
+unchanged 10×22-pixel cells. Exact mouse press/release bytes remain required. The failed runs are
+`out/parity-stroke-bundle.log` and `out/parity-stroke-bundle-resume.log`; their evidence directories
+are `out/bundle-smoke/run.UenIvd7C` and `out/bundle-smoke/stroke-resume.uuOFVeFW`.
+
+A regular-application WindowServer probe also returned transparent pixels. The current
+ScreenCaptureKit screenshot API was tried for the same isolated window and failed with capture
+error -3811. Neither result supports changing the placeholder palette. Those probes are retained
+under `out/label-{windowserver,screencapture}-*` and `out/parity-{windowserver,screencapture}-*`.
+
+The resumed installed run passes Actions, project menus, composer/document/diff/stream paths,
+native Codex/Claude conversations, permissions at both scales, account selection and Add Project
+(`out/parity-stroke-bundle-resume-final.log`, `out/bundle-smoke/stroke-resume.nwpzUUYf`).
+It then exposed a source-free fixture defect: the provider-artwork fallback test copied the
+executable and its artwork resources but omitted the required AppKit font resource bundle.
+The fixture now copies both bundles and removes only provider artwork. A build-tree fallback
+had previously concealed that omission.
+
+The final resumed tail exits successfully (`out/parity-stroke-bundle-tail.log`,
+`out/bundle-smoke/stroke-resume.umkbpMJN`). It covers bundled/fallback provider marks, bounded
+account rows, project actions, the ordinary outline in both appearances, 5,100 projects with
+1,024 terminals, terminal recovery/refusal/catalogue/capacity, working-directory identity and
+desktop-entry launch. Together these runs cover the complete package suite; this was not one
+uninterrupted green invocation. The installed ordinary startup capture was inspected, and its
+startup plus 360/320-point dark placeholder captures are decoded-RGB-identical to the tested
+Release build. Twelve Python runner contracts, both vendor checks and `git diff --check` pass.
+The Mac catalogue was not rerun; full chrome, typography, reliable placeholder-opacity evidence
+and persisted expansion remain parity work. No baselines were approved or changes committed.
+
+## 208. Project disclosures restore the shared durable state
+
+The Mac sidebar writes `Project.isExpanded`; Linux's bounded navigation projection dropped that
+field and its outline therefore always started collapsed. The projection now carries the existing
+value, including the shared `true` default for new projects. Initial and imported snapshots restore
+all expanded identities in one outline projection, without emitting gesture callbacks or writes.
+The outline contract restores 5,100 roots with one populated branch using exactly two child-count
+queries, builds no detached views, and verifies expand/collapse notifications separately.
+
+Pointer, keyboard and page-reveal expansion share the outline's delegate route. One worker writes
+one current project payload through `updateProjectExpansion`; it preserves position, embedded
+terminals, session rows and runtime selection, and refuses a missing identity without upserting it.
+Navigation waits for the receipt while resize and terminal input remain serviced. A failed write
+restores the previous expansion and selected row. This is host-owned state on the existing surface,
+not a new preference, extension component or database schema.
+
+The CoreSlice contracts pass, including mixed standing states, idempotence, missing-project refusal
+and an expansion update beside an unreadable unrelated session. The initial payload assertion
+incorrectly compared JSON text (encoder key order is not stable); its corrected assertion compares
+all decoded fields after the round trip. `out/parity-expansion-contracts-final.log` also includes
+the outline and native visible-row contracts. The failed assertion is retained in
+`out/parity-expansion-contracts.log`.
+
+Native multi-project journeys pass at both scales (`out/parity-expansion-{1x,2x}-verified-20261017`):
+independent/empty disclosure changes, keyboard traversal, mixed-state restart, exact runtime
+identity and a held-store-lock refusal that restores the selected child. Both restarted windows
+were inspected. Their unchanged collapsed startup states are decoded-RGB-identical to finding
+207's captures at both scales. The first restart attempts used the project-window title to find a
+window already attached to a terminal; the corrected lookup retains process identity and accepts
+both product titles. Failed evidence remains in `out/parity-expansion-{1x,2x}-20261017`.
+
+The native 5,100-project/1,024-terminal journey passes, including middle/tail restoration with the
+first branch still expanded; collapsed count/hover/keyboard assertions also pass
+(`out/parity-expansion-navigation-20261017`). Fixtures that specifically inspect collapsed badges
+now seed that state rather than depending on Linux ignoring the stored expanded default. The
+project-action fixture identifies project controls by semantic identity so a newly created terminal
+can appear under its expanded project; its final pointer/keyboard/menu/drag journey passes in
+`out/parity-expansion-actions-final-20261017`. The earlier action attempt used the wrong argument
+in a local runner, and its next attempt exposed the two-rows-only fixture assumption; both logs
+are retained. The ordinary native Codex conversation/composer/terminal/restart journey passes
+(`out/parity-expansion-native-verified.log`); an earlier invocation refused an already existing
+output directory before launching the app. Twelve Python runner contracts, both vendor checks and
+`git diff --check` pass.
+
+The archive and Debian package were rebuilt (`out/parity-expansion-package.log`). A fresh Ubuntu
+installation without the checkout, Swift or global Inter passes the complete two-scale disclosure
+journey and bundled-font/layout checks (`out/parity-expansion-installed.log`). Installed evidence
+is `out/parity-expansion-installed-20261017`: both initial windows, all four narrow dark placeholder
+captures, both mixed-state restarts and both empty-branch collapses after restart match the source
+build's decoded RGB exactly. The installed collapsed-empty-branch window was also inspected.
+
+The focused Mac `ProjectDatabaseTests` run also succeeds: 68 tests, zero failures, one existing
+live-legacy-document test skipped because no `projects.json` fixture is present
+(`out/parity-expansion-mac-database.log`). The complete Mac visual catalogue, full Debian runtime
+suite and Wayland lane were not rerun for this change. Full chrome, typography and reliable
+placeholder-opacity evidence remain parity work. A restored runtime still initially enters the
+Linux saved-runtime picker; Mac restores selection in the ordinary outline, so that presentation
+is a separate remaining gap. No visual baselines were approved and no changes were committed.
+
+## 209. Restored runtimes select their ordinary outline row
+
+Linux restored the correct daemon runtime but replaced the sidebar with its saved-agent or
+saved-terminal catalog. Returning from that catalog highlighted the project rather than the
+restored child. Mac's `select(sessionID:)` and `select(terminalID:)` reveal the ancestor chain and
+select the exact child in the ordinary outline.
+
+Startup now retains a stable outline target beside runtime activation. After the first standing
+projection, it expands that target's parent if needed, resolves the child and scrolls it into view.
+An already-open parent performs no write; a folded parent uses the existing single-worker
+expansion route. Other branches retain their stored choices. Native conversation restoration,
+terminal-agent attachment and standalone-terminal attachment use the same presentation rule.
+The saved catalogs remain explicit project-menu destinations. Runtime creation and attach-only
+startup rules are unchanged, and this adds no user-facing setting or extension surface.
+
+The native multi-project journey passes at both scales, including selected-child restoration
+without a catalog, a second restart from a deliberately folded parent, persistence of only that
+parent's reveal, unrelated collapsed/empty branches and busy-store rollback. Final evidence is
+`out/parity-restored-outline-{1x,2x}-final-20261017`. Restarts inherit the real pointer position;
+the first capture attempts did not wait for its exit repaint and retained transient hover ink.
+The fixture now waits for that existing repaint before capture. Both scales' final restored
+sidebar images were inspected, and a before/after comparison was opened against finding 208.
+
+The ordinary native Codex conversation journey passes with a collapsed parent on restart,
+AT-SPI selection of the exact restored conversation, transcript replay, retained identity and a
+new turn on the same provider thread (`out/parity-restored-outline-native-verified.log`). Its
+replayed conversation capture was inspected. The initial capture gate expected every sidebar
+frame to be an agent picker and therefore waited forever after the correctly restored outline
+appeared; it now follows either presentation, resets state at each new app launch, and still
+requires a prepared conversation and matching sidebar height/appearance. That failed run remains
+in `out/parity-restored-outline-native.log`.
+
+Focused terminal-agent, Claude, standalone-shell, working-directory and launcher journeys pass:
+`out/parity-restored-outline-runtime-20261017` contains deep-history exact-row restoration beyond
+the recent page and same-child Claude reattachment; `out/parity-restored-outline-runtime-tail-20261017`
+contains shell restart and real-bash cwd tracking; `out/parity-restored-outline-startup-verified-20261017`
+contains clean-profile import and targeted/untargeted same-child relaunch. Their old automatic-picker
+assumptions now request a catalog explicitly where browsing one is the test. The cwd fixture allows
+the deliberate restored-parent expansion while still comparing all other settings, terminal data,
+ownership and the other project's bytes. The launcher fixture folds the expanded project before
+moving to its next sibling. Earlier failed runner/fixture attempts remain in the corresponding
+runtime logs. AT-SPI restoration assertions share the existing catalog test helper, and the
+standalone agent runner now supplies an explicit D-Bus session for that inspection.
+
+The rebuilt archive and Debian package are recorded in `out/parity-restored-outline-package.log`.
+A clean Ubuntu installation without the checkout, Swift or globally installed Inter passes both
+multi-project restoration and the complete native-conversation journey at 1× and 2×
+(`out/parity-restored-outline-installed.log`, evidence `out/parity-restored-outline-installed-20261017`).
+Both initial collapsed windows, both mixed-state restarts and both folded-parent reveal captures
+are decoded-RGB-identical to the final source-build captures. The installed 2× replayed conversation
+was inspected, as was the source-build deep-history agent selection. Twelve Python runner contracts,
+both vendor identity checks, shell syntax and `git diff --check` pass. The full Debian runtime suite,
+Wayland lane and Mac visual catalogue were not rerun; this change touches Linux presentation only.
+Full window chrome, typography and reliable placeholder-opacity evidence remain unfinished. No
+baselines were approved or changes committed.
+
+
+## 210. Installed journeys must state their intended outline state
+
+The follow-up installed-package sweep exposed old fixture assumptions after findings 208–209.
+The live reinstall journey still expected an automatic saved-terminal picker. It now checks the
+ordinary outline's exact selected terminal ID through AT-SPI, rejects a picker frame, and retains
+its existing daemon PID, child PID, attachment and unchanged-database checks across actual Debian
+package replacement. Its runner supplies a D-Bus session for that accessibility inspection.
+
+The workspace ownership and catalog-count fixtures had relied on every imported project rendering
+collapsed, despite its persisted expanded default. Their project-only arrow sequences and collapsed
+aggregate badges now seed `isExpanded = false` explicitly and first assert the imported default.
+The project-create fixture instead keeps expanded branches and identifies project rows by their
+semantic controls, allowing the new terminal child to remain visible. No product behavior was
+changed to satisfy these tests; the native multi-project journey still covers expanded defaults,
+independent branches, selected-runtime restoration and failed-write rollback.
+
+The complete installed Wayland lane passes at both scales, including AT-SPI actions, physical seat
+pointer/keyboard routing, title reveal, Unicode composition and wheel/smooth scrolling:
+`out/parity-restored-outline-wayland.log`, evidence `out/wayland-smoke.1Ul53r9K`. The title-reveal
+frame was inspected (the BMP was decoded to `input/title-reveal.png` for viewing). The successful
+live-reinstall capture was also inspected at
+`out/bundle-smoke/restored-outline.aJiIipm1/installed-out/reinstall-reattached.png`.
+
+The full-window comparison uses the actual Mac shell capture
+`.build/ui-evidence-reports/20261016-212856-83986/current/sidebar-edge-reveal-threading-light-hovered.png`;
+the `chrome-threading-*.png` theme sentinel is a conversation render, not a whole-window reference.
+The sidebar footer and top window toolbar remain absent from Linux. A further concrete mismatch
+is visible in the Wayland shell: a newly opened project shell gets the project name/identity in its
+page header (`WindowHarness` cases 8/9), while restoration gets the saved terminal name/identity.
+That header/reveal discrepancy is addressed in finding 211; this verification pass did not claim full UI parity.
+
+
+All installed runtime journeys now pass, composed across the resumed runs rather than claimed as
+one uninterrupted green suite. `out/parity-restored-outline-bundle-runtime-verified.log` covers
+archive/non-root installed startup and live reinstall (`restored-outline.aJiIipm1`);
+`out/parity-restored-outline-bundle-tail-verified.log` covers workspace ownership, saved-session
+Actions and Open In (`restored-outline.ZAxQjySA`);
+`out/parity-restored-outline-bundle-tail-catalogue.log` covers delayed agent admission, Actions and
+project Actions (`restored-outline.zXnU2PrG`); and
+`out/parity-restored-outline-bundle-tail-create.log` completes project creation, composer/document/
+conversation/diff surfaces, native Codex and Claude, both-scale native permission journeys,
+provider/account/count/large-outline checks, terminal restart/refusal/catalog limits, cwd identity
+and desktop launch (`restored-outline.STjBycRy`). These directories are under `out/bundle-smoke/`.
+Earlier failing attempts remain alongside them, including a local resume-helper attempt that
+omitted `cd /tmp`; it failed before its first product journey and was corrected separately.
+The archive/package are the unchanged finding-209 artifacts. This pass did not repeat builds,
+portable compiled contracts or the Mac visual catalogue. Python runner tests, both source-copy
+verification commands, shell syntax and `git diff --check` pass. No baselines were approved or
+changes committed.
+
+
+## 211. A newly opened shell keeps its terminal page identity
+
+The shell header was built before its worker committed the terminal record and permanently kept
+its project's name, identity and reveal closure. Startup restoration already used the terminal
+record, so the same shell changed its page name and reveal destination merely by reopening the app.
+Mac's `PageTitleView` names the page and reveals its own sidebar row.
+
+`GraphicalTerminal` now retains the saved name beside its typed terminal ID after the creation
+receipt is consumed. Reconciliation updates the mounted `WorkspacePaneChrome` and active reveal
+target together, only when that exact runtime still owns the active pane. The header cancels any
+old header/menu gesture and republishes its native geometry/accessibility identity, without
+replacing the terminal pane, PTY or input owner. Returning through a project's cached shell command
+uses the retained metadata immediately. Before commitment, the header simply says `Terminal`.
+
+The first new native catalog assertion exposed a second path: restarting an exited saved shell
+replaces its runtime object, so that object also needs the existing saved title alongside the ID.
+The saved activation route now supplies both from its already-bounded row snapshot. The failed
+first attempt remains in `out/parity-terminal-page-native-20261017/catalogue-1/journey.log`.
+Neither path adds synchronous store access, per-frame catalog scanning or another extension
+surface. The existing at-most-eight receipt loop and bounded row projection keep ownership;
+`PageTitleView` still owns visible header presentation.
+
+Final release build: `out/parity-terminal-page-build-final.log`. The native X11 workspace and
+Open In journeys pass, including clipboard, held mouse ownership, blocked-selection input, PTY
+resize and exact external-app paths. The saved-terminal journey passes at 1× and 2× through fresh
+creation, live reuse, same-ID restart, cached project activation and AT-SPI header reveal of the
+exact focused child. A folded parent opens durably while every other project/terminal field stays
+unchanged. The 512-row/eight-runtime capacity and import-refresh journey also passes. Logs and
+inspected images are in `out/parity-terminal-page-native-final-20261017`.
+
+The rebuilt archive and Debian package are recorded in `out/parity-terminal-page-package.log`.
+A clean Ubuntu install without Swift or the checkout passes the complete changed saved-terminal
+journey at both scales (`out/parity-terminal-page-installed.log`, evidence
+`out/parity-terminal-page-installed-20261017`). The complete header bands are decoded-RGB-identical
+to the source-build captures at both scales; the installed 2× window was inspected.
+The full installed Wayland lane passes rendering at both scales, accessible actions, physical seat
+input, Unicode composition and smooth/wheel scrolling (`out/parity-terminal-page-wayland.log`,
+`out/wayland-smoke.JQIvEr2y`). Its real title click now asserts the durable terminal ID rather than
+the parent project. The resulting shell was inspected and compared in the display panel with
+finding 210's Wayland capture.
+
+Twelve Python runner contracts, both source-copy checks and `git diff --check` pass. The full
+installed Debian runtime suite and Mac visual catalogue were not repeated for this Linux-only
+header change; finding 210 records the prior full runtime coverage. No baselines were approved or
+changes committed. Full UI parity remains incomplete, including window toolbar/footer. The fresh
+shell creation selection discrepancy observed here is addressed in finding 212.
+
+
+## 212. Opening a project shell selects its child without taking keyboard focus
+
+Mac's shell creation route selects the terminal child. Linux previously retained the project row
+until explicit title reveal, even after finding 211 corrected the page header. Project-shell
+activation now reveals the exact saved terminal in the ordinary outline, opening its parent
+through the existing durable expansion path while leaving keyboard input in the terminal.
+Cached project-shell activation uses the known identity immediately. A fresh shell retains one
+pending reveal intent for its exact runtime until the worker publishes the committed record.
+Sidebar navigation or switching panes cancels that intent; returning focus to the pending terminal
+does not revive it and overwrite the user's newer selection.
+
+The creation receipt now publishes after the database and host lock close. Parent revelation may
+immediately request an expansion write, so publishing under the creation lock could refuse that
+legitimate write. The deferred receipt still publishes an already-committed terminal if the later
+selected-terminal write fails. No spawn/retry authority changes, synchronous UI I/O, unbounded
+catalog work or new customization surface were introduced. The existing bounded receipt loop,
+outline projection and expansion worker retain ownership.
+
+`terminal_creation_selection_smoke.py` controls the first handshake through a single connection
+to the real daemon. At both scales it proves immediate selection, durable parent expansion,
+terminal keyboard focus and exact attached child reuse. Its delayed case navigates to Beta and
+returns focus to the pending Alpha shell before releasing the handshake: Beta stays selected,
+Alpha stays folded and no expansion write is requested. The fixture runs in both native-window
+and installed-package runners. Source evidence is in
+`out/parity-created-selection-native-20261017`; both 2× scenario captures were inspected.
+
+Existing project-only navigation fixtures now explicitly fold the selected terminal's parent
+through real input before walking project siblings. Project menu fixtures assert the exact new
+terminal identity, and catalog/cwd fixtures account for the already-expanded creation parent.
+The first workspace regression exposed a stale context-menu row lookup that could choose the new
+terminal child; it now resolves another durable project ID. That failed attempt remains in
+`out/parity-created-selection-regression-20261017`. The final workspace, project creation, Open In,
+both-scale catalog and capacity journeys pass in
+`out/parity-created-selection-regression-final-20261017`. The before/after shared-runtime capture
+was displayed for comparison.
+
+The release build and rebuilt archive/Debian package are recorded in
+`out/parity-created-selection-build.log` and `out/parity-created-selection-package.log`.
+The complete installed Wayland lane passes at both scales
+(`out/parity-created-selection-wayland.log`, `out/wayland-smoke.EfVhK6HG`). A focused physical-input
+rerun adds explicit child-selection and terminal-focus assertions before title reveal and passes
+(`out/parity-created-selection-wayland-input-final.log`, `out/wayland-smoke.o4NmPFCG`); its initial
+shell capture was inspected. The first local focused runner omitted its project directory and
+failed before product startup; its separate failed log remains preserved.
+
+The installed runtime sweep passes archive/non-root startup, actual live-child Debian reinstall,
+workspace ownership, Actions/Open In, delayed agent admission, project controls, conversation
+surfaces, Codex/Claude, permissions, accounts and multi-project restoration in
+`out/parity-created-selection-bundle-runtime.log` (`out/bundle-smoke/created-selection.WkxENvjl`).
+It then exposed a window-lookup race in the new creation fixture: the PID-only X11 search returned
+a window that disappeared before Return, producing `BadWindow`. The fixture now waits for the
+accessible project selection and matches the visible product window by both PID and title, as the
+other native journeys do. This is a fixture correction; the tested package is unchanged.
+
+The resumed installed tail passes both new scenarios at 1× and 2×, the 5,100-project/1,024-terminal
+outline, restart/refusal/catalog/capacity checks, live cwd tracking and identity guards, and desktop
+launch (`out/parity-created-selection-bundle-tail.log`,
+`out/bundle-smoke/created-selection.ltIwhsgk`). Together the two runs cover the complete installed
+runtime suite; this was not one uninterrupted green run. Both installed 2× scenario captures were
+inspected. All four sidebar captures are decoded-RGB-identical to their source-build counterparts
+(`out/parity-created-selection-installed-pixels.log`). Twelve Python runner contracts, both vendor
+identity checks, shell syntax and `git diff --check` pass. No Mac product source changed in this
+pass, and the Mac visual catalogue was not repeated. No baselines were approved or changes
+committed. Full UI parity, including the window toolbar/footer and remaining typography and
+surface differences, is still unfinished.
+
+
+## 213. The empty sidebar is a message, not a selected project
+
+The installed empty workspace rendered a selected orange `Add project folder…` row where the
+Mac shell centers `No Projects` and its folder-import hint. The two-label presentation now lives
+in `UI/Design/SidebarEmptyState.swift`, used by the existing lazy Mac mount and symlinked into the
+Linux shell. Linux mounts it only for an empty ordinary project list, hides it for menus/imported
+projects, and exposes its text as the empty list's accessibility description. There are zero
+project rows and zero selected children. The real header Add Project control and keyboard import
+route remain available.
+
+The hint promises folder drop, so SDL file-drop events now enter the existing asynchronous import
+gate. The event copies one path of at most 1,023 bytes and refuses oversized payloads without
+truncation; SDL-owned payload memory is released for both file and text drops. The worker validates
+an existing directory and uses LinuxHost's canonical import/identity path. The existing single
+pending-import gate bounds concurrency, and no file, process or database work enters the UI actor.
+The presentation and import operation remain host-owned; no extension surface was added.
+
+The new native fixture drives a GTK drag source with real XTest pointer input into SDL, rather
+than injecting a host command. At 1× and 2× it checks the empty list/description, live light/dark
+appearance, ordinary-file refusal, a Unicode/spaced folder import and duplicate identity, with no
+PTY child created. The fixture is included in both native and installed runtime runners. GTK's
+Python introspection package is a test dependency only. The first attempt lacked that package;
+the first compile also exposed the Linux font adapter's missing `emphasizedBody` role. Both were
+corrected without changing the shared component's typography.
+
+The final release build is `out/parity-empty-sidebar-build-final.log`. Native logs and inspected
+light/dark/imported captures are in `out/parity-empty-sidebar-native-final-20261017`. The prior
+installed empty frame and new source frame are displayed for comparison. The rebuilt archive and
+Debian package are recorded in `out/parity-empty-sidebar-package.log`.
+
+The clean installed subset passes archive/non-root startup, provider PATH, both-scale empty
+sidebar/drop journeys, all three Add Project choices and desktop launch
+(`out/parity-empty-sidebar-installed.log`, `out/bundle-smoke/empty-sidebar.FvvUZAiq`). The local
+subset helper inherited the full runner's overbroad final success label; its log now records the
+actual scope explicitly, and the helper's label is corrected for future use. The full installed
+runtime suite was not repeated. Both appearances' sidebar pixels match the source-build captures
+exactly at both scales (`out/parity-empty-sidebar-pixels.log`); the installed 2× light frame was
+inspected.
+
+The focused real Mac shell evidence passes (`out/parity-empty-sidebar-mac.log`,
+`.build/ui-evidence-reports/20261017-014955-76663`). Its Threading light capture was inspected, and
+the empty navigator area is decoded-RGBA-identical to the pre-extraction reference in both
+appearances. The greeting outside that area changes with time and is not part of this claim.
+This narrow extraction did not repeat the full Mac catalogue.
+
+The complete installed Wayland lane passes rendering at 1×/2×, accessible actions, physical seat
+input, Unicode composition and smooth/wheel scrolling (`out/parity-empty-sidebar-wayland.log`,
+`out/wayland-smoke.oJMgJB4H`). Native folder drop itself is verified through X11 only; Wayland drop
+remains unverified. Twelve Python runner contracts, both vendor identity checks, shell/Python
+syntax and `git diff --check` pass. No baselines were approved or changes committed. Full UI
+parity remains incomplete: the empty right-pane welcome/composer, toolbar/footer, and remaining
+typography/ink differences are still visible in the shell comparison.
+
+## 214. The idle workspace keeps its session composer standing
+
+The Mac shell already presents its opening composer, while Linux first showed a separate
+`No Session Selected` / `New Session` screen (and a different empty-store welcome). Linux now
+mounts one composer immediately, even when project or agent choices are missing. Escape returns
+keyboard focus to the navigator without discarding the editor, draft or accessible identity.
+Project selection and folder import update the destination while preserving the draft. Explicit
+New Chat still starts a fresh brief. The Mac's project-switch draft-reset behavior is not claimed
+by this incremental Linux lifecycle.
+
+Launch derives the current project and provider-qualified account from host state. Missing
+choices, an empty/provisional brief and pending project selection/import prevent submission.
+Empty project/agent chips also expose their disabled state and zero actions through AT-SPI.
+Import completion is consumed before composer submission and presentation, so the first imported
+project updates the form in the same frame. Project choice values are projected only when the
+project snapshot changes; typing reads cached admission booleans. Account choices remain capped
+at 64 and popup views at six. Host authority covers destination, identity, draft lifecycle and
+launch; the presentation uses existing Design controls without adding an extension surface.
+
+Release build `out/parity-standing-composer-build-gates.log` and package build
+`out/parity-standing-composer-package.log` pass. The native composer/account and both-scale empty
+sidebar/drop journeys pass in `out/parity-standing-composer-native-final-20261017`; inspected
+captures include the imported Unicode project with its retained draft, compact 560×180 form,
+and light/dark empty states. The accessibility and Add Project tail passes in
+`out/parity-standing-composer-native-tail-resolved-20261017`. Updating that older accessibility
+fixture also removed stale assumptions about combo-box roles, disclosure-edge clicks, project
+headers after terminal creation and accessible row objects across an outline rebuild. Its exact
+geometry, focus and read-only terminal text contracts remain enforced. Earlier failing attempts
+are retained separately.
+
+Real IBus Pinyin preedit, Escape cancellation, `你好` commit and no premature launch pass
+(`out/parity-standing-composer-ime.log`). Twelve Python runner contracts, vendor identity checks,
+Python/shell syntax and whitespace checks pass. No Mac source changed in this increment, and no
+Mac catalogue or baseline acceptance was run. The full UI remains visibly incomplete: the hero
+mark/greeting, prompt border and options, toolbar/footer, and broader composer behavior still
+need parity work. Native folder drop remains verified through X11 only.
+
+Installed Wayland rendering at both scales, AT-SPI actions and physical seat controls pass in
+`out/parity-standing-composer-wayland.log` (`out/wayland-smoke.Z9Rtembr`). Its composer fixture
+initially armed a one-shot screenshot after all relevant events had already settled; moving the
+pointer to force a frame then captured an intermediate chip hover. The fixture now establishes
+the start caret, waits for its post-presentation accessibility state, and arms capture before the
+edit that returns to the tail. It retains exact whole-frame comparisons rather than masking the
+hover difference. The corrected focused lane passes Unicode entry, wheel/smooth scrolling, exact
+project launch and PTY isolation (`out/parity-standing-composer-wayland-composer-final.log`,
+`out/wayland-smoke.NLJOptLy`); its opening-brief render was inspected. The earlier attempts remain
+in their own evidence directories. The source before/after welcome comparison is displayed.
+
+The clean installed runtime sweep (`out/parity-standing-composer-bundle-runtime.log`,
+`out/bundle-smoke/standing-composer.k8w9qRAH`) passes archive/non-root startup, provider PATH,
+live-child reinstall, workspace/input, Actions, provider admission, composer/account, native
+conversation/permission at both scales, shared content renderers, Add Project, provider artwork,
+account picker and project-count journeys. The multi-project fixture then reached a stale
+`New Session` assertion; it now resolves the standing form's Start Session control by identity and
+checks its disabled state and exact narrow-window bounds. That complete outline journey passes
+in `out/parity-standing-composer-bundle-tail.log`
+(`out/bundle-smoke/standing-composer-tail.2hG4n48K`). Its narrow dark render was inspected.
+The first empty-sidebar tail check also exposed a fixture-isolation error: it compared complete
+shared-daemon records even though earlier journeys leave records whose uptime continues to
+advance. It now saves both snapshots and compares exact session IDs/PIDs, retaining the no-new-
+child contract without requiring unrelated runtime metadata to stand still. The corrected run's
+snapshots confirm that only `uptimeSeconds` changed at both scales.
+
+The installed 2× empty/imported renders also expose a remaining prompt-surface defect: before
+editing, the field fill spans only y=636…701; after importing with a draft it spans y=636…815
+in the same 1280×900 window (sampled inside the field at x=535). The standing form still lets the
+text view paint that fill instead of giving the whole viewport the shared `PromptChrome` surface.
+This is recorded for the prompt-anatomy work, not counted as visual parity in this increment.
+
+The final clean installed tail passes (`out/parity-standing-composer-bundle-tail-final.log`,
+`out/bundle-smoke/standing-composer-tail.dd6bg0Yy`): creation selection and empty-sidebar import
+at both scales, the 5,100-project native outline, saved-terminal restart/refusal/catalogue/capacity,
+cwd ownership/tracking and desktop launch. The installed 2× empty render and the packaged composer
+were inspected. Together with the successful prefix and corrected multi-project run above, this
+covers the complete installed runtime suite against the same package; it was not a single
+uninterrupted green invocation. No code was committed and no baseline was approved. The 1:1 UI
+goal remains active.
+
+## 215. The opening prompt owns its whole surface and follows the Mac's dimensions
+
+The standing form still painted its field through the text document. On a cold 2× empty frame
+that filled only 66 pixels of a 180-pixel viewport, then expanded after editing. The document is
+now transparent inside a `PromptChrome` surface, which owns the field fill, border, corner shape
+and whole-box focus ring independently of document height. The opening column cap (720 points)
+and minimum prompt height (116) now live in the shared boundary and the Mac controller aliases
+those unchanged values. Linux uses the Mac's 32-point pane margin, bottom alignment and 10-point
+row spacing, with bounded pressure relief at its smaller supported minimum window. The prompt
+grows upward from 116 to the shared 180-point ceiling before scrolling.
+
+The height calculation reads the retained TextKit layout used by the editor; unchanged-width
+pointer/wheel events reuse that cached document, and the host adds only constant work. The form
+still retains one editor/surface and bounded chooser rows. Destination, account, draft, launch
+and input authority stay host-owned; no extension slot was added. The opening footer options,
+attachments and hero/greeting remain incomplete.
+
+Rendered tests caught the first focus implementation reading the old `firstResponder` from
+inside its transition callback: the accent ring appeared when focus left the editor. It now uses
+the callback's supplied focus state, as the reply composer does. The native composer journey
+checks the actual two-point focus and one-point resting border, 720-point centered width,
+116-point resting/180-point grown height, Unicode editing, exact tail scrolling, the compact
+window and single launch. The empty-sidebar journey checks a continuous field-color strip through
+the full cold viewport in both appearances at 1× and 2×, then retains its native import/draft and
+process-identity assertions. Theme captures now wait for both panes' presentation.
+
+The changed layout also exposed an existing input defect: one motion leaving the navigator for
+the composer returned only navigator cancellation. The bridge now emits a combined crossing
+(event 27/action 7), and the host clears the old hover then dispatches that same motion to the
+composer. The reverse crossing already had the corresponding action 6. No synthetic event is
+queued behind the next click. The C pointer contract covers both directions and retained gesture
+ownership; the real accessibility journey deterministically crosses each way. Its setup accepts
+ordinary navigator motion or the existing reverse-crossing event, depending on the initial pointer.
+
+Release builds are recorded in `out/parity-opening-prompt-build-focus.log` and the final
+`out/parity-opening-prompt-build-crossing.log`. The main native composer/account and both-scale
+empty-field/import journeys pass in `out/parity-opening-prompt-native-focus-20261017`; focused,
+compact and 2× cold-empty renders were inspected. The final accessibility/Add Project tail is
+`out/parity-opening-prompt-native-crossing-final-20261017`. The pointer contract passes in
+`out/parity-opening-prompt-pointer.log`. Earlier failed focus/crossing attempts remain separate.
+
+The focused Mac composer catalogue passes (`out/parity-opening-prompt-mac.log`,
+`.build/ui-evidence-reports/20261017-022902-72069`). System's empty state and the Cyberpunk and
+Swiss Minimalist short forms were inspected. The Mac's values did not change; this is not a
+complete Mac catalogue run or baseline approval. The Linux before/after empty form is displayed
+for comparison. Twelve Python runner contracts and both vendor identity checks pass.
+
+The final package builds successfully (`out/parity-opening-prompt-package-final.log`). Its clean
+Ubuntu installed subset passes composer/account, empty field and native import at both scales,
+Add Project, narrow multi-project outline and desktop launch
+(`out/parity-opening-prompt-installed-final.log`, `out/bundle-smoke/opening-prompt.26FMyHrt`).
+The final installed 2× cold-empty field and typed composer renders were inspected. This increment
+reruns that relevant subset; the complete installed runtime coverage is recorded in finding 214.
+
+The complete installed Wayland actions lane also passes in one final invocation
+(`out/parity-opening-prompt-wayland-final.log`, `out/wayland-smoke.rncwiNS5`): rendering at both
+scales, AT-SPI actions, physical seat controls, Unicode composer entry, wheel/smooth scrolling,
+exact project launch and PTY isolation. Its opening composer render was inspected. Real IBus
+Pinyin preedit, Escape cancellation, `你好` commit and no premature launch pass in
+`out/parity-opening-prompt-ime.log`. Python syntax and whitespace checks pass. Native folder
+drop remains verified through X11 only. No code was committed and no baseline was approved;
+the broader 1:1 UI goal remains active.
+
+
+## 216. The opening welcome shares the Mac's mark, greeting and geometry
+
+The Linux composer still used a terminal-placeholder hierarchy: a 44-point terminal symbol,
+15-point provider title and destination caption. The Mac shell instead floats a 40-point
+Threading mark above a 20-point semibold greeting, with no default caption. Linux now mounts a
+`ComposerWelcomeView` Design boundary around the existing shared mark paths and one primary-ink
+wrapping label. `ComposerWelcomeLayout` owns the mark size, 620-point reading measure, three-line
+cap and 48-point minimum clearance for both hosts; Mac aliases preserve its previous values.
+The 12-point mark/text spacing and pane margins remain Design roles. The whole group centers in
+the space above the form and disappears when it cannot fit, rather than clipping behind controls.
+
+`ComposerGreeting` is compiled from the same source on both platforms. Its daypart now directly
+names `ThemeWelcomeGrammar.Daypart`, the type the old `ThemeWelcome.Daypart` already aliased.
+The date-aware greeting is picked once for a new form and retained through typing, provider
+choices, project choices and theme appearance changes. No provider or project data enters the
+welcome. The fixed app pool, one label, at most three lines and eight retained mark paths bound
+both ordinary and narrow-window work; unchanged text/width reuse label metrics. This is existing
+host-owned composer presentation and adds no extension slot. Theme-authored welcome content,
+alternate marks, captions, scrims and animation still require Linux implementation.
+
+AT-SPI now publishes the actual greeting with a stable identifier and omits it when the hero is
+hidden. Removing the invisible old destination caption leaves project/provider identity on the
+corresponding combo boxes. The geometry journey caught the first implementation storing heading
+bounds without adding that node to the bridge's component-coordinate dispatch. Both window and
+parent coordinate routes now include it; the test also checks that the label is not focusable.
+Composer tests observe provider/project changes on their actual chip identities and assert that
+the welcome remains unchanged through those choices. The first updated fixture omitted the
+chips' existing `Project:`/`Identity:` prefixes; that failed attempt is retained separately.
+
+The first clean installed run passed composer/account, then timed out awaiting the second native
+folder drop; no second transfer reached the host log. The fixture terminated the GTK selection
+owner 200 ms after releasing the pointer without observing completion, allowing a lifetime race
+under concurrent build load. The source now reports
+ready/data/end signals with its PID, and the driver waits for both URI delivery and drag end
+before terminating it. This replaces the fixed post-release wait; it does not retry a missing
+transfer or weaken the import/duplicate/no-child assertions.
+
+The final source build is `out/parity-welcome-build-heading.log` (77.93 seconds). The focused Mac
+composer catalogue passes in `out/parity-welcome-mac.log`
+(`.build/ui-evidence-reports/20261017-024431-16480`). System, Cyberpunk and Swiss Minimalist empty
+welcomes and the styled short forms were inspected. Against finding 215's focused report, 28 of
+41 decoded images match exactly; the other 13 differences are confined to greeting text bounds
+(the fixture selects live greetings). This is not a complete Mac catalogue or baseline approval.
+The Linux before/after welcome comparison is displayed, and the 2× dark empty shell was inspected.
+Real IBus preedit, Escape, `你好` commit and no early launch pass in `out/parity-welcome-ime.log`.
+
+
+The final native suite passes in `out/parity-welcome-native-verified-20261017`: composer/account,
+light/dark empty welcome and real folder imports at 1×/2×, empty/full accessibility, heading
+coordinates and Add Project. The 2× light shell was inspected, and each drop's log now records
+ready, data and end for its own selection-owner PID. Earlier failed source runs remain in
+`out/parity-welcome-native-20261017` (fixture chip labels) and
+`out/parity-welcome-native-final-20261017` (heading coordinate dispatch).
+Twelve Python runner contracts, both vendor identity checks, changed Python syntax and whitespace
+checks pass. The final installable package is recorded in `out/parity-welcome-package-final.log`.
+
+
+The final clean installed subset passes in `out/parity-welcome-installed-final.log`
+(`out/bundle-smoke/welcome.d0EleO28`): composer/account, both-scale empty welcome/import,
+Add Project, narrow multi-project outline and desktop launch. The installed 2× empty welcome
+and 320-point narrow pane were inspected. The full installed runtime suite was not rerun;
+finding 214 records its preceding coverage. The initial failed installed run remains at
+`out/parity-welcome-installed.log` (`out/bundle-smoke/welcome.dcBjaD51`).
+
+The complete final installed Wayland actions lane passes in `out/parity-welcome-wayland-final.log`
+(`out/wayland-smoke.U04DrfzK`), including 1×/2× rendering, AT-SPI, physical seat controls,
+Unicode composer input, wheel/smooth scrolling, exact project launch and PTY isolation. The final
+Wayland welcome render was inspected. Native folder drop remains verified on X11 only. Prompt
+footer/options, attachment controls, toolbar/footer and wider theme support remain incomplete;
+no baseline was approved and no code was committed. The full 1:1 UI goal remains active.
+
+
+The compact 2× Actions journey also passes (`out/parity-welcome-actions-20261017/actions.log`),
+including disabled empty-store commands, chooser cancellation, pointer/keyboard/AT-SPI commands,
+bounded menu scrolling, focus isolation, exact shell reuse and named-account provider creation.
+Its standing-form assertion resolves the editor by identity: at that height the greeting is
+correctly absent. Native app logs are retained beside the journey log.
+
+## 217. The opening prompt carries a real permission choice
+
+The Linux composer previously fixed every new session to Manual in its launch worker while
+omitting the Mac's permission footer. It now mounts the production `ChipView` inside the prompt,
+using shared `PermissionModeLabels` for the hand mark and inheritance wording and the existing
+`AgentPermissionMode` titles, descriptions and Codex caveat. `PromptChrome.contentFrames` supplies
+the same 12-point horizontal inset, 10-point vertical inset/gap and 26-point footer within the
+existing 116/180-point prompt limits. The existing five-control key loop includes the footer,
+and the editor retains Return for a newline and Super+Return for submission.
+
+New briefs still start at Manual. The six explicit choices and Use Agent's Setting travel from
+host state through `AgentSessionCreation` into the durable record and the existing provider
+command builders. Nil emits no permission override. This does not claim Mac Settings/account
+inheritance resolution. Project and identity changes retain the draft choice; explicit New Chat
+resets it. Permission selection, persistence and launch remain host-owned, with no new extension
+slot. The fixed seven-value menu measures once on open and mounts at most six shared rows;
+AT-SPI exposes the same chip, rows and full explanations. Shared menu width limits still apply.
+
+The real window journeys found two existing assumptions exposed by the footer. Menu dismissal
+used top-level project/provider frames; it now resolves the selected chip and converts through
+its actual parent hierarchy, so a repeated permission-chip click dismisses the popup. After a
+compact/full-window round trip, cached text left the document's hit area at its old short height.
+`NSTextView` now observes the clip viewport and updates its document floor from cached layout in
+constant time, without reshaping text for a height-only resize or wheel event. The text-editor
+harness checks unchanged used-text geometry and a window-dispatched click in the expanded blank
+area. The first failed composer journey remains in `out/parity-permissions-native-20261017`.
+
+Visual review then found an accessibility focus split: the native input flag moved to the
+composer while the Swift host still considered the navigator focused. Accepted choice actions
+now update both authorities. The stronger installed test reproduced the old package's missing
+focus border (`out/parity-permissions-installed.log`,
+`out/bundle-smoke/permissions.98hR4sb1`). It checks physical typing after the accessible choice
+and compares the real focused/resting prompt border rather than trusting only AT-SPI focus.
+
+The focused Mac composer run passes in `out/parity-permissions-mac.log`
+(`.build/ui-evidence-reports/20261017-030309-64378`). System Codex Auto, Cyberpunk short and Swiss
+Minimalist short renders were inspected. Against finding 216, 30 of 41 decoded images match
+exactly; the other 11 differences remain confined to live greeting text. This is a focused
+catalogue, not complete platform coverage or baseline approval. The Linux before/after prompt
+comparison is displayed; normal, compact, permission-menu and dark footer renders were inspected.
+
+Before the final accessibility-focus correction, the complete relevant native subset passed in
+`out/parity-permissions-native-final-20261017`: composer, all 14 permission/provider choices,
+named account, empty/import at both scales, empty/full accessibility and Add Project. The shared
+text-editor harness passes in `out/parity-permissions-editor.log`; real IBus preedit, Escape,
+Chinese commit and no premature launch pass in `out/parity-permissions-ime.log`. The compact
+2× Actions journey passes in `out/parity-permissions-actions-20261017/actions.log`. The earlier
+installed Wayland actions lane also passes in `out/parity-permissions-wayland.log`
+(`out/wayland-smoke.4YypF4yq`). Final-package verification is recorded below.
+
+The final source build is `out/parity-permissions-build-focus.log` (55.13 seconds), and the final
+package is `out/parity-permissions-package-final.log`. The final composer and all 14 permission
+cases pass in `out/parity-permissions-native-verified-20261017`, including physical typing and
+focus-border comparison after accessibility selection. Final light/dark footer captures were
+inspected. Twelve Python runner contracts, both vendor identity checks, shell syntax and
+whitespace checks pass.
+
+The final installed Wayland actions lane passes in `out/parity-permissions-wayland-final.log`
+(`out/wayland-smoke.LWwdfr6x`): both rendering scales, AT-SPI actions, physical seat controls,
+Unicode composition, wheel/smooth scrolling, exact project launch and PTY isolation. Its final
+opening-footer render was inspected. The installed X11 dark permission footer was also inspected
+and shows the corrected focus border.
+
+The clean installed X11 subset passes in `out/parity-permissions-installed-final.log`
+(`out/bundle-smoke/permissions.q8J3gDqh`): composer, all 14 permission/provider cases with the
+stronger focus check, named accounts, empty/import at both scales, Add Project, narrow outline
+and desktop entry. This is the relevant subset rather than a rerun of the complete installed
+runtime catalogue from finding 214.
+
+The last menu review found wheel input unhandled by the choice presenter, while the seventh
+option could only be reached by keyboard. The shared composer choice host now
+consumes wheel input inside the popup, accumulates fractional steps and updates its bounded
+rows. The permission fixture reaches Bypass Permissions with native wheel events for both
+providers and captures the scrolled popup. This also covers project and account menus through
+the same presenter. The wheel-support build/package logs are `out/parity-permissions-build-wheel.log`
+and `out/parity-permissions-package-wheel.log`; verification follows below.
+
+The latest source composer and all 14 permission cases pass in
+`out/parity-permissions-native-wheel-20261017`. The latest clean installed permission/account
+subset and desktop launch pass in `out/parity-permissions-installed-wheel.log`
+(`out/bundle-smoke/permissions-wheel.h0LdRULh`), including both providers' wheel-selected final
+option, saved mode, exact argv, physical typing and focus pixels. The scrolled source Codex and
+installed Claude menus were inspected. The full installed X11 subset immediately preceding the
+wheel-only correction is recorded above; the complete runtime catalogue was not rerun.
+
+The latest installed Wayland actions lane also passes in
+`out/parity-permissions-wayland-wheel.log` (`out/wayland-smoke.qi5xfibb`); its opening-footer
+capture was inspected. This lane checks the existing Wayland input/scroll/launch contracts;
+the new permission-menu wheel selection itself is verified on X11. The 12 runner contracts,
+changed Python syntax, shell syntax and whitespace checks pass. No baseline was approved and
+no code was committed. Model/effort, speed, surface selection, attachments, remaining toolbar
+and footer controls, and wider theme behavior remain incomplete. The full 1:1 UI goal stays active.
+
+## 218. Model/effort picker portability groundwork, 2026-10-17
+
+The next opening-composer gap is the shared model-by-effort matrix. The existing Mac control
+now compiles through a Linux source link; only its Mac view controller, InjectionNext hooks and
+haptic calls are platform-guarded. Its drawing, selection, keyboard and accessibility logic
+remain shared. This finding is groundwork, not a claim that Linux users can choose a model yet:
+the opening composer still needs a bounded account-catalogue worker, a mounted picker,
+selection/admission semantics, accessibility projection and fresh/resume launch wiring.
+
+The first Linux build identified actual compatibility gaps rather than requiring another picker:
+tracking areas had no continuous mouse-moved delivery, focused cells could not scroll into view,
+radial gradients and symbol palette composition were absent, and the Linux theme boundary did
+not expose accent-muted. These contracts now exist. Pointer tracking visits the old/current hit
+paths, stops behind an overlay and respects key-window activation. Focus reveal scrolls the
+nearest document clip on both axes, without changing an already visible rectangle. Palette
+composition keeps size/weight, applies the one supported ink to source alpha, and preserves
+geometry for palette-only configuration. Radial fills interpolate once per visible device pixel
+under the path and inherited clip, with no intermediate bitmap or overlapping translucent rings.
+
+The matrix previously scanned every model before rejecting offscreen rows. It now computes its
+dirty row range directly. Linux view drawing receives its ancestor-clipped visible rectangle,
+so a tall document no longer receives its complete height as the dirty region. The existing
+`ViewClippingHarness` now checks a 1,000-row document's distant-cell reveal and exact dirty
+viewport, repeated pointer moves, cover/key-window transitions, transformed radial alpha and
+actual palette pixels. All pass in `out/parity-model-picker-contracts.log`.
+
+`AgentModelOption.swift` contains the existing reasoning/model/default value types, while
+`ProviderModelCatalog.swift` contains the existing pure Codex decoder and Claude/config helpers.
+Both are byte-identical core-slice entries. The Mac `AgentModels` caller keeps bounded reads,
+cache freshness, direct-catalogue precedence and account/default policy. Its focused provider
+settings/default/catalogue tests passed: 34 executed, one skipped, no failures in
+`out/parity-model-catalog-mac.log`. The complete existing Linux core contract executable also
+passes in `out/parity-model-picker-core.log`; this does not test a Linux catalogue worker that
+has not been implemented.
+
+The Release host build passes in `out/parity-model-picker-shim-build.log` (69.33 seconds), with
+the final palette-only sizing adjustment linked by `out/parity-model-picker-final-build.log`.
+The package log is `out/parity-model-picker-package.log`. Both vendor checks pass with 131 core
+files, and all 12 Python runner contracts pass. No user ACP changes were overwritten.
+
+The focused Mac shipping-popover render passes and all six current images were inspected in
+`.build/ui-evidence-reports/20261017-033510-46563`. The baseline report has four changed and two
+unbaselined images. The older baselines lack the current hidden-model footer, separate provenance
+line and diamond Ultra treatment; those presentation changes predate this portability edit.
+This is not an exact before/after comparison or full-platform catalogue, and no baseline was
+approved. Linux matrix pixels themselves remain unverified until the real composer mounts it.
+
+One installed-test launch began before package assembly finished and correctly refused the
+incomplete DEB (`out/parity-model-picker-installed.log`, evidence
+`out/bundle-smoke/model-foundation.iT4RIbSC`). The package completed before the final installed
+run was started. The concurrent Wayland installation waited long enough to install the finished
+package; its installed WindowHarness SHA-256 was checked against the packaged executable:
+`05a722f83aeabe4d7e398e8c7dab53257fa5cb09bdf8f13f782e07cad2aa6e3b`.
+Final runtime verification is recorded below.
+
+The final source X11 subset passes in `out/parity-model-picker-native-20261017`: composer,
+all 14 permission/provider choices, named accounts, empty/import at 1×/2×, empty/full AT-SPI and
+Add Project. The light focused composer and dark permission footer were inspected. The installed
+Wayland actions lane passes in `out/parity-model-picker-wayland.log`
+(`out/wayland-smoke.uYL7mYyQ`): both rendering scales, accessibility, physical seat input,
+Unicode composer, wheel/smooth scrolling, exact launch and PTY isolation. Its opening capture
+was also inspected. These are regression checks of the existing shell, not Linux picker evidence.
+
+The three focused Mac picker interaction/presentation contracts also pass in
+`out/parity-model-picker-mac-contracts.log`. All 16 source composer captures have identical
+decoded RGBA pixels to the preceding verified permission-wheel build. That exact regression
+comparison covers the existing Linux composer only.
+
+The complete installed X11 runtime runner (`tests/bundle_runtime_smoke.sh`, using the already
+built package in a clean Swift-free Ubuntu image) passes in
+`out/parity-model-picker-installed-final.log`, with evidence in
+`out/bundle-smoke/model-foundation.0aQMSI43`. This covers startup and live reinstall, Actions and
+Open In, all composer permission choices, shared documents/diffs/streaming, native Codex and
+Claude conversations and decisions at both scales, account/provider rows, expansion persistence,
+folder drop, large outlines, saved-terminal restart/refusal/capacity/cwd identity, and desktop
+launch. Installed minimum-window, scrolled opening composer and 2× grown native composer
+captures were inspected. The baseline comparison and unmounted-picker limits above still apply.
+
+No code was committed and no baseline was approved. Account catalogue worker, mounted Linux
+matrix, model/effort selection persistence and launch wiring remain the next work. The full
+1:1 UI goal remains active; this finding closes only the compatibility groundwork.
+
+## 219. Opening model/effort integration checkpoint, 2026-10-17
+
+The Linux opening composer now mounts the production model/effort matrix and shared content
+body behind its CPU chip. Mac and Linux use one presentation factory for the account-default
+row, Auto effort and supported combinations. The host reads the exact selected account on a
+serial worker, with one active read and one coalesced pending request; stale receipts cannot
+replace a different account's catalogue. Settings/state files cap at 1 MiB, Codex's cache at
+16 MiB, admitted models at 512 and distinct effort columns at 32 plus Auto. No model cache
+means Codex keeps CLI inheritance and a disabled picker, without an invented catalogue.
+
+Explicit choices enter the existing session record and portable launch builders. Codex's
+reasoning override is a TOML string inside its own shell operand, including on resume. Fresh
+launches re-read and validate the selected account's catalogue before saving a session. A
+catalogue refresh retains an invalid explicit choice and disables Start until corrected;
+keyboard submission uses that same gate. Account changes and New Chat clear model/effort;
+project changes retain them. The brief survives identity changes. Linux does not yet restore
+per-account last-successful choices or implement hidden-model preferences.
+
+The shared matrix now supports Home/End and Page Up/Down, preserving the effort where available
+and falling back to Auto on an unsupported row. Arrow navigation still skips unsupported
+combinations. Linux maps physical Space to the AppKit key code used by the grid. AT-SPI
+publishes only visible clipped cells (maximum 128), with separate focused and selected/checked
+state, and refuses stale composer/popup identities. The real product shell remains the host;
+its existing menu surface still approximates the Mac popover's complete chrome.
+
+The first shared-body refactor shifted label alignment and legacy-theme rounding on Mac.
+Restoring native constraints inside the shared Mac body fixes those differences. All six
+current picker images in `.build/ui-evidence-reports/20261017-041023-19418/current` have exactly
+the same decoded RGBA pixels as §218's `20261017-033510-46563` images. The Windows 98 result was
+inspected again. Four focused interaction/presentation contracts, including boundary navigation,
+pass in `out/parity-model-composer-mac-contracts.log`. The render log is
+`out/parity-model-composer-mac-final-render.log`. This is focused evidence, not a full Mac UI
+catalogue run; the pre-existing baseline differences in §218 remain unapproved.
+
+The initial Linux build crashed inside SwiftPM/libdispatch before compilation
+(`out/parity-model-composer-build.log`); its terminal exit was confirmed before retrying.
+The retry compiled successfully in 190.30 seconds (`out/parity-model-composer-build-retry.log`).
+The first two runtime attempts verified Codex choice/inheritance/resume, then stopped on a
+Claude fixture error: it wrote `additionalModels` instead of the provider's actual
+`additionalModelOptionsCache`. The fixture now uses the shared parser's real wire key and
+scrolls to the additional model before pointer selection. These failed attempts are retained
+in `out/parity-model-composer-native-20261017` and `out/parity-model-composer-verified-20261017`.
+
+The new journey is wired into both composer-only/full source runners and the installed runtime
+runner. Existing composer, permissions and accessibility expectations include the extra chip.
+All 12 Python runner contracts, shell syntax, Python syntax, both vendor verifications (131 core
+files), and `git diff --check` pass. No user ACP edits were overwritten.
+
+The user requested a pause at the next good stop during this validation. Package assembly,
+installed X11/Wayland checks for this integration, broader theme fidelity, final popover chrome,
+and the other full-composer controls remain pending. The last packaged and installed artifact
+is still §218. No commit, push or baseline approval was performed. Final checkpoint results
+follow below.
+
+The final Linux build passes in `out/parity-model-composer-space-build.log` (52.29 seconds).
+An intermediate runtime run caught a real Space activation gap: SDL delivered Space through
+committed-text input, where the synthetic AppKit event had key code zero. That boundary now
+maps Space to 49 as well as mapping the functional-key path. The final runtime evidence is
+`out/parity-model-composer-final-20261017`: all seven model/effort cases pass, covering physical
+Space and arrows, pointer selection, both providers' inheritance, named-account switching with
+the brief intact, a 600-model/40-effort input capped to model 511/effort 31 with bounded visible
+accessibility cells, stale-catalogue refusal before record/process creation, persistence, and
+exact Codex resume arguments. The failed Space run remains in
+`out/parity-model-composer-checkpoint-20261017`.
+
+Real Linux light-grid, Claude catalogue and distant-cell captures were inspected. The file
+named `codex-selected-ultra-dark.png` still contains light pixels: the fixture waits for the
+theme log message rather than completed presentation. It must wait for presented dark pixels
+before this image can serve as dark evidence. Dark matrix appearance, 2× matrix interaction,
+Wayland model selection and a freshly installed package remain unverified for §219.
+
+The final source runner completed with exit 0 (`out/parity-model-composer-final.log`). Alongside
+all seven model cases, the existing composer journey passes its focus loop, scrolling,
+project/provider choices, multiline Unicode edits and exact launch. All 14 permission/provider
+cases also pass, including Claude's Tab/Shift+Tab traversal through the model chip. The current
+build/test processes have finished. Work is paused here at the user's request, with the full
+1:1 UI goal unfinished and the validation/packaging limits above preserved for the next turn.
+
+## 220. Commit validation and mainline integration, 2026-10-17
+
+Before committing the accumulated Linux checkpoint, `scripts/test.sh all` ran the full Mac
+suite: 10,748 tests, 106 skips, four failing test cases (eight assertions, one unexpected).
+Evidence is `out/parity-commit-all.log`. Its failure prevented the wrapper from starting iOS.
+The component-gallery coverage check identified the newly extracted picker body and the
+Linux-only welcome view. The existing picker story already mounts the body; its component
+registry now names it. The textual Mac catalogue audit explicitly distinguishes the welcome
+view compiled only under `#if os(Linux)`, whose runtime evidence lives in the Linux shell.
+No gallery appearance or application behavior was changed by that correction.
+
+The four-case focused rerun (`out/parity-commit-recheck.log`) passes the gallery coverage check
+and `SidebarChatPreviewTests/testTheRowsButtonTakesItsOwnPressInsideTheOutline`. Both simulator
+recording cases still time out waiting for their saved movie:
+`testARecordingIsVisibleOnTheDeviceAndItsButtonUntilTheMovieIsSaved` and
+`testClosingThePaneFinishesARunningRecording`. They are recorded as unresolved validation
+failures, not counted as passing or assumed fixed by rebasing. The iOS suite remains unrun.
+The Linux runner contracts (12 tests), vendor identity checks and staged whitespace check pass.
+The checkpoint includes the existing ACP provider changes alongside the accumulated UI work.

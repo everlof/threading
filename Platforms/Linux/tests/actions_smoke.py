@@ -21,7 +21,9 @@ root.mkdir()
 store, project, home = root / 'store', root / 'ActionsProject', root / 'home'
 project.mkdir()
 home.mkdir()
-environment = dict(os.environ, HOME=str(home), THREADING_LINUX_NAVIGATION_TRACE='1')
+# This journey intentionally scrolls a ninth command through a bounded menu viewport.
+environment = dict(os.environ, HOME=str(home), THREADING_LINUX_NAVIGATION_TRACE='1',
+                   THREADING_LINUX_UI_SCALE='2')
 for name in ('THREADING_LINUX_CODEX_ACCOUNT', 'THREADING_LINUX_CLAUDE_ACCOUNT'):
     environment.pop(name, None)
 marker = root / 'child.json'
@@ -86,6 +88,13 @@ def application():
 def title(pattern):
     return eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid', str(process.pid),
                                   '--name', pattern).splitlines()[0], pattern)
+
+
+def fixed_viewport(pattern):
+    window = title(pattern)
+    xdo('windowsize', '--sync', window, '1120', '480')
+    eventually(lambda: 'IDLE_PANE_FRAME 640x480 ' in log_path.read_text(), 'bounded menu viewport')
+    return window
 
 
 def key(value):
@@ -249,11 +258,16 @@ try:
     with log_path.open('w+') as log:
         process = subprocess.Popen([binary, '--app', str(store), endpoint, '/usr/bin/python3',
                                     str(child), str(marker)], env=environment, stdout=log, stderr=log)
-        window = title('^Threading experiment - empty store$')
+        window = fixed_viewport('^Threading experiment - empty store$')
         app = eventually(application, 'empty app accessibility')
         idle = next(item for item in children()[1] if item.get_role_name() == 'panel')
-        assert idle.get_child_at_index(0).get_name() == 'No Projects Yet'
-        idle_add = idle.get_child_at_index(2)
+        assert any(idle.get_child_at_index(i).get_accessible_id() == 'linux.composer.editor'
+                   for i in range(idle.get_child_count()))
+        submit = next(idle.get_child_at_index(i) for i in range(idle.get_child_count())
+                      if idle.get_child_at_index(i).get_accessible_id() == 'linux.placeholder.action')
+        assert submit.get_name() == 'Start Session'
+        assert not submit.get_state_set().contains(Atspi.StateType.ENABLED)
+        idle_add = next(item for item in children()[1] if item.get_accessible_id() == 'linux.add-project')
         assert idle_add.get_name() == 'Add Project'
         assert idle_add.get_action_iface().do_action(0)
         eventually(lambda: listing().get_name() == 'Add Project',
@@ -293,7 +307,7 @@ try:
     with log_path.open('w+') as log:
         process = subprocess.Popen([binary, '--app', str(store), endpoint, '/usr/bin/python3',
                                     str(child), str(marker)], env=environment, stdout=log, stderr=log)
-        window = title('^Threading experiment - ' + re.escape(str(project)) + '$')
+        window = fixed_viewport('^Threading experiment - ' + re.escape(str(project)) + '$')
         app = eventually(application, 'project accessibility')
         _, bounds = button()
         xdo('mousemove', '--window', window, '10', '150')
@@ -377,8 +391,12 @@ try:
         key('Tab')
         eventually(terminal_focus, 'terminal focus after sidebar-return dismissal')
         xdo('mousemove', '--window', window, '500', '100', 'click', '1')
-        # The grid begins below the 82px header. A click at500,100 is column19,row1.
-        expected_input = b'ivx\x1b[<0;19;1M\x1b[<0;19;1m'
+        terminal = next(item for item in children()[1] if item.get_role_name() == 'terminal')
+        grid = terminal.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        assert grid.x <= 500 < grid.x + grid.width and grid.y <= 100 < grid.y + grid.height
+        # Terminal cells stay 10×22 physical pixels; UI scaling changes the pane origin.
+        column, row = (500 - grid.x) // 10 + 1, (100 - grid.y) // 22 + 1
+        expected_input = b'ivx' + f'\x1b[<0;{column};{row}M\x1b[<0;{column};{row}m'.encode()
         eventually(lambda: child_state()['input'] == expected_input.hex(),
                    'next genuine mouse gesture retains matching press and release')
         key('a')
@@ -432,7 +450,7 @@ while True:
         process = subprocess.Popen([binary, '--app-agents', str(agent_store), endpoint, '/bin/sh',
                                     str(root / 'agent-codex'), str(root / 'agent-claude')],
                                    env=environment, stdout=log, stderr=log)
-        window = title('^Threading experiment - ' + re.escape(str(agent_project)) + '$')
+        window = fixed_viewport('^Threading experiment - ' + re.escape(str(agent_project)) + '$')
         app = eventually(application, 'configured provider accessibility')
         for number, provider in enumerate(('codex', 'claude'), start=1):
             press_accessible()

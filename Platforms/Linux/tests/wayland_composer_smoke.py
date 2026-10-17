@@ -94,11 +94,11 @@ def listing(name):
                  if item.get_role_name() == 'list' and item.get_name() == name), None)
 
 
-def panel(title):
+def panel():
     return next((item for item in descendants(app)
                  if item.get_role_name() == 'panel'
                  and item.get_child_count() > 0
-                 and item.get_child_at_index(0).get_name() == title), None)
+                 and item.get_child_at_index(0).get_accessible_id() == 'linux.composer.greeting'), None)
 
 
 input_socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -156,20 +156,16 @@ try:
         process = subprocess.Popen([launcher, str(project)], env=environment,
                                    stdout=log, stderr=log)
         app = eventually(application, 'installed Wayland application')
-        idle = eventually(lambda: panel('No Session Selected'), 'idle pane')
+        idle = eventually(lambda: panel(), 'idle pane')
         (capture / 'trigger').write_text('normal\n')
-        move_to(idle.get_child_at_index(2))
+        move_to(control('linux.composer.project'))
         idle_image = eventually(lambda: valid_bitmap(capture / 'normal.bmp')
                                 if (capture / 'normal.bmp').is_file() else None,
                                 'idle compositor capture')
-        click(eventually(lambda: control('linux.placeholder.action'), 'New Session'))
-        create = eventually(lambda: listing('New in Project'), 'project create menu')
-        click(create.get_child_at_index(0))
-        providers = eventually(lambda: listing('New Chat providers'), 'provider menu')
-        click(providers.get_child_at_index(0))
-        composer = eventually(lambda: panel('Start a Codex session'), 'composer pane')
+        composer = eventually(lambda: panel(), 'composer pane')
         editor = eventually(lambda: control('linux.composer.editor'), 'composer editor')
-        assert editor.get_state_set().contains(Atspi.StateType.FOCUSED)
+        click(editor)
+        eventually(lambda: editor.get_state_set().contains(Atspi.StateType.FOCUSED), 'editor focus')
         assert editor.get_state_set().contains(Atspi.StateType.EDITABLE)
 
         prompt = 'granska å\nrad två'
@@ -188,10 +184,14 @@ try:
         editable.set_text_contents(long_prompt)
         eventually(lambda: Atspi.Text.get_text(text, 0, -1) == long_prompt,
                    'long Wayland brief')
+        # Accessibility publishes after presentation. Establish a different caret first,
+        # then arm the capture before the real edit that scrolls back to the tail. Pointer
+        # movement is not a frame barrier and can capture an intermediate chip hover.
+        assert text.set_caret_offset(0)
+        eventually(lambda: text.get_caret_offset() == 0, 'long brief start caret')
+        (capture / 'trigger').write_text('scroll-tail\n')
         assert text.set_caret_offset(len(long_prompt))
         eventually(lambda: text.get_caret_offset() == len(long_prompt), 'long brief caret')
-        (capture / 'trigger').write_text('scroll-tail\n')
-        move_to(editor)
         tail_image = eventually(lambda: valid_bitmap(capture / 'scroll-tail.bmp')
             if (capture / 'scroll-tail.bmp').is_file() else None, 'tail compositor capture')
 

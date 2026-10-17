@@ -11,6 +11,7 @@ public final class NSTrackingArea {
         public static let activeInKeyWindow = Options(rawValue: 1 << 1)
         public static let activeAlways = Options(rawValue: 1 << 2)
         public static let inVisibleRect = Options(rawValue: 1 << 3)
+        public static let mouseMoved = Options(rawValue: 1 << 4)
     }
 
     public let rect: NSRect

@@ -18,6 +18,8 @@ Sources/Threading/Core/Settings/LimitRecoveryPolicy.swift
 Sources/Threading/Core/Settings/PreferenceStore.swift
 Sources/Threading/Core/Agent/AgentDefaults.swift
 Sources/Threading/Core/Agent/ModelName.swift
+Sources/Threading/Core/Agent/AgentModelOption.swift
+Sources/Threading/Core/Agent/ProviderModelCatalog.swift
 Sources/Threading/Models/Identifiers.swift
 Sources/Threading/Models/Project.swift
 Sources/Threading/Models/AgentSession.swift
@@ -144,3 +146,4 @@ Sources/Threading/Core/Agent/ConversationPreparedChild.swift
 Sources/Threading/Core/Agent/PermissionPolicy.swift
 Sources/Threading/Core/Agent/ShellCommandPolicy.swift
 Sources/Threading/Core/Session/AttachmentDetection.swift
+Sources/Threading/Core/Agent/ACPLaunchCommand.swift

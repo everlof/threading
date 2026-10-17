@@ -1,5 +1,7 @@
 """Project count, disclosure, and inline terminal selection in the native shell."""
 import os
+import json
+import sqlite3
 from pathlib import Path
 import signal
 import subprocess
@@ -24,9 +26,14 @@ for folder in (alpha, beta):
     subprocess.run([host, '--add-project', str(store), str(folder)],
                    check=True, capture_output=True, timeout=8)
 # The saved terminal remains a child of Alpha after /bin/true exits. No terminal is opened
-# in this fixture's window, so both projects still use the collapsed top-level row shape.
+# in this fixture's window; explicitly start both projects collapsed to inspect their badges.
 subprocess.run([host, str(store), endpoint, 'run', str(alpha), '/bin/true'],
                stdin=subprocess.DEVNULL, check=True, capture_output=True, timeout=12)
+with sqlite3.connect(store / 'threading.db') as database:
+    for identity, payload in database.execute('SELECT id,data FROM project').fetchall():
+        value = json.loads(payload)
+        value['isExpanded'] = False
+        database.execute('UPDATE project SET data=? WHERE id=?', (json.dumps(value), identity))
 log_path = output / 'window.log'
 Atspi.init()
 
@@ -94,8 +101,10 @@ def pixel(rgb, x, y):
     return tuple(rgb[offset:offset + 3])
 
 
+# The full 240-point outline retains AppKit’s 16-point outer cell band.
+# This fixture renders at 2× and subtracts that band before sampling the count/actions.
 def trailing_ink(rgb, rect):
-    row_right = rect.x + rect.width
+    row_right = rect.x + rect.width - 32
     background = pixel(rgb, row_right - 88, rect.y + rect.height // 2)
     return sum(max(abs(channel - ground) for channel, ground in
                    zip(pixel(rgb, x, y), background)) > 35
@@ -104,7 +113,7 @@ def trailing_ink(rgb, rect):
 
 
 def slot_ink(rgb, rect, trailing_start, trailing_end):
-    row_right = rect.x + rect.width
+    row_right = rect.x + rect.width - 32
     background = pixel(rgb, row_right - 88, rect.y + rect.height // 2)
     return sum(max(abs(channel - ground) for channel, ground in
                    zip(pixel(rgb, x, y), background)) > 35
@@ -115,7 +124,7 @@ def slot_ink(rgb, rect, trailing_start, trailing_end):
 def count_digit_ink(rgb, rect):
     # The production ellipsis replaces the count in this slot. Its three dots cross the
     # digit's middle, so sample the count's upper and lower strokes outside the dots.
-    row_right = rect.x + rect.width
+    row_right = rect.x + rect.width - 32
     background = pixel(rgb, row_right - 88, rect.y + rect.height // 2)
     center = rect.y + rect.height // 2
     rows = list(range(center - 12, center - 5)) + list(range(center + 4, center + 10))
@@ -139,7 +148,7 @@ try:
     xdo('mousemove', '0', '0')
     with log_path.open('w+') as log:
         process = subprocess.Popen([binary, '--app', str(store), endpoint, '/bin/sh'],
-                                   env=dict(os.environ, THREADING_LINUX_NAVIGATION_TRACE='1'),
+                                   env=dict(os.environ, THREADING_LINUX_NAVIGATION_TRACE='1', THREADING_LINUX_UI_SCALE='2'),
                                    stdout=log, stderr=log)
         app = eventually(lambda: application(process), 'AT-SPI registration', process)
         listed = eventually(lambda: project_list(app), 'two project rows', process)
@@ -150,13 +159,22 @@ try:
         row_rects = [row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
                      for row in (first, second)]
         for index, rect in enumerate(row_rects):
-            assert (rect.x, rect.y, rect.width, rect.height) == (12, 86 + index * 64, 296, 60)
+            assert (rect.x, rect.y, rect.width, rect.height) == (0, 110 + index * 60, 480, 60)
         window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
                                         str(process.pid), '--name', '^Threading experiment - '),
                             'native window', process).splitlines()[0]
+        # This pixel fixture has a fixed viewport; startup fitting is covered by multi_project_outline.
+        xdo('windowsize', '--sync', window, '1120', '480')
+        eventually(lambda: 'IDLE_PANE_FRAME 640x480 ' in log_path.read_text(), 'fixed viewport', process)
         eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') >= 1,
                    'initial neutral project frame', process)
         initial = capture(window, 'project-count-alpha.png')
+        # At 2× the capsule begins at x=20 and the project's icon slot begins at x=58.
+        # The previous host painted the identity at x=20, outside its own selection.
+        center = row_rects[0].y + row_rects[0].height // 2
+        selection = pixel(initial, 300, center)
+        assert pixel(initial, 21, center) == selection, 'project identity escaped the selection gutter'
+        assert pixel(initial, 60, center) != selection, 'project identity is absent from the inset cell'
         assert trailing_ink(initial, row_rects[0]) >= 8, 'nonzero count absent from trailing slot'
         assert trailing_ink(initial, row_rects[1]) == 0, 'zero count painted in trailing slot'
 
@@ -186,27 +204,40 @@ try:
         eventually(lambda: selected(listed, 0) and not selected(listed, 1),
                    'row click selected the counted project', process)
         assert first.get_name().startswith('AlphaCount [0 agents, 1 terminals]')
-        xdo('mousemove', '--window', window, str(rect.x + 58), str(rect.y + rect.height // 2))
+        xdo('mousemove', '--window', window, str(rect.x + 36), str(rect.y + rect.height // 2))
         xdo('click', '--window', window, '1')
         expanded = eventually(lambda: expanded_project_list(app),
                               'project disclosure opened inline terminal', process)
         child = expanded.get_child_at_index(1)
         child_rect = child.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert (child_rect.x, child_rect.y, child_rect.width, child_rect.height) == (44, 150, 264, 56)
+        assert (child_rect.x, child_rect.y, child_rect.width, child_rect.height) == (0, 170, 480, 56)
         assert child.get_accessible_id() not in (first.get_accessible_id(), second.get_accessible_id())
         assert selected(expanded, 0) and not selected(expanded, 1)
         expanded_pixels = capture(window, 'project-count-alpha-expanded.png')
-        assert terminal_content_ink(expanded_pixels, child_rect, 8, 40) >= 16, \
+        assert terminal_content_ink(expanded_pixels, child_rect, 86, 118) >= 16, \
             'shared terminal identity glyph absent from inline child'
-        assert terminal_content_ink(expanded_pixels, child_rect, 44, 160) >= 16, \
+        assert terminal_content_ink(expanded_pixels, child_rect, 130, 240) >= 16, \
             'shared terminal title absent from inline child'
         xdo('key', 'Down')
         eventually(lambda: selected(expanded, 1), 'inline terminal keyboard selection', process)
         selected_terminal = capture(window, 'project-count-alpha-terminal-selected.png')
-        assert terminal_content_ink(selected_terminal, child_rect, 8, 40) >= 16, \
+        assert terminal_content_ink(selected_terminal, child_rect, 86, 118) >= 16, \
             'selected terminal identity glyph disappeared'
-        assert terminal_content_ink(selected_terminal, child_rect, 44, 160) >= 16, \
+        assert terminal_content_ink(selected_terminal, child_rect, 130, 240) >= 16, \
             'selected terminal title disappeared'
+        before_theme = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
+        xdo('key', 'ctrl+shift+t')
+        eventually(lambda: 'THEME_APPEARANCE dark' in log_path.read_text()
+                   and log_path.read_text().count('NAVIGATOR_TEXT mounted=') > before_theme,
+                   'dark outline repaint', process)
+        dark_terminal = capture(window, 'project-count-alpha-terminal-dark.png')
+        assert terminal_content_ink(dark_terminal, child_rect, 86, 118) >= 16, \
+            'dark selected terminal identity disappeared'
+        assert terminal_content_ink(dark_terminal, child_rect, 130, 240) >= 16, \
+            'dark selected terminal title disappeared'
+        assert pixel(dark_terminal, 400, child_rect.y + child_rect.height // 2) != \
+            pixel(selected_terminal, 400, child_rect.y + child_rect.height // 2), \
+            'selected outline did not adopt the dark palette'
         xdo('key', 'Up')
         eventually(lambda: selected(expanded, 0), 'project keyboard selection', process)
         xdo('key', 'space')

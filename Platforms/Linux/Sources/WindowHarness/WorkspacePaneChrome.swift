@@ -28,7 +28,7 @@ final class SessionMenuSurface: NSView {
 /// Shared pane header and bounded menus. The content runtime owns input and lifecycle.
 @MainActor
 final class WorkspacePaneChrome {
-    static var headerPixelHeight: Int { Int((PaneHeaderView.bandHeight * 2).rounded()) }
+    static var headerPixelHeight: Int { Int((PaneHeaderView.bandHeight * WorkspaceDisplay.scale).rounded()) }
     private static let visibleMenuRows = 6
     private var menuVisibleRows = 6
 
@@ -39,7 +39,7 @@ final class WorkspacePaneChrome {
 
     private enum MenuContent: Equatable { case sessionActions, openIn }
 
-    private let headerWindow = NSWindow(backingScaleFactor: 2)
+    private let headerWindow = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
     private let headerRoot = NSView(frame: .zero)
     private let pageTitle = PageTitleView(symbolName: "terminal", inkSource: .backdrop)
     private let openInAction = ThemedIconButton(
@@ -50,8 +50,8 @@ final class WorkspacePaneChrome {
         target: .splitMenu, glyphMaterialization: .deferred)
     private lazy var openInControl = SplitIconButtonView(
         action: openInAction, chevron: openInChooser)
-    let pageIdentity: String
-    private let menuWindow = NSWindow(backingScaleFactor: 2)
+    private(set) var pageIdentity: String
+    private let menuWindow = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
     private let menuRoot = SessionMenuSurface(frame: .zero)
     private var menuRows: [ThemedMenuRowView] = []
     private var menuPlan: ThemedMenuRowPlan?
@@ -180,14 +180,31 @@ final class WorkspacePaneChrome {
         case 3: eventType = .leftMouseUp
         default: eventType = .mouseMoved
         }
-        let point = NSPoint(x: CGFloat(input.x) / 2,
-                            y: PaneHeaderView.bandHeight - CGFloat(input.y) / 2)
+        let point = NSPoint(x: CGFloat(input.x) / WorkspaceDisplay.scale,
+                            y: PaneHeaderView.bandHeight - CGFloat(input.y) / WorkspaceDisplay.scale)
         _ = headerWindow.dispatchToContent(NSEvent(type: eventType, locationInWindow: point))
         if input.action == 4 { headerWindow.cancelPointerGesture() }
         headerNeedsPresentation = true
     }
 
     func pressPageTitle() -> Bool { pageTitle.accessibilityPerformPress() }
+
+    /// A new shell acquires its durable identity on a worker after this header is mounted.
+    /// Update the existing control, without replacing its terminal pane or input ownership.
+    func updateTerminalPage(name: String, identity: String, window: OpaquePointer,
+                            onReveal: @escaping () -> Void) {
+        guard pageIdentity != identity else { return }
+        dismissMenu(window: window)
+        headerWindow.cancelPointerGesture()
+        menuToggleRequested = false
+        openInChooserToggleRequested = false
+        requestedOpenInID = nil
+        chosenOpenInID = nil
+        pageIdentity = identity
+        pageTitle.update(title: name, symbolName: "terminal", identity: identity)
+        pageTitle.onReveal = onReveal
+        headerNeedsPresentation = true
+    }
 
     func pressSessionActions() -> Bool {
         guard hasSessionActions else { return false }
@@ -247,8 +264,8 @@ final class WorkspacePaneChrome {
         menuPlan = ThemedMenuRowPlan(entries: entries, selectedEntryIndex: selectedEntryIndex)
         menuSelected = selectedEntryIndex ?? 0
         menuFirstVisible = min(menuSelected, max(0, entries.count - menuVisibleRows))
-        let menuWidth = min(CGFloat(228), CGFloat(paneWidth) / 2 - 8)
-        menuSize.width = Int(menuWidth * 2)
+        let menuWidth = min(CGFloat(228), CGFloat(paneWidth) / WorkspaceDisplay.scale - 8)
+        menuSize.width = Int(menuWidth * WorkspaceDisplay.scale)
         rebuildVisibleMenuRows()
         headerWindow.layoutIfNeeded()
         let x: Int
@@ -256,11 +273,11 @@ final class WorkspacePaneChrome {
         case .sessionActions:
             let anchor = pageTitle.actionsAnchor.convert(pageTitle.actionsAnchor.bounds,
                                                           to: headerRoot)
-            x = Int((anchor.minX * 2).rounded())
+            x = Int((anchor.minX * WorkspaceDisplay.scale).rounded())
             pageTitle.actionsAnchor.isSelected = true
         case .openIn:
             let anchor = openInChooser.convert(openInChooser.bounds, to: headerRoot)
-            x = Int((anchor.maxX * 2).rounded()) - menuSize.width
+            x = Int((anchor.maxX * WorkspaceDisplay.scale).rounded()) - menuSize.width
             openInChooser.isSelected = true
         }
         menuOrigin = (max(0, min(paneWidth - menuSize.width, x)), Self.headerPixelHeight)
@@ -275,8 +292,8 @@ final class WorkspacePaneChrome {
         let visible = menuFirstVisible..<last
         let padding: CGFloat = 6
         let menuHeight = visible.reduce(2 * padding) { $0 + plan.heights[$1] }
-        menuSize.height = Int(menuHeight * 2)
-        let menuWidth = CGFloat(menuSize.width) / 2
+        menuSize.height = Int(menuHeight * WorkspaceDisplay.scale)
+        let menuWidth = CGFloat(menuSize.width) / WorkspaceDisplay.scale
         menuRoot.frame = NSRect(x: 0, y: 0, width: menuWidth, height: menuHeight)
         for row in menuRows { row.removeFromSuperview() }
         menuRows.removeAll(keepingCapacity: true)
@@ -370,8 +387,8 @@ final class WorkspacePaneChrome {
             case 3: eventType = .leftMouseUp
             default: eventType = .mouseMoved
             }
-            let point = NSPoint(x: CGFloat(input.x) / 2,
-                                y: menuRoot.bounds.height - CGFloat(input.y) / 2)
+            let point = NSPoint(x: CGFloat(input.x) / WorkspaceDisplay.scale,
+                                y: menuRoot.bounds.height - CGFloat(input.y) / WorkspaceDisplay.scale)
             _ = menuWindow.dispatchToContent(NSEvent(type: eventType, locationInWindow: point))
             menuNeedsPresentation = true
         }
@@ -387,7 +404,7 @@ final class WorkspacePaneChrome {
         guard menuOpen, menuNeedsPresentation else { return }
         menuNeedsPresentation = false
         let bitmap = Bitmap(width: menuSize.width, height: menuSize.height)
-        menuRoot.render(in: NSGraphicsContext(bitmap: bitmap, scale: 2))
+        menuRoot.render(in: NSGraphicsContext(bitmap: bitmap, scale: WorkspaceDisplay.scale))
         let result = bitmap.pixels.withUnsafeBufferPointer {
             tw_present_session_menu(window, $0.baseAddress,
                                     Int32(menuSize.width), Int32(menuSize.height),
@@ -404,8 +421,8 @@ final class WorkspacePaneChrome {
         }
         for row in menuRows {
             let bounds = row.convert(row.bounds, to: menuRoot)
-            let x = originX + menuOrigin.x + Int((bounds.minX * 2).rounded())
-            let y = menuOrigin.y + Int(((menuRoot.bounds.height - bounds.maxY) * 2).rounded())
+            let x = originX + menuOrigin.x + Int((bounds.minX * WorkspaceDisplay.scale).rounded())
+            let y = menuOrigin.y + Int(((menuRoot.bounds.height - bounds.maxY) * WorkspaceDisplay.scale).rounded())
             let rowID: String
             switch menuContent {
             case .sessionActions: rowID = SessionMenuCommand.allCases[row.entryIndex].rawValue
@@ -417,7 +434,7 @@ final class WorkspacePaneChrome {
                 row.item.title.withCString { name in
                     tw_accessibility_session_menu_add_row(window, identifier, name,
                         row.entryIndex == menuSelected ? 1 : 0, 1, Int32(x), Int32(y),
-                        Int32((bounds.width * 2).rounded()), Int32((bounds.height * 2).rounded()))
+                        Int32((bounds.width * WorkspaceDisplay.scale).rounded()), Int32((bounds.height * WorkspaceDisplay.scale).rounded()))
                 }
             }
         }
@@ -428,7 +445,7 @@ final class WorkspacePaneChrome {
         guard headerNeedsPresentation || headerWidth != width else { return }
         headerNeedsPresentation = false
         headerWidth = width
-        headerRoot.frame = NSRect(x: 0, y: 0, width: CGFloat(width) / 2,
+        headerRoot.frame = NSRect(x: 0, y: 0, width: CGFloat(width) / WorkspaceDisplay.scale,
                                   height: PaneHeaderView.bandHeight)
         let openInWidth = Design.Size.toolbarButtonWidth + Design.Size.splitMenuWidth
             + PaneHeaderView.itemSpacing
@@ -436,20 +453,20 @@ final class WorkspacePaneChrome {
             - 2 * PaneHeaderView.contentInset - openInWidth)
         let bitmap = Bitmap(width: width, height: Self.headerPixelHeight,
                             background: LinuxTheme.components("terminal.background"))
-        headerRoot.render(in: NSGraphicsContext(bitmap: bitmap, scale: 2))
+        headerRoot.render(in: NSGraphicsContext(bitmap: bitmap, scale: WorkspaceDisplay.scale))
         let result = bitmap.pixels.withUnsafeBufferPointer {
             tw_present_terminal_header(window, $0.baseAddress,
                                        Int32(width), Int32(Self.headerPixelHeight))
         }
         guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
         let titleBounds = pageTitle.convert(pageTitle.bounds, to: headerRoot)
-        let left = Int((titleBounds.minX * 2).rounded(.down))
-        let top = Int((titleBounds.maxY * 2).rounded(.up))
+        let left = Int((titleBounds.minX * WorkspaceDisplay.scale).rounded(.down))
+        let top = Int((titleBounds.maxY * WorkspaceDisplay.scale).rounded(.up))
         let actionsBounds = pageTitle.actionsAnchor.convert(pageTitle.actionsAnchor.bounds,
                                                               to: headerRoot)
         let right = Int(((hasSessionActions ? min(titleBounds.maxX, actionsBounds.minX)
-                           : titleBounds.maxX) * 2).rounded(.up))
-        let bottom = Int((titleBounds.minY * 2).rounded(.down))
+                           : titleBounds.maxX) * WorkspaceDisplay.scale).rounded(.up))
+        let bottom = Int((titleBounds.minY * WorkspaceDisplay.scale).rounded(.down))
         pageIdentity.withCString { identity in
             pageTitle.title.withCString { name in
                 tw_accessibility_page_title(window, identity, name,
@@ -458,13 +475,13 @@ final class WorkspacePaneChrome {
             }
         }
         if hasSessionActions {
-            let actionX = Int((actionsBounds.minX * 2).rounded(.down))
-            let actionTop = Int((actionsBounds.maxY * 2).rounded(.up))
+            let actionX = Int((actionsBounds.minX * WorkspaceDisplay.scale).rounded(.down))
+            let actionTop = Int((actionsBounds.maxY * WorkspaceDisplay.scale).rounded(.up))
             pageIdentity.withCString { identity in
                 tw_accessibility_page_actions(window, identity, "Session context menu",
                     Int32(originX + actionX), Int32(Self.headerPixelHeight - actionTop),
-                    Int32((actionsBounds.width * 2).rounded()),
-                    Int32((actionsBounds.height * 2).rounded()))
+                    Int32((actionsBounds.width * WorkspaceDisplay.scale).rounded()),
+                    Int32((actionsBounds.height * WorkspaceDisplay.scale).rounded()))
             }
         } else {
             tw_accessibility_page_actions(window, nil, nil, 0, 0, 0, 0)
@@ -472,21 +489,21 @@ final class WorkspacePaneChrome {
         if preferredOpenInID != nil {
             let primary = openInAction.convert(openInAction.bounds, to: headerRoot)
             let chooser = openInChooser.convert(openInChooser.bounds, to: headerRoot)
-            let primaryTop = Int((primary.maxY * 2).rounded(.up))
-            let chooserTop = Int((chooser.maxY * 2).rounded(.up))
+            let primaryTop = Int((primary.maxY * WorkspaceDisplay.scale).rounded(.up))
+            let chooserTop = Int((chooser.maxY * WorkspaceDisplay.scale).rounded(.up))
             pageIdentity.withCString { identity in
                 (openInAction.accessibilityTitle() ?? "Open in external app").withCString { label in
                     (openInChooser.accessibilityTitle() ?? "Choose an app to open in")
                         .withCString { chooserLabel in
                             tw_accessibility_open_in(window, identity, label, chooserLabel, 1,
-                                Int32(originX + Int((primary.minX * 2).rounded(.down))),
+                                Int32(originX + Int((primary.minX * WorkspaceDisplay.scale).rounded(.down))),
                                 Int32(Self.headerPixelHeight - primaryTop),
-                                Int32((primary.width * 2).rounded()),
-                                Int32((primary.height * 2).rounded()),
-                                Int32(originX + Int((chooser.minX * 2).rounded(.down))),
+                                Int32((primary.width * WorkspaceDisplay.scale).rounded()),
+                                Int32((primary.height * WorkspaceDisplay.scale).rounded()),
+                                Int32(originX + Int((chooser.minX * WorkspaceDisplay.scale).rounded(.down))),
                                 Int32(Self.headerPixelHeight - chooserTop),
-                                Int32((chooser.width * 2).rounded()),
-                                Int32((chooser.height * 2).rounded()))
+                                Int32((chooser.width * WorkspaceDisplay.scale).rounded()),
+                                Int32((chooser.height * WorkspaceDisplay.scale).rounded()))
                         }
                 }
             }
@@ -507,7 +524,7 @@ final class WorkspacePaneChrome {
     func refresh(window: OpaquePointer, width: Int, height: Int, originX: Int) throws {
         if menuOpen && headerWidth != width { dismissMenu(window: window) }
         if menuOpen, let plan = menuPlan {
-            let available = CGFloat(max(0, height - Self.headerPixelHeight)) / 2
+            let available = CGFloat(max(0, height - Self.headerPixelHeight)) / WorkspaceDisplay.scale
             var rows = 0
             var used: CGFloat = 12
             for rowHeight in plan.heights.prefix(Self.visibleMenuRows) {

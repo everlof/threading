@@ -6,7 +6,7 @@ mkdir -p out
 docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_RESTART_ONLY="${THREADING_LINUX_RESTART_ONLY:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_LINUX_STARTUP_TRACE="${THREADING_LINUX_STARTUP_TRACE:-0}" -e THREADING_LINUX_AGENT_ONLY="${THREADING_LINUX_AGENT_ONLY:-0}" -e THREADING_LINUX_NAMED_ONLY="${THREADING_LINUX_NAMED_ONLY:-0}" -e THREADING_LINUX_IME_ONLY="${THREADING_LINUX_IME_ONLY:-0}" -e THREADING_LINUX_COMPOSER_IME_ONLY="${THREADING_LINUX_COMPOSER_IME_ONLY:-0}" -e THREADING_LINUX_A11Y_ONLY="${THREADING_LINUX_A11Y_ONLY:-0}" -e THREADING_LINUX_COMPOSER_ONLY="${THREADING_LINUX_COMPOSER_ONLY:-0}" -e THREADING_LINUX_COMPOSER_ACCOUNT_ONLY="${THREADING_LINUX_COMPOSER_ACCOUNT_ONLY:-0}" -e THREADING_LINUX_OPEN_IN_ONLY="${THREADING_LINUX_OPEN_IN_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Platforms/Linux swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
 set -euo pipefail
 apt-get update -qq >/dev/null
-apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev libglib2.0-dev libgdk-pixbuf-2.0-dev librsvg2-common fonts-dejavu-core fonts-noto-cjk fonts-noto-color-emoji xvfb xdotool xclip imagemagick zenity python3-gi gir1.2-atspi-2.0 dbus-x11 >/dev/null
+apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev libglib2.0-dev libgdk-pixbuf-2.0-dev librsvg2-common fonts-dejavu-core fonts-noto-cjk fonts-noto-color-emoji xvfb xdotool xclip imagemagick zenity python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 dbus-x11 >/dev/null
 if [[ "$THREADING_LINUX_IME_ONLY" == 1 || "$THREADING_LINUX_COMPOSER_IME_ONLY" == 1 ]]; then
   apt-get install -y -qq ibus ibus-libpinyin dbus-x11 >/dev/null
 fi
@@ -62,6 +62,10 @@ done
 if [[ "$THREADING_LINUX_COMPOSER_ONLY" == 1 ]]; then
   dbus-run-session -- python3 tests/composer_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
     "$daemon" "$fixture/composer.sock" "$fixture" "$PWD/out/composer"
+  dbus-run-session -- python3 tests/composer_permissions_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/composer-permissions.sock" "$fixture" "$PWD/out/composer-permissions"
+  dbus-run-session -- python3 tests/composer_models_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/composer-models.sock" "$fixture" "$PWD/out/composer-models"
   exit 0
 fi
 if [[ "$THREADING_LINUX_COMPOSER_ACCOUNT_ONLY" == 1 ]]; then
@@ -157,7 +161,7 @@ if [[ "$THREADING_LINUX_AGENT_ONLY" == 1 ]]; then
   LD_PRELOAD="$fixture/gtk-present-delay.so" THREADING_GTK_PRESENT_DELAY_MS=3000 \
     dbus-run-session -- python3 tests/agent_catalogue_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
     "$daemon" "$fixture/pty.sock" "$fixture"
-  python3 tests/agent_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"
+  dbus-run-session -- python3 tests/agent_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"
   python3 tests/named_codex_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
   python3 tests/native_claude_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
   python3 tests/named_claude_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
@@ -439,7 +443,7 @@ dbus-run-session -- python3 tests/open_in_smoke.py "$bin/WindowHarness" "$bin/Li
 
 python3 tests/project_retry_smoke.py "$bin/WindowHarness" "$fixture/store"
 python3 tests/project_terminal_picker_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" "$PWD/tests/terminal_attach_child.py"
-python3 tests/agent_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"
+dbus-run-session -- python3 tests/agent_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture"
 python3 tests/agent_create_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
 python3 tests/named_codex_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
 python3 tests/native_claude_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture"
@@ -457,10 +461,22 @@ dbus-run-session -- python3 tests/provider_marks_smoke.py "$bin/WindowHarness" "
   "$daemon" "$fixture/pty.sock" "$fixture"
 dbus-run-session -- python3 tests/composer_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$daemon" "$fixture/composer.sock" "$fixture" "$PWD/out/composer"
+dbus-run-session -- python3 tests/composer_permissions_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$daemon" "$fixture/composer-permissions.sock" "$fixture" "$PWD/out/composer-permissions"
+dbus-run-session -- python3 tests/composer_models_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$daemon" "$fixture/composer-models.sock" "$fixture" "$PWD/out/composer-models"
 dbus-run-session -- python3 tests/composer_account_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$daemon" "$fixture/composer-account.sock" "$fixture" "$PWD/out/composer-account"
 dbus-run-session -- python3 tests/project_count_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$fixture/pty.sock" "$fixture" "$PWD/out/project-count"
+for scale in 1 2; do
+  THREADING_LINUX_UI_SCALE=$scale dbus-run-session -- python3 tests/terminal_creation_selection_smoke.py \
+    "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture" \
+    "$PWD/out/terminal-creation-$scale"
+  THREADING_LINUX_UI_SCALE=$scale dbus-run-session -- python3 tests/empty_sidebar_smoke.py \
+    "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/pty.sock" "$fixture" \
+    "$PWD/out/empty-sidebar-$scale"
+done
 python3 tests/terminal_attach_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" "$PWD/tests/terminal_attach_child.py"
 python3 tests/app_startup_smoke.py "$PWD/run-app.sh" "$bin/LinuxHost" "$daemon" "$bin" "$fixture"
 python3 tests/terminal_restore_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \

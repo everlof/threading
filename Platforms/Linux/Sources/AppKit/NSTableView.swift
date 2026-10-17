@@ -79,6 +79,15 @@ public extension Notification.Name {
 /// direct documentView of an NSScrollView.
 @MainActor
 open class NSTableView: NSView, NSClipViewDocumentObserver {
+    public enum Style { case fullWidth, inset }
+
+    /// The inset table's ten-point document breathing scrolls with its rows. Hosts still
+    /// own cell content and row chrome; this is table geometry, not an outer viewport gap.
+    open var style: Style = .fullWidth {
+        didSet { if style != oldValue { finishDocumentGeometry() } }
+    }
+    private var verticalRowInset: CGFloat { style == .inset ? 10 : 0 }
+
     public struct AnimationOptions: OptionSet, Sendable {
         public let rawValue: UInt
         public init(rawValue: UInt) { self.rawValue = rawValue }
@@ -297,7 +306,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
     private func viewportAnchor() -> (row: Int, offset: CGFloat)? {
         guard let clip = superview as? NSClipView,
               let row = visibleRowRange().first else { return nil }
-        return (row, clip.bounds.minY - rowHeightIndex.offset(row))
+        return (row, clip.bounds.minY - rowOffset(row))
     }
 
     private func remapRetainedRows(_ position: (Int) -> Int?) {
@@ -329,7 +338,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         finishDocumentGeometry()
         if let anchor, let clip = superview as? NSClipView {
             clip.scroll(to: NSPoint(x: clip.bounds.minX,
-                y: rowHeightIndex.offset(anchor.row) + anchor.offset))
+                y: rowOffset(anchor.row) + anchor.offset))
         }
         reconcilingRows = false
         reconcileVisibleRows()
@@ -370,7 +379,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
 
     open func rect(ofRow row: Int) -> NSRect {
         guard row >= 0, row < numberOfRows else { return .zero }
-        return NSRect(x: 0, y: rowHeightIndex.offset(row),
+        return NSRect(x: 0, y: rowOffset(row),
                       width: frame.width, height: rowHeights[row])
     }
 
@@ -379,7 +388,8 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
               point.x < frame.width else { return -1 }
         let index = firstOffset(after: point.y) - 1
         guard index >= 0, index < numberOfRows,
-              point.y < rowHeightIndex.offset(index) + rowHeights[index] else { return -1 }
+              point.y >= rowOffset(index),
+              point.y < rowOffset(index) + rowHeights[index] else { return -1 }
         return index
     }
 
@@ -512,7 +522,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
     }
 
     private func finishDocumentGeometry() {
-        let height = rowHeightIndex.offset(numberOfRows)
+        let height = rowHeightIndex.offset(numberOfRows) + verticalRowInset * 2
         precondition(height.isFinite, "table document exceeds finite geometry")
         changingDocumentGeometry = true
         if frame.height != height { frame.size.height = height }
@@ -528,7 +538,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         guard !visible.isEmpty else { return 0..<0 }
         var lower = max(0, min(numberOfRows, firstOffset(after: visible.minY) - 1))
         if lower < numberOfRows,
-           visible.minY >= rowHeightIndex.offset(lower) + rowHeights[lower] {
+           visible.minY >= rowOffset(lower) + rowHeights[lower] {
             lower += 1
         }
         let upper = max(lower, min(numberOfRows, firstOffset(atOrAfter: visible.maxY)))
@@ -537,12 +547,16 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
 
     /// First prefix offset greater than `value` (upper bound).
     private func firstOffset(after value: CGFloat) -> Int {
-        rowHeightIndex.firstOffset(value, strictlyAfter: true)
+        rowHeightIndex.firstOffset(value - verticalRowInset, strictlyAfter: true)
     }
 
     /// First prefix offset greater than or equal to `value` (lower bound).
     private func firstOffset(atOrAfter value: CGFloat) -> Int {
-        rowHeightIndex.firstOffset(value, strictlyAfter: false)
+        rowHeightIndex.firstOffset(value - verticalRowInset, strictlyAfter: false)
+    }
+
+    private func rowOffset(_ row: Int) -> CGFloat {
+        verticalRowInset + rowHeightIndex.offset(row)
     }
 
     private func reconcileVisibleRows() {

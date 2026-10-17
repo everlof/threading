@@ -31,6 +31,7 @@ public final class NSBezierPath {
     public var windingRule: NSBezierPathWindingRule = .nonZero
     public var lineCapStyle: NSLineCapStyle = .butt
     public var lineJoinStyle: NSLineJoinStyle = .miter
+    public var miterLimit: CGFloat = 10
     public var isEmpty: Bool { elements.isEmpty }
     public var elementCount: Int { elements.count }
 
@@ -134,6 +135,7 @@ public final class NSBezierPath {
         path.windingRule = windingRule
         path.lineCapStyle = lineCapStyle
         path.lineJoinStyle = lineJoinStyle
+        path.miterLimit = miterLimit
         var current = NSPoint.zero
         var subpathStart = NSPoint.zero
         for element in elements {
@@ -269,15 +271,27 @@ public final class NSBezierPath {
 
     // MARK: - Flattening
 
-    /// Subpaths as polygons in this path's own coordinate space.
+    struct Subpath {
+        var points: [NSPoint]
+        var closed: Bool
+    }
+
+    /// Fill consumers retain explicit closing vertices; stroke consumers also need closure
+    /// metadata, since a line ending at its start still has two caps unless close() was called.
     func polygons(flatness: CGFloat = 0.2) -> [[NSPoint]] {
-        var result: [[NSPoint]] = []
+        subpaths(flatness: flatness).map { path in
+            path.closed ? path.points + [path.points[0]] : path.points
+        }
+    }
+
+    func subpaths(flatness: CGFloat = 0.2) -> [Subpath] {
+        var result: [Subpath] = []
         var current: [NSPoint] = []
         var start = NSPoint.zero
         for element in elements {
             switch element {
             case .move(let point):
-                if current.count > 1 { result.append(current) }
+                if current.count > 1 { result.append(Subpath(points: current, closed: false)) }
                 current = [point]; start = point
             case .line(let point):
                 current.append(point)
@@ -289,11 +303,11 @@ public final class NSBezierPath {
                     current.append(Self.cubic(from, c1, c2, point, t))
                 }
             case .close:
-                if current.count > 1 { result.append(current) }
+                if current.count > 1 { result.append(Subpath(points: current, closed: true)) }
                 current = [start]
             }
         }
-        if current.count > 1 { result.append(current) }
+        if current.count > 1 { result.append(Subpath(points: current, closed: false)) }
         return result
     }
 
@@ -339,7 +353,8 @@ public final class NSBezierPath {
 
     public func stroke() {
         guard let context = NSGraphicsContext.current else { return }
-        context.stroke(polygons: polygons(), width: lineWidth, color: context.strokeColor)
+        context.stroke(subpaths: subpaths(), width: lineWidth, cap: lineCapStyle,
+                       join: lineJoinStyle, miterLimit: miterLimit, color: context.strokeColor)
     }
 
     public func addClip() {

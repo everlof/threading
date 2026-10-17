@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from runtime_pixel_contract import assert_placeholder_ink
 
 import gi
 gi.require_version('Atspi', '2.0')
@@ -84,16 +85,21 @@ def chooser_pid(process):
 def capture(window, name):
     path = output / name
     subprocess.run(['import', '-window', window, str(path)], check=True, timeout=5)
-    assert subprocess.check_output(['identify', '-format', '%wx%h', str(path)],
-                                   text=True, timeout=5) == '1120x480'
+    width, height = map(int, subprocess.check_output(
+        ['identify', '-format', '%w %h', str(path)], text=True, timeout=5).split())
+    native = dict(line.split('=', 1) for line in xdo('getwindowgeometry', '--shell', window).splitlines())
+    assert (width, height) == (int(native['WIDTH']), int(native['HEIGHT']))
     image = subprocess.check_output(['convert', str(path), '-depth', '8', 'RGB:-'], timeout=5)
-    assert len(image) == 1120 * 480 * 3
-    return image
+    assert len(image) == width * height * 3
+    return width, height, image
 
 
 def changed_pixels(before, after, x0, y0, x1, y1):
-    return sum(max(abs(before[(y * 1120 + x) * 3 + channel] -
-                       after[(y * 1120 + x) * 3 + channel]) for channel in range(3)) > 25
+    width, height, first = before
+    assert after[:2] == (width, height)
+    second = after[2]
+    return sum(max(abs(first[(y * width + x) * 3 + channel] -
+                       second[(y * width + x) * 3 + channel]) for channel in range(3)) > 25
                for y in range(y0, y1) for x in range(x0, x1))
 
 
@@ -121,7 +127,9 @@ try:
         assert button.get_state_set().contains(Atspi.StateType.ENABLED)
         assert button.get_action_iface().get_n_actions() == 1
         bounds = button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        assert (bounds.x, bounds.y, bounds.width, bounds.height) == (212, 20, 40, 40)
+        scale = int(os.environ.get('THREADING_LINUX_UI_SCALE', '1'))
+        assert (bounds.x, bounds.y, bounds.width, bounds.height) == tuple(
+            value * scale for value in (186, 10, 20, 20))
         center = (bounds.x + bounds.width // 2, bounds.y + bounds.height // 2)
         assert frame.get_component_iface().get_accessible_at_point(
             *center, Atspi.CoordType.WINDOW).get_accessible_id() == 'linux.add-project'
@@ -131,6 +139,27 @@ try:
         eventually(lambda: 'NAVIGATOR_TEXT mounted=' in log_path.read_text(),
                    'initial rendered frame', process)
         normal = capture(window, 'add-project-normal.png')
+        palette = json.loads((Path(binary).parent /
+            'LinuxAppKitSpike_WindowHarness.resources/Theme/threading.json').read_text())
+        pane = next(frame.get_child_at_index(index) for index in range(frame.get_child_count())
+                    if frame.get_child_at_index(index).get_role_name() == 'panel')
+        project_chip = next(pane.get_child_at_index(i) for i in range(pane.get_child_count())
+                            if pane.get_child_at_index(i).get_accessible_id() == 'linux.composer.project')
+        action_bounds = project_chip.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        assert_placeholder_ink(output / 'add-project-normal.png', palette['light'], action_bounds, scale)
+        for appearance in ('dark', 'light'):
+            before = log_path.read_text().count('IDLE_PANE_FRAME ')
+            xdo('windowfocus', '--sync', window, 'key', 'ctrl+shift+t')
+            # The idle pane presents before the sidebar. Wait for both halves before
+            # recording an appearance, otherwise a capture can contain two themes.
+            eventually(lambda: 'OUTLINE_FRAME ' in log_path.read_text().split(
+                           f'THEME_APPEARANCE {appearance}\n')[-1]
+                       and f'THEME_APPEARANCE {appearance}' in log_path.read_text()
+                       and log_path.read_text().count('IDLE_PANE_FRAME ') > before,
+                       f'{appearance} empty-pane repaint', process)
+            capture(window, f'placeholder-{appearance}.png')
+            assert_placeholder_ink(output / f'placeholder-{appearance}.png',
+                                   palette[appearance], action_bounds, scale)
         before = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
         xdo('mousemove', '--window', window, *map(str, center))
         eventually(lambda: log_path.read_text().count('NAVIGATOR_TEXT mounted=') > before,

@@ -118,6 +118,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var running = false
     private var closed = false
     private var terminalRecordID: TerminalID?
+    private var terminalRecordTitle: String?
     struct TerminalCreation: Sendable {
         let projectID: ProjectID
         let terminalID: TerminalID
@@ -190,6 +191,7 @@ final class GraphicalTerminal: @unchecked Sendable {
                     receipt in
                     lock.lock()
                     terminalRecordID = receipt.terminalID
+                    terminalRecordTitle = receipt.title
                     terminalCreation = receipt
                     lock.unlock()
                     createdTerminalStore = store
@@ -216,7 +218,9 @@ final class GraphicalTerminal: @unchecked Sendable {
     }
     func startAgent(store: String, socket: String, directory: String, shell: String,
                     kind: AgentKind, executable: String, accountHandle: AccountHandle, id: SessionID,
-                    width: Int, height: Int, prompt: String? = nil) {
+                    width: Int, height: Int, prompt: String? = nil,
+                    permissionMode: AgentPermissionMode? = .manual,
+                    model: String? = nil, reasoningEffort: String? = nil) {
         lock.lock(); agentCreationPending = true; lock.unlock()
         worker.async { [self] in
             defer { lock.lock(); agentCreationPending = false; lock.unlock() }
@@ -227,6 +231,7 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let plan = try Self.createAgent(store: store, directory: directory,
                                                 shell: shell, kind: kind, executable: executable,
                                                 accountHandle: accountHandle, prompt: prompt,
+                                                permissionMode: permissionMode, model: model, reasoningEffort: reasoningEffort,
                                                 accountPath: accountPath, id: id) { receipt in
                     lock.lock(); agentCreation = receipt; lock.unlock()
                 }
@@ -305,11 +310,14 @@ final class GraphicalTerminal: @unchecked Sendable {
     /// Explicit activation may start this saved shell again. Startup restoration still uses
     /// attach only. One selected project payload and one bounded daemon survey stay on the worker;
     /// terminal lookup is linear in that project's embedded terminal records, not its agents.
-    func openTerminal(store: String, socket: String, terminalID: String, projectID: String,
+    func openTerminal(store: String, socket: String, terminalID: String, title: String, projectID: String,
                       executable: String, arguments: [String], width: Int, height: Int) {
         // The project cache keeps this same saved destination while its worker validates the
         // record. Publishing its identity here does not publish a new durable creation.
-        lock.lock(); terminalRecordID = TerminalID(uuidString: terminalID); lock.unlock()
+        lock.lock()
+        terminalRecordID = TerminalID(uuidString: terminalID)
+        terminalRecordTitle = title
+        lock.unlock()
         worker.async { [self] in
             do {
                 guard executable.hasPrefix("/") else {
@@ -384,6 +392,12 @@ final class GraphicalTerminal: @unchecked Sendable {
     var terminalID: String? {
         lock.lock(); defer { lock.unlock() }
         return terminalRecordID?.uuidString
+    }
+    /// Retain the committed page identity after the one-shot catalogue receipt is consumed.
+    var terminalPage: (id: String, title: String)? {
+        lock.lock(); defer { lock.unlock() }
+        guard let terminalRecordID, let terminalRecordTitle else { return nil }
+        return (terminalRecordID.uuidString, terminalRecordTitle)
     }
     func attachAgent(store: String, socket: String, sessionID: String) {
         attach(store: store, socket: socket, savedID: sessionID, kind: .agent)
@@ -678,6 +692,10 @@ final class GraphicalTerminal: @unchecked Sendable {
     }
     private static func createTerminal(store: String, directory: String, executable: String,
                                        admitted: (TerminalCreation) -> Void) throws -> PTYHostSessionIdentity {
+        // Publish committed rows even if selection subsequently fails, but only after the
+        // database and host lock have closed. The UI may immediately persist a parent reveal.
+        var creation: TerminalCreation?
+        defer { if let creation { admitted(creation) } }
         guard let folder = ProjectDirectory.existing(at: directory) else {
             throw WindowFailure("project directory does not exist")
         }
@@ -703,15 +721,16 @@ final class GraphicalTerminal: @unchecked Sendable {
             try database.saveProject(project, position: position)
         }
         // The record already exists even if selecting it or spawning its child later fails.
-        admitted(TerminalCreation(projectID: project.id, terminalID: terminal.id,
+        creation = TerminalCreation(projectID: project.id, terminalID: terminal.id,
             title: String(terminal.displayTitle.unicodeScalars.prefix(256)),
-            terminalCount: project.terminals.count, directory: terminal.currentDirectory))
+            terminalCount: project.terminals.count, directory: terminal.currentDirectory)
         try database.saveSelectedTerminalID(terminal.id)
         return PTYHostSessionIdentity(.projectTerminal(terminal.id))
     }
     private static func createAgent(store: String, directory: String, shell: String,
                                     kind: AgentKind, executable: String, accountHandle: AccountHandle,
-                                    prompt: String?, accountPath: String, id: SessionID,
+                                    prompt: String?, permissionMode: AgentPermissionMode?,
+                                    model: String?, reasoningEffort: String?, accountPath: String, id: SessionID,
                                     admitted: (AgentCreation) -> Void) throws -> AgentLaunchPlan {
         guard shell.hasPrefix("/"), executable.hasPrefix("/") else {
             throw WindowFailure("shell and agent executable must be absolute paths")
@@ -737,9 +756,17 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard try database.sessionRecord(id: id) == nil else {
             throw WindowFailure("session identity already exists")
         }
+        if model != nil || reasoningEffort != nil {
+            let catalogue = ComposerModelCatalog.read(provider: kind,
+                directory: URL(fileURLWithPath: accountPath, isDirectory: true))
+            guard catalogue.admits(model: model, effort: reasoningEffort) else {
+                throw WindowFailure("selected model or effort is no longer available for this account")
+            }
+        }
         guard var session = AgentSessionCreation.makeRecord(kind: kind,
-                                                            accountHandle: accountHandle,
-                                                            permissionMode: .manual, id: id) else {
+                                                            accountHandle: accountHandle, model: model,
+                                                            reasoningEffort: reasoningEffort,
+                                                            permissionMode: permissionMode, id: id) else {
             throw WindowFailure("unsupported session configuration")
         }
         let agentCommand: ShellCommand
@@ -747,7 +774,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         switch kind {
         case .codex:
             (agentCommand, resumeState) = CodexLaunchCommand.terminal(executable: executable,
-                model: nil, permissionMode: session.permissionMode,
+                model: session.model, reasoningEffort: session.reasoningEffort,
+                permissionMode: session.permissionMode,
                 resumeState: session.resumeState, prompt: prompt)
         case .claude:
             let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: executable,
@@ -1002,7 +1030,8 @@ final class GraphicalTerminal: @unchecked Sendable {
                 throw WindowFailure("saved Codex conversation has broken record numbering")
             }
             (agentCommand, resumeState) = CodexLaunchCommand.terminal(executable: codex,
-                model: session.model, permissionMode: session.permissionMode,
+                model: session.model, reasoningEffort: session.reasoningEffort,
+                permissionMode: session.permissionMode,
                 resumeState: session.resumeState, prompt: nil)
         case .claude:
             guard let claude, claude.hasPrefix("/") else {

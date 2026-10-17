@@ -1,4 +1,5 @@
 """A newly created shell immediately joins the native saved picker with one runtime owner."""
+from saved_catalog_menu import open_saved_terminals
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,13 @@ child = Path(__file__).with_name('saved_terminal_child.py').resolve()
 log_path = Path('out/terminal-catalogue-window.log')
 subprocess.run([host, '--add-project', str(store), str(project)], check=True,
                capture_output=True, timeout=10)
+# This catalog journey checks the collapsed project's aggregate count beside its saved picker.
+with sqlite3.connect(store / 'threading.db') as database:
+    identity, payload = database.execute('SELECT id,data FROM project').fetchone()
+    record = json.loads(payload)
+    assert record['isExpanded'] is True
+    record['isExpanded'] = False
+    database.execute('UPDATE project SET data=? WHERE id=?', (json.dumps(record).encode(), identity))
 process = None
 saved_id = None
 Atspi.init()
@@ -97,22 +105,32 @@ def application():
     return None
 
 
+def terminal_header(expected_name):
+    def read():
+        frame = app.get_child_at_index(0)
+        for index in range(frame.get_child_count()):
+            child = frame.get_child_at_index(index)
+            if child.get_accessible_id() == 'linux.page-title' and child.get_name() == expected_name:
+                return child
+        return None
+    return eventually(read, 'saved terminal name in the live page header')
+
+
 def row(identifier, terminal=False):
     def read():
         listed = app.get_child_at_index(0).get_child_at_index(0)
         assert listed.get_role_name() == 'list'
-        assert listed.get_child_count() == 1
-        assert listed.get_description() == 'Showing 1 through 1 of 1 items'
         if terminal:
+            assert listed.get_child_count() == 1
+            assert listed.get_description() == 'Showing 1 through 1 of 1 items'
             assert listed.get_name() == 'Saved terminals (1 of 1)'
-        item = listed.get_child_at_index(0)
-        assert item.get_accessible_id() == identifier
+        else:
+            assert listed.get_name() == 'Projects' and listed.get_child_count() == 2
+        item = next(listed.get_child_at_index(index) for index in range(listed.get_child_count())
+                    if listed.get_child_at_index(index).get_accessible_id() == identifier)
         assert item.get_state_set().contains(Atspi.StateType.SELECTED)
-        assert item.get_name().endswith(' retained'), item.get_name()
         if terminal:
             assert '[' + identifier[:8] + '] retained' in item.get_name()
-        else:
-            assert item.get_name() == 'CatalogueProject [0 agents, 1 terminals] retained'
         return item
     return eventually(read, 'one retained catalogue row with its durable identity')
 
@@ -142,16 +160,19 @@ with log_path.open('w+') as log:
         app = eventually(application, 'fixture AT-SPI registration')
         key('Return')
         ready(1)
+        eventually(lambda: json.loads(persisted()[1])['isExpanded'] is True,
+                   'creation reveals its persisted parent')
         saved_record = persisted()
         terminals = json.loads(saved_record[1])['terminals']
         assert len(terminals) == 1, terminals
         saved_id = terminals[0]['id']
+        terminal_header(terminals[0]['title'])
         first_pid = assert_owner(1)
 
         key('ctrl+shift+p')
         projects()
-        row(project_id)
-        key('Right')
+        row(saved_id)
+        open_saved_terminals(key)
         picker()
         row(saved_id, terminal=True)
         subprocess.run(['import', '-window', window, 'out/terminal-catalogue-new-row.png'],
@@ -188,6 +209,33 @@ with log_path.open('w+') as log:
         title(r'^Threading terminal - exited 0( \[(history cut|restored)\])?$')
         key('ctrl+shift+p')
         projects()
+        # Fold the automatically revealed child before exercising an explicit header reveal.
+        key('Left')
+        key('Left')
+        eventually(lambda: json.loads(persisted()[1])['isExpanded'] is False and
+                   log_path.read_text().count('OUTLINE_EXPANSION_PENDING ') ==
+                   log_path.read_text().count('OUTLINE_EXPANSION_SAVED '), 'folded header target')
+        expected_folded = json.loads(saved_record[1])
+        expected_folded['isExpanded'] = False
+        assert json.loads(persisted()[1]) == expected_folded
+        saved_record = persisted()
+        # The cached project route must keep the same terminal page identity. Its native
+        # accessibility action reveals that child, including a previously folded parent.
+        assert terminal_header(terminals[0]['title']).get_action_iface().do_action(0)
+        def revealed():
+            listed = app.get_child_at_index(0).get_child_at_index(0)
+            chosen = listed.get_selection_iface().get_selected_child(0)
+            return (listed.get_name() == 'Projects' and chosen is not None
+                    and chosen.get_accessible_id() == saved_id
+                    and chosen.get_state_set().contains(Atspi.StateType.FOCUSED)
+                    and json.loads(persisted()[1])['isExpanded'] is True)
+        eventually(revealed, 'terminal header reveals and focuses the exact saved child')
+        expected_project = json.loads(saved_record[1])
+        expected_project['isExpanded'] = True
+        assert json.loads(persisted()[1]) == expected_project
+        saved_record = persisted()
+        subprocess.run(['import', '-window', window, 'out/terminal-catalogue-header-reveal.png'],
+                       check=True, timeout=5)
         key('alt+F4')
         assert process.wait(timeout=5) == 0
         assert persisted() == saved_record

@@ -1,4 +1,6 @@
 #include "AppKitTextBridge.h"
+#include "FontFamily.h"
+#include "LabelLayout.h"
 
 #ifdef __linux__
 #include <math.h>
@@ -18,7 +20,7 @@ static PangoLayout *new_layout(cairo_t *cr, const uint8_t *text, int length,
                                int monospace, int weight, int italic, double size) {
     PangoLayout *layout = pango_cairo_create_layout(cr);
     PangoFontDescription *font = pango_font_description_new();
-    pango_font_description_set_family(font, monospace ? "DejaVu Sans Mono" : "DejaVu Sans");
+    pango_font_description_set_family(font, tat_font_family(monospace));
     const PangoWeight pango_weight = weight == 3 ? PANGO_WEIGHT_BOLD :
                                      weight == 2 ? PANGO_WEIGHT_SEMIBOLD :
                                      weight == 1 ? PANGO_WEIGHT_MEDIUM : PANGO_WEIGHT_NORMAL;
@@ -170,22 +172,7 @@ int tat_render(uint8_t *coverage, int capacity, int width, int height,
     }
     cairo_t *cr = cairo_create(surface);
     PangoLayout *layout = new_layout(cr, text, length, monospace, weight, italic, size);
-    pango_layout_set_width(layout, layout_width * PANGO_SCALE);
-    pango_layout_set_alignment(layout, alignment == 1 ? PANGO_ALIGN_CENTER :
-                                        alignment == 2 ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT);
-    pango_layout_set_justify(layout, alignment == 3);
-    if (mode == 2 || mode == 3 || mode == 6 || mode == 7) {
-        pango_layout_set_wrap(layout, mode == 3 || mode == 7 ? PANGO_WRAP_CHAR : PANGO_WRAP_WORD_CHAR);
-        pango_layout_set_height(layout, -max_lines);
-        pango_layout_set_ellipsize(layout, mode == 2 || mode == 3
-                                  ? PANGO_ELLIPSIZE_END : PANGO_ELLIPSIZE_NONE);
-    } else {
-        pango_layout_set_single_paragraph_mode(layout, TRUE);
-        pango_layout_set_height(layout, -1);
-        pango_layout_set_ellipsize(layout, mode == 1 ? PANGO_ELLIPSIZE_END :
-                                   mode == 4 ? PANGO_ELLIPSIZE_START :
-                                   mode == 5 ? PANGO_ELLIPSIZE_MIDDLE : PANGO_ELLIPSIZE_NONE);
-    }
+    tat_configure_label_layout(layout, layout_width, mode, alignment, max_lines);
     cairo_set_source_rgba(cr, 1, 1, 1, 1);
     cairo_move_to(cr, -clip_x, -clip_y);
     pango_cairo_show_layout(cr, layout);

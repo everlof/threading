@@ -69,7 +69,7 @@ open class NSTextContainer {
 /// A Pango-shaped editor. Layout is cached between edits and width changes; painting visits
 /// only the visible lines, so a long prompt does not rasterize its hidden paragraphs.
 @MainActor
-open class NSTextView: NSText {
+open class NSTextView: NSText, NSClipViewDocumentObserver {
     open override func resetCursorRects() {
         addCursorRect(bounds, cursor: .iBeam)
     }
@@ -202,6 +202,11 @@ open class NSTextView: NSText {
     open var textUsedRect: NSRect {
         ensureLayout()
         return NSRect(x: 0, y: 0, width: max(0, layoutWidth), height: layoutHeight)
+    }
+
+    func clipViewViewportDidChange(_ clipView: NSClipView) {
+        guard superview === clipView else { return }
+        updateDocumentHeight()
     }
 
     open func selectedRange() -> NSRange { selected }
@@ -598,16 +603,20 @@ open class NSTextView: NSText {
             y += lineHeight
         }
         layoutHeight = y + verticalInset
-        if isVerticallyResizable, !layingOut {
-            let minimum = max(minSize.height, (superview as? NSClipView)?.bounds.height ?? 0)
-            let maximum = maxSize.height > 0 ? maxSize.height : .greatestFiniteMagnitude
-            let target = min(max(max(layoutHeight, minimum), 0), maximum)
-            if target.isFinite, frame.height != target {
-                layingOut = true
-                frame.size.height = target
-                layingOut = false
-            }
-        }
+        updateDocumentHeight()
+    }
+
+    /// The document remains a hit target across the whole viewport even when cached text
+    /// needs no reflow. A height-only resize must not reshape the draft to update that floor.
+    private func updateDocumentHeight() {
+        guard isVerticallyResizable, !layingOut else { return }
+        let minimum = max(minSize.height, (superview as? NSClipView)?.bounds.height ?? 0)
+        let maximum = maxSize.height > 0 ? maxSize.height : .greatestFiniteMagnitude
+        let target = min(max(max(layoutHeight, minimum), 0), maximum)
+        guard target.isFinite, frame.height != target else { return }
+        layingOut = true
+        frame.size.height = target
+        layingOut = false
     }
 
     private func fittedEnd(in source: NSString, from start: Int, through end: Int,

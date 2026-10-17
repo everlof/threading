@@ -1,4 +1,5 @@
 """Late durable agent admission composes with imports, refusal, and a capped native picker."""
+from saved_catalog_menu import open_saved_agents
 import json
 import fcntl
 import os
@@ -26,7 +27,7 @@ project.mkdir()
 seed_store = root / 'seed-store'
 home = root / 'home'
 home.mkdir()
-environment = dict(os.environ, HOME=str(home))
+environment = dict(os.environ, HOME=str(home), THREADING_LINUX_UI_SCALE='2')
 for name in ('THREADING_LINUX_CODEX_ACCOUNT', 'THREADING_LINUX_CLAUDE_ACCOUNT'):
     environment.pop(name, None)
 # The production host supplies the current record/schema shape. Its isolated stand-in exits;
@@ -38,6 +39,14 @@ with sqlite3.connect(seed_store / 'threading.db') as database:
     project_id, kind, active, payload = database.execute(
         'SELECT project_id, kind, last_active_at, data FROM session').fetchone()
     template = json.loads(payload)
+    # The admission/count cases inspect the collapsed project's aggregate badge. Persist that
+    # fixture state instead of relying on the host to ignore the expanded project default.
+    project_payload = json.loads(database.execute(
+        'SELECT data FROM project WHERE id=?', (project_id,)).fetchone()[0])
+    assert project_payload['isExpanded'] is True
+    project_payload['isExpanded'] = False
+    database.execute('UPDATE project SET data=? WHERE id=?',
+                     (json.dumps(project_payload).encode(), project_id))
     database.execute('DELETE FROM session')
     database.execute("DELETE FROM app_state WHERE key IN ('selectedSessionID', 'selectedTerminalID')")
     for position in range(512):
@@ -227,6 +236,8 @@ class Scenario:
                                          '/bin/sh', '/bin/true'], env=environment,
                                         stdout=self.log, stderr=self.log)
         self.window = self.title('Threading experiment - ' + str(project))
+        # The catalog bound below deliberately exercises eight visible rows.
+        self.xdo('windowsize', '--sync', self.window, '1120', '480')
         self.app = self.eventually(self.application, 'AT-SPI fixture application')
 
     def folder_pid(self):
@@ -405,14 +416,14 @@ def import_overlap(current, outside_projection=False):
         current.expected_count = 1025
     current.submit_folder(dialog)
     current.project_count()
-    current.key('Left')
+    open_saved_agents(current.key)
     current.title('Threading agents - ' + str(project))
     current.check_picker()
 
 
 def selected_refusal(current):
     current.begin_creation()
-    current.key('Left')
+    open_saved_agents(current.key)
     current.title('Threading agents - ' + str(project), timeout=2)
     expected = current.listed().get_child_at_index(2).get_accessible_id()
     current.key('Down')
@@ -427,7 +438,7 @@ def selected_refusal(current):
     current.key('Escape')
     current.title('Threading experiment - ' + str(project))
     current.project_count()
-    current.key('Left')
+    open_saved_agents(current.key)
     current.title('Threading agents - ' + str(project))
     current.check_picker()
 

@@ -17,6 +17,9 @@ final class NativeWorkspaceSession {
         let plan: AgentLaunchPlan
         var events: [StreamEvent]
         let truncated: Bool
+        /// The provider replays this conversation's history itself, over its protocol, once the
+        /// agent starts; there is no local transcript to read.
+        let replaysOverProtocol: Bool
     }
 
     let id: SessionID
@@ -59,6 +62,8 @@ final class NativeWorkspaceSession {
     private var pendingRenderCount = 0
     private var launching = false
     private var replaying = true
+    /// The agent is running and its provider is replaying the saved history to it.
+    private var loadingHistory = false
     private var launchRecordedAt: Date?
     private(set) var completedTurns = 0
     var rowsPrepared: Bool { !replaying && pendingRenderCount == 0 }
@@ -69,7 +74,7 @@ final class NativeWorkspaceSession {
     var rootProcessIdentifier: Int32? { stream?.rootProcessIdentifier }
 
     init(store: String, socket: String, id: SessionID, shell: String,
-         codex: String?, claude: String?) {
+         executables: [AgentKind: String]) {
         self.store = store
         self.socket = socket
         self.id = id
@@ -77,7 +82,7 @@ final class NativeWorkspaceSession {
         timeline = ConversationTimeline(sessionID: id, chartDecoder: { _, _ in nil })
         PermissionBroker.register(self)
         worker.async { [weak self] in
-            let result = Result { try Self.prepare(store: store, id: id, shell: shell, codex: codex, claude: claude) }
+            let result = Result { try Self.prepare(store: store, id: id, shell: shell, executables: executables) }
             NativeConversationDelivery.callbacks.receive { self?.loaded(result) }
         }
     }
@@ -111,6 +116,10 @@ final class NativeWorkspaceSession {
                     self.replaying = false
                     self.status = "Ready"
                     self.changed()
+                    if let prepared = self.prepared, prepared.replaysOverProtocol,
+                       prepared.session.hasLaunched, prepared.session.resumeState.isResumable {
+                        self.launch(prompt: nil)
+                    }
                 }
             }
             changed()
@@ -119,38 +128,11 @@ final class NativeWorkspaceSession {
 
     @discardableResult
     func send(_ text: String) -> Bool {
-        guard canSend, let prepared, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        guard canSend, prepared != nil, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               text.utf8.prefix(65_537).count <= 65_536 else { return false }
         if stream == nil {
             apply(.userMessage(text))
-            launching = true
-            status = "Starting agent…"
-            changed()
-            let store = store, socket = socket
-            worker.async { [weak self] in
-                let result = Result {
-                    let child = try ConversationPreparedChild(plan: prepared.plan, sessionID: prepared.session.id,
-                        host: Self.hostPlan(prepared, socket: socket))
-                    let date = Date()
-                    try Self.withDatabase(store: store) { database in
-                        guard let record = try database.sessionRecord(id: prepared.session.id),
-                              record.project.id == prepared.projectID,
-                              record.session.usesNativeUI,
-                              record.session.kind == prepared.session.kind,
-                              record.session.accountHandle == prepared.session.accountHandle,
-                              record.session.lastActiveAt == prepared.session.lastActiveAt else {
-                            throw WindowFailure("Saved conversation changed before launch admission.")
-                        }
-                        var session = record.session
-                        AgentLaunchRecording.apply(prepared.plan, to: &session, at: date)
-                        try database.saveSession(session, in: record.project.id, position: record.position)
-                    }
-                    return Started(child: child, recordedAt: date)
-                }
-                NativeConversationDelivery.callbacks.receive {
-                    self?.started(result, prepared: prepared, prompt: text)
-                }
-            }
+            launch(prompt: text)
             return true
         }
         guard stream?.send(text) == true else { changed(); return false }
@@ -160,24 +142,58 @@ final class NativeWorkspaceSession {
         return true
     }
 
+    /// Starts the agent with the turn that asked for it, or with none for a conversation whose
+    /// history the provider replays over its protocol.
+    private func launch(prompt: String?) {
+        guard let prepared, stream == nil, !launching else { return }
+        launching = true
+        status = prompt == nil ? "Loading conversation…" : "Starting agent…"
+        changed()
+        let store = store, socket = socket
+        worker.async { [weak self] in
+            let result = Result {
+                let child = try ConversationPreparedChild(plan: prepared.plan, sessionID: prepared.session.id,
+                    host: Self.hostPlan(prepared, socket: socket))
+                let date = Date()
+                try Self.withDatabase(store: store) { database in
+                    guard let record = try database.sessionRecord(id: prepared.session.id),
+                          record.project.id == prepared.projectID,
+                          record.session.usesNativeUI,
+                          record.session.kind == prepared.session.kind,
+                          record.session.accountHandle == prepared.session.accountHandle,
+                          record.session.lastActiveAt == prepared.session.lastActiveAt else {
+                        throw WindowFailure("Saved conversation changed before launch admission.")
+                    }
+                    var session = record.session
+                    AgentLaunchRecording.apply(prepared.plan, to: &session, at: date)
+                    try database.saveSession(session, in: record.project.id, position: record.position)
+                }
+                return Started(child: child, recordedAt: date)
+            }
+            NativeConversationDelivery.callbacks.receive {
+                self?.started(result, prepared: prepared, prompt: prompt)
+            }
+        }
+    }
+
     private struct Started: Sendable {
         let child: ConversationPreparedChild
         let recordedAt: Date
     }
 
-    private func started(_ result: Result<Started, Error>, prepared: Prepared, prompt: String) {
+    private func started(_ result: Result<Started, Error>, prepared: Prepared, prompt: String?) {
         guard !stopped else { return }
         launching = false
         switch result {
         case .failure(let error):
-            apply(.turnFinished(text: nil, outcome: .failed, metrics: .empty))
+            if prompt != nil { apply(.turnFinished(text: nil, outcome: .failed, metrics: .empty)) }
             report(String(describing: error))
         case .success(let started):
             launchRecordedAt = started.recordedAt
             let stream = makeStream(prepared, child: started.child)
             self.stream = stream
             stream.onEvent = { [weak self] in self?.apply($0) }
-            stream.onInteractionAvailabilityChange = { [weak self] in self?.changed() }
+            stream.onInteractionAvailabilityChange = { [weak self] in self?.interactionChanged() }
             stream.onLaunchFailure = { [weak self] in self?.report(String(describing: $0)) }
             if let asking = stream as? QuestionAskingConversation {
                 asking.onQuestion = { [weak self] request, answer in
@@ -195,9 +211,24 @@ final class NativeWorkspaceSession {
                 self.persist { session in session.lastExitCode = status; session.lastActiveAt = Date() }
             }
             stream.start()
+            guard let prompt else {
+                loadingHistory = true
+                interactionChanged()
+                return
+            }
             if stream.send(prompt) { status = "Working"; changed() }
             else { report("The agent refused the opening message.") }
         }
+    }
+
+    /// A provider replaying history accepts a turn once the replay is over; that is when the
+    /// conversation is ready.
+    private func interactionChanged() {
+        if loadingHistory, stream?.canSend == true {
+            loadingHistory = false
+            status = "Ready"
+        }
+        changed()
     }
 
     func interrupt() {
@@ -334,9 +365,14 @@ final class NativeWorkspaceSession {
                     CodexTurnConfiguration(model: session.model, effort: session.reasoningEffort,
                         serviceTier: session.fastMode.map { $0 ? AgentDefaults.codexFastServiceTier : AgentDefaults.codexStandardServiceTier })
                 }, plan: { plan })
-        case .grok, .cursor, .openCode:
-            // Preparation currently admits the two workspace executables. Other native profiles
-            // retain their saved surface and present an explicit availability failure.
+        case .grok, .cursor:
+            // The working directory is the session's own checkout every time, fresh or resumed:
+            // `session/load` accepts any cwd and rebinds the live session to whatever it is given.
+            return ACPStreamSession(sessionID: session.id, callbackDelivery: NativeConversationDelivery.callbacks,
+                preparedChild: child, workingDirectory: directory,
+                profile: session.kind == .grok ? .grok : .cursor, plan: { plan })
+        case .openCode:
+            // Preparation refuses OpenCode before a child exists; see `prepare`.
             preconditionFailure("unsupported workspace native preparation")
         }
     }
@@ -350,6 +386,8 @@ final class NativeWorkspaceSession {
                 prepareRow(timeline.rows[index], at: index)
             case .streaming(let text): onStreaming?(text)
             case .turnSettled:
+                // A replayed turn is history, not a turn completed in this process.
+                guard !loadingHistory else { continue }
                 completedTurns += 1
                 status = "Ready"
             case .adoptedSessionID(let id):
@@ -438,7 +476,7 @@ final class NativeWorkspaceSession {
     }
 
     private nonisolated static func prepare(store: String, id: SessionID, shell: String,
-                                            codex: String?, claude: String?) throws -> Prepared {
+                                            executables: [AgentKind: String]) throws -> Prepared {
         let record = try withDatabase(store: store) { database in
             guard let record = try database.sessionRecord(id: id), record.session.usesNativeUI,
                   record.session.kind.supportsNativeUI else { throw WindowFailure("Saved native conversation is unavailable.") }
@@ -447,47 +485,68 @@ final class NativeWorkspaceSession {
         let session = record.session
         guard let directory = ProjectDirectory.existing(at: session.workingDirectory(in: record.project)),
               shell.hasPrefix("/") else { throw WindowFailure("Conversation checkout or login shell is unavailable.") }
-        let accountPath = try GraphicalTerminal.accountPath(for: session.kind, handle: session.accountHandle)
-        let account = AgentAccount(provider: session.kind, handle: session.accountHandle, configPath: accountPath)
-        let url: URL?
-        switch session.kind {
-        case .claude:
-            url = session.resumeState.transcriptID.flatMap {
-                ClaudeTranscript.storageSlot(sessionID: $0, account: account, in: record.project)?.resolve()
-            }
-        case .codex: url = session.resumeState.transcriptID.flatMap { CodexTranscript.url(sessionID: $0, account: account) }
-        default: throw WindowFailure("This provider's native workspace launch is not available yet.")
+        guard let executable = executables[session.kind], executable.hasPrefix("/") else {
+            throw WindowFailure("\(session.kind.displayName) executable is unavailable.")
         }
-        if session.hasLaunched {
-            guard let url, FileManager.default.fileExists(atPath: url.path) else {
-                throw WindowFailure("Saved conversation history is missing from its account.")
+        let accountPath: String
+        let url: URL?
+        let replaysOverProtocol: Bool
+        switch session.kind {
+        case .claude, .codex:
+            replaysOverProtocol = false
+            accountPath = try GraphicalTerminal.accountPath(for: session.kind, handle: session.accountHandle)
+            let account = AgentAccount(provider: session.kind, handle: session.accountHandle, configPath: accountPath)
+            url = session.kind == .claude
+                ? session.resumeState.transcriptID.flatMap {
+                    ClaudeTranscript.storageSlot(sessionID: $0, account: account, in: record.project)?.resolve()
+                }
+                : session.resumeState.transcriptID.flatMap { CodexTranscript.url(sessionID: $0, account: account) }
+            if session.hasLaunched {
+                guard let url, FileManager.default.fileExists(atPath: url.path) else {
+                    throw WindowFailure("Saved conversation history is missing from its account.")
+                }
             }
+        case .grok, .cursor:
+            // One login per CLI, and history arrives over the protocol: `session/load` replays it.
+            accountPath = ""
+            url = nil
+            replaysOverProtocol = true
+        case .openCode:
+            throw WindowFailure("This provider's native workspace launch is not available yet.")
         }
         let agentCommand: ShellCommand
         let resumeState: ResumeState
+        var environment: [String: String] = [:]
+        let mode = session.kind.supportsPermissionModes ? session.permissionMode : nil
         switch session.kind {
         case .claude:
-            guard let claude, claude.hasPrefix("/") else { throw WindowFailure("Claude executable is unavailable.") }
-            let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: claude,
+            let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: executable,
                 permissionMode: session.permissionMode, prompt: nil,
                 integrationFlags: ClaudeLaunchCommand.streamProtocolFlags())
             agentCommand = session.hasLaunched ? pair.resume : pair.fresh
             resumeState = .resumable(pair.transcriptID)
         case .codex:
-            guard let codex, codex.hasPrefix("/") else { throw WindowFailure("Codex executable is unavailable.") }
-            agentCommand = CodexLaunchCommand.appServer(executable: codex, model: session.model,
+            agentCommand = CodexLaunchCommand.appServer(executable: executable, model: session.model,
                 permissionMode: session.permissionMode)
             resumeState = session.resumeState
-        default: throw WindowFailure("This provider's native workspace launch is not available yet.")
+        case .grok:
+            agentCommand = ACPLaunchCommand.grok(executable: executable, model: session.model, permissionMode: mode)
+            resumeState = session.resumeState
+        case .cursor:
+            agentCommand = ACPLaunchCommand.cursor(executable: executable)
+            resumeState = session.resumeState
+            environment = AgentDefaults.cursorLaunchEnvironment
+        case .openCode:
+            throw WindowFailure("This provider's native workspace launch is not available yet.")
         }
         var command = AgentAccountRoute.prefix(for: session.kind, handle: session.accountHandle, configPath: accountPath)
         command.append(contentsOf: agentCommand)
         let replay = url.flatMap { FileManager.default.fileExists(atPath: $0.path) ? TranscriptReplay.read(at: $0, kind: session.kind) : nil }
             ?? ([], false)
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: directory.path,
-            shellPath: shell, resumeState: resumeState)
+            shellPath: shell, resumeState: resumeState, environmentOverrides: environment)
         return Prepared(session: session, projectID: record.project.id, directory: directory.path,
-            plan: plan, events: replay.0, truncated: replay.1)
+            plan: plan, events: replay.0, truncated: replay.1, replaysOverProtocol: replaysOverProtocol)
     }
 }
 #endif

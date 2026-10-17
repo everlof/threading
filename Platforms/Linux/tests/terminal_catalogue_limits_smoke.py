@@ -1,4 +1,5 @@
 """Immediate saved-shell admission respects picker/runtime limits and import refresh."""
+from saved_catalog_menu import open_saved_terminals
 import json
 import os
 from pathlib import Path
@@ -39,6 +40,12 @@ def records():
 
 
 with sqlite3.connect(store / 'threading.db') as database:
+    # Counts and project-to-project arrows below deliberately inspect collapsed branches.
+    for identity, payload in database.execute('SELECT id,data FROM project').fetchall():
+        value = json.loads(payload)
+        assert value['isExpanded'] is True
+        value['isExpanded'] = False
+        database.execute('UPDATE project SET data=? WHERE id=?', (json.dumps(value).encode(), identity))
     project_id, payload = database.execute('SELECT id, data FROM project ORDER BY position LIMIT 1').fetchone()
     record = json.loads(payload)
     assert record['folderPath'] == str(projects[0]) and record['terminals'] == []
@@ -116,9 +123,9 @@ def application():
 def listed():
     result = app.get_child_at_index(0).get_child_at_index(0)
     assert result.get_role_name() == 'list'
-    # The native project outline mounts a ninth partially clipped row; the saved picker
-    # still uses eight complete rows in this window.
-    maximum = 9 if result.get_name() == 'Projects' else 8
+    # At this fixture's explicit 2× scale, seven project rows (last clipped) or
+    # eight complete saved-picker rows fit in the 480px window.
+    maximum = 7 if result.get_name() == 'Projects' else 8
     assert result.get_child_count() <= maximum, 'offscreen rows mounted in AT-SPI'
     return result
 
@@ -165,6 +172,20 @@ def assert_project_count(index, count):
     eventually(read, 'authoritative project count after native admission/refresh')
 
 
+def fold_project(index):
+    # Creation reveals its child. Fold that branch through real navigation before inspecting
+    # the aggregate count and walking the next project sibling in this catalog-limit journey.
+    key('Left')
+    key('Left')
+    def folded():
+        chosen = listed().get_selection_iface().get_selected_child(0)
+        log = log_path.read_text()
+        return (chosen.get_accessible_id() == project_ids[index]
+                and not json.loads(records()[index][1])['isExpanded']
+                and log.count('OUTLINE_EXPANSION_PENDING ') == log.count('OUTLINE_EXPANSION_SAVED '))
+    eventually(folded, 'explicit collapsed catalog-count branch')
+
+
 def assert_children(number):
     entries = starts()
     assert len(entries) == number, entries
@@ -200,8 +221,12 @@ def folder_dialog_pid():
 with log_path.open('w+') as log:
     try:
         process = subprocess.Popen([binary, '--app', str(store), endpoint, '/usr/bin/python3',
-                                    str(child), str(marker)], stdout=log, stderr=log)
+                                    str(child), str(marker)], stdout=log, stderr=log,
+                                   env=dict(os.environ, THREADING_LINUX_UI_SCALE='2'))
         window = project_title(0)
+        # Keep the deliberate eight-row catalog viewport independent of display scaling.
+        xdo('windowsize', '--sync', window, '1120', '480')
+        eventually(lambda: 'IDLE_PANE_FRAME 640x480 ' in log_path.read_text(), 'catalog viewport')
         app = eventually(application, 'fixture AT-SPI registration')
         key('Return')
         ready(1)
@@ -211,8 +236,9 @@ with log_path.open('w+') as log:
         assert_children(1)
         key('ctrl+shift+p')
         project_title(0)
+        fold_project(0)
         assert_project_count(0, 513)
-        key('Right')
+        open_saved_terminals(key)
         picker()
         assert_picker()
         subprocess.run(['import', '-window', window, 'out/terminal-catalogue-cap.png'],
@@ -234,12 +260,13 @@ with log_path.open('w+') as log:
             assert_children(index + 1)
             key('ctrl+shift+p')
             project_title(index)
+            fold_project(index)
             assert_project_count(index, 1)
         # At eight slots the same saved owner remains usable, even though new admission is full.
         for index in reversed(range(7)):
             key('Up')
             project_title(index)
-        key('Right')
+        open_saved_terminals(key)
         picker()
         assert_picker()
         key('Return')
@@ -275,7 +302,7 @@ with log_path.open('w+') as log:
         assert_project_count(0, 513)
         assert records() == before_refresh, 'refresh duplicated or rewrote terminal records'
         assert_children(8)
-        key('Right')
+        open_saved_terminals(key)
         picker()
         assert_picker()
         key('Escape')

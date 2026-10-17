@@ -37,6 +37,7 @@ enum CodexLaunchCommand {
     static func terminal(
         executable: String = AgentDefaults.codexExecutable,
         model: String?,
+        reasoningEffort: String? = nil,
         conversationOverrides: ShellCommand = ShellCommand(),
         permissionMode: AgentPermissionMode?,
         hookFlags: ShellCommand = ShellCommand(),
@@ -48,6 +49,10 @@ enum CodexLaunchCommand {
         command.append(flag: AgentDefaults.codexNoAlternateScreenFlag)
         if let model, !model.isEmpty {
             command.append(flag: AgentDefaults.codexModelFlag, value: model)
+        }
+        if let reasoningEffort, !reasoningEffort.isEmpty {
+            command.append(flag: AgentDefaults.codexConfigFlag,
+                value: "\(AgentDefaults.codexReasoningEffortKey)=\(tomlString(reasoningEffort))")
         }
         command.append(contentsOf: conversationOverrides)
         if let permissionMode {
@@ -66,5 +71,18 @@ enum CodexLaunchCommand {
             command.append(operand: prompt)
         }
         return (command, .awaitingIdentifier)
+    }
+
+    private static func tomlString(_ value: String) -> String {
+        var result = "\""
+        for scalar in value.unicodeScalars {
+            switch scalar.value {
+            case 0x22: result += "\\\""
+            case 0x5c: result += "\\\\"
+            case 0...0x1f, 0x7f: result += String(format: "\\u%04X", scalar.value)
+            default: result.unicodeScalars.append(scalar)
+            }
+        }
+        return result + "\""
     }
 }

@@ -53,19 +53,19 @@ struct SessionSurfaceTogglePresentation: Equatable {
 /// What the three genuinely differ about is `Timing` — when a mode chosen here starts to
 /// apply — so that is the only thing they pass in.
 enum PermissionModePresentation {
-    static let symbol = "hand.raised"
+    static let symbol = PermissionModeLabels.symbol
 
     /// What a chip says when *no* source can name a mode: no choice here, nothing in Settings,
     /// nothing in the agent's own configuration, and no conversation on this login to have
     /// observed one. It names where the decision is made because there is genuinely nothing else
     /// to name — the same last resort, reached the same way, as the model chip's "Agent's
     /// choice". Every other case names the posture and qualifies it below.
-    static var agentSettingTitle: String { L10n.string("Agent's Setting") }
+    static var agentSettingTitle: String { PermissionModeLabels.agentSettingTitle }
 
     /// The row offered when nothing here and nothing in Settings has chosen. It defers to the
     /// CLI's own configuration, which Threading cannot read, so it names where the decision is
     /// made rather than a mode.
-    static var agentSettingRowTitle: String { L10n.string("Use Agent's Setting") }
+    static var agentSettingRowTitle: String { PermissionModeLabels.agentSettingRowTitle }
 
     /// Marks the mode a session falls back to when it chooses nothing of its own.
     ///

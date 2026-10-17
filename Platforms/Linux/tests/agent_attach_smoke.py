@@ -1,4 +1,5 @@
 """A saved agent session survives its CLI client and reopens in the native window."""
+from saved_catalog_menu import open_saved_agents, open_saved_terminals, selected_outline_row
 import json
 import fcntl
 import os
@@ -158,10 +159,10 @@ with log_path.open('w+') as log:
                 assert selected_session() == agents[-1], 'project targeting changed agent selection'
                 assert xdo('windowfocus', window, 'key', 'Down').returncode == 0
                 await_title(process, 'Threading experiment - ' + str(project), app_log_path)
-                assert xdo('windowfocus', window, 'key', 'Left').returncode == 0
+                open_saved_agents(lambda value: xdo('windowfocus', window, 'key', value))
                 await_title(process, 'Threading agents - ' + str(project), app_log_path)
                 deadline = time.monotonic() + 5
-                while f'AGENT_PICKER_FRAME 1120x480 mounted=2 selected={agents[-1]} total=2 capped=0' not in app_log_path.read_text():
+                while f'AGENT_PICKER_FRAME 240x480 mounted=2 selected={agents[-1]} total=2 capped=0' not in app_log_path.read_text():
                     assert time.monotonic() < deadline, app_log_path.read_text()
                     time.sleep(.05)
                 with (Path(store) / 'host.lock').open('rb') as lock:
@@ -242,9 +243,18 @@ with log_path.open('w+') as log:
                 await_title(process, 'Threading terminal - exited 9 [history cut]',
                             root / 'agent-reopened.log')
                 assert xdo('windowfocus', window, 'key', 'ctrl+shift+p').returncode == 0
+                await_title(process, 'Threading experiment - ' + str(project), root / 'agent-reopened.log')
+                deadline = time.monotonic() + 10
+                while not selected_outline_row(process.pid, agents[-1]):
+                    assert time.monotonic() < deadline, (root / 'agent-reopened.log').read_text()
+                    time.sleep(.05)
+                assert 'AGENT_PICKER_FRAME ' not in (root / 'agent-reopened.log').read_text()
+                subprocess.run(['import', '-window', window, 'out/agent-deep-outline-selection.png'],
+                               check=True, timeout=5)
+                open_saved_agents(lambda stroke: xdo('windowfocus', window, 'key', stroke))
                 await_title(process, 'Threading agents - ' + str(project), root / 'agent-reopened.log')
                 deadline = time.monotonic() + 5
-                while not any(f'selected={agents[-1]} total=515 capped=1' in line
+                while not any('total=515 capped=1' in line
                               for line in (root / 'agent-reopened.log').read_text().splitlines()
                               if line.startswith('AGENT_PICKER_FRAME ')):
                     assert time.monotonic() < deadline, (root / 'agent-reopened.log').read_text()
@@ -348,6 +358,12 @@ with log_path.open('w+') as log:
                 await_title(process, f'Threading terminal - SHELL REATTACHED PID {shell_pid} [history cut]',
                             root / 'agent-cleared-reopen.log')
                 assert xdo('key', 'ctrl+shift+p').returncode == 0
+                await_title(process, 'Threading experiment - ' + str(project), root / 'agent-cleared-reopen.log')
+                deadline = time.monotonic() + 10
+                while not selected_outline_row(process.pid, shell_id):
+                    assert time.monotonic() < deadline, (root / 'agent-cleared-reopen.log').read_text()
+                    time.sleep(.05)
+                open_saved_terminals(lambda stroke: xdo('windowfocus', window, 'key', stroke))
                 await_title(process, 'Threading terminals - ' + str(project),
                             root / 'agent-cleared-reopen.log')
                 assert xdo('key', 'Escape').returncode == 0

@@ -43,6 +43,7 @@ swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product 
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product PortablePTYClientHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product TableHeightHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product OutlineViewHarness
+swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product SidebarVisibleRowsHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product PriorityLayoutHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product ViewClippingHarness
 swift build -c release --product ParagraphWrappingHarness
@@ -54,6 +55,7 @@ timeout 60 "$contract_bin/NativeRemoteContractHarness"
 timeout 120 "$contract_bin/CoreSliceHarness"
 timeout 120 "$contract_bin/TableHeightHarness"
 timeout 120 "$contract_bin/OutlineViewHarness"
+timeout 120 "$contract_bin/SidebarVisibleRowsHarness"
 timeout 120 "$contract_bin/PriorityLayoutHarness"
 timeout 120 "$contract_bin/ViewClippingHarness"
 timeout 120 "$contract_bin/ParagraphWrappingHarness"
@@ -100,12 +102,19 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/out/gtk-present-delay.so:/gtk-present-delay.so:ro" \
   -v "$PWD/tests/provider_marks_smoke.py:/provider_marks_smoke.py:ro" \
   -v "$PWD/tests/runtime_pixel_contract.py:/runtime_pixel_contract.py:ro" \
+  -v "$PWD/tests/saved_catalog_menu.py:/saved_catalog_menu.py:ro" \
   -v "$PWD/tests/account_picker_rows_smoke.py:/account_picker_rows_smoke.py:ro" \
   -v "$PWD/tests/project_count_smoke.py:/project_count_smoke.py:ro" \
+  -v "$PWD/tests/multi_project_outline_smoke.py:/multi_project_outline_smoke.py:ro" \
+  -v "$PWD/tests/terminal_creation_selection_smoke.py:/terminal_creation_selection_smoke.py:ro" \
+  -v "$PWD/tests/empty_sidebar_smoke.py:/empty_sidebar_smoke.py:ro" \
+  -v "$PWD/tests/folder_drop_source.py:/folder_drop_source.py:ro" \
   -v "$PWD/tests/native_outline_smoke.py:/native_outline_smoke.py:ro" \
   -v "$PWD/tests/project_actions_smoke.py:/project_actions_smoke.py:ro" \
   -v "$PWD/tests/project_create_menu_smoke.py:/project_create_menu_smoke.py:ro" \
   -v "$PWD/tests/composer_smoke.py:/composer_smoke.py:ro" \
+  -v "$PWD/tests/composer_permissions_smoke.py:/composer_permissions_smoke.py:ro" \
+  -v "$PWD/tests/composer_models_smoke.py:/composer_models_smoke.py:ro" \
   -v "$PWD/tests/document_ui_smoke.py:/document_ui_smoke.py:ro" \
   -v "$PWD/tests/short_user_row_smoke.py:/short_user_row_smoke.py:ro" \
   -v "$PWD/tests/native_workspace_smoke.py:/native_workspace_smoke.py:ro" \

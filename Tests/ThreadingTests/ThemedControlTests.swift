@@ -7983,6 +7983,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "MermaidPreviewView",
                 "MediaTransportView",
                 "ModelEffortMatrixControl",
+                "ModelEffortPickerContentView",
                 "ModelEffortPickerViewController",
                 "MorphingMultilineTitleLabel",
                 "MorphingTitleLabel",
@@ -8154,7 +8155,13 @@ final class ThemedControlTests: HostedStoreTestCase {
             "ThemeGradientAnimator",
             "ThemeBackdropMotionView"
         ]
+        // This shared source file also declares a Linux-only view behind #if os(Linux).
+        // The Mac gallery cannot instantiate it; the Linux opening-composer runtime journey
+        // mounts and captures it in its shipping shell. Keep the textual scan's platform scope
+        // explicit rather than claiming that this view is nonvisual or has a Mac story.
+        let linuxOnlyComponents: Set<String> = ["ComposerWelcomeView"]
         let missing = declaredComponents.subtracting(nonvisualModels)
+            .subtracting(linuxOnlyComponents)
             .subtracting(ComponentGalleryViewController.componentNames)
 
         XCTAssertEqual(

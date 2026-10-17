@@ -42,11 +42,13 @@ final class SidebarEdgeRevealRenderTests: HostedStoreTestCase {
         )
         greeting.setStringValue("What are we building today?", animated: false)
 
-        for (name, appearance) in [
-            ("light", NSAppearance.Name.aqua),
-            ("dark", NSAppearance.Name.darkAqua),
+        for (name, theme, appearance) in [
+            ("light", AppTheme.system, NSAppearance.Name.aqua),
+            ("dark", AppTheme.system, NSAppearance.Name.darkAqua),
+            ("threading-light", AppThemeStyles.threading, NSAppearance.Name.aqua),
+            ("threading-dark", AppThemeStyles.threading, NSAppearance.Name.darkAqua),
         ] {
-            AppThemePalette.set(.system)
+            AppThemePalette.set(theme)
             content.appearance = try XCTUnwrap(NSAppearance(named: appearance))
             AppThemeRefresh.repaint(content)
 

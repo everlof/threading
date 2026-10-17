@@ -13,6 +13,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <libweston/libweston.h>
+#include <libweston/desktop.h>
 
 // Ubuntu's libweston-13-dev does not install backend.h. These declarations
 // match Weston 13.0.0's libweston/backend.h and input.c, whose
@@ -71,14 +72,16 @@ static int receive_command(int fd, uint32_t mask, void *data) {
     if (strcmp(command, "origin") == 0) {
         struct weston_view *view;
         wl_list_for_each(view, &module->compositor->view_list, link) {
-            if (view->is_mapped &&
-                (view->surface->width == 800 || view->surface->width == 1120) &&
-                view->surface->height == 480) {
-                snprintf(detail, sizeof(detail), "ORIGIN %.0f %.0f",
-                         view->geometry.pos_offset.x, view->geometry.pos_offset.y);
-                reply = detail;
-                break;
-            }
+            if (!view->is_mapped || !weston_surface_is_desktop_surface(view->surface)) continue;
+            struct weston_desktop_surface *desktop = weston_surface_get_desktop_surface(view->surface);
+            const char *title = weston_desktop_surface_get_title(desktop);
+            // Find the app by its native identity, independent of startup scale or resize.
+            // Dimensions can also match the compositor background at a display-fitted size.
+            if (!title || strncmp(title, "Threading", 9) != 0) continue;
+            snprintf(detail, sizeof(detail), "ORIGIN %.0f %.0f",
+                     view->geometry.pos_offset.x, view->geometry.pos_offset.y);
+            reply = detail;
+            break;
         }
     } else if (sscanf(command, "move %d %d", &x, &y) == 2 && x >= 0 && y >= 0) {
         struct weston_coord_global point = {.c = weston_coord(x, y)};

@@ -1,8 +1,9 @@
 """Explicit saved-shell activation preserves identity and uncertain child ownership.
 
-Controlled daemon peers exercise native Right/Enter navigation. They never start a process.
+Controlled daemon peers exercise native menu/Enter navigation. They never start a process.
 The source store is copied through SQLite backup and is never mutated.
 """
+from saved_catalog_menu import open_saved_terminals
 import json
 from pathlib import Path
 import re
@@ -52,7 +53,7 @@ class Fixture:
         self.project = next((row for row in projects if row.get('terminals')), None)
         assert self.project is not None, 'source fixture needs a project with a saved terminal'
         assert Path(self.project['folderPath']).is_dir(), 'fixture project directory must exist'
-        # Right opens the most recent embedded terminal first, matching navigationSnapshot.
+        # The saved-terminal menu opens the most recent embedded terminal first, matching navigationSnapshot.
         self.identity = {'kind': 'projectTerminal', 'id': self.project['terminals'][-1]['id']}
         self.before = self.records()
         self.endpoint = str(self.root / 'peer.sock')
@@ -101,7 +102,7 @@ class Fixture:
                                          '/bin/sh', self.project['folderPath']],
                                         stdout=self.log, stderr=self.log)
         self.window = self.title('Threading experiment - ' + self.project['folderPath'])
-        self.key('Right')
+        open_saved_terminals(self.key)
         self.title('Threading terminals - ' + self.project['folderPath'])
 
     def accepted(self):

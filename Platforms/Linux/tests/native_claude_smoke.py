@@ -1,4 +1,5 @@
 """The native window creates, resumes and refuses missing Claude conversations."""
+from saved_catalog_menu import open_saved_agents
 import json
 import os
 from pathlib import Path
@@ -144,7 +145,7 @@ def create(process, window, log):
     assert Path(created['transcript']).is_file(), created
     key(window, 'ctrl+shift+p')
     title(process, 'Threading experiment - ' + str(project), log)
-    key(window, 'Left')
+    open_saved_agents(lambda value: key(window, value))
     title(process, 'Threading agents - ' + str(project), log)
     subprocess.run(['import', '-window', window, 'out/claude-agent-picker.png'],
                    check=True, timeout=5)
@@ -179,6 +180,7 @@ with reattach_log.open('w+') as output:
         key(window, 'q')
         title(process, 'Threading terminal - exited 0 [history cut]', reattach_log)
         key(window, 'ctrl+shift+p')
+        open_saved_agents(lambda stroke: key(window, stroke))
         title(process, 'Threading agents - ' + str(project), reattach_log)
         key(window, 'Escape')
         title(process, 'Threading experiment - ' + str(project), reattach_log)
@@ -200,7 +202,7 @@ visit('native-claude-reopen-after-exit.log', reopened_after_exit, targeted=True)
 
 
 def open_saved(process, window, log, expected):
-    key(window, 'Left')
+    open_saved_agents(lambda value: key(window, value))
     title(process, 'Threading agents - ' + str(project), log)
     key(window, 'Return')
     title(process, 'Threading terminal - ' + expected, log)

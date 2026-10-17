@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingRemoteKit
 
 /// The line the empty composer greets with.
 ///
@@ -26,7 +27,7 @@ enum ComposerGreeting {
 
     /// The theme's welcome conditions speak in the same four parts of the day, so a theme line
     /// written for the evening and the app's own evening lines agree on when evening is.
-    typealias Daypart = ThemeWelcome.Daypart
+    typealias Daypart = ThemeWelcomeGrammar.Daypart
 
     /// Everything the given moment could say, split by how it would say it. The testable core:
     /// specials fire on their dates and are empty on an ordinary day.

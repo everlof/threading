@@ -90,22 +90,6 @@ final class ProjectSidebarViewController: NSViewController {
     /// The default-accounts editor while it is open, so a second request replaces it.
     private var defaultAccountsPopover: ThemedPopover?
 
-    private func makeEmptyStateView() -> NSView {
-        let title = NSTextField(labelWithString: SidebarStrings.emptyTitle)
-        title.applyFont(.emphasizedBody)
-        title.textColor = Design.Text.secondary
-        title.alignment = .center
-        let subtitle = NSTextField(wrappingLabelWithString: SidebarStrings.emptySubtitle)
-        subtitle.applyFont(.detail())
-        subtitle.textColor = Design.Text.tertiary
-        subtitle.alignment = .center
-        let stack = NSStackView(views: [title, subtitle])
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = SidebarDefaults.emptyStateSpacing
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        return stack
-    }
     private let appEvents = AppEventObservations()
 
     /// The persisted tree this controller presents. Production uses the app-wide store; an
@@ -614,7 +598,7 @@ private extension ProjectSidebarViewController {
             return
         }
 
-        let stack = makeEmptyStateView()
+        let stack = SidebarEmptyState.makeView()
         emptyStateView = stack
         view.addSubview(stack)
 

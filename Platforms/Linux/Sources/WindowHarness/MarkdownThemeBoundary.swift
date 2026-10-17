@@ -40,15 +40,19 @@ extension SurfaceRadius {
     static var panel: Self { .fixed(Design.Radius.panel) }
 }
 extension NSView {
-    func applySurface(fill: NSColor, radius: SurfaceRadius) {
-        setAppliedSurface(fill: fill, radius: radius.current, border: nil)
+    func applySurface(fill: NSColor, radius: SurfaceRadius, border: NSColor? = nil,
+                      borderWidth: CGFloat = Design.Radius.border, glow: Bool = false,
+                      bevel: SurfaceBevel = .automatic) {
+        // The checked Threading material has neither a bevel nor a glow. Preserve the
+        // production recipe's geometry and dynamic colors through the retained surface.
+        setAppliedSurface(fill: fill, radius: radius.current, border: border, borderWidth: borderWidth)
     }
     func applyLayerBackground(_ fill: NSColor) { setAppliedSurface(fill: fill, radius: 0, border: nil) }
 }
 extension Design {
     // Recipes used by the shared conversation/Markdown rows in this fixed-theme host.
     enum FontRole: Equatable {
-        case detail, body, subheading, caption, placeholderTitle
+        case detail, body, emphasizedBody, subheading, caption, placeholderTitle, welcomeGreeting
         case code(weight: NSFont.Weight = .regular)
         static func detail() -> Self { .detail }
     }
@@ -59,8 +63,10 @@ extension NSTextField {
     func applyFont(_ role: Design.FontRole, in surface: Design.Typography.FontSurface) {
         switch role {
         case .body: font = Design.Typography.body(surface: surface)
+        case .emphasizedBody: font = .systemFont(ofSize: 13, weight: .semibold)
         case .detail: font = Design.Typography.detail()
         case .placeholderTitle: font = .systemFont(ofSize: 15, weight: .medium)
+        case .welcomeGreeting: font = .systemFont(ofSize: 20, weight: .semibold)
         case .subheading: font = .systemFont(ofSize: 12, weight: .regular)
         case .caption: font = .systemFont(ofSize: 11, weight: .semibold)
         case .code(let weight): font = .monospacedSystemFont(ofSize: 11, weight: weight)

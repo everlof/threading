@@ -326,6 +326,14 @@ int main(int argc, char **argv) {
     settle();
 
     tw_navigator_pointer_route(window, 1);
+    tw_workspace_placeholder_mode(window, 1);
+    motion(42, 110, 0);
+    next(window, 27, 0, 42, 110);
+    motion(430, 113, 0);
+    next(window, 27, 7, 430, 113);
+    motion(45, 113, 0);
+    next(window, 27, 6, 45, 113);
+    tw_workspace_placeholder_mode(window, 0);
     motion(42, 110, 0);
     TWEvent event = next(window, 27, 0, 42, 110);
     assert(event.key == 0);

@@ -2728,69 +2728,17 @@ final class SessionComposerViewController: NSViewController {
         )
         guard !options.isEmpty else { return nil }
 
-        let markedInList = resolved.identifier.map { identifier in
-            options.contains { $0.identifier == identifier }
-        } ?? false
-        // The qualifier is the marked row's second line, not part of its name: appended,
-        // "(account default)" was truncated at the column's width and took the tail of the
-        // name with it.
-        let qualifier = ComposerDefaults.qualifier(for: resolved.source)
-
-        var models: [ModelEffortPickerPresentation.Model] = []
-        if !markedInList {
-            let resolvedOption = resolved.identifier.flatMap { identifier in
-                AgentModels.option(identifier: identifier, for: selectedAgent, account: account)
-            }
-            models.append(.init(
-                id: resolved.identifier ?? "threading.model-effort.default-model",
-                name: resolvedOption?.displayName
-                    ?? resolved.identifier.map { AgentModels.displayName(for: $0, account: account) }
-                    ?? ComposerDefaults.defaultModelTitle,
-                detail: resolved.identifier == nil ? nil : qualifier,
-                representedValue: nil,
-                supportedEffortIDs: Set(resolvedOption?.reasoningLevels.map(\.effort) ?? [])
-            ))
+        let resolvedOption = resolved.identifier.flatMap { identifier in
+            AgentModels.option(identifier: identifier, for: selectedAgent, account: account)
         }
-
-        models += options.map { option in
-            let isDefault = markedInList && option.identifier == resolved.identifier
-            return .init(
-                id: option.identifier,
-                name: option.displayName,
-                detail: isDefault ? qualifier : nil,
-                representedValue: isDefault ? nil : option.identifier,
-                supportedEffortIDs: Set(option.reasoningLevels.map(\.effort))
-            )
-        }
-
-        var seenEfforts: Set<String> = []
-        var efforts: [ModelEffortPickerPresentation.Effort] = [
-            .init(
-                id: ModelEffortPickerPresentation.automaticEffortID,
-                name: L10n.string("Auto"),
-                representedValue: nil
-            )
-        ]
-        for option in options {
-            for level in option.reasoningLevels where seenEfforts.insert(level.effort).inserted {
-                efforts.append(.init(
-                    id: level.effort,
-                    name: level.displayName,
-                    representedValue: level.effort
-                ))
-            }
-        }
-
-        let selectedModelID = selectedModel
-            ?? resolved.identifier
-            ?? "threading.model-effort.default-model"
-        return ModelEffortPickerPresentation(
-            models: models,
-            efforts: efforts,
-            selectedModelID: selectedModelID,
-            selectedEffortID: selectedReasoningEffort
-                ?? ModelEffortPickerPresentation.automaticEffortID
-        )
+        return ModelEffortPickerPresentation.make(options: options,
+            defaultModelID: resolved.identifier,
+            defaultModelName: resolvedOption?.displayName
+                ?? resolved.identifier.map { AgentModels.displayName(for: $0, account: account) }
+                ?? ComposerDefaults.defaultModelTitle,
+            defaultModelDetail: ComposerDefaults.qualifier(for: resolved.source),
+            defaultOption: resolvedOption, selectedModel: selectedModel,
+            selectedEffort: selectedReasoningEffort)
     }
 
     /// Visibility is stored per provider-qualified login, including the standard account for a
@@ -3178,25 +3126,25 @@ enum ComposerDefaults {
 
     /// The hero's mark: larger than the sidebar's 24 because it stands alone over a greeting,
     /// smaller than an app icon because it is a flourish, not the content.
-    static let heroMarkSide: CGFloat = 40
+    static let heroMarkSide = ComposerWelcomeLayout.markSide
 
     /// How far ahead the welcome's clock looks when the calendar cannot name the next minute
     /// boundary — never in practice, but a minute either way.
     static let welcomeClockFallbackInterval: TimeInterval = 60
 
     /// The least air the hero needs beyond its own height before it is worth showing at all.
-    static let heroMinimumClearance: CGFloat = 48
+    static let heroMinimumClearance = ComposerWelcomeLayout.minimumClearance
 
     /// The widest the hero's words are set, however wide the pane: a reading measure, because a
     /// greeting is a sentence. Not the column's `contentWidth`, which is sized for a row of
     /// controls — a theme's 160 characters across 720 points is a line the eye loses its place
     /// in on the way back.
-    static let heroMeasure = Design.Size.readableWidth
+    static let heroMeasure = ComposerWelcomeLayout.measure
 
     /// The most lines a theme's greeting wraps to before the last one truncates. Three is what
     /// the hero already stands at for the manager's brief, so the longest greeting a theme may
     /// write is never taller over the box than the app's own longest words.
-    static let greetingMaximumLines = 3
+    static let greetingMaximumLines = ComposerWelcomeLayout.maximumLines
 
     /// The most lines the caption beneath it wraps to. The quieter line stays a line or two —
     /// past that it is a paragraph competing with the greeting it annotates.
@@ -3214,7 +3162,7 @@ enum ComposerDefaults {
     /// Wider than `readableWidth`, which paces prose. This column holds a row of controls
     /// and a prompt box with a control row of its own, and squeezing those to a reading measure
     /// is what shrank the chips to unlabelled icons.
-    static let contentWidth: CGFloat = 720
+    static let contentWidth = PromptChrome.openingContentWidth
 
     /// How hard the column insists on filling the pane. Below every split item's holding
     /// priority, and that is the whole point: paired with the required `contentWidth` cap, an
@@ -3271,7 +3219,7 @@ enum ComposerDefaults {
     /// The prompt opens several lines tall. The composer owns the whole pane and is replaced
     /// by the conversation the moment it is used, so there is nothing to be compact for — and
     /// the size of the box is what says how much of a description is wanted.
-    static let promptHeight: CGFloat = 116
+    static let promptHeight = PromptChrome.openingMinimumHeight
 
     static let branchFieldWidth: CGFloat = 260
     static let branchFieldHeight: CGFloat = 24

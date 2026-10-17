@@ -67,9 +67,13 @@ ln -s /usr/lib/aarch64-linux-gnu/libdecor/plugins-1/libdecor-cairo.so \
 install -m 0755 run-app.sh "$bundle/run-app.sh"
 install -m 0755 "$bin_dir/WindowHarness" "$bundle/bin/WindowHarness"
 cp -a "$bin_dir/LinuxAppKitSpike_WindowHarness.resources" "$bundle/bin/"
+cp -a "$bin_dir/LinuxAppKitSpike_AppKit.resources" "$bundle/bin/"
 install -m 0755 "$bin_dir/LinuxHost" "$bundle/bin/LinuxHost"
 install -m 0755 "$daemon_dir/threading-ptyd" "$bundle/bin/threading-ptyd"
 install -m 0644 BUNDLE_README.md "$bundle/README.md"
+mkdir -p "$bundle/licenses/Inter"
+install -m 0644 Sources/AppKit/Resources/Fonts/Inter/LICENSE.txt "$bundle/licenses/Inter/LICENSE.txt"
+install -m 0644 Sources/AppKit/Resources/Fonts/Inter/SOURCE.md "$bundle/licenses/Inter/SOURCE.md"
 mkdir -p "$bundle/licenses/NativeDiffKit"
 install -m 0644 Sources/LinuxNativeDiffAppKit/LICENSE "$bundle/licenses/NativeDiffKit/LICENSE"
 grep -Fq "0226f30467f540a3f62ef48d453f93927da199b6" .build/checkouts/swift-crypto/Sources/CCryptoBoringSSL/hash.txt
@@ -114,7 +118,7 @@ Version: $version
 Section: devel
 Priority: optional
 Architecture: arm64
-Depends: libsqlite3-0, libcurl4t64, zlib1g, libstdc++6, libsdl2-2.0-0, libpangocairo-1.0-0, libatk-bridge2.0-0t64, libglib2.0-0t64, libgdk-pixbuf-2.0-0, librsvg2-common, libdecor-0-plugin-1-cairo, zenity, fonts-dejavu-core, fonts-noto-color-emoji, util-linux, git
+Depends: libsqlite3-0, libcurl4t64, zlib1g, libstdc++6, libsdl2-2.0-0, libpangocairo-1.0-0, libpangoft2-1.0-0, libfontconfig1, libatk-bridge2.0-0t64, libglib2.0-0t64, libgdk-pixbuf-2.0-0, librsvg2-common, libdecor-0-plugin-1-cairo, zenity, fonts-dejavu-core, fonts-noto-color-emoji, util-linux, git
 Maintainer: David Everlöf <support@mjukis.dev>
 Description: Experimental native Linux host for Threading
  Local projects, terminals and coding-agent sessions in a desktop window.

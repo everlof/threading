@@ -50,6 +50,30 @@ final class ModelEffortPickerRenderTests: XCTestCase {
         )
     }
 
+    func testBoundaryNavigationKeepsAvailableEffortAndFallsBackToAuto() throws {
+        var chosenModel: String?
+        var chosenEffort: String?
+        let matrix = ModelEffortMatrixControl(presentation: presentation()) {
+            chosenModel = $0
+            chosenEffort = $1
+        }
+        func key(_ code: UInt16) throws {
+            matrix.keyDown(with: try XCTUnwrap(NSEvent.keyEvent(with: .keyDown,
+                location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                context: nil, characters: "", charactersIgnoringModifiers: "",
+                isARepeat: false, keyCode: code)))
+        }
+        try key(119) // End: Luna does not support the selected Ultra effort.
+        XCTAssertTrue(matrix.accessibilityPerformPress())
+        XCTAssertEqual(chosenModel, "luna")
+        XCTAssertNil(chosenEffort)
+        try key(124) // Light is supported by Luna.
+        try key(115) // Home: the inherited Sol row does not support Light.
+        XCTAssertTrue(matrix.accessibilityPerformPress())
+        XCTAssertNil(chosenModel)
+        XCTAssertNil(chosenEffort)
+    }
+
     func testAxisHighlightStaysBetweenTheThemesRestingAndHoverStates() throws {
         let pure = try XCTUnwrap(
             AppThemeLibrary.stock.first { $0.name == "Pure" }

@@ -158,7 +158,8 @@ void tw_close(TWWindow *w) {
     free(w);
     SDL_Quit();
 }
-TWWindow *tw_open(const char *title, int width, int height) {
+static TWWindow *tw_open_window(const char *title, int width, int height, int sidebarWidth,
+                                int fitDisplay) {
     const char *traceValue = getenv("THREADING_LINUX_STARTUP_TRACE");
     const int trace = traceValue && strcmp(traceValue, "1") == 0;
     const double started = trace ? tw_startup_milliseconds() : 0;
@@ -172,6 +173,17 @@ TWWindow *tw_open(const char *title, int width, int height) {
     const int initialized = SDL_Init(SDL_INIT_VIDEO);
     tw_startup_trace(trace, started, "sdl-init.end");
     if (initialized != 0) return NULL;
+    if (fitDisplay) {
+        SDL_Rect usable;
+        if (SDL_GetDisplayUsableBounds(0, &usable) == 0) {
+            width = width < usable.w ? width : usable.w;
+            height = height < usable.h ? height : usable.h;
+        }
+        const int minimumWidth = sidebarWidth + 320;
+        const int maximumWidth = sidebarWidth + 1280;
+        width = width < minimumWidth ? minimumWidth : width > maximumWidth ? maximumWidth : width;
+        height = height < 180 ? 180 : height > 900 ? 900 : height;
+    }
     TWWindow *w = calloc(1, sizeof(*w));
     if (!w) { SDL_Quit(); return NULL; }
     tw_startup_trace(trace, started, "create-window.begin");
@@ -180,8 +192,8 @@ TWWindow *tw_open(const char *title, int width, int height) {
     tw_startup_trace(trace, started, "create-window.end");
     if (!w->window) { tw_close(w); return NULL; }
     // Explicit experiment bounds keep the software rasterizer's allocation/work bounded.
-    SDL_SetWindowMinimumSize(w->window, 320, 180);
-    SDL_SetWindowMaximumSize(w->window, 1280, 900);
+    SDL_SetWindowMinimumSize(w->window, sidebarWidth + 320, 180);
+    SDL_SetWindowMaximumSize(w->window, sidebarWidth + 1280, 900);
     tw_startup_trace(trace, started, "create-renderer.begin");
     w->renderer = SDL_CreateRenderer(w->window, -1, SDL_RENDERER_SOFTWARE);
     tw_startup_trace(trace, started, "create-renderer.end");
@@ -194,6 +206,16 @@ TWWindow *tw_open(const char *title, int width, int height) {
     tw_accessibility_window_focus(w, (SDL_GetWindowFlags(w->window) & SDL_WINDOW_INPUT_FOCUS) != 0);
     tw_startup_trace(trace, started, "accessibility-open.end");
     return w;
+}
+TWWindow *tw_open(const char *title, int width, int height) {
+    return tw_open_window(title, width, height, 0, 0);
+}
+TWWindow *tw_open_workspace(const char *title, int width, int height, int sidebarWidth) {
+    if (sidebarWidth < 160 || sidebarWidth > 640 || width <= 0 || height <= 0) {
+        SDL_SetError("invalid workspace startup geometry");
+        return NULL;
+    }
+    return tw_open_window(title, width, height, sidebarWidth, 1);
 }
 void tw_window_geometry(TWWindow *w, int *x, int *y, int *width, int *height) {
     SDL_GetWindowPosition(w->window, x, y);
@@ -497,7 +519,7 @@ int tw_workspace_terminal_top_inset_value(TWWindow *w) {
     return w && w->sidebarWidth ? w->terminalTopInset : 0;
 }
 void tw_workspace_mode(TWWindow *w, int sidebarWidth, int sidebarFocused) {
-    if (!w || (sidebarWidth != 0 && sidebarWidth != 320)) return;
+    if (!w || (sidebarWidth != 0 && (sidebarWidth < 160 || sidebarWidth > 640))) return;
     if (w->sidebarWidth == sidebarWidth) {
         if (sidebarWidth) tw_workspace_focus(w, sidebarFocused);
         return;
@@ -525,8 +547,8 @@ void tw_workspace_mode(TWWindow *w, int sidebarWidth, int sidebarFocused) {
     SDL_DestroyTexture(w->sidebarTexture); w->sidebarTexture = NULL;
     SDL_DestroyTexture(w->terminalTexture); w->terminalTexture = NULL;
     SDL_DestroyTexture(w->terminalHeaderTexture); w->terminalHeaderTexture = NULL;
-    SDL_SetWindowMinimumSize(w->window, sidebarWidth ? 640 : 320, 180);
-    SDL_SetWindowMaximumSize(w->window, sidebarWidth ? 1600 : 1280, 900);
+    SDL_SetWindowMinimumSize(w->window, sidebarWidth + 320, 180);
+    SDL_SetWindowMaximumSize(w->window, sidebarWidth + 1280, 900);
     if (sidebarWidth) {
         // Force the first transition through the same input/focus lifecycle as later changes.
         w->sidebarFocused = !(sidebarFocused != 0);
@@ -634,6 +656,19 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         }
         *out = (TWEvent){0};
         SDL_GetWindowSize(w->window, &out->width, &out->height);
+        if (e.type == SDL_DROPFILE || e.type == SDL_DROPTEXT) {
+            const int acceptsFile = e.type == SDL_DROPFILE &&
+                e.drop.windowID == SDL_GetWindowID(w->window) && w->sidebarWidth;
+            const size_t length = e.drop.file ? strnlen(e.drop.file, sizeof(out->text)) : 0;
+            if (acceptsFile) {
+                out->kind = 55;
+                out->action = length > 0 && length < sizeof(out->text) ? 0 : 1;
+                if (!out->action) memcpy(out->text, e.drop.file, length + 1);
+            }
+            SDL_free(e.drop.file);
+            if (acceptsFile) return 1;
+            continue;
+        }
         if (e.type == w->workerWakeType) {
             if ((uint32_t)(uintptr_t)e.user.data1 != w->workerWakeGeneration) continue;
             out->kind = 52;
@@ -835,7 +870,9 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         } else if (w->navigatorPointerRoute && e.type == SDL_MOUSEMOTION &&
                    w->navigatorHovered && !w->terminalButtons) {
             w->navigatorHovered = 0;
-            out->kind = 27; out->action = 4; out->key = 0;
+            const int entersPlaceholder = placeholder_contains(w, out, e.motion.x, e.motion.y);
+            if (entersPlaceholder) w->placeholderHovered = 1;
+            out->kind = 27; out->action = entersPlaceholder ? 7 : 4; out->key = 0;
             out->x = e.motion.x; out->y = e.motion.y;
             out->modifiers = tw_modifiers(SDL_GetModState());
         } else if (w->navigatorPointerRoute && e.type == SDL_MOUSEBUTTONDOWN &&
@@ -1264,8 +1301,8 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             else if (e.key.keysym.sym == SDLK_UP) out->kind = 3;
             else if (e.key.keysym.sym == SDLK_DOWN) out->kind = 4;
             else if (e.key.keysym.sym == SDLK_SPACE && !e.key.repeat) out->kind = 36;
-            else if (e.key.keysym.sym == SDLK_RIGHT) out->kind = 10;
-            else if (e.key.keysym.sym == SDLK_LEFT) out->kind = 11;
+            else if (e.key.keysym.sym == SDLK_RIGHT) out->kind = 53;
+            else if (e.key.keysym.sym == SDLK_LEFT) out->kind = 54;
             else if (e.key.keysym.sym == SDLK_ESCAPE) out->kind = 12;
             else if (e.key.keysym.sym == SDLK_RETURN && !e.key.repeat) { out->kind = 8; w->suppressActivation = SDLK_RETURN; }
         }

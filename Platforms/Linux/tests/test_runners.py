@@ -230,6 +230,7 @@ while True:
         self.write(contract_bin / "NativeRemoteContractHarness", "exit 0")
         self.write(contract_bin / "TableHeightHarness", "exit 0")
         self.write(contract_bin / "OutlineViewHarness", "exit 0")
+        self.write(contract_bin / "SidebarVisibleRowsHarness", "exit 0")
         self.write(contract_bin / "PriorityLayoutHarness", "exit 0")
         self.write(contract_bin / "ViewClippingHarness", "exit 0")
         self.write(contract_bin / "ParagraphWrappingHarness", "exit 0")

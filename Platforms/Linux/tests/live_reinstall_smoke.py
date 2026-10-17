@@ -1,4 +1,5 @@
 """Keep a non-root terminal alive while the parent reinstalls the actual .deb."""
+from saved_catalog_menu import selected_outline_row
 import os
 from pathlib import Path
 import signal
@@ -115,15 +116,18 @@ try:
         time.sleep(.05)
     else:
         raise AssertionError('installed replacement did not automatically reattach the existing child')
+    key(window, 'ctrl+shift+p')
+    title(process, 'Threading experiment - ' + str(project))
+    deadline = time.monotonic() + 10
+    while not selected_outline_row(process.pid, first['id'].removeprefix('terminal-')):
+        assert time.monotonic() < deadline, (root / 'after-reinstall.log').read_text()
+        time.sleep(.05)
+    assert 'TERMINAL_PICKER_FRAME ' not in (root / 'after-reinstall.log').read_text()
     subprocess.run(['import', '-window', window, 'out/reinstall-reattached.png'],
                    check=True, timeout=5)
-    key(window, 'ctrl+shift+p')
-    title(process, 'Threading terminals - ' + str(project))
-    key(window, 'Escape')
-    title(process, 'Threading experiment - ' + str(project))
     key(window, 'alt+F4')
     assert process.wait(timeout=5) == 0
-    print('PASS live daemon and terminal child survive .deb reinstall and automatically reattach from installed launcher', flush=True)
+    print('PASS live daemon and terminal child survive .deb reinstall, reattach and select the exact ordinary outline row', flush=True)
 finally:
     if process is not None and process.poll() is None:
         process.kill()

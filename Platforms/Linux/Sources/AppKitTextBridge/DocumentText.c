@@ -1,4 +1,5 @@
 #include "AppKitTextBridge.h"
+#include "FontFamily.h"
 
 #ifdef __linux__
 #include <limits.h>
@@ -77,7 +78,7 @@ TATDocumentLayout *tat_document_create(const uint8_t *utf8, int length,
     g_object_unref(map);
 
     PangoFontDescription *font = pango_font_description_new();
-    pango_font_description_set_family(font, monospace ? "DejaVu Sans Mono" : "DejaVu Sans");
+    pango_font_description_set_family(font, tat_font_family(monospace));
     PangoWeight weights[] = { PANGO_WEIGHT_NORMAL, PANGO_WEIGHT_MEDIUM,
                              PANGO_WEIGHT_SEMIBOLD, PANGO_WEIGHT_BOLD };
     pango_font_description_set_weight(font, weights[weight]);

@@ -28,14 +28,14 @@ docker run --rm -v "$PWD/../..:/repo" -w /repo/Platforms/Linux swift:6.3.2-noble
   swiftc -parse-as-library -swift-version 6 -I "$bin/Modules" \
     -Xcc "-fmodule-map-file=$bridge_map" \
     tests/stack_layout/Fixture.swift "$bin"/AppKit.build/*.o "$bin"/AppKitTextBridge.build/*.o \
-    $(pkg-config --libs pangocairo) \
+    $(pkg-config --libs pangocairo fontconfig pangoft2) \
     -o out/stack-layout-linux
   out/stack-layout-linux
   swiftc -parse-as-library -swift-version 6 -I "$bin/Modules" \
     -Xcc "-fmodule-map-file=$bridge_map" \
     /repo/Sources/Threading/UI/Design/ControlRow.swift \
     tests/stack_layout/ControlRowFixture.swift "$bin"/AppKit.build/*.o "$bin"/AppKitTextBridge.build/*.o \
-    $(pkg-config --libs pangocairo) \
+    $(pkg-config --libs pangocairo fontconfig pangoft2) \
     -o out/control-row-linux
   out/control-row-linux
 '

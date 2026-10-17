@@ -1,4 +1,7 @@
 import AppKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 /// The provider-neutral data a model-by-effort chooser draws.
 ///
@@ -49,26 +52,143 @@ struct ModelEffortPickerPresentation: Equatable {
     static let automaticEffortID = "threading.model-effort.automatic"
 }
 
+extension ModelEffortPickerPresentation {
+    /// Both hosts use the same inheritance row and effort-column semantics.
+    static func make(options: [AgentModelOption], defaultModelID: String?,
+                     defaultModelName: String, defaultModelDetail: String,
+                     defaultOption: AgentModelOption?, selectedModel: String?,
+                     selectedEffort: String?) -> Self? {
+        guard !options.isEmpty else { return nil }
+        let markedInList = options.contains { $0.identifier == defaultModelID }
+        let defaultID = defaultModelID ?? "threading.model-effort.default-model"
+        var models: [Model] = []
+        if !markedInList {
+            models.append(Model(id: defaultID, name: defaultModelName,
+                detail: defaultModelID == nil ? nil : defaultModelDetail, representedValue: nil,
+                supportedEffortIDs: Set(defaultOption?.reasoningLevels.map(\.effort) ?? [])))
+        }
+        models += options.map { option in
+            let isDefault = markedInList && option.identifier == defaultModelID
+            return Model(id: option.identifier, name: option.displayName,
+                detail: isDefault ? defaultModelDetail : nil,
+                representedValue: isDefault ? nil : option.identifier,
+                supportedEffortIDs: Set(option.reasoningLevels.map(\.effort)))
+        }
+        var seen: Set<String> = []
+        var efforts = [Effort(id: automaticEffortID, name: L10n.string("Auto"), representedValue: nil)]
+        for option in options {
+            for level in option.reasoningLevels where seen.insert(level.effort).inserted {
+                efforts.append(Effort(id: level.effort, name: level.displayName, representedValue: level.effort))
+            }
+        }
+        return Self(models: models, efforts: efforts,
+            selectedModelID: selectedModel ?? defaultID,
+            selectedEffortID: selectedEffort ?? automaticEffortID)
+    }
+}
+
+/// Shared popover contents. Hosts own anchoring, dismissal and the chosen launch values.
+@MainActor
+final class ModelEffortPickerContentView: NSView {
+    private enum Layout {
+        static var inset: CGFloat { Design.Spacing.medium }
+        static var titleHeight: CGFloat { 22 }
+        static var gap: CGFloat { Design.Spacing.small }
+        static var maximumWidth: CGFloat { 680 }
+        static var maximumMatrixHeight: CGFloat { 336 }
+    }
+
+    let matrixView: ModelEffortMatrixControl
+    let scrollView = ThemedScrollView(frame: .zero)
+    private let title = NSTextField(labelWithString: L10n.string("Model × effort"))
+    private let footer: NSView?
+
+    init(matrixView: ModelEffortMatrixControl, footer: NSView? = nil) {
+        self.matrixView = matrixView
+        self.footer = footer
+        super.init(frame: .zero)
+        title.applyFont(.caption)
+        title.textColor = Design.Text.secondary
+        title.setAccessibilityElement(false)
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        matrixView.frame = NSRect(origin: .zero, size: matrixView.intrinsicContentSize)
+        scrollView.documentView = matrixView
+        addSubview(title)
+        addSubview(scrollView)
+        if let footer { addSubview(footer) }
+        #if !os(Linux)
+        // AppKit constraints use text alignment rectangles and pixel-align legacy theme
+        // controls. Keep that native sizing contract; the Linux host lays out these same
+        // children explicitly until its constraint engine supports those semantics.
+        for child in [title, scrollView] + (footer.map { [$0] } ?? []) {
+            child.translatesAutoresizingMaskIntoConstraints = false
+        }
+        let natural = matrixView.intrinsicContentSize
+        var constraints = [
+            title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.inset),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Layout.inset),
+            title.topAnchor.constraint(equalTo: topAnchor, constant: Layout.inset),
+            title.heightAnchor.constraint(equalToConstant: Layout.titleHeight),
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.inset),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.inset),
+            scrollView.topAnchor.constraint(equalTo: title.bottomAnchor, constant: Layout.gap),
+            scrollView.widthAnchor.constraint(equalToConstant: min(Layout.maximumWidth, natural.width)),
+            scrollView.heightAnchor.constraint(equalToConstant: min(Layout.maximumMatrixHeight, natural.height))
+        ]
+        if let footer {
+            constraints += [
+                footer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.inset),
+                footer.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: Layout.gap),
+                footer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Layout.inset)
+            ]
+        } else {
+            constraints.append(scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Layout.inset))
+        }
+        NSLayoutConstraint.activate(constraints)
+        #endif
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var intrinsicContentSize: NSSize {
+        let natural = matrixView.intrinsicContentSize
+        return NSSize(width: min(Layout.maximumWidth, natural.width) + Layout.inset * 2,
+            height: Layout.inset * 2 + Layout.titleHeight + Layout.gap
+                + min(Layout.maximumMatrixHeight, natural.height)
+                + (footer.map { Layout.gap + $0.intrinsicContentSize.height } ?? 0))
+    }
+
+    override func layout() {
+        super.layout()
+        #if os(Linux)
+        let width = max(1, bounds.width - Layout.inset * 2)
+        let footerHeight = footer?.intrinsicContentSize.height ?? 0
+        let footerAllowance = footer == nil ? 0 : footerHeight + Layout.gap
+        let matrixHeight = max(1, bounds.height - Layout.inset * 2
+            - Layout.titleHeight - Layout.gap - footerAllowance)
+        title.frame = NSRect(x: Layout.inset, y: bounds.height - Layout.inset - Layout.titleHeight,
+                            width: width, height: Layout.titleHeight)
+        scrollView.frame = NSRect(x: Layout.inset, y: Layout.inset + footerAllowance,
+                                 width: width, height: matrixHeight)
+        matrixView.frame = NSRect(origin: .zero, size: matrixView.intrinsicContentSize)
+        footer?.frame = NSRect(x: Layout.inset, y: Layout.inset, width: width, height: footerHeight)
+        #endif
+    }
+}
+
 /// A bounded viewport over a provider-sized model catalogue.
 ///
 /// The document is one drawing control rather than one retained view per combination. Its
 /// storage is O(models + efforts), AppKit asks it to draw only the visible dirty region, and the
 /// enclosing themed scroll view bounds both axes. That is the scaling contract for catalogues
 /// received from provider-owned files rather than a fixed application enum.
+#if !os(Linux)
 @MainActor
 final class ModelEffortPickerViewController: NSViewController {
-    private enum Layout {
-        // Computed accessors keep picker-only measurements injectable while the opt-in
-        // InjectionNext session is running. Stored constants have already been initialized by
-        // the time a replacement function body arrives.
-        static var inset: CGFloat { Design.Spacing.medium }
-        static var titleHeight: CGFloat { 22 }
-        static var titleGap: CGFloat { Design.Spacing.small }
-        static var footerGap: CGFloat { Design.Spacing.small }
-        static var maximumWidth: CGFloat { 680 }
-        static var maximumMatrixHeight: CGFloat { 336 }
-    }
-
     let matrixView: ModelEffortMatrixControl
     private let hiddenModelCount: Int
     private let onShowHiddenModels: (() -> Void)?
@@ -96,27 +216,6 @@ final class ModelEffortPickerViewController: NSViewController {
     }
 
     override func loadView() {
-        let root = NSView()
-        let title = NSTextField(labelWithString: L10n.string("Model × effort"))
-        title.applyFont(.caption)
-        title.textColor = Design.Text.secondary
-        title.setAccessibilityElement(false)
-
-        let scroll = ThemedScrollView()
-        scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = true
-        scroll.autohidesScrollers = true
-        scroll.drawsBackground = false
-        scroll.borderType = .noBorder
-        scroll.documentView = matrixView
-
-        let natural = matrixView.intrinsicContentSize
-        matrixView.frame = NSRect(origin: .zero, size: natural)
-        let viewport = NSSize(
-            width: min(Layout.maximumWidth, natural.width),
-            height: min(Layout.maximumMatrixHeight, natural.height)
-        )
-
         let showHidden: ThemedButton? = if hiddenModelCount > 0, onShowHiddenModels != nil {
             ThemedButton(
                 title: L10n.format("Show hidden models (%d)", hiddenModelCount),
@@ -130,46 +229,8 @@ final class ModelEffortPickerViewController: NSViewController {
         showHidden?.contentAlignment = .leading
         showHidden?.setAccessibilityIdentifier("model-effort.show-hidden-models")
 
-        for child in [title, scroll] + (showHidden.map { [$0] } ?? []) {
-            child.translatesAutoresizingMaskIntoConstraints = false
-        }
-        root.addSubview(title)
-        root.addSubview(scroll)
-        if let showHidden { root.addSubview(showHidden) }
-        var constraints = [
-            title.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Layout.inset),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -Layout.inset),
-            title.topAnchor.constraint(equalTo: root.topAnchor, constant: Layout.inset),
-            title.heightAnchor.constraint(equalToConstant: Layout.titleHeight),
-            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Layout.inset),
-            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Layout.inset),
-            scroll.topAnchor.constraint(equalTo: title.bottomAnchor, constant: Layout.titleGap),
-            scroll.widthAnchor.constraint(equalToConstant: viewport.width),
-            scroll.heightAnchor.constraint(equalToConstant: viewport.height)
-        ]
-        if let showHidden {
-            constraints += [
-                showHidden.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Layout.inset),
-                showHidden.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: Layout.footerGap),
-                showHidden.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Layout.inset)
-            ]
-        } else {
-            constraints.append(
-                scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Layout.inset)
-            )
-        }
-        NSLayoutConstraint.activate(constraints)
-
-        let contentSize = NSSize(
-            width: viewport.width + Layout.inset * 2,
-            height: Layout.inset * 2 + Layout.titleHeight + Layout.titleGap + viewport.height
-                + (showHidden.map { Layout.footerGap + $0.intrinsicContentSize.height } ?? 0)
-        )
-        // Give AppKit a non-zero owner before the popover installs the controller. Otherwise
-        // the root's temporary autoresizing-mask height of zero fights the complete vertical
-        // constraint chain during the first sizing pass, even though the popover corrects it a
-        // moment later. A shipping popover should not need constraint recovery to reach its
-        // preferred size.
+        let root = ModelEffortPickerContentView(matrixView: matrixView, footer: showHidden)
+        let contentSize = root.intrinsicContentSize
         root.frame = NSRect(origin: .zero, size: contentSize)
         preferredContentSize = contentSize
         view = root
@@ -179,6 +240,8 @@ final class ModelEffortPickerViewController: NSViewController {
         onShowHiddenModels?()
     }
 }
+
+#endif
 
 /// One themed, keyboard-operable radio grid. Drawing the complete selected cell gives selection
 /// enough weight to survive every theme; a tiny checkmark is neither the state nor the target.
@@ -202,7 +265,7 @@ final class ModelEffortMatrixControl: ThemedControl {
         static var axisHoverProgress: CGFloat { 0.46 }
     }
 
-    #if DEBUG
+    #if DEBUG && !os(Linux)
     private static let injectionNotification = Notification.Name("INJECTION_BUNDLE_NOTIFICATION")
     #endif
 
@@ -246,7 +309,7 @@ final class ModelEffortMatrixControl: ThemedControl {
         setAccessibilityRole(.radioGroup)
         setAccessibilityLabel(L10n.string("Model and effort"))
         updateAccessibilityValue()
-        #if DEBUG
+        #if DEBUG && !os(Linux)
         // Injection replaces the drawing methods, but AppKit still needs an invalidation before
         // the already-open picker asks those methods for another frame.
         NotificationCenter.default.addObserver(
@@ -270,6 +333,53 @@ final class ModelEffortMatrixControl: ThemedControl {
             width: Layout.modelWidth + CGFloat(presentation.efforts.count) * Layout.effortWidth,
             height: Layout.headerHeight + CGFloat(presentation.models.count) * Layout.rowHeight
         )
+    }
+
+    struct VisibleChoice {
+        let index: Int
+        let name: String
+        let detail: String
+        let frame: NSRect
+        let selected: Bool
+        let focused: Bool
+        let enabled: Bool
+    }
+
+    func visibleChoices() -> [VisibleChoice] {
+        let visible = visibleRect
+        guard !visible.isEmpty, !presentation.efforts.isEmpty else { return [] }
+        let first = max(0, Int(floor((visible.minY - Layout.headerHeight) / Layout.rowHeight)))
+        let end = min(presentation.models.count,
+            max(first, Int(ceil((visible.maxY - Layout.headerHeight) / Layout.rowHeight))))
+        guard first < end else { return [] }
+        var result: [VisibleChoice] = []
+        for row in first..<end {
+            let model = presentation.models[row]
+            for column in presentation.efforts.indices {
+                let cell = Cell(row: row, column: column)
+                let frame = cellRect(row: cell.row, column: cell.column).intersection(visible)
+                guard !frame.isEmpty else { continue }
+                let effort = presentation.efforts[column]
+                result.append(VisibleChoice(index: row * presentation.efforts.count + column,
+                    name: "\(model.name) · \(effort.name)", detail: model.detail ?? "", frame: frame,
+                    selected: isSelected(cell), focused: focusedCell == cell, enabled: isAvailable(cell)))
+            }
+        }
+        return result
+    }
+
+    @discardableResult
+    func chooseVisibleChoice(at index: Int) -> Bool {
+        guard index >= 0, !presentation.efforts.isEmpty else { return false }
+        let cell = Cell(row: index / presentation.efforts.count, column: index % presentation.efforts.count)
+        guard isEnabled, isAvailable(cell), cellRect(row: cell.row, column: cell.column).intersects(visibleRect) else { return false }
+        choose(cell)
+        return true
+    }
+
+    func revealFocusedChoice() {
+        guard let cell = focusedCell ?? selectedCell() ?? firstAvailableCell() else { return }
+        scrollToVisible(cellRect(row: cell.row, column: cell.column))
     }
 
     override var acceptsFirstResponder: Bool { isEnabled && firstAvailableCell() != nil }
@@ -339,7 +449,9 @@ final class ModelEffortMatrixControl: ThemedControl {
         guard isEnabled else { return }
         let point = convert(event.locationInWindow, from: nil)
         if let row = modelRow(at: point), canHideModel(at: row), hideRect(for: row).contains(point) {
+            #if !os(Linux)
             NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+            #endif
             onHideModel?(presentation.models[row].id)
             return
         }
@@ -359,6 +471,10 @@ final class ModelEffortMatrixControl: ThemedControl {
         case 124: moveFocus(horizontal: 1, vertical: 0) // right
         case 125: moveFocus(horizontal: 0, vertical: 1) // down
         case 126: moveFocus(horizontal: 0, vertical: -1) // up
+        case 115: moveFocus(toRow: 0) // home
+        case 119: moveFocus(toRow: presentation.models.count - 1) // end
+        case 116: moveFocusByPage(-1)
+        case 121: moveFocusByPage(1)
         case 36, 49:
             if let cell = focusedCell ?? selectedCell() ?? firstAvailableCell() { choose(cell) }
         default:
@@ -369,7 +485,11 @@ final class ModelEffortMatrixControl: ThemedControl {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         drawHeader(in: dirtyRect)
-        for row in presentation.models.indices {
+        let firstRow = max(0, Int(floor((dirtyRect.minY - Layout.headerHeight) / Layout.rowHeight)))
+        let endRow = min(presentation.models.count,
+            max(firstRow, Int(ceil((dirtyRect.maxY - Layout.headerHeight) / Layout.rowHeight))))
+        guard firstRow < endRow else { return }
+        for row in firstRow..<endRow {
             let rowRect = NSRect(
                 x: 0,
                 y: Layout.headerHeight + CGFloat(row) * Layout.rowHeight,
@@ -750,6 +870,24 @@ final class ModelEffortMatrixControl: ThemedControl {
         return nil
     }
 
+    private func moveFocusByPage(_ direction: Int) {
+        guard let current = focusedCell ?? selectedCell() ?? firstAvailableCell() else { return }
+        let pageRows = max(1, Int(visibleRect.height / Layout.rowHeight))
+        moveFocus(toRow: current.row + direction * pageRows)
+    }
+
+    private func moveFocus(toRow requestedRow: Int) {
+        guard let current = focusedCell ?? selectedCell() ?? firstAvailableCell(),
+              !presentation.models.isEmpty else { return }
+        let row = min(max(0, requestedRow), presentation.models.count - 1)
+        let preferred = Cell(row: row, column: current.column)
+        let column = isAvailable(preferred) ? current.column
+            : presentation.efforts.indices.first { isAvailable(Cell(row: row, column: $0)) }
+        guard let column else { return }
+        focusedCell = Cell(row: row, column: column)
+        scrollToVisible(cellRect(row: row, column: column))
+    }
+
     private func moveFocus(horizontal: Int, vertical: Int) {
         guard var candidate = focusedCell ?? selectedCell() ?? firstAvailableCell() else { return }
         let attempts = max(1, presentation.models.count * presentation.efforts.count)
@@ -777,7 +915,9 @@ final class ModelEffortMatrixControl: ThemedControl {
         let model = presentation.models[cell.row]
         let effort = presentation.efforts[cell.column]
         onChoose(model.representedValue, effort.representedValue)
+        #if !os(Linux)
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        #endif
         NSAccessibility.post(element: self, notification: .valueChanged)
     }
 
@@ -834,7 +974,7 @@ final class ModelEffortMatrixControl: ThemedControl {
         ultraTimer = nil
     }
 
-    #if DEBUG
+    #if DEBUG && !os(Linux)
     @objc private nonisolated func injectionDidComplete(_ notification: Notification) {
         Task { @MainActor [weak self] in
             guard let self else { return }

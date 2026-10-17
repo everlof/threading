@@ -61,6 +61,12 @@ could be interrupted. WAL is the other half: a read never blocks the writer, and
 turns "another process has it" into a wait. That makes multiple writers *possible*, not permitted
 — `SingleInstanceLock` still stands, and is a chosen concurrency model rather than a workaround.
 
+The Linux navigator's disclosure worker uses `updateProjectExpansion` with the stable project ID.
+It reads the current project payload and updates only its expansion flag in one write transaction,
+leaving position, sessions, runtime selection and embedded terminals intact. A missing project
+returns refusal rather than being upserted. The navigation projection includes the existing flag;
+no schema migration or second Linux preferences store is involved.
+
 **SQLite handles have one deterministic lifetime.** `SQLiteDatabase.Statement` finalizes in
 `deinit` as well as after `run`: fluent binding can throw while the statement expression is still
 being built, before `run` has installed its own `defer`, and that must not leave a native statement

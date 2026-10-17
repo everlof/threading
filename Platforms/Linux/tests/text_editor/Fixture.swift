@@ -163,6 +163,21 @@ enum Fixture {
         precondition(prompt.contentView.bounds.minY > 0,
                      "typing after a scroll must reveal the retained caret again")
         let promptText = prompt.textView
+        promptText.string = "Short draft"
+        prompt.frame.size.height = 20
+        let shortUsed = promptText.textUsedRect
+        prompt.frame.size.height = 100
+        precondition(promptText.frame.height == 100,
+                     "height-only viewport growth must extend the cached document hit area")
+        precondition(promptText.textUsedRect == shortUsed,
+                     "height-only growth must preserve text layout")
+        promptWindow.makeFirstResponder(nil)
+        promptWindow.dispatchToContent(NSEvent(type: .leftMouseDown,
+            locationInWindow: NSPoint(x: 90, y: 50)))
+        promptWindow.dispatchToContent(NSEvent(type: .leftMouseUp,
+            locationInWindow: NSPoint(x: 90, y: 50)))
+        precondition(promptWindow.firstResponder === promptText,
+                     "blank viewport below a short draft must take typing focus after growth")
         var submitIntents: [PromptSubmitIntent] = []
         promptText.onSubmit = { submitIntents.append($0) }
         promptText.string = "Draft"

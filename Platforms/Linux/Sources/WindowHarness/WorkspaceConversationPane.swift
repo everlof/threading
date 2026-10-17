@@ -10,12 +10,16 @@ import LinuxWindowBridge
 final class WorkspaceConversationPane: WorkspacePane {
     let runtime: NativeWorkspaceSession
     let chrome: WorkspacePaneChrome
-    private let owner = NSWindow(backingScaleFactor: 2)
+    private let owner = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
     private let root = NSView(frame: .zero)
     private let scroll = ThemedScrollView()
     private let table = ConversationContentTable.make()
     private let rows = DocumentRowSource()
     private let editor = PromptTextView.scrollingPrompt()
+    private let composer = NSView(frame: .zero)
+    private let composerContent = NSStackView()
+    private let composerFooter = NSStackView()
+    private let composerSpacer = NSView(frame: .zero)
     private let submit = ThemedButton()
     private let status: NSTextField
     private var needsPresentation = true
@@ -23,6 +27,7 @@ final class WorkspaceConversationPane: WorkspacePane {
     private var displayRevision: UInt64 = 0
     private var followTail = true
     private var focused = false
+    private var composerFocused = false
     private var presentedPermission: Int?
     private var permissionCard: PermissionRequestView?
     private var questionCards: [UUID: ConversationQuestionCard] = [:]
@@ -37,21 +42,23 @@ final class WorkspaceConversationPane: WorkspacePane {
         chrome = WorkspacePaneChrome(pageName: pageName, pageIdentity: runtime.id.uuidString,
             symbolName: "text.bubble", icon: icon, showsSessionActions: true, onReveal: onReveal)
         status = ConversationRowView.streaming(runtime.status)
-        // These four peers are positioned by this bounded host, while each peer's own
+        // These peers are positioned by this bounded host, while each peer's own
         // internal constraints still own its content. Do not feed their intrinsic fits back
         // into the root as unconstrained Auto Layout siblings.
-        let positionedViews: [NSView] = [scroll, status, editor, submit]
+        let positionedViews: [NSView] = [scroll, status, composer]
         for view in positionedViews { view.translatesAutoresizingMaskIntoConstraints = true }
         table.dataSource = rows
         table.delegate = rows
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         editor.textView.placeholder = "Reply to this conversation"
-        editor.textView.textContainerInset = NSSize(width: Design.Spacing.medium, height: Design.Spacing.small)
         editor.textView.submitsOnReturn = { true }
         editor.textView.onSubmit = { [weak self] _ in self?.send() }
-        submit.title = "Send"
-        submit.isProminent = true
+        editor.textView.onFocusChange = { [weak self] focused in
+            self?.composerFocused = focused
+            self?.refreshComposerSurface()
+        }
+        submit.isBordered = false
         submit.setAccessibilityIdentifier("composer.conversation-reply.submit")
         submit.action = { [weak self] in
             guard let self else { return }
@@ -62,8 +69,29 @@ final class WorkspaceConversationPane: WorkspacePane {
         submit.nextKeyView = editor.textView
         root.addSubview(scroll)
         root.addSubview(status)
-        root.addSubview(editor)
-        root.addSubview(submit)
+        root.addSubview(composer)
+        PromptChrome.configureFooter(composerFooter, spacer: composerSpacer)
+        composerFooter.addArrangedSubview(submit)
+        composerContent.orientation = .vertical
+        composerContent.alignment = .leading
+        composerContent.spacing = Design.Spacing.medium
+        composerContent.translatesAutoresizingMaskIntoConstraints = false
+        editor.translatesAutoresizingMaskIntoConstraints = false
+        submit.translatesAutoresizingMaskIntoConstraints = false
+        composerContent.addArrangedSubview(editor)
+        composerContent.addArrangedSubview(composerFooter)
+        composer.addSubview(composerContent)
+        NSLayoutConstraint.activate([
+            composerContent.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: Design.Spacing.inset),
+            composerContent.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -Design.Spacing.inset),
+            composerContent.topAnchor.constraint(equalTo: composer.topAnchor, constant: PromptChrome.footerVerticalInset),
+            composerContent.bottomAnchor.constraint(equalTo: composer.bottomAnchor, constant: -PromptChrome.footerVerticalInset),
+            editor.widthAnchor.constraint(equalTo: composerContent.widthAnchor),
+            composerFooter.widthAnchor.constraint(equalTo: composerContent.widthAnchor),
+            composerFooter.heightAnchor.constraint(equalToConstant: Design.Size.chipHeight),
+            submit.widthAnchor.constraint(equalToConstant: PromptChrome.submitSize),
+            submit.heightAnchor.constraint(equalToConstant: PromptChrome.submitSize)
+        ])
         owner.contentView = root
         runtime.onRow = { [weak self] index, row, blocks in
             guard let self else { return }
@@ -143,10 +171,11 @@ final class WorkspaceConversationPane: WorkspacePane {
         status.stringValue = runtime.pendingPermission != nil ? "Waiting for permission"
             : runtime.questions.isEmpty ? runtime.status : "Waiting for your answer"
         status.textColor = runtime.failure == nil ? Design.Text.secondary : Design.Status.negative
-        submit.title = runtime.canInterrupt ? "Stop" : "Send"
-        submit.isEnabled = runtime.canInterrupt || (runtime.canSend
+        let canSubmit = runtime.canSend
             && !editor.textView.hasMarkedText()
-            && !editor.textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            && !editor.textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        PromptChrome.updateSubmit(submit, canSubmit: canSubmit, isStop: runtime.canInterrupt)
+        submit.toolTip = runtime.canInterrupt ? "Stop · Esc" : "Send · Return"
         needsPresentation = true
     }
 
@@ -161,8 +190,14 @@ final class WorkspaceConversationPane: WorkspacePane {
         chrome.setThemeAppearance()
         root.appearance = LinuxTheme.appearance
         root.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
-        editor.applySurface(fill: Design.Surface.elevated, radius: .control)
+        refreshComposerSurface()
         rows.refreshTheme()
+        needsPresentation = true
+    }
+
+    private func refreshComposerSurface() {
+        PromptChrome.applySurface(to: composer, fill: Design.Surface.field,
+            emphasized: owner.isKeyWindow && composerFocused)
         needsPresentation = true
     }
 
@@ -180,19 +215,30 @@ final class WorkspaceConversationPane: WorkspacePane {
     func refresh(window: OpaquePointer, width: Int, height: Int, originX: Int, focused: Bool) throws {
         try chrome.refresh(window: window, width: width, height: height, originX: originX)
         let contentHeight = max(1, height - WorkspacePaneChrome.headerPixelHeight)
-        let size = NSSize(width: CGFloat(width) / 2, height: CGFloat(contentHeight) / 2)
+        let size = NSSize(width: CGFloat(width) / WorkspaceDisplay.scale, height: CGFloat(contentHeight) / WorkspaceDisplay.scale)
         guard needsPresentation || size != presentedSize || displayRevision != owner.displayRevision else { return }
         root.frame = NSRect(origin: .zero, size: size)
         let inset = min(Design.Spacing.inset, size.width / 8)
         let actionHeight = min(28, max(1, size.height / 5))
-        let actionWidth = min(72, max(1, size.width / 4))
-        submit.frame = NSRect(x: max(inset, size.width - inset - actionWidth), y: inset,
-            width: actionWidth, height: actionHeight)
-        let editorHeight = min(72, max(1, size.height / 4))
-        editor.frame = NSRect(x: inset, y: inset + actionHeight + Design.Spacing.small,
-            width: max(1, size.width - 2 * inset), height: editorHeight)
-        status.frame = NSRect(x: inset, y: inset, width: max(1, size.width - 3 * inset - actionWidth), height: actionHeight)
-        let bottom = editor.frame.maxY + Design.Spacing.medium
+        let composerWidth = max(1, size.width - 2 * inset)
+        // Width changes reflow the same cached TextKit document the editor already paints.
+        // Reading its used rect adds no second string scan or alternate text measurement.
+        editor.frame.size.width = max(1, composerWidth - 2 * Design.Spacing.inset)
+        let lineHeight = (editor.textView.font ?? Design.Typography.body()).boundingRectForFont.height
+        let resting = PromptChrome.restingHeight(minimum: Design.Size.inputHeight,
+            lineHeight: lineHeight, showsFooter: true)
+        let textHeight = editor.textView.layoutManager.flatMap { manager in
+            editor.textView.textContainer.map { manager.usedRect(for: $0).height }
+        } ?? 0
+        let fitted = PromptChrome.fittedHeight(textHeight: textHeight, restingHeight: resting, showsFooter: true)
+        let composerHeight = min(fitted.height, max(1, size.height - 2 * inset - actionHeight
+            - Design.Spacing.small - Design.Size.chipHeight))
+        let needsScroller = fitted.scrolls || composerHeight < fitted.height
+        if editor.hasVerticalScroller != needsScroller { editor.hasVerticalScroller = needsScroller }
+        composer.frame = NSRect(x: inset, y: inset + actionHeight + Design.Spacing.small,
+            width: composerWidth, height: composerHeight)
+        status.frame = NSRect(x: inset, y: inset, width: composerWidth, height: actionHeight)
+        let bottom = composer.frame.maxY + Design.Spacing.medium
         scroll.frame = NSRect(x: inset, y: bottom, width: max(1, size.width - 2 * inset),
             height: max(1, size.height - bottom - inset))
         // The clip view already sizes its document to the viewport, so the table's own width is
@@ -208,7 +254,7 @@ final class WorkspaceConversationPane: WorkspacePane {
             scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, table.frame.height - scroll.contentView.bounds.height)))
         }
         let bitmap = Bitmap(width: width, height: contentHeight, background: LinuxTheme.components("ground"))
-        root.render(in: NSGraphicsContext(bitmap: bitmap, scale: 2))
+        root.render(in: NSGraphicsContext(bitmap: bitmap, scale: WorkspaceDisplay.scale))
         let result = bitmap.pixels.withUnsafeBufferPointer {
             tw_present_pane(window, $0.baseAddress, Int32(width), Int32(contentHeight), 0)
         }
@@ -216,9 +262,9 @@ final class WorkspaceConversationPane: WorkspacePane {
         if focused {
             tw_title(window, title)
             let caret = activeTextView.convert(activeTextView.insertionPointRect, to: root)
-            tw_text_input_rect(window, Int32(originX + Int(caret.minX * 2)),
-                Int32(WorkspacePaneChrome.headerPixelHeight + Int((size.height - caret.maxY) * 2)),
-                Int32(max(1, caret.width * 2)), Int32(max(1, caret.height * 2)))
+            tw_text_input_rect(window, Int32(originX + Int(caret.minX * WorkspaceDisplay.scale)),
+                Int32(WorkspacePaneChrome.headerPixelHeight + Int((size.height - caret.maxY) * WorkspaceDisplay.scale)),
+                Int32(max(1, caret.width * WorkspaceDisplay.scale)), Int32(max(1, caret.height * WorkspaceDisplay.scale)))
         }
         tw_accessibility_show_terminal(window, title)
         needsPresentation = false
@@ -228,13 +274,16 @@ final class WorkspaceConversationPane: WorkspacePane {
             (view as? NSTextField)?.isWaitingForCompleteTextViewport == true || view.subviews.contains(where: waiting)
         }
         let prepared = runtime.rowsPrepared && !waiting(table) && !status.isWaitingForCompleteTextViewport
+        let composerTop = WorkspacePaneChrome.headerPixelHeight + Int((size.height - composer.frame.maxY) * WorkspaceDisplay.scale)
+        let sendPoint = submit.convert(NSPoint(x: submit.bounds.midX, y: submit.bounds.midY), to: root)
+        print("COMPOSER_FRAME x=\(originX + Int(composer.frame.minX * WorkspaceDisplay.scale)) y=\(composerTop) width=\(Int(composer.bounds.width * WorkspaceDisplay.scale)) height=\(Int(composer.bounds.height * WorkspaceDisplay.scale)) send=\(originX + Int(sendPoint.x * WorkspaceDisplay.scale)),\(WorkspacePaneChrome.headerPixelHeight + Int((size.height - sendPoint.y) * WorkspaceDisplay.scale)) enabled=\(submit.isEnabled) focused=\(composerFocused) scrolls=\(editor.hasVerticalScroller)")
         for card in decisionOrder where card.window != nil {
             // Window-pixel centres of a decision card's controls, for journeys that use them.
             var controls: [String] = []
             func centre(_ name: String, _ view: NSView) {
                 let point = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: root)
-                let x = originX + Int(point.x * 2)
-                let y = WorkspacePaneChrome.headerPixelHeight + Int((size.height - point.y) * 2)
+                let x = originX + Int(point.x * WorkspaceDisplay.scale)
+                let y = WorkspacePaneChrome.headerPixelHeight + Int((size.height - point.y) * WorkspaceDisplay.scale)
                 controls.append("\(name.replacingOccurrences(of: " ", with: "_"))=\(x),\(y)")
             }
             func walk(_ view: NSView) {
@@ -257,7 +306,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         }
         for tool in tools(table) where !tool.visibleRect.isEmpty {
             let point = tool.convert(NSPoint(x: tool.bounds.midX, y: tool.bounds.midY), to: root)
-            print("TOOL_FRAME \(originX + Int(point.x * 2)),\(WorkspacePaneChrome.headerPixelHeight + Int((size.height - point.y) * 2)) height=\(Int(tool.bounds.height)) open=\(rows.expandedTools.count)")
+            print("TOOL_FRAME \(originX + Int(point.x * WorkspaceDisplay.scale)),\(WorkspacePaneChrome.headerPixelHeight + Int((size.height - point.y) * WorkspaceDisplay.scale)) height=\(Int(tool.bounds.height)) open=\(rows.expandedTools.count)")
         }
         print("CONVERSATION_FRAME \(runtime.id.uuidString) rows=\(table.numberOfRows) mounted=\(table.mountedViewCount) turns=\(runtime.completedTurns) prepared=\(prepared) dark=\(LinuxTheme.isDark) status=\(runtime.status)")
         fflush(nil)
@@ -291,7 +340,7 @@ final class WorkspaceConversationPane: WorkspacePane {
             let type: NSEvent.EventType = input.kind == 16 ? .scrollWheel
                 : input.kind == 17 ? .leftMouseDragged
                 : input.action == 3 ? .leftMouseUp : .leftMouseDown
-            let point = NSPoint(x: CGFloat(input.x) / 2, y: root.bounds.height - CGFloat(input.y) / 2)
+            let point = NSPoint(x: CGFloat(input.x) / WorkspaceDisplay.scale, y: root.bounds.height - CGFloat(input.y) / WorkspaceDisplay.scale)
             _ = owner.dispatchToContent(NSEvent(type: type, locationInWindow: point,
                 scrollingDeltaY: input.kind == 16 ? CGFloat(input.key) : 0))
             if input.kind == 16 {

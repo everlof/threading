@@ -112,6 +112,7 @@ struct SelectedProjectTerminal {
 }
 
 struct ProjectNavigationEntry {
+    let isExpanded: Bool
     let id: ProjectID
     let name: String
     let folderPath: String
@@ -381,6 +382,7 @@ final class ProjectDatabase {
             var decoded: [ProjectID: [AgentSession]] = [:]
             try appendDecodedSessions(stored, to: &decoded)
             projects.append(ProjectNavigationEntry(
+                isExpanded: project.isExpanded,
                 id: project.id,
                 name: project.name,
                 folderPath: project.folderPath,
@@ -504,6 +506,21 @@ final class ProjectDatabase {
     /// because one disclosure triangle moved made the gesture scale with the complete sidebar.
     func saveProject(_ project: Project, position: Int) throws {
         try upsert(project, position: position)
+    }
+
+    /// Changes only one project's disclosure state, preserving its current settings, terminals,
+    /// order and session rows. Missing projects are never recreated by a stale UI callback.
+    func updateProjectExpansion(id: ProjectID, expanded: Bool) throws -> Bool {
+        try database.transaction {
+            guard var project = try projectRecord(id: id) else { return false }
+            guard project.isExpanded != expanded else { return true }
+            project.isExpanded = expanded
+            try database.prepare("UPDATE project SET data = ? WHERE id = ?")
+                .bind(1, try Self.encodeValidated(project))
+                .bind(2, id.uuidString)
+                .run()
+            return true
+        }
     }
 
     /// Updates one embedded terminal from the current project payload, never a cached project.

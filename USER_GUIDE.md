@@ -12,8 +12,17 @@ macOS UI. See the [Linux preview guide](Platforms/Linux/BUNDLE_README.md) for in
 supported commands and keyboard navigation.
 New Session accepts a multiline brief; wheel input scrolls long briefs, Return adds a line,
 and Super+Return starts the selected agent.
-Tab and Shift+Tab reach the project and identity choices, editor and submit button. Space or
-Return opens a focused choice; Escape closes it. Home/End and Page Up/Down navigate the brief.
+The permission choice inside the brief starts at Manual. Choose another mode or Use Agent's
+Setting before starting; the choice is saved with that session. Codex's Plan choice prevents
+writes but does not instruct the agent to produce a plan.
+The model/effort choice reads the selected account's available models. The marked default row
+and Auto keep the agent's own settings; explicit choices are saved with the session and restored
+when it resumes. Switching accounts clears those choices without changing the brief. A missing
+Codex model cache leaves the choice disabled and lets the CLI choose its defaults.
+Tab and Shift+Tab reach the project and identity choices, editor, model/effort, permissions and
+submit button. Space or Return opens a focused choice; Escape closes it. In the model grid,
+arrows skip unsupported combinations and Home/End or Page Up/Down reveal distant rows.
+Those navigation keys move within the brief when the editor has focus.
 
 ## First Launch
 

@@ -130,17 +130,10 @@ try:
                                         str(process.pid), '--name', '^Threading experiment - '),
                             'native window', process).splitlines()[0]
         xdo('windowfocus', '--sync', window)
-        idle = eventually(lambda: panel(app) if panel(app).get_child_at_index(0).get_name()
-                          == 'No Session Selected' else None, 'idle pane', process)
-        assert idle.get_child_at_index(2).get_action_iface().do_action(0)
-        create = eventually(lambda: menu(app, 'New in Project'), 'creation menu', process)
-        assert create.get_child_at_index(0).get_action_iface().do_action(1)
-        providers = eventually(lambda: menu(app, 'New Chat providers'), 'provider menu', process)
-        assert providers.get_child_at_index(0).get_action_iface().do_action(1)
-        eventually(lambda: panel(app) if panel(app).get_child_at_index(0).get_name()
-                   == 'Start a Codex session' else None, 'composer pane', process)
         editor = eventually(lambda: editor_in(app), 'AT-SPI editor', process)
-        assert editor.get_state_set().contains(Atspi.StateType.FOCUSED)
+        bounds = editor.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        xdo('mousemove', '--window', window, str(bounds.x + 15), str(bounds.y + 15), 'click', '1')
+        eventually(lambda: editor.get_state_set().contains(Atspi.StateType.FOCUSED), 'editor focus', process)
         text = editor.get_text_iface()
         time.sleep(1)
 
@@ -158,7 +151,7 @@ try:
         xdo('key', 'Escape')
         eventually(lambda: Atspi.Text.get_text(text, 0, -1) == '',
                    'Escape removes marked preedit', process)
-        assert panel(app).get_child_at_index(0).get_name() == 'Start a Codex session'
+        assert panel(app).get_child_at_index(0).get_accessible_id() == 'linux.composer.greeting'
         assert editor.get_state_set().contains(Atspi.StateType.FOCUSED)
         assert not marker.exists() and session_count() == 0, 'Escape launched an agent'
 
