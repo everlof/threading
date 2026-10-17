@@ -74,6 +74,10 @@ The terminal fills the rest, under a header naming the project and session curre
 A third pane opens on the right when an agent displays something the terminal cannot render.
 See [Display Panel](#display-panel).
 
+Drag the divider beside the chat to give the browser or display panel more room. At narrow
+widths, the header shortens its account summary and chat title while keeping the action buttons
+available. Hover or click the usage ring to see the full account reading.
+
 There is no title bar — the window controls sit over the top of the sidebar. That is also as
 narrow as the sidebar goes: drag its divider and it stops where those controls end, and pushing
 on past that stop closes the sidebar altogether. **⌘S** brings it back, as does the sidebar

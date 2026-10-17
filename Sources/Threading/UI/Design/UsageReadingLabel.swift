@@ -53,11 +53,27 @@ final class UsageReadingLabel: NSView, InkSourced {
         Self.plainSummary(readings: readings)
     }
 
-    private var ink: Design.Ink { inkSource.ink }
+    private var presentedInk: Design.Ink?
+    private var statusGrounds: [NSColor] = []
+    private var emptyValue = NSAttributedString()
+    private var ink: Design.Ink { presentedInk ?? inkSource.ink }
+
+    /// Backdrop controls resolve ink against their own resting and hover faces. Keep that
+    /// contrast decision while sharing the same whole-reading compression as composer rows.
+    func show(readings: [AccountUsage.Reading], ink: Design.Ink,
+              statusGrounds: [NSColor], emptyValue: NSAttributedString) {
+        presentedInk = ink
+        self.statusGrounds = statusGrounds
+        self.emptyValue = emptyValue
+        self.readings = readings
+    }
+
+    var attributedSummary: NSAttributedString {
+        readings.isEmpty ? emptyValue : line(count: min(readings.count, Self.maximumReadings))
+    }
 
     override var intrinsicContentSize: NSSize {
-        guard !readings.isEmpty else { return NSSize(width: 0, height: 0) }
-        let size = line(count: min(readings.count, Self.maximumReadings)).size()
+        let size = attributedSummary.size()
         return NSSize(width: ceil(size.width), height: ceil(size.height))
     }
 
@@ -92,10 +108,15 @@ final class UsageReadingLabel: NSView, InkSourced {
 
     override func draw(_ dirtyRect: NSRect) {
         let count = drawableReadingCount(in: bounds.width)
-        guard count > 0 else { return }
+        let text: NSAttributedString
+        if readings.isEmpty, emptyValue.size().width <= bounds.width + 0.5 {
+            text = emptyValue
+        } else {
+            guard count > 0 else { return }
+            text = line(count: count)
+        }
 
         // Unflipped, so the point given is the line's lower-left corner.
-        let text = line(count: count)
         let size = text.size()
         text.draw(at: NSPoint(x: 0, y: ((bounds.height - size.height) / 2).rounded()))
     }
@@ -126,7 +147,8 @@ final class UsageReadingLabel: NSView, InkSourced {
         return Self.summary(
             readings: Array(readings.prefix(count)),
             omittedCount: count == maximum ? readings.count - maximum : 0,
-            ink: ink
+            ink: ink,
+            statusGrounds: statusGrounds
         )
     }
 

@@ -178,25 +178,14 @@ enum ConversationDefaults {
     /// required set, and well above the 750 a label defends its text at.
     static let columnWidthPriority = NSLayoutConstraint.Priority(999)
 
-    /// How hard a pane-level column — the reply box's, the sticky step's — holds the width the
-    /// layout pass states for it: above the hugging its content answers with, below everything
-    /// the split view says about the pane.
-    ///
-    /// A column that sits in the pane itself must be a *stated constant*, the way the transcript
-    /// rows state theirs, and never an equality to the pane's width. An equality-to-pane under a
-    /// required cap cannot be satisfied in a pane wider than the cap, and the solver reduces the
-    /// error with whatever is cheapest — which, at any priority above the 250 an
-    /// `NSSplitViewItem` positions its pane with, is *the pane*: at `.defaultHigh` each such
-    /// column clamped the whole conversation pane down to its own cap and the divider would not
-    /// move, reported as "the chat can't be made wider than the textarea". Nor can the equality
-    /// simply drop below 250 — the composer's footer hugs at exactly that default, so a weaker
-    /// pull loses to the chips and the box collapses to their width instead of filling the pane.
-    /// A constant the layout pass has already made satisfiable pulls on nothing; the priority
-    /// only has to beat the hug (250) and stay under the divider's own drag (490) — and under
-    /// the 500 at which a content-derived constant starts sizing the window (see
-    /// `window-chrome.md`). The transcript rows may keep their 999 because they live in the
-    /// scroll view's document, where no constraint can reach the pane.
-    static let statedColumnPriority = NSLayoutConstraint.Priority(400)
+    /// A pane-level column must beat content hugging (250) but yield to the display pane's
+    /// holding priority (260). A drag or restored divider can arrive before the next layout
+    /// pass updates the column's measured width; at 400, that stale constant pulled the pane
+    /// back. Below 250, the reply box instead shrank to its content's fitting width.
+    /// Transcript rows keep their separate 999 because they live in the scroll document.
+    static let statedColumnPriority = NSLayoutConstraint.Priority(
+        NSLayoutConstraint.Priority.defaultLow.rawValue + 1
+    )
 
     /// The reply box's column: the transcript's column plus the box's own padding.
     ///

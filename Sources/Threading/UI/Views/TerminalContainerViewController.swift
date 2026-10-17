@@ -274,7 +274,6 @@ final class TerminalContainerViewController: NSViewController {
         super.viewDidLoad()
         setupHeader()
         setupDrawer()
-        setupPlaceholder()
         setupGitStatusOverlay()
         if let storedComposerViewController {
             installComposerIfNeeded(storedComposerViewController)
@@ -639,6 +638,11 @@ final class TerminalContainerViewController: NSViewController {
     private func hideComposerIfLoaded() {
         guard let controller = storedComposerViewController, controller.isViewLoaded else { return }
         controller.view.isHidden = true
+        // Hidden views still contribute constraints. The retained form's footer must not
+        // impose its width on the terminal or native conversation that replaced it. Keep the
+        // controller (and its draft), then reinstall the same view on the next composer route.
+        controller.view.removeFromSuperview()
+        controller.removeFromParent()
     }
 
     /// Shows the composer for a project — or for none, the choose-a-project mode a store with
@@ -672,7 +676,7 @@ final class TerminalContainerViewController: NSViewController {
         // a drawer left standing under them draws a terminal through the form on top of it.
         applyDrawer(for: nil)
 
-        placeholderView.isHidden = true
+        setPlaceholderVisible(false)
         hideLaunchFailureIfNeeded()
         let composerViewController = composerViewController
         composerViewController.view.isHidden = false
@@ -696,7 +700,7 @@ final class TerminalContainerViewController: NSViewController {
         currentTerminalID = nil
         currentSessionID = nil
         applyDrawer(for: nil)
-        placeholderView.isHidden = true
+        setPlaceholderVisible(false)
         hideLaunchFailureIfNeeded()
         hideComposerIfLoaded()
         applyPaneBackground(.chrome)
@@ -797,7 +801,7 @@ final class TerminalContainerViewController: NSViewController {
             detachCurrentChild()
             currentTerminalID = nil
             currentSessionID = nil
-            placeholderView.isHidden = true
+            setPlaceholderVisible(false)
             hideLaunchFailureIfNeeded()
             hideComposerIfLoaded()
             applyPaneBackground(.chrome)
@@ -1067,9 +1071,21 @@ final class TerminalContainerViewController: NSViewController {
         launchFailureView.isHidden = true
     }
 
+    private func setPlaceholderVisible(_ visible: Bool) {
+        placeholderView.isHidden = !visible
+        guard visible else {
+            // A hidden label still contributes its intrinsic width to Auto Layout.
+            placeholderView.removeFromSuperview()
+            return
+        }
+        setupPlaceholder()
+    }
+
     private func setupPlaceholder() {
+        let host = view
+        guard placeholderView.superview == nil else { return }
         placeholderView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(placeholderView)
+        host.addSubview(placeholderView, positioned: .below, relativeTo: gitStatusOverlay)
 
         NSLayoutConstraint.activate([
             placeholderView.topAnchor.constraint(equalTo: contentTopAnchor),
@@ -1387,7 +1403,7 @@ final class TerminalContainerViewController: NSViewController {
         ])
 
         currentChild = controller
-        placeholderView.isHidden = true
+        setPlaceholderVisible(false)
         hideLaunchFailureIfNeeded()
         hideComposerIfLoaded()
 
@@ -1414,7 +1430,7 @@ final class TerminalContainerViewController: NSViewController {
         ])
 
         currentProjectTerminal = controller
-        placeholderView.isHidden = true
+        setPlaceholderVisible(false)
         hideLaunchFailureIfNeeded()
         hideComposerIfLoaded()
         applyPaneBackground(.terminal(controller.paneBackgroundColor))
@@ -1541,7 +1557,7 @@ final class TerminalContainerViewController: NSViewController {
         ])
 
         currentConversation = conversation
-        placeholderView.isHidden = true
+        setPlaceholderVisible(false)
         hideLaunchFailureIfNeeded()
         hideComposerIfLoaded()
 
@@ -1617,7 +1633,7 @@ final class TerminalContainerViewController: NSViewController {
             hasLater: window.hasLater
         ))
         currentSearchConversationWindow = controller
-        placeholderView.isHidden = true
+        setPlaceholderVisible(false)
         hideLaunchFailureIfNeeded()
         hideComposerIfLoaded()
         applyPaneBackground(.chrome)
@@ -1687,7 +1703,7 @@ final class TerminalContainerViewController: NSViewController {
             hasLater: window.hasLater
         ))
         currentProjectTextSearchPreview = controller
-        placeholderView.isHidden = true
+        setPlaceholderVisible(false)
         hideLaunchFailureIfNeeded()
         hideComposerIfLoaded()
         applyPaneBackground(.chrome)
@@ -1801,7 +1817,7 @@ final class TerminalContainerViewController: NSViewController {
         currentSettingsPageID = nil
         currentTerminalID = nil
         hideComposerIfLoaded()
-        placeholderView.isHidden = false
+        setPlaceholderVisible(true)
         hideLaunchFailureIfNeeded()
         applyPaneBackground(.chrome)
         placeholderView.configure(
@@ -1828,7 +1844,7 @@ final class TerminalContainerViewController: NSViewController {
         let scheduledView = scheduledPlaceholderForPresentation()
 
         hideComposerIfLoaded()
-        placeholderView.isHidden = true
+        setPlaceholderVisible(false)
         hideLaunchFailureIfNeeded()
         recoveryView?.isHidden = true
         scheduledView.isHidden = false
@@ -1948,7 +1964,7 @@ final class TerminalContainerViewController: NSViewController {
         currentComposerProjectID = nil
         currentSettingsPageID = nil
         hideComposerIfLoaded()
-        placeholderView.isHidden = true
+        setPlaceholderVisible(false)
         hideLaunchFailureIfNeeded()
         recoveryView.isHidden = false
         applyPaneBackground(.chrome)
@@ -1968,7 +1984,7 @@ final class TerminalContainerViewController: NSViewController {
     private func showRecoveryState(for sessionID: SessionID?) {
         recoveryView?.isHidden = true
         hideComposerIfLoaded()
-        placeholderView.isHidden = false
+        setPlaceholderVisible(true)
         hideLaunchFailureIfNeeded()
         currentComposerProjectID = nil
         currentSettingsPageID = nil
@@ -1994,7 +2010,7 @@ final class TerminalContainerViewController: NSViewController {
         }
 
         hideComposerIfLoaded()
-        placeholderView.isHidden = false
+        setPlaceholderVisible(true)
         hideLaunchFailureIfNeeded()
         applyPaneBackground(.chrome)
         placeholderView.configure(
@@ -2037,7 +2053,7 @@ final class TerminalContainerViewController: NSViewController {
     ) {
         installLaunchFailureViewIfNeeded()
         hideComposerIfLoaded()
-        placeholderView.isHidden = true
+        setPlaceholderVisible(false)
         recoveryView?.isHidden = true
         scheduledPlaceholderView?.isHidden = true
         launchFailureView.isHidden = false
@@ -2172,7 +2188,7 @@ final class TerminalContainerViewController: NSViewController {
         }
 
         hideComposerIfLoaded()
-        placeholderView.isHidden = false
+        setPlaceholderVisible(true)
         hideLaunchFailureIfNeeded()
         applyPaneBackground(.chrome)
         placeholderView.configure(
@@ -3151,6 +3167,12 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
 /// The strip at the top of the content pane, holding what used to be toolbar items.
 @MainActor
 enum PaneHeaderDefaults {
+    /// Keep the page name readable after the usage summary compresses, without letting either
+    /// piece of header text decide the conversation pane's width (held at defaultLow).
+    static let titleWidthPriority = NSLayoutConstraint.Priority(
+        NSLayoutConstraint.Priority.defaultLow.rawValue - 1
+    )
+
     /// Deep enough for the tab and the icon buttons beside it, with air above and below.
     /// Read from `PaneHeaderView` so this strip and the sidebar's header band keep one
     /// silhouette: their hairlines land on the same line across the split.

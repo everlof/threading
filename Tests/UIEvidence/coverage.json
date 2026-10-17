@@ -244,6 +244,36 @@
       }
     },
     {
+      "id": "conversation-pane-width",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Narrow chat beside a browser",
+      "description": "Native and terminal conversations at the 320-point divider minimum in the real main window, with a long page title, account usage and the browser panel open.",
+      "states": ["Native conversation", "Terminal conversation", "Long title", "Account usage", "Browser open"],
+      "matrix": {
+        "themes": ["System", "Threading", "Swiss Minimalist", "Cyberpunk"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["320-point conversation in a 1400×800-point main window"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ConversationPaneWidthTests.swift",
+        "tests": [
+          "ThreadingTests/ConversationPaneWidthTests/testNativeAndTerminalSessionsReachTheMinimumBesideABrowser",
+          "ThreadingTests/ConversationPaneWidthTests/testRendersNarrowConversationsInTheMainWindow",
+          "ThreadingTests/UsageReadingLabelTests",
+          "ThreadingTests/ConversationRenderTests/testTranscriptComposerAndRailStandOnOneCentredColumn",
+          "ThreadingTests/ComposerHandoffTests",
+          "ThreadingTests/OpenInTests/testTheHeaderStillFitsWithTheOpenInPairAtTheNarrowestPane",
+          "ThreadingTests/ThemedControlTests/testPaneHeaderCarriesThePageItsActionsAndTracksPaneState",
+          "ThreadingTests/ThemedControlTests/testHeaderStepsAsideForTheWindowControlsWhenTheSidebarCollapses",
+          "ThreadingTests/ThemedControlTests/testThePageTitleHidesWhileSettingsIsActive",
+          "ThreadingTests/DisplayPaneLayoutTests/testThePanelOpensAtTheWidthItRemembersRatherThanItsChromeFloor"
+        ]
+      },
+      "capture": { "glob": "conversation-width-*.png" }
+    },
+    {
       "id": "session-composer-layout",
       "kind": "surface",
       "status": "implemented",

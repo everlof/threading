@@ -4455,6 +4455,28 @@
         }
       }
     },
+    "A chat that created or asked in an open workroom must not stop on a question in its terminal. Questions for you go to this person through the workroom, like any other person's, and the answer comes back to the chat as mail." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En chatt som har skapat eller ställt en fråga i ett öppet arbetsrum ska inte stanna vid en fråga i terminalen. Frågor till dig går till den här personen via arbetsrummet, precis som andra personers frågor, och svaret kommer tillbaka till chatten som post."
+          }
+        }
+      }
+    },
+    "A chat tied to a workroom asks you here instead of waiting in its terminal." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En chatt som är kopplad till ett arbetsrum frågar dig här i stället för att vänta i terminalen."
+          }
+        }
+      }
+    },
     "A chat, a checkout or a terminal given a sound of its own from its Sounds menu is listed here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6792,6 +6814,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägg till uppdatering"
+          }
+        }
+      }
+    },
+    "Add yourself as a person first. You are added to every room you approve opening, so you can answer from the same link on your phone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till dig själv som person först. Du läggs till i varje rum som du godkänner att öppna, så att du kan svara från samma länk i telefonen."
           }
         }
       }
@@ -36935,6 +36968,17 @@
         }
       }
     },
+    "Nobody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen"
+          }
+        }
+      }
+    },
     "Nobody else can reach this chat. Sharing it creates a single-use invitation to this one chat — never to your other sessions." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43643,6 +43687,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Frågor till personer utanför den här Macen."
+          }
+        }
+      }
+    },
+    "Questions for you" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågor till dig"
+          }
+        }
+      }
+    },
+    "Questions for you go to" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågor till dig skickas till"
           }
         }
       }
@@ -72779,6 +72845,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Du"
+          }
+        }
+      }
+    },
+    "You (%@) can answer in this room too." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du (%@) kan också svara i det här rummet."
           }
         }
       }

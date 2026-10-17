@@ -20,7 +20,7 @@ final class AccountUsageItemView: BackdropThemedControl {
     typealias UsagePopoverContentProvider = @MainActor (AgentAccount) -> NSViewController?
 
     private let ringView = UsageRingView()
-    private let summaryLabel = NSTextField(labelWithString: "")
+    private let summaryLabel = UsageReadingLabel(inkSource: .backdrop)
     private let appEvents = AppEventObservations()
 
     private var isPressed = false { didSet { updateBackground() } }
@@ -69,7 +69,7 @@ final class AccountUsageItemView: BackdropThemedControl {
     /// the design helper while this component quietly stops using its answer.
     var ringTrackColorForTesting: NSColor { ringView.trackColor }
     var ringTintColorForTesting: NSColor { ringView.tint }
-    var summaryForTesting: NSAttributedString { summaryLabel.attributedStringValue }
+    var summaryForTesting: NSAttributedString { summaryLabel.attributedSummary }
     var contentGroundsForTesting: [NSColor] { contentInk(from: ink).grounds }
 
     private let customizationLookup: ComponentCustomizationHost.Lookup
@@ -146,6 +146,9 @@ final class AccountUsageItemView: BackdropThemedControl {
         setAccessibilityLabel(L10n.string("Account usage"))
 
         ringView.translatesAutoresizingMaskIntoConstraints = false
+        // The ring and its popover remain available at narrow widths. The summary is optional
+        // inline detail, not a minimum width for the entire conversation pane.
+        summaryLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
 
         let stack = NSStackView(views: [ringView, summaryLabel])
         stack.orientation = .horizontal
@@ -295,11 +298,19 @@ final class AccountUsageItemView: BackdropThemedControl {
         // reported every window as expired whenever the two differed — which is always, in a
         // fixture.
         let readings = usage?.readings(at: now, metering: model) ?? []
-        summaryLabel.attributedStringValue = Self.summary(
+        summaryLabel.show(
             readings: CustomLimitBounds.retinted(readings, of: metered, in: rules, at: now),
             ink: content.ink,
-            statusGrounds: content.grounds
+            statusGrounds: content.grounds,
+            emptyValue: NSAttributedString(
+                string: AccountUsageItemDefaults.unknownValue,
+                attributes: [
+                    .font: Design.Typography.control(),
+                    .foregroundColor: content.ink.secondary
+                ]
+            )
         )
+        setAccessibilityValue(summaryLabel.attributedSummary.string)
     }
 
     /// Foreground ink is measured against the faces the pill can actually be wearing, not only
@@ -309,36 +320,6 @@ final class AccountUsageItemView: BackdropThemedControl {
         let ground = (hostGround ?? inkSource).ground
         let grounds = [source.surface, source.surfaceHover].map { $0.composited(over: ground) }
         return (source.legible(over: grounds), grounds)
-    }
-
-    /// `5h 43% · 7d 73%`: each window as a quiet label and its value, the value tinted by
-    /// that window's own severity. The vocabulary is Claude's own status line, so the short
-    /// names read as familiar rather than cryptic.
-    ///
-    /// Composed by `UsageReadingLabel`, which is where the composer's line comes from too. The
-    /// composer promises to show *the reading this pill will go on showing* once the session
-    /// exists, and two implementations of one sentence is how a promise like that stops being
-    /// true. What stays here is the empty case: a pill is a fixed slot in the chrome and says
-    /// `—` when there is nothing to report, where a line on a control row leaves instead.
-    private static func summary(
-        readings: [AccountUsage.Reading],
-        ink: Design.Ink,
-        statusGrounds: [NSColor]
-    ) -> NSAttributedString {
-        guard !readings.isEmpty else {
-            return NSAttributedString(
-                string: AccountUsageItemDefaults.unknownValue,
-                attributes: [
-                    .font: Design.Typography.control(),
-                    .foregroundColor: ink.secondary
-                ]
-            )
-        }
-        return UsageReadingLabel.summary(
-            readings: readings,
-            ink: ink,
-            statusGrounds: statusGrounds
-        )
     }
 
     // MARK: - Interaction

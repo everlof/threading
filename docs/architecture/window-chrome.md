@@ -249,6 +249,37 @@ The title explicitly exposes its nested actions button as an accessibility child
 the enclosing button as a leaf otherwise, hiding the menu from VoiceOver and UI automation even
 though the ellipsis is drawn and pointer-clickable.
 
+**The header's text yields to the conversation divider.** The title label already truncated,
+but `PageTitleView` also publishes an intrinsic width. Leaving that outer control at AppKit's
+default compression resistance held a pane with a long title at 502pt despite its 320pt split
+minimum. The main-window host now puts the title's compression below the split item's holding
+priority. The account summary yields first, using `UsageReadingLabel` to drop complete readings
+rather than cut a percentage in half; its ring, full accessible value and usage popover remain
+available. No resize callback rebuilds the header or scans content: Auto Layout resolves the fixed
+set of controls, and the reading draws at most three windows. This remains host-owned window
+geometry and adds no extension replacement surface.
+
+**Invisible surfaces must not size the chat that replaced them.** The new-chat form and session
+placeholder were hidden but still pinned to the pane. The form's footer could hold 440pt; the
+placeholder's label plus its margins imposed 360pt under System and about 463pt under Cyberpunk,
+in both renderers. The container now detaches those surfaces when replacing them and reinstalls
+them when requested. The stored composer controller retains its draft and choices. The handoff
+snapshot is taken before detachment, so the composer-to-conversation animation keeps its source.
+
+The native reply box also held its last measured width at priority 400. That constant can be
+stale when the divider moves or the browser reopens, and it out-ranked the display pane's
+260 holding priority: a requested 400pt landed at 433pt. Pane-level column preferences now sit at
+251, above content hugging (250) but below the display pane. Dropping the preference below
+250 made the widened reply box stop at its content's 626pt fitting width. Transcript rows retain
+their separate 999 inside the scroll document. The existing centred-column test checks that
+fixing divider movement does not shrink the reply box to the width of its chips.
+
+`ConversationPaneWidthTests` moves the real divider with populated native and terminal sessions,
+checks the actual pane and window dimensions after visiting the composer, verifies the retained
+draft on return, and renders the narrow state with a browser open.
+Comparing a header's fitting size with its available width alone cannot prove this contract: both
+can grow together when the content is allowed to overrule the pane.
+
 **Reveal means the visible, keyboard-usable sidebar, not a selection in a hidden controller.**
 The column may currently contain an extension navigator or be collapsed entirely, so the title's
 press takes one ordered route: restore and persist the native navigator, select and scroll the
