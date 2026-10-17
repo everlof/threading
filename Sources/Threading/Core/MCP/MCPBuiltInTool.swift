@@ -126,6 +126,9 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case trafficStart, trafficStatus, trafficStop, trafficList, trafficGet
   case trafficBody, trafficHeaders, trafficClear, trafficCertificate
 
+  case workroomFind, workroomCreate, workroomContext, workroomAsk, workroomQuestions
+  case workroomRespond, workroomRequestOpening, workroomSetLanguage
+
   enum Family: String, CaseIterable, Sendable {
     case continuation
     case display
@@ -145,6 +148,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
     case settings
     case issueReporting
     case extensionAuthoring
+    case workrooms
   }
 
   /// Compatibility projection for call sites that need the stable wire spelling. The spelling

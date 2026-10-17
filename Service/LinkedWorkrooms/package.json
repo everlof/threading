@@ -1,9 +1,0 @@
-{
-  "name": "threading-linked-workrooms-trial",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "start": "node server.mjs",
-    "test": "swift build --package-path ../../Targets/Controller && node --test server.test.mjs"
-  }
-}

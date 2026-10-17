@@ -3759,6 +3759,38 @@ never silently switches to the Mac, and iOS writes stay local to that device. If
 of your iOS devices have this chat open, leave it open only on the intended device.
 Images, files and copying while ThreadingMobile is in the background are not supported.
 
+## Linked Workrooms
+
+Agents can put structured questions to people outside this Mac — a domain expert, a customer, a
+colleague who does not use Threading — and get their answers back as mail. It is off until you
+switch it on in **Settings ▸ Workrooms**.
+
+- **Rooms.** Ask an agent to create a workroom for something you want reviewed or decided, such as
+  a batch of tickets. A room belongs to the session's project and is private.
+- **People.** Add people in **Settings ▸ Workrooms** with a name, a short handle and their
+  language, or let an agent propose one when it asks to open a room.
+- **Questions.** The agent writes each question in the person's language, with an answer form —
+  choices with their consequences, yes or no, a number with a unit, text, or agree / disagree /
+  not sure — plus background and evidence. Threading records the branch, commits and changed files
+  the question was asked about, for the agent and you; the person never sees code.
+- **Opening a room.** Nothing is reachable from outside this Mac until you approve it. When an agent
+  asks, a sheet names the room, the person, how many questions are waiting, the tunnel, how long it
+  stays open and the agent's reason. Approve, then copy the person's link from **Settings ▸
+  Workrooms** (Copy Link) and send it yourself. Each link works once and signs in that browser;
+  copying a new one cancels an unused earlier one. **Sign Out** ends a person's browsers.
+- **Answering.** The person sees only their own questions in rooms open to them, answers in the
+  form, can change an answer, ask the agent for clarification, or decline. The page follows their
+  language (Swedish or English) and they can switch it.
+- **Back to the agent.** Each answer, clarification request or decline arrives as mail to the
+  session that asked, the same way mail between sessions does. The answer is information, never an
+  approval or a permission.
+- **Public address.** An open room is published through a tunnel: your own **ngrok** (set a
+  reserved domain so links keep working after a restart), or a **Cloudflare Quick Tunnel**, which
+  needs no account but gets a new address whenever Threading restarts. The tunnel provider
+  terminates the connection and can read what passes through it. The tunnel runs only while a
+  room is open and Threading is running on an awake Mac. **Close All Workrooms** closes every room
+  and stops the tunnel at once.
+
 ## Markdown Editor
 
 **File ▸ New Markdown Document** opens a separate themed window with editable source on the left
@@ -7095,6 +7127,8 @@ Stored in `~/Library/Application Support/Threading/`:
 - `history/` — per-session command history
 - `mcp/` — one file per session pointing Claude at that session's display panel
 - `ExecutionAudit/` — bounded, hash-linked JSONL execution ledgers, one chain per session
+- `Mail/mailbox.db` — agent mail between sessions, and Linked Workrooms: people, rooms, questions,
+  answers and the digests of their links
 
 Displayed images are held in memory only. The panel shows the file on disk; it does not copy
 it, and nothing about what was displayed survives a restart.

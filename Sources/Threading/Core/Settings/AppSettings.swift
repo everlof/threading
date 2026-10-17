@@ -1373,6 +1373,31 @@ final class AppSettings {
         }
     }
 
+    // MARK: - Linked Workrooms
+
+    /// Whether agents may ask people outside this Mac through Linked Workrooms.
+    var workroomsEnabled: Bool {
+        get { AppSettingDefinitions.workroomsEnabled.read(from: defaults) ?? false }
+        set { AppSettingDefinitions.workroomsEnabled.write(newValue, to: defaults) }
+    }
+
+    var workroomTunnelProvider: WorkroomTunnelProvider {
+        get {
+            AppSettingDefinitions.workroomTunnelProvider.read(from: defaults)
+                .flatMap(WorkroomTunnelProvider.init(rawValue:)) ?? .ngrok
+        }
+        set { AppSettingDefinitions.workroomTunnelProvider.write(newValue.rawValue, to: defaults) }
+    }
+
+    /// A reserved ngrok domain, or nil for the account's assigned address.
+    var workroomNgrokDomain: String? {
+        get {
+            let value = AppSettingDefinitions.workroomNgrokDomain.read(from: defaults) ?? ""
+            return WorkroomTunnelRecipe.isValidDomain(value) ? value : nil
+        }
+        set { AppSettingDefinitions.workroomNgrokDomain.write(newValue ?? "", to: defaults) }
+    }
+
     /// Whether Threading may send content-free crashes, hangs and sampled performance data to
     /// Sentry. Independent of paired-device diagnostics and absent until the person opts in.
     var sentryDiagnosticsEnabled: Bool {

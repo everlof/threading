@@ -182,6 +182,16 @@ extension AgentCommand {
   static func mailInbox(_ value: MailInboxArguments) -> Self { builtIn(.mailInbox, value) }
   static func mailAck(_ value: MailAckArguments) -> Self { builtIn(.mailAck, value) }
   static func mailDirectory(_ value: EmptyToolArguments = .init()) -> Self { builtIn(.mailDirectory, value) }
+  static func workroomFind(_ value: WorkroomFindArguments = .init()) -> Self { builtIn(.workroomFind, value) }
+  static func workroomCreate(_ value: WorkroomCreateArguments) -> Self { builtIn(.workroomCreate, value) }
+  static func workroomContext(_ value: WorkroomRoomArguments) -> Self { builtIn(.workroomContext, value) }
+  static func workroomAsk(_ value: WorkroomAskArguments) -> Self { builtIn(.workroomAsk, value) }
+  static func workroomQuestions(_ value: WorkroomQuestionsArguments = .init()) -> Self { builtIn(.workroomQuestions, value) }
+  static func workroomRespond(_ value: WorkroomRespondArguments) -> Self { builtIn(.workroomRespond, value) }
+  static func workroomRequestOpening(_ value: WorkroomRequestOpeningArguments) -> Self {
+    builtIn(.workroomRequestOpening, value)
+  }
+  static func workroomSetLanguage(_ value: WorkroomSetLanguageArguments) -> Self { builtIn(.workroomSetLanguage, value) }
   static func listAccounts(_ value: ListAccountsArguments) -> Self { builtIn(.listAccounts, value) }
   static func sessionCost(_ value: SessionCostArguments) -> Self { builtIn(.sessionCost, value) }
   static func resumeSession(_ value: ResumeSessionArguments) -> Self { builtIn(.resumeSession, value) }

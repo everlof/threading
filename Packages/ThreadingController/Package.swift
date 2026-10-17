@@ -5,13 +5,18 @@ import PackageDescription
 let package = Package(
     name: "ThreadingController",
     platforms: [.macOS(.v13)],
-    products: [.library(name: "ThreadingController", targets: ["ThreadingController"])],
+    products: [.library(name: "ThreadingController", targets: ["ThreadingController"]),
+               .library(name: "ThreadingWorkroomPortal", targets: ["ThreadingWorkroomPortal"])],
     dependencies: [.package(path: "../ThreadingDomain"), .package(path: "../ThreadingUsage")],
     targets: [
         .systemLibrary(name: "CControllerSQLite", pkgConfig: "sqlite3",
                        providers: [.apt(["libsqlite3-dev"])]),
         .target(name: "ThreadingController", dependencies: ["CControllerSQLite", .product(name: "ThreadingDomain", package: "ThreadingDomain"),
                                                          .product(name: "ThreadingUsage", package: "ThreadingUsage")]),
-        .testTarget(name: "ThreadingControllerTests", dependencies: ["ThreadingController"])
+        .testTarget(name: "ThreadingControllerTests", dependencies: ["ThreadingController"]),
+        // The Linked Workrooms participant portal: a pure request→response handler over a
+        // participant-only backend. Foundation only, no sockets, so any host can serve it.
+        .target(name: "ThreadingWorkroomPortal", dependencies: ["ThreadingController"]),
+        .testTarget(name: "ThreadingWorkroomPortalTests", dependencies: ["ThreadingWorkroomPortal", "ThreadingController"])
     ]
 )

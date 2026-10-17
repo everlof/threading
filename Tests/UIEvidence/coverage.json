@@ -733,6 +733,37 @@
       }
     },
     {
+      "id": "workrooms-settings-layout",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Workrooms settings",
+      "description": "Settings ▸ Workrooms — the switch, the public address, people and rooms — at both supported review widths.",
+      "states": [
+        "Settings overview"
+      ],
+      "matrix": {
+        "themes": [
+          "System"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "Regular",
+          "Constrained"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/WorkroomsSettingsRenderTests.swift",
+        "test": "ThreadingTests/WorkroomsSettingsRenderTests/testRendersWorkroomsSettingsToImages"
+      },
+      "capture": {
+        "glob": "workrooms-*.png"
+      }
+    },
+    {
       "id": "agent-tools-settings",
       "kind": "surface",
       "status": "implemented",

@@ -355,7 +355,8 @@ the store is the controller's, [`autonomous-controller.md`](autonomous-controlle
 The Mac opens a controller store of its own as its mailbox — `MacMailbox`,
 `…/Threading/Mail/mailbox.db`, redirected under hosted tests, reported unavailable and never
 recreated when it cannot be opened — and registers each session lazily as
-`<macHost>/session/<session uuid>` under its title.
+`<macHost>/session/<session uuid>` under its title. The same store holds Linked Workrooms and
+its local-only person mailboxes ([`linked-workrooms.md`](linked-workrooms.md)).
 
 - **Tools.** `mail_send`, `mail_inbox`, `mail_ack`, `mail_directory` sit in the same
   "Other sessions" group (`MCPMailTools.swift`; policy and words in `MailAgentCommandService`).

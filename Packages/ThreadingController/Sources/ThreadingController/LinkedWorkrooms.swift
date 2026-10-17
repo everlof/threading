@@ -12,6 +12,8 @@ public struct LinkedWorkroom: Codable, Equatable, Sendable {
     public let title: String
     public let purpose: String
     public let createdAt: String
+    /// The mailbox of the session that created it, or nil for the owner. Shown to the owner.
+    public internal(set) var createdBy: String? = nil
 }
 
 public enum WorkroomLinkKind: String, Codable, Sendable {

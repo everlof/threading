@@ -78,6 +78,9 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case defaultPermissionMode
     case localDiagnosticsEnabled
     case sentryDiagnosticsEnabled
+    case workroomsEnabled
+    case workroomTunnelProvider
+    case workroomNgrokDomain
     case remoteAccessEnabled
     case remoteHostedEnrollmentEnabled
     case remoteNotificationMacActivityWindow
@@ -1250,6 +1253,44 @@ enum AppSettingDefinitions {
         )]
     )
 
+    /// Whether agents may use Linked Workrooms at all. Off by default: until it is on, the
+    /// Workrooms tool group is absent from every session and the portal never listens.
+    static let workroomsEnabled = AppSettingDescriptor<Bool>(
+        identity: .workroomsEnabled,
+        persistenceKey: "workroomsEnabled",
+        absence: .falseValue,
+        presentations: [row(
+            "workrooms", 0, nil, "Ask people outside this Mac",
+            ["Linked Workrooms", "domain expert", "questions", "portal", "review"]
+        )]
+    )
+
+    /// How an opened room reaches its people: the user's own ngrok, or a Cloudflare Quick Tunnel.
+    static let workroomTunnelProvider = AppSettingDescriptor<String>(
+        identity: .workroomTunnelProvider,
+        persistenceKey: "workroomTunnelProvider",
+        absence: .fallback(WorkroomTunnelProvider.ngrok.rawValue),
+        validation: .allowedStrings(Set(WorkroomTunnelProvider.allCases.map(\.rawValue))),
+        presentations: [row(
+            "workrooms", 1, "Public Address", "Tunnel",
+            ["ngrok", "Cloudflare", "tunnel", "public link", "address"]
+        )]
+    )
+
+    /// A reserved ngrok domain, so an invitation link outlives a restart. Empty uses whatever
+    /// address the ngrok account assigns.
+    static let workroomNgrokDomain = AppSettingDescriptor<String>(
+        identity: .workroomNgrokDomain,
+        persistenceKey: "workroomNgrokDomain",
+        absence: .emptyString,
+        validation: .maximumBytes(253),
+        encoding: .removeEmpty,
+        presentations: [row(
+            "workrooms", 2, "Public Address", "Reserved domain",
+            ["ngrok domain", "static domain", "stable address"]
+        )]
+    )
+
     static let sentryDiagnosticsEnabled = AppSettingDescriptor<Bool>(
         identity: .sentryDiagnosticsEnabled,
         persistenceKey: "sentryDiagnosticsEnabled",
@@ -1628,6 +1669,7 @@ enum AppSettingDefinitions {
         .init(claudeStartupSpeed), .init(codexStartupSpeed),
         .init(defaultPermissionMode), .init(localDiagnosticsEnabled),
         .init(sentryDiagnosticsEnabled),
+        .init(workroomsEnabled), .init(workroomTunnelProvider), .init(workroomNgrokDomain),
         .init(remoteAccessEnabled),
         .init(remoteHostedEnrollmentEnabled),
         .init(remoteAccessKeepAwake),

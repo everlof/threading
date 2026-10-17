@@ -45,6 +45,9 @@ works away from home.
   origin Threading had, so public guest links went with it; see
   [Pair an iPhone](#pair-an-iphone). `RemoteHostEndpointKind.relay` stays on the wire as
   decodable vocabulary, because an installed phone holds records that carry it.
+  The one tunnel Threading starts now is unrelated to Remote Access: Linked Workrooms may publish
+  its participant-only portal while a room is open to a named person
+  ([`workroom-participant-tunnel.md`](decisions/workroom-participant-tunnel.md)).
 
 Because every way in is bound separately, "tailnet only" and "this network only" are both
 expressible, which is the guarantee behind *publishes Threading only inside the owner's tailnet*: a

@@ -40,7 +40,7 @@ extension ControllerStore {
     /// Writes (or re-points) the forward for `from`. One end must be on this host: the old
     /// address (this store forwards) or the new one (this store accepts what is forwarded).
     public func setMailForward(from: MailAddress, to: MailAddress, expectedRevision: Int) throws -> MailForward {
-        guard from != to, from.kind == to.kind else {
+        guard from != to, from.kind == to.kind, from.kind != .person else {
             throw ControllerError.invalidInput("mail_forward")
         }
         guard expectedRevision >= 0, expectedRevision < Int.max else { throw ControllerError.invalidInput("revision") }
@@ -105,6 +105,8 @@ extension ControllerStore {
             var moved = 0
             for row in rows {
                 var message: MailMessage = try decode(row.text(0))
+                // A workroom person's reply stays on the host that holds the person's mailbox.
+                guard message.envelope.sender.kind != .person else { continue }
                 let id = message.envelope.id.uuidString.lowercased()
                 message.envelope = message.envelope.forwarded(to: to)
                 if to.host == local {
@@ -185,6 +187,7 @@ extension ControllerStore {
         switch address.kind {
         case .session: return (try optional("mailbox", address.description) as MailMailbox?) != nil
         case .worker: return (try optional("worker", WorkerID(address.id).description) as ControllerWorker?) != nil
+        case .person: return (try optional("workroomPerson", WorkroomPersonID(address.id).description) as WorkroomPerson?) != nil
         }
     }
 
@@ -192,6 +195,7 @@ extension ControllerStore {
         switch address.kind {
         case .session: let _: MailMailbox = try required("mailbox", address.description)
         case .worker: try requireActiveWorker(WorkerID(address.id))
+        case .person: let _: WorkroomPerson = try required("workroomPerson", WorkroomPersonID(address.id).description)
         }
     }
 }

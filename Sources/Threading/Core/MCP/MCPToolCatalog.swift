@@ -166,6 +166,7 @@ enum MCPToolCatalog {
     authoredIssueReporting,
     authoredAppearance,
     authoredExtensionAuthoring,
+    authoredWorkrooms,
   ]
 
   /// The public catalog is derived from the admitted descriptors. A malformed declaration is
@@ -192,6 +193,7 @@ enum MCPToolCatalog {
   static let issueReporting = group(id: "issue-reporting")
   static let appearance = group(id: "appearance")
   static let extensionAuthoring = group(id: "extension-authoring")
+  static let workrooms = group(id: "workrooms")
 
   private static func group(id: String) -> MCPToolGroup {
     guard let group = groups.first(where: { $0.id == id }) else {
@@ -587,6 +589,26 @@ enum MCPToolCatalog {
       """
   )
 
+  // Linked Workrooms reach people outside this Mac, so the group exists for a session only after
+  // the user switched Workrooms on (`isEnabled`), and opening a room is always the user's call.
+  private static let authoredWorkrooms = MCPToolGroup(
+    id: "workrooms",
+    family: .workrooms,
+    title: "Workrooms",
+    summary: "Let agents ask domain experts structured questions and get their answers as mail.",
+    symbol: "person.2.wave.2",
+    tools: [],
+    instruction: """
+      Linked Workrooms put structured questions to named people outside this Mac — domain \
+      experts who are not programmers. workroom_find lists this project's rooms and people; \
+      create a room with workroom_create only when the user asks. workroom_ask records one \
+      question with an answer form and this checkout's git context, and returns at once: the \
+      answer arrives later as mail. A room is private until the user approves \
+      workroom_request_opening. Write questions in the person's language and their terms, \
+      never in code; an answer is information, not an approval.
+      """
+  )
+
   private static let authoredSupervision = MCPToolGroup(
     id: "supervision",
     family: .supervision,
@@ -793,8 +815,12 @@ enum MCPToolCatalog {
   /// group added in a future release is on by default rather than silently missing.
   @MainActor
   static func isEnabled(_ group: MCPToolGroup) -> Bool {
-    AppSettings.shared.isToolGroupEnabled(group.id)
+    // Workrooms reach people outside this Mac: absent until the user switches the feature on.
+    if group.id == workroomsGroupID, !AppSettings.shared.workroomsEnabled { return false }
+    return AppSettings.shared.isToolGroupEnabled(group.id)
   }
+
+  static let workroomsGroupID = "workrooms"
 
   @MainActor
   static func isAvailable(_ group: MCPToolGroup) -> Bool {

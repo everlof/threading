@@ -261,6 +261,38 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
+  func workroomFind(
+    _ arguments: WorkroomFindArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func workroomCreate(
+    _ arguments: WorkroomCreateArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func workroomContext(
+    _ arguments: WorkroomRoomArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func workroomAsk(
+    _ arguments: WorkroomAskArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func workroomQuestions(
+    _ arguments: WorkroomQuestionsArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func workroomRespond(
+    _ arguments: WorkroomRespondArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func workroomRequestOpening(
+    _ arguments: WorkroomRequestOpeningArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func workroomSetLanguage(
+    _ arguments: WorkroomSetLanguageArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
   func listAccounts(_ arguments: ListAccountsArguments, for sessionID: SessionID) -> MCPToolResult
   func sessionCost(_ arguments: SessionCostArguments, for sessionID: SessionID) -> MCPToolResult
   func resumeSession(

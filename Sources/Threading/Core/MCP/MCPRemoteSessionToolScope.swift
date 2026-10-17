@@ -99,6 +99,12 @@ enum MCPRemoteSessionToolScope {
              .extensionDescribeComponent, .extensionValidateComponentPatch,
              .extensionPreviewComponentPatch:
             return false
+
+        // A question carries this Mac's checkout state and its answer returns to this Mac's
+        // mailbox for the session; a remote session's checkout and mailbox are on its host.
+        case .workroomFind, .workroomCreate, .workroomContext, .workroomAsk, .workroomQuestions,
+             .workroomRespond, .workroomRequestOpening, .workroomSetLanguage:
+            return false
         }
     }
 

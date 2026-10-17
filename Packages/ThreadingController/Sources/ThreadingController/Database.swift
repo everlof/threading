@@ -8,7 +8,7 @@ final class ControllerDatabase {
     /// under its write lock and refuses unless it is exactly this, so an older process that
     /// stays open while a newer one migrates the file stops writing instead of writing rows the
     /// new schema's invariants do not expect. The integrator sets this to the final step.
-    static let schemaVersion: Int64 = 11
+    static let schemaVersion: Int64 = 12
     /// How long a write waits for another process's write lock before SQLITE_BUSY.
     private static let busyTimeoutMilliseconds: Int32 = 3_000
     private var handle: OpaquePointer?
@@ -161,6 +161,28 @@ final class ControllerDatabase {
                     )
                     """)
                 try run("CREATE INDEX IF NOT EXISTS workroom_question_recipient_page ON workroom_question_recipient(room,recipient,sequence)")
+            }
+            // Structured questions a mailbox asks one person, and which rooms each person may see.
+            // The person indexes serve a portal inbox across rooms without scanning other people.
+            try migrate(to: 12) { _ in
+                try run("""
+                    CREATE TABLE IF NOT EXISTS workroom_ask (
+                        question TEXT PRIMARY KEY, room TEXT NOT NULL, asker TEXT NOT NULL,
+                        person TEXT NOT NULL, state TEXT NOT NULL, sequence INTEGER NOT NULL
+                    )
+                    """)
+                try run("CREATE INDEX IF NOT EXISTS workroom_ask_room ON workroom_ask(room,sequence)")
+                try run("CREATE INDEX IF NOT EXISTS workroom_ask_room_state ON workroom_ask(room,state,sequence)")
+                try run("CREATE INDEX IF NOT EXISTS workroom_ask_asker ON workroom_ask(asker,sequence)")
+                try run("CREATE INDEX IF NOT EXISTS workroom_ask_person ON workroom_ask(person,state,sequence)")
+                try run("CREATE INDEX IF NOT EXISTS workroom_ask_person_all ON workroom_ask(person,sequence)")
+                try run("""
+                    CREATE TABLE IF NOT EXISTS workroom_access (
+                        room TEXT NOT NULL, person TEXT NOT NULL, state TEXT NOT NULL,
+                        revision INTEGER NOT NULL, PRIMARY KEY(room,person)
+                    )
+                    """)
+                try run("CREATE INDEX IF NOT EXISTS workroom_access_person ON workroom_access(person,state,room)")
             }
             guard try currentVersion() == Self.schemaVersion else { throw ControllerError.unsupportedSchema }
             try run("PRAGMA journal_mode=WAL")

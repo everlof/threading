@@ -47,6 +47,9 @@ reshuffling it is a line move.
   with optional links to tickets, documents, PRs and other context. Agents use scoped MCP tools;
   people answer in an authenticated portal. The first Sonda pilot includes a room without a
   ticket and keeps external publication reviewable.
+- [Linked Workrooms: expert portal](linked-workrooms-expert-portal.md) — **phase 1 implemented**
+  2026-10-17 (see `docs/architecture/linked-workrooms.md`); what remains is the pilot, Tailscale
+  Funnel, controller executions, remote hosts and Jira publication.
 - [Host and agent diagnostics](host-agent-diagnostics.md) — agreed implementation plan for
   portable controller/ptyd health, Rindabox task explanations and incidents, Mac remote-host
   inspection, and independent Cloudflare outage emails for the VPS and an opted-in Mac.

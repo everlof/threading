@@ -150,6 +150,7 @@ enum SettingsPages {
     static let remoteHostsID = "remote-hosts"
     static let privacyID = "privacy"
     static let githubID = "github"
+    static let workroomsID = "workrooms"
     static let accountsID = ExtensionHostSettingsPage.accounts.rawValue
     static let profilesID = ExtensionHostSettingsPage.profiles.rawValue
     static let themesID = ExtensionHostSettingsPage.themes.rawValue
@@ -425,6 +426,19 @@ enum SettingsPages {
                 "private repositories", "client ID", "app"
             ),
         ) { GitHubPreferencesViewController() },
+        // People outside this Mac answering agents' questions. In Access, beside the other ways
+        // something outside reaches this Mac, because opening a room is exactly that.
+        Page(
+            id: workroomsID,
+            hostPage: nil,
+            title: L10n.string("Workrooms"),
+            symbol: "person.2.wave.2",
+            group: accessGroup,
+            searchTerms: terms(
+                "Linked Workrooms", "domain expert", "questions", "answers", "portal", "invite",
+                "ngrok", "tunnel", "review"
+            ),
+        ) { WorkroomsPreferencesViewController() },
         Page(
             id: privacyID,
             hostPage: nil,

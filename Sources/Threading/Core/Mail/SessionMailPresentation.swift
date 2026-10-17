@@ -101,7 +101,12 @@ struct SessionMailPresentation: Equatable, Sendable {
                 party = sessionTitle(SessionID(recipient.id)).map(WorkspaceControlPlane.safeHeaderTitle)
                     ?? L10n.string("A removed session")
             } else {
-                party = recipient.kind == .worker ? L10n.string("Worker") : L10n.string("Session")
+                switch recipient.kind {
+                case .worker: party = L10n.string("Worker")
+                // A workroom question: the recipient is a person outside this Mac, not an agent.
+                case .person: party = L10n.string("A person in a workroom")
+                case .session: party = L10n.string("Session")
+                }
             }
             return Row(
                 id: envelope.id, direction: .sent, party: party, host: hostName(recipient.host),

@@ -728,6 +728,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             MacMailDelivery.shared.start()
             MailboxHandover.shared.start()
             Task { await MacMailSync.shared.start(endpoints: { MacMailSync.liveEndpoints() }) }
+            // Linked Workrooms: the portal and its tunnel run only while a room is open to someone.
+            WorkroomHost.shared.start()
             // A theme's answer to turns coming back and sessions waiting; it starts the mood
             // monitor only while the theme in force states moments.
             ThemeMomentPresenter.shared.install()

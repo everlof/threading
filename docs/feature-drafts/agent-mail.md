@@ -67,8 +67,10 @@ only peer; that is a topology, not a protocol.
    unknown addresses.
 2. **A message is addressed to a mailbox, not a process.** Addresses are
    `<host>/session/<threading-id>` and `<host>/worker/<worker-uuid>`. A host mints a stable host
-   UUID and a display name once; it never changes with hostname or IP. `person:`/`group:`
-   recipients are a later slice (they already exist as question recipients in the controller).
+   UUID and a display name once; it never changes with hostname or IP. A third, local-only kind,
+   `<host>/person/<uuid>`, is a Linked Workrooms participant's mailbox, reached only through a
+   workroom question and never relayed ([`linked-workrooms.md`](../architecture/linked-workrooms.md));
+   `group:` recipients are still a later slice.
    **A mailbox lives on the host that runs its agent's process**, and the address's host part is
    that host (see [Mailbox location](#mailbox-location)).
 3. **The sender is authenticated, never claimed.** On the Mac from the MCP URL token

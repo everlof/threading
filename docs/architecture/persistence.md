@@ -881,6 +881,12 @@ store, the panel layouts and their cached PNGs, project icons, avatars, usage hi
 icon-research records and the instance lock. Settings ▸ **Advanced** shows both and reveals them,
 because "where is my data" is a question answered with a path to copy rather than a sentence.
 
+**`Threading/Mail/mailbox.db` is the Mac's own controller store** (`MacMailbox`, `0700`
+directory): agent mail between sessions and, since schema v12, Linked Workrooms — people, rooms,
+questions, answer revisions, and only the SHA-256 digests of invitation and device tokens. Only the
+app opens it; an unreadable or newer-schema file is reported unavailable and never recreated. See
+[`linked-workrooms.md`](linked-workrooms.md).
+
 **One subdirectory of that root is owner-only, and is a secret rather than state.**
 `Threading/bridge/` is `0700` and holds two things a hook needs to find its way back to the app:
 `mcp.sock`, the MCP server's unix rendezvous, and `session-tokens.json` (`0600`), the durable

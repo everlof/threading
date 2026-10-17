@@ -1114,10 +1114,16 @@ MCP exposes `workroom_context`, `workroom_links` and `workroom_questions`; it de
 from the current work and accepts no room selector. The ordinary `work_ask` permission policy
 still controls recipients. The room tools cannot create links, grant access, or answer.
 
-`Service/LinkedWorkrooms` is a separate loopback-only browser trial over the owner CLI. It
-uses ephemeral 24-hour bearer invitations for named recipients, checks the room and question
-on each request, and exposes only addressed questions to a guest. This is a local prototype,
-not a hosted identity or client access service. It cannot read Jira content, publish updates,
-or render agent-authored HTML. Those need separate adapters and authenticated publication
-rules before use with external participants. Run it against a new private database;
-schema v11 migration is one-way for older controller binaries.
+The browser trial that once served these rooms (`Service/LinkedWorkrooms`) is retired.
+
+## Linked Workrooms for people (schema v12)
+
+Schema v12 adds questions a mailbox asks one named person, not tied to controller work: people
+and their per-room grants, room publication, typed answer forms and revisions, a clarification
+thread, and hashed single-use invitations and device sessions (`Workroom*.swift`). It adds a third
+mailbox kind, `person`, which is local-only: a question is mail to the person's mailbox and an
+answer is a reply from it, so the asking mailbox hears about it through ordinary delivery. Person
+mail is never queued to a peer, accepted from one, granted, forwarded or moved. The participant
+portal is the separate, Foundation-only `ThreadingWorkroomPortal` product of this package. The Mac
+app is its first host; see [`linked-workrooms.md`](linked-workrooms.md). Schema v12 migration is
+one-way for older controller binaries, as every step is.

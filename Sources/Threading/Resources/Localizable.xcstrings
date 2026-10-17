@@ -904,6 +904,17 @@
         }
       }
     },
+    "%@ is not installed. Install it with Homebrew, or choose another way in." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ är inte installerat. Installera det med Homebrew, eller välj ett annat sätt in."
+          }
+        }
+      }
+    },
     "%@ is not on this machine. Tick “This is a throwaway test account” to store a credential for it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1990,6 +2001,17 @@
         }
       }
     },
+    "%d browsers, last %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d webbläsare, senast %@"
+          }
+        }
+      }
+    },
     "%d constrained" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2096,6 +2118,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%d av %d filer · %d läsningar · %d redigeringar"
+          }
+        }
+      }
+    },
+    "%d open questions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d öppna frågor"
           }
         }
       }
@@ -4846,6 +4879,17 @@
         }
       }
     },
+    "A person in a workroom" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En person i ett workroom"
+          }
+        }
+      }
+    },
     "A phone away from home cannot reach this Mac while it sleeps." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6484,6 +6528,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägg till en anteckning — den visar vägen till kopierade rapporter"
+          }
+        }
+      }
+    },
+    "Add a person" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till en person"
           }
         }
       }
@@ -8307,6 +8362,17 @@
         }
       }
     },
+    "An agent can create a private room in its project when you ask, and put questions in it to people you add here. Nothing is reachable from outside this Mac until you approve opening a room to a person." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En agent kan skapa ett privat rum i sitt projekt när du ber om det, och ställa frågor där till personer du lägger till här. Inget går att nå utanför den här Macen förrän du godkänner att ett rum öppnas för en person."
+          }
+        }
+      }
+    },
     "An agent captured this" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8314,6 +8380,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En agent tog den här"
+          }
+        }
+      }
+    },
+    "An agent creates one when you ask it to." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En agent skapar ett när du ber den."
           }
         }
       }
@@ -8380,6 +8457,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ett tillägg med identifierare %@ är redan installerat."
+          }
+        }
+      }
+    },
+    "An open room is published through a tunnel to a port on this Mac that serves only the people's pages. The tunnel provider terminates the connection and can read what passes through it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett öppet rum publiceras genom en tunnel till en port på den här Macen som bara serverar personernas sidor. Tunnelleverantören avslutar anslutningen och kan läsa det som passerar."
           }
         }
       }
@@ -9682,6 +9770,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fråga på sidan…"
+          }
+        }
+      }
+    },
+    "Ask people outside this Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fråga personer utanför den här Macen"
           }
         }
       }
@@ -15062,6 +15161,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stäng alla flikar"
+          }
+        }
+      }
+    },
+    "Close All Workrooms" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng alla workrooms"
           }
         }
       }
@@ -21567,6 +21677,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Klar"
+          }
+        }
+      }
+    },
+    "Don’t Open" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna inte"
           }
         }
       }
@@ -31098,6 +31219,17 @@
         }
       }
     },
+    "Let agents ask domain experts structured questions and get their answers as mail." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låt agenter ställa strukturerade frågor till domänexperter och få svaren som mejl."
+          }
+        }
+      }
+    },
     "Let agents build into and inspect an adopted Simulator in the right panel." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31618,6 +31750,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Länka ett 1Password-objekt"
+          }
+        }
+      }
+    },
+    "Linked Workrooms" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linked Workrooms"
           }
         }
       }
@@ -36385,6 +36528,17 @@
         }
       }
     },
+    "No rooms yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga rum ännu"
+          }
+        }
+      }
+    },
     "No runs yet. Each scheduled time, matching event or manual run adds one here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37444,6 +37598,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ingenting pågår. Sessionerna stängs, och deras konversationer sparas och kan återupptas vid nästa start."
+          }
+        }
+      }
+    },
+    "Nothing is published until you open a room." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget publiceras förrän du öppnar ett rum."
           }
         }
       }
@@ -39048,6 +39213,17 @@
         }
       }
     },
+    "Open Room" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna rummet"
+          }
+        }
+      }
+    },
     "Open Session Info" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39359,6 +39535,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna varje yta, byt tema medan den visas och stäng den med Escape."
+          }
+        }
+      }
+    },
+    "Open for %d days. You can close it any time in Settings ▸ Workrooms." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppet i %d dagar. Du kan stänga det när som helst i Inställningar ▸ Workrooms."
           }
         }
       }
@@ -39776,6 +39963,17 @@
         }
       }
     },
+    "Open “%@” to %@?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna ”%@” för %@?"
+          }
+        }
+      }
+    },
     "OpenCode" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39915,6 +40113,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Valfritt"
+          }
+        }
+      }
+    },
+    "Optional. Keeps links working after a restart." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Valfritt. Gör att länkar fungerar efter en omstart."
           }
         }
       }
@@ -40907,6 +41116,17 @@
         }
       }
     },
+    "People" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personer"
+          }
+        }
+      }
+    },
     "Permanently delete this session and exit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40964,6 +41184,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Behörigheter"
+          }
+        }
+      }
+    },
+    "Person: %@ (%@, %@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Person: %@ (%@, %@)"
           }
         }
       }
@@ -43058,6 +43289,17 @@
         }
       }
     },
+    "Public Address" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Publik adress"
+          }
+        }
+      }
+    },
     "Publish %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43087,6 +43329,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Publicerad som #%lld"
+          }
+        }
+      }
+    },
+    "Published at %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Publicerad på %@"
           }
         }
       }
@@ -43379,6 +43632,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fråga %lld av %lld"
+          }
+        }
+      }
+    },
+    "Questions for people outside this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågor till personer utanför den här Macen."
+          }
+        }
+      }
+    },
+    "Questions waiting for them: %d" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågor som väntar på personen: %d"
           }
         }
       }
@@ -43786,6 +44061,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Går att nå på %@"
+          }
+        }
+      }
+    },
+    "Reached through %@. The tunnel provider terminates the connection and can read what passes through it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nås genom %@. Tunnelleverantören avslutar anslutningen och kan läsa det som passerar."
           }
         }
       }
@@ -46519,6 +46805,17 @@
         }
       }
     },
+    "Reserved domain" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reserverad domän"
+          }
+        }
+      }
+    },
     "Reserved percentage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47838,6 +48135,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det rullande fönstrets längd i timmar"
+          }
+        }
+      }
+    },
+    "Room: “%@” in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rum: ”%@” i %@"
+          }
+        }
+      }
+    },
+    "Rooms" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rum"
           }
         }
       }
@@ -53221,6 +53540,17 @@
         }
       }
     },
+    "Showing the newest %d rooms" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar de %d senaste rummen"
+          }
+        }
+      }
+    },
     "Showing the window" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55423,6 +55753,17 @@
         }
       }
     },
+    "Starting the tunnel…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startar tunneln…"
+          }
+        }
+      }
+    },
     "Starting…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56146,6 +56487,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Strängar"
+          }
+        }
+      }
+    },
+    "Structured questions to domain experts; answers return as mail." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Strukturerade frågor till domänexperter; svaren kommer som mejl."
           }
         }
       }
@@ -58324,6 +58676,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agentens länk har gått ut"
+          }
+        }
+      }
+    },
+    "The agent’s reason: “%@”" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentens motivering: ”%@”"
           }
         }
       }
@@ -60962,6 +61325,17 @@
         }
       }
     },
+    "The person answers through a link you send them. Their answers are information for the agent, never approvals or permissions." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personen svarar via en länk du skickar. Svaren är information till agenten, aldrig godkännanden eller behörigheter."
+          }
+        }
+      }
+    },
     "The picture is stored with this project, under the name you give it. The agent can compare the page against it later." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62666,6 +63040,50 @@
         }
       }
     },
+    "The tunnel could not start." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tunneln kunde inte starta."
+          }
+        }
+      }
+    },
+    "The tunnel did not publish an address in time." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tunneln publicerade ingen adress i tid."
+          }
+        }
+      }
+    },
+    "The tunnel published an address the portal cannot use." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tunneln publicerade en adress som portalen inte kan använda."
+          }
+        }
+      }
+    },
+    "The tunnel stopped (exit %d)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tunneln stoppade (avslut %d)."
+          }
+        }
+      }
+    },
     "The turn baseline has expired." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62798,6 +63216,17 @@
         }
       }
     },
+    "The workroom portal could not listen on this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Workroom-portalen kunde inte lyssna på den här Macen."
+          }
+        }
+      }
+    },
     "The workspace file “%@” was moved, deleted, or is outside this checkout. Remove it and add the current file before sending." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62827,6 +63256,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Partiklarna ”%@” lämnar text med kontrasten %@:1 på sina ställen. Prova %@ opacitet eller lägre."
+          }
+        }
+      }
+    },
+    "Their name, a short handle agents use, and their language." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Namn, ett kort namn som agenterna använder, och språk."
           }
         }
       }
@@ -63834,6 +64274,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "De raderas omedelbart och flyttas inte till Papperskorgen. Var och en återskapas av kommandot som visas bredvid. Det tar tid men kräver inga beslut."
+          }
+        }
+      }
+    },
+    "They will see only the questions addressed to them in this room, and answer through a link you send them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personen ser bara de frågor i rummet som riktas till hen, och svarar via en länk du skickar."
           }
         }
       }
@@ -67682,6 +68133,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Justera"
+          }
+        }
+      }
+    },
+    "Tunnel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tunnel"
           }
         }
       }
@@ -71968,6 +72430,39 @@
         }
       }
     },
+    "Workrooms" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Workrooms"
+          }
+        }
+      }
+    },
+    "Workrooms cannot be read" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Workrooms kan inte läsas"
+          }
+        }
+      }
+    },
+    "Workrooms is off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Workrooms är avstängt."
+          }
+        }
+      }
+    },
     "Workspace Navigator Pipeline" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -72769,6 +73264,17 @@
         }
       }
     },
+    "a Cloudflare Quick Tunnel, whose address changes whenever Threading restarts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "en Cloudflare Quick Tunnel, vars adress ändras när Threading startar om"
+          }
+        }
+      }
+    },
     "a detached commit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -72945,6 +73451,17 @@
         }
       }
     },
+    "and more than %d others" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "och fler än %d till"
+          }
+        }
+      }
+    },
     "animation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -72952,6 +73469,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "animation"
+          }
+        }
+      }
+    },
+    "answers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "svar"
           }
         }
       }
@@ -73880,6 +74408,17 @@
         }
       }
     },
+    "domain expert" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "domänexpert"
+          }
+        }
+      }
+    },
     "don't ask again" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -74063,6 +74602,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "example.com"
+          }
+        }
+      }
+    },
+    "example.ngrok.app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "example.ngrok.app"
           }
         }
       }
@@ -74305,6 +74855,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "toning"
+          }
+        }
+      }
+    },
+    "handle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "kortnamn"
           }
         }
       }
@@ -74777,6 +75338,17 @@
         }
       }
     },
+    "invite" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bjud in"
+          }
+        }
+      }
+    },
     "is larger than %d KiB" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -74922,6 +75494,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "hävs %@"
+          }
+        }
+      }
+    },
+    "link sent, unused until %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "länk skickad, oanvänd till %@"
           }
         }
       }
@@ -75439,6 +76022,61 @@
         }
       }
     },
+    "new, proposed by the agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ny, föreslagen av agenten"
+          }
+        }
+      }
+    },
+    "ngrok" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ngrok"
+          }
+        }
+      }
+    },
+    "ngrok at %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ngrok på %@"
+          }
+        }
+      }
+    },
+    "ngrok uses your own ngrok configuration and account. A Cloudflare Quick Tunnel needs no account, but its address changes whenever Threading restarts, so links you sent stop working." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ngrok använder din egen ngrok-konfiguration och ditt konto. En Cloudflare Quick Tunnel kräver inget konto, men adressen ändras när Threading startar om, så länkar du skickat slutar fungera."
+          }
+        }
+      }
+    },
+    "ngrok, at the address your account assigns" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ngrok, på adressen ditt konto tilldelar"
+          }
+        }
+      }
+    },
     "night" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -75501,6 +76139,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "inget utgångsdatum rapporterat"
+          }
+        }
+      }
+    },
+    "no link yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ingen länk ännu"
           }
         }
       }
@@ -76022,6 +76671,17 @@
         }
       }
     },
+    "portal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "portal"
+          }
+        }
+      }
+    },
     "power" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -76150,6 +76810,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "pymobiledevice3"
+          }
+        }
+      }
+    },
+    "questions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "frågor"
           }
         }
       }
@@ -76629,6 +77300,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "visa"
+          }
+        }
+      }
+    },
+    "review" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "granskning"
+          }
+        }
+      }
+    },
+    "revision %d" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "version %d"
           }
         }
       }
@@ -77590,6 +78283,17 @@
         }
       }
     },
+    "tunnel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "tunnel"
+          }
+        }
+      }
+    },
     "typeface" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -77663,6 +78367,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "osatt"
+          }
+        }
+      }
+    },
+    "until %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "till %@"
           }
         }
       }

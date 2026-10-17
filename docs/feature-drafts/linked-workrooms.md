@@ -1,6 +1,11 @@
 # Linked Workrooms
 
-> Draft, 2026-10-09. Product direction and rollout plan. A controller-backed local trial now covers unlinked rooms, typed links, bound work, named questions and answers, structured question context and PDF snapshots. Hosted access, reviewed rich presentation and external publication remain planned.
+> Draft, 2026-10-09; updated 2026-10-17. Product direction and rollout plan. The private
+> workroom of step 2 below now ships in the app for agent sessions: people, typed answer forms,
+> git-grounded questions, a participant-only portal through an approved tunnel, and answers
+> delivered as mail — see [`docs/architecture/linked-workrooms.md`](../architecture/linked-workrooms.md)
+> and the remaining phases in [`linked-workrooms-expert-portal.md`](linked-workrooms-expert-portal.md).
+> Jira assessment, reviewed publication, external clients and hosted identity remain planned.
 
 ## Problem and intended contract
 
@@ -224,6 +229,12 @@ a reviewable proposed Jira update with correct evidence and no unapproved extern
 simultaneous rooms must keep their identities, answers and artifacts separate.
 
 ## Decisions still needed
+
+Answered on 2026-10-17 for the first slice: the audience is the owner and named domain experts;
+identity is an owner-issued, single-use link that mints a revocable device session, kept as
+digests in the controller store beside the people, grants and questions (HTTP and cookies stay
+outside the portable `ThreadingController` target); hosting is the owner's Mac behind an approved,
+participant-only tunnel. The questions below remain for later phases.
 
 - First audience: only the technical owner and domain expert, or external clients from day one?
 - Hosting and identity: which existing service will own human accounts and workroom access?

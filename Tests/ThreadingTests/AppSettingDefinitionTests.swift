@@ -399,7 +399,10 @@ final class AppSettingDefinitionTests: XCTestCase {
             ),
             .sourceControlProviderConnections: .init(
                 key: "sourceControlProviderConnections", valueType: .data
-            )
+            ),
+            .workroomsEnabled: .init(key: "workroomsEnabled", valueType: .boolean),
+            .workroomTunnelProvider: .init(key: "workroomTunnelProvider", valueType: .string),
+            .workroomNgrokDomain: .init(key: "workroomNgrokDomain", valueType: .string)
         ]
 
         XCTAssertEqual(Set(expected.keys), Set(AppSettingIdentity.allCases))
@@ -545,9 +548,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 108)
+        XCTAssertEqual(authoredRows.count, 111)
 #else
-        XCTAssertEqual(authoredRows.count, 107)
+        XCTAssertEqual(authoredRows.count, 110)
 #endif
         XCTAssertEqual(
             // Markdown associations are OS-owned actions, not persisted AppSettings.
@@ -656,6 +659,7 @@ final class AppSettingDefinitionTests: XCTestCase {
             "a hosted test bundle is a development build, and must list what one lists"
         )
         XCTAssertEqual(actual["github"], ["Client ID", "gh CLI", "Git credential helper"])
+        XCTAssertEqual(actual["workrooms"], ["Ask people outside this Mac", "Tunnel", "Reserved domain"])
         XCTAssertEqual(actual["privacy"], [
             "Files & Folders", "Notifications", "Accessibility", "Screen Recording",
             "Live usage from your Claude login"
