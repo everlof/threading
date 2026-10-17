@@ -182,6 +182,7 @@ extension ControllerStore {
             var room = LinkedWorkroom(id: id, scope: scope, title: title, purpose: purpose, createdAt: Self.now())
             room.createdBy = createdBy?.description
             try insert("workroom", id.description, scope: scope, value: room)
+            if let createdBy { try tie(createdBy, to: id) }
             try event("workroom.created", id.description)
             return room
         }
@@ -292,6 +293,32 @@ extension ControllerStore {
             SELECT COUNT(*) FROM (SELECT 1 FROM workroom_ask WHERE room=? AND state='open' LIMIT ?)
             """, [.text(roomID.description), .integer(Int64(WorkroomLimits.openQuestionsPerRoom))]).first?.integers[0] ?? 0
         return WorkroomSummary(room: room, publication: try workroomPublication(roomID), people: people, openQuestions: Int(open))
+    }
+
+    // MARK: - Ties
+
+    /// The rooms a mailbox works in — it created them or asked in them — that are not closed.
+    /// A session tied to a room routes its questions through it instead of waiting in its
+    /// terminal; closing the room unties it. Bounded: a mailbox's first 100 ties.
+    public func workroomTies(_ mailbox: MailAddress) throws -> [LinkedWorkroom] {
+        var rooms: [LinkedWorkroom] = []
+        for row in try db.rows("""
+            SELECT payload FROM record INDEXED BY record_ready
+            WHERE kind='workroomTie' AND parent=? AND state='tied' ORDER BY sequence LIMIT 100
+            """, [.text(mailbox.description)]) {
+            let roomID: WorkroomID = try decode(row.text(0))
+            guard try workroomPublication(roomID).state != .closed,
+                  let room: LinkedWorkroom = try optional("workroom", roomID.description) else { continue }
+            rooms.append(room)
+        }
+        return rooms
+    }
+
+    /// Ties a mailbox to a room it works in. Idempotent.
+    func tie(_ mailbox: MailAddress, to roomID: WorkroomID) throws {
+        let id = "\(mailbox)|\(roomID)"
+        guard (try optional("workroomTie", id) as WorkroomID?) == nil else { return }
+        try insert("workroomTie", id, parent: mailbox.description, state: "tied", value: roomID)
     }
 
     // MARK: - Helpers

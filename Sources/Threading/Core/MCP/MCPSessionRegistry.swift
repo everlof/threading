@@ -483,6 +483,18 @@ enum MCPSessionRegistry {
             }
         }
 
+        // The workroom question guard: answering, and silent for every session not tied to a
+        // workroom. Written with the lifecycle hooks because a chat becomes tied mid-session.
+        if reportsLifecycle {
+            groups["PreToolUse", default: []].append(group(
+                command: WorkroomQuestionGuard.claudeCommand(token: token, event: .preToolUse),
+                matcher: WorkroomQuestionGuard.askToolName
+            ))
+            groups["Stop", default: []].append(group(
+                command: WorkroomQuestionGuard.claudeCommand(token: token, event: .stop), matcher: nil
+            ))
+        }
+
         for (name, entries) in groups {
             hooks[name] = entries
         }

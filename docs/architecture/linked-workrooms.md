@@ -97,6 +97,30 @@ change it (`workroom_set_language`) when answers show another preference; a choi
 in the portal sticks against agents. A question records its own language; the portal's words
 (Swedish, English) follow the person's language, then `Accept-Language`, then English.
 
+## A tied chat does not wait in its terminal
+
+A session is **tied** while it created, or asked in, a workroom that is not closed
+(`workroomTie` records, written by `createWorkroom` and `askWorkroom`; `workroomTies` reads at most
+100). For a tied session, `WorkroomQuestionGuard` answers two hooks through
+`/question-guard/<token>?event=…`, an answering endpoint like `/mail-notice/`:
+
+- **`PreToolUse` on `AskUserQuestion`** (Claude terminals): denied, with a reason that says to ask
+  with `workroom_ask` and keep working. This is enforcement; the tool does not run.
+- **`Stop`** (Claude terminals, and Codex through the shared `hooks.json`): blocked **once per
+  turn** when the last message's closing paragraph ends on a question (a `?` in a URL does not
+  count). `stop_hook_active` and the remembered `turn_id` (or the message's tail when a runtime
+  sends none) mean a turn that ends on a question again is let through, so a question only the
+  person at the terminal can answer still reaches them and nothing loops. A block goes through
+  `MailStopContinuationLedger` like a mail notice's, so the chat is not shown idle while it
+  continues.
+
+Questions for the owner go to the person chosen in **Settings ▸ Workrooms ▸ Questions for you go
+to**, who is granted beside anyone a room is opened to. Without one, the reason tells the agent to
+state its assumption instead. Every untied session gets an empty answer. The entries are written
+for every session with lifecycle hooks and decide at request time, because a chat becomes tied
+mid-session; changing Codex's `hooks.json` costs one renewal of the user's hook trust. Native
+chats are not guarded yet: their questions reach the app's own permission card.
+
 ## Records (schema v12)
 
 | Record (`record.kind`) | Key | Notes |
@@ -108,6 +132,7 @@ in the portal sticks against agents. A question records its own language; the po
 | `workroomNote` | UUID; `parent` question | clarification, response, decline, withdrawal |
 | `workroomInvitation` | SHA-256 of the token; `parent` person | single use, 7 days; a new one revokes the pending one |
 | `workroomDevice` | SHA-256 of the session token; `parent` person | 30 days; at most 20 live per person |
+| `workroomTie` | `<mailbox>|<room>`; `parent` mailbox | the session works in that room; see the question guard |
 
 Tables: `workroom_ask(question, room, asker, person, state, sequence)` with indexes by room, room
 and state, asker, person and state, and person alone; `workroom_access(room, person, state,

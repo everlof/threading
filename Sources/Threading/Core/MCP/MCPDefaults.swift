@@ -74,6 +74,10 @@ enum MCPDefaults {
     /// A notice is a hint on the agent's hot path: an unreachable app or a busy store costs this
     /// much and prints nothing.
     static let mailNoticeTimeout: TimeInterval = 2
+    /// The workroom question guard's answering hook (`WorkroomQuestionGuard`).
+    static let questionGuardPathPrefix = "/question-guard/"
+    static let questionGuardEventParameter = "event"
+    static let questionGuardTimeout: TimeInterval = 2
 
     /// The query parameter naming which lifecycle event a report describes.
     ///

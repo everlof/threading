@@ -304,6 +304,16 @@ enum CodexHookInstaller {
             ))
         }
 
+        // The workroom question guard's Stop entry: silent for every session not tied to a
+        // workroom. Codex has no question tool, so its PreToolUse half is Claude's only.
+        if installed[WorkroomQuestionGuard.Event.stop.hookName] == nil {
+            installed[WorkroomQuestionGuard.Event.stop.hookName] = foreignEntries(in: hooks[WorkroomQuestionGuard.Event.stop.hookName])
+        }
+        installed[WorkroomQuestionGuard.Event.stop.hookName, default: []].append(entry(
+            command: WorkroomQuestionGuard.codexCommand(event: .stop, marker: MCPDefaults.hookMarker),
+            timeout: MCPDefaults.questionGuardTimeout + MailNoticeHookDefaults.codexTimeoutSlack
+        ))
+
         // Written unconditionally, and inert until a launch exports the broker variable. The
         // alternative — installing it only for native sessions — would rewrite the file every
         // time a session changed surface, and each rewrite costs the user's trust decision.

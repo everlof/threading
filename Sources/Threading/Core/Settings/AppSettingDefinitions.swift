@@ -81,6 +81,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case workroomsEnabled
     case workroomTunnelProvider
     case workroomNgrokDomain
+    case workroomOwnerHandle
     case remoteAccessEnabled
     case remoteHostedEnrollmentEnabled
     case remoteNotificationMacActivityWindow
@@ -1291,6 +1292,21 @@ enum AppSettingDefinitions {
         )]
     )
 
+    /// Which workroom person is the owner. A session tied to a workroom asks the owner through
+    /// `workroom_ask` instead of waiting in its terminal; empty means questions for the owner
+    /// still have nowhere to go but the chat.
+    static let workroomOwnerHandle = AppSettingDescriptor<String>(
+        identity: .workroomOwnerHandle,
+        persistenceKey: "workroomOwnerHandle",
+        absence: .emptyString,
+        validation: .maximumBytes(64),
+        encoding: .removeEmpty,
+        presentations: [row(
+            "workrooms", 3, "People", "Questions for you go to",
+            ["owner", "me", "my questions", "ask me", "terminal questions"]
+        )]
+    )
+
     static let sentryDiagnosticsEnabled = AppSettingDescriptor<Bool>(
         identity: .sentryDiagnosticsEnabled,
         persistenceKey: "sentryDiagnosticsEnabled",
@@ -1670,6 +1686,7 @@ enum AppSettingDefinitions {
         .init(defaultPermissionMode), .init(localDiagnosticsEnabled),
         .init(sentryDiagnosticsEnabled),
         .init(workroomsEnabled), .init(workroomTunnelProvider), .init(workroomNgrokDomain),
+        .init(workroomOwnerHandle),
         .init(remoteAccessEnabled),
         .init(remoteHostedEnrollmentEnabled),
         .init(remoteAccessKeepAwake),

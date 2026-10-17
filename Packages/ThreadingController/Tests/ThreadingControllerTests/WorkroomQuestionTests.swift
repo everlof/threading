@@ -317,3 +317,36 @@ struct WorkroomQuestionTests {
         #expect(try await reopened.workroomAccess(f.room.id).isEmpty)
     }
 }
+
+/// A session is tied to the rooms it created or asked in, until they close.
+struct WorkroomTieTests {
+    @Test func creatingOrAskingTiesAMailboxUntilTheRoomCloses() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try ControllerStore(path: directory.appendingPathComponent("controller.db").path)
+        let host = try await store.host().id
+        let creator = MailAddress(host: host, kind: .session, id: UUID())
+        let asker = MailAddress(host: host, kind: .session, id: UUID())
+        let bystander = MailAddress(host: host, kind: .session, id: UUID())
+        for (address, name) in [(creator, "Creator"), (asker, "Asker"), (bystander, "Bystander")] {
+            _ = try await store.registerMailbox(address, name: name)
+        }
+        let room = try await store.createWorkroom(id: WorkroomID(), scope: "p", title: "Room", purpose: "", createdBy: creator)
+        _ = try await store.addWorkroomPerson(id: WorkroomPersonID(), handle: "expert", name: "Expert", language: "sv")
+        _ = try await store.askWorkroom(id: QuestionID(), roomID: room.id, scope: "p", asker: asker, personHandle: "expert",
+                                        draft: WorkroomQuestionDraft(title: "Q", prompt: "Why?", language: "sv"),
+                                        gitContext: nil)
+        #expect(try await store.workroomTies(creator).map(\.id) == [room.id])
+        #expect(try await store.workroomTies(asker).map(\.id) == [room.id])
+        #expect(try await store.workroomTies(bystander).isEmpty)
+        // Re-asking does not duplicate the tie.
+        _ = try await store.askWorkroom(id: QuestionID(), roomID: room.id, scope: "p", asker: asker, personHandle: "expert",
+                                        draft: WorkroomQuestionDraft(title: "Q2", prompt: "And?", language: "sv"),
+                                        gitContext: nil)
+        #expect(try await store.workroomTies(asker).count == 1)
+        _ = try await store.openWorkroom(room.id, people: [try #require(await store.workroomPerson(handle: "expert")).id], expiresAt: nil)
+        _ = try await store.closeWorkroom(room.id)
+        #expect(try await store.workroomTies(creator).isEmpty)
+    }
+}

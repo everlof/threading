@@ -44,6 +44,9 @@ enum WorkroomOpeningSheet {
                                  address))
         lines.append(L10n.format("Open for %d days. You can close it any time in Settings ▸ Workrooms.", facts.days))
         lines.append(L10n.format("The agent’s reason: “%@”", facts.reason))
+        if let owner = facts.ownerName {
+            lines.append(L10n.format("You (%@) can answer in this room too.", owner))
+        }
         lines.append(L10n.string("They will see only the questions addressed to them in this room, and answer through a link you send them."))
         return lines.joined(separator: "\n\n")
     }

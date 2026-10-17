@@ -272,11 +272,17 @@ final class WorkroomAgentCommandService {
             if let refusal = WorkroomOpeningLedger.shared.admit(key) { return .failure(refusal) }
             let openQuestions = try await Self.openQuestionCount(room: room.id, person: existing?.id, store: store)
             let name = existing?.name ?? proposed?.name ?? handle
+            // The owner is granted beside anyone a room is opened to, so a tied session's
+            // questions for the owner can be answered from the same portal.
+            var owner: WorkroomPerson?
+            if let ownerHandle = AppSettings.shared.workroomOwnerHandle, ownerHandle != handle {
+                owner = try await store.workroomPerson(handle: ownerHandle)
+            }
             let answer = await self.approveOpening(WorkroomOpeningFacts(
                 roomTitle: room.title, projectName: caller.projectName, personName: name, handle: handle,
                 language: existing?.language ?? proposed?.language ?? "", proposedByAgent: existing == nil,
                 openQuestions: openQuestions, provider: AppSettings.shared.workroomTunnelProvider,
-                domain: AppSettings.shared.workroomNgrokDomain, days: days, reason: reason
+                domain: AppSettings.shared.workroomNgrokDomain, days: days, reason: reason, ownerName: owner?.name
             ))
             guard let approved = answer else {
                 WorkroomOpeningLedger.shared.finish(key, approved: false)
@@ -289,7 +295,7 @@ final class WorkroomAgentCommandService {
                 person = try await store.addWorkroomPerson(id: WorkroomPersonID(), handle: handle, name: proposed.name,
                                                            language: proposed.language, email: proposed.email)
             } else { throw ControllerError.notFound }
-            _ = try await store.openWorkroom(room.id, people: [person.id],
+            _ = try await store.openWorkroom(room.id, people: [person.id] + (owner.map { [$0.id] } ?? []),
                                              expiresAt: Date().addingTimeInterval(TimeInterval(days) * 86_400))
             WorkroomHost.shared.refresh()
             NotificationCenter.default.post(WorkroomStatusDidChange())
@@ -557,6 +563,8 @@ struct WorkroomOpeningFacts: Sendable {
     let domain: String?
     let days: Int
     let reason: String
+    /// The owner's own person, granted beside them, or nil when none is set or it is them.
+    var ownerName: String? = nil
 }
 
 /// One proposal in front of the user per room and person, and no re-asking straight after a no.

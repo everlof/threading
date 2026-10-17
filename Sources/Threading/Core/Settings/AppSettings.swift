@@ -1398,6 +1398,15 @@ final class AppSettings {
         set { AppSettingDefinitions.workroomNgrokDomain.write(newValue ?? "", to: defaults) }
     }
 
+    /// The handle of the workroom person who is the owner, or nil when none is chosen.
+    var workroomOwnerHandle: String? {
+        get {
+            let value = AppSettingDefinitions.workroomOwnerHandle.read(from: defaults) ?? ""
+            return value.isEmpty ? nil : value
+        }
+        set { AppSettingDefinitions.workroomOwnerHandle.write(newValue ?? "", to: defaults) }
+    }
+
     /// Whether Threading may send content-free crashes, hangs and sampled performance data to
     /// Sentry. Independent of paired-device diagnostics and absent until the person opts in.
     var sentryDiagnosticsEnabled: Bool {

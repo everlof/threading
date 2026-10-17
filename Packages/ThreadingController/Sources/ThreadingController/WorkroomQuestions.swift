@@ -150,6 +150,7 @@ extension ControllerStore {
             try db.run("INSERT INTO workroom_ask(question,room,asker,person,state,sequence) VALUES(?,?,?,?,?,?)",
                        [.text(id.description), .text(roomID.description), .text(asker.description),
                         .text(person.id.description), .text(question.state.rawValue), .integer(sequence)])
+            try tie(asker, to: roomID)
             try event("workroom.asked", id.description)
             return question
         }

@@ -3788,6 +3788,12 @@ switch it on in **Settings ▸ Workrooms**.
 - **Back to the agent.** Each answer, clarification request or decline arrives as mail to the
   session that asked, the same way mail between sessions does. The answer is information, never an
   approval or a permission.
+- **No waiting in the terminal.** A chat that created or asked in an open workroom routes its
+  questions through the workroom instead of stopping on them: Claude's question prompt is refused
+  with that instruction, and a turn that ends on a question is sent back once to ask it through
+  the workroom and carry on. Choose yourself under **Questions for you go to** so questions only
+  you can answer reach you the same way; you are added to every room you open. If a chat ends on a
+  question twice in a row, the second one is left for you in the terminal.
 - **Public address.** An open room is published through a tunnel: your own **ngrok** (set a
   reserved domain so links keep working after a restart), or a **Cloudflare Quick Tunnel**, which
   needs no account but gets a new address whenever Threading restarts. The tunnel provider

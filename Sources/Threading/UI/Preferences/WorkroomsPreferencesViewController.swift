@@ -56,6 +56,7 @@ final class WorkroomsPreferencesViewController: NSViewController {
         field.placeholderString = L10n.string("example.ngrok.app")
         return field
     }()
+    private lazy var ownerPopUp = SettingsUI.popUp(target: self, action: #selector(ownerChanged))
     private lazy var nameField = SettingsUI.textField(target: self, action: #selector(addPerson), width: 150)
     private lazy var handleField = SettingsUI.textField(target: self, action: #selector(addPerson), width: 110)
     private lazy var languageField = SettingsUI.textField(target: self, action: #selector(addPerson), width: 60)
@@ -189,7 +190,24 @@ final class WorkroomsPreferencesViewController: NSViewController {
     }
 
     private func peopleRows() -> [NSView] {
-        var rows: [NSView] = snapshot.people.map { entry in
+        ownerPopUp.removeAllItems()
+        ownerPopUp.addItem(ThemedMenuItem(title: L10n.string("Nobody"), representedValue: ""))
+        for entry in snapshot.people {
+            ownerPopUp.addItem(ThemedMenuItem(title: entry.person.name, representedValue: entry.person.handle))
+        }
+        let owner = AppSettings.shared.workroomOwnerHandle
+        ownerPopUp.selectItem(at: snapshot.people.firstIndex { $0.person.handle == owner }.map { $0 + 1 } ?? 0)
+        var rows: [NSView] = [SettingsUI.row(
+            title: "Questions for you go to",
+            subtitle: "A chat tied to a workroom asks you here instead of waiting in its terminal.",
+            help: SettingsUI.help(
+                "Questions for you",
+                "A chat that created or asked in an open workroom must not stop on a question in its terminal. Questions for you go to this person through the workroom, like any other person's, and the answer comes back to the chat as mail.",
+                "Add yourself as a person first. You are added to every room you approve opening, so you can answer from the same link on your phone."
+            ),
+            control: ownerPopUp
+        )]
+        rows += snapshot.people.map { entry in
             let person = entry.person
             let copy = SettingsUI.button(copiedPerson == person.id ? "Copied" : "Copy Link", target: self,
                                          action: #selector(copyLink(_:)))
@@ -275,6 +293,11 @@ final class WorkroomsPreferencesViewController: NSViewController {
 
     @objc private func enabledChanged() {
         AppSettings.shared.workroomsEnabled = enabledToggle.state == .on
+    }
+
+    @objc private func ownerChanged() {
+        let handle = ownerPopUp.selectedItem?.representedValue as? String ?? ""
+        AppSettings.shared.workroomOwnerHandle = handle.isEmpty ? nil : handle
     }
 
     @objc private func providerChanged() {
