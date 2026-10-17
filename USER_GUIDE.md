@@ -3447,8 +3447,12 @@ the prompt first. Either way the lines arrive as one paste when the program supp
 Claude Code shows as a single "[Pasted text]" token. A view-only link can copy but not quote.
 
 The key bar under the terminal is two rows: a tight run of key caps against the keyboard, and
-an action row above it carrying any keys placed there beside the paperclip, the Direct/Compose
-switch and the `⌨︎…` key editor. The caps are customizable per agent, per device — a Termius-style keyboard
+an action row above it carrying any keys placed there beside the paperclip, the eraser, the
+Direct/Compose switch and the `⌨︎…` key editor. The eraser empties the agent's own input line —
+the prompt inside the TUI, not your Compose draft — with that agent's editing keys, so it never
+sends the text, interrupts a running turn or quits the agent. It appears for Claude Code, Codex
+and OpenCode terminals. In Direct, holding delete keeps erasing across everything on the TUI's
+line, including text this phone did not type. The caps are customizable per agent, per device — a Termius-style keyboard
 that goes further than Termius's fixed catalogue. Every bar starts from a stock layout for its
 agent (Claude Code's leads with ⇧⇥, the permission-mode cycle its TUI answers to), and the
 action row's `⌨︎…` control — or **Settings → On this iPhone → Terminal keys** — opens the

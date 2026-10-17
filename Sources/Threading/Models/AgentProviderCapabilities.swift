@@ -403,6 +403,30 @@ struct AgentCapabilities: OptionSet {
   static let runtimeOwnedApprovals = Self(rawValue: 1 << 42)
   /// A structured conversation transport that can run through a remote ptyd pipe channel.
   static let remoteNativeConversation = Self(rawValue: 1 << 43)
+
+  /// The TUI's input line edits like readline: Ctrl+U kills to the start of the line, Ctrl+K
+  /// to its end, and each joins the neighbouring line when it has nothing left to kill. So
+  /// `TerminalDefaults.inputClearChunk`, repeated, empties the whole multi-line input whatever
+  /// the cursor's position, and does nothing at all to an empty one.
+  ///
+  /// Measured 2026-10-17 by driving each installed CLI in a pty and reading its rendered
+  /// screen: Claude Code 2.1.302, Codex 0.163.0 and OpenCode 1.18.31. Each was given a
+  /// 300-character wrapped line plus thirteen more lines, the cursor three lines up; the paced
+  /// pairs emptied it and the next keystroke landed in an empty input. Pressed while each was
+  /// running a local `!sleep`, the pairs cleared the queued text without interrupting the run.
+  /// Claude keeps what was killed for Ctrl+Y.
+  ///
+  /// The obvious keys were measured and are wrong. Claude 2.1.302 binds `ctrl+l` to
+  /// `chat:clearInput`, but it cleared nothing in any encoding. Ctrl+C cleared a non-empty
+  /// Claude input, but on an empty one it arms "press again to exit", and OpenCode's shipped
+  /// keymap binds it to `app_exit` as well as `input_clear` — a clear button pressed twice
+  /// would quit the agent. A second Escape at an idle Claude prompt opens the rewind chooser
+  /// (see `TerminalDefaults.interruptSequence`).
+  ///
+  /// Grok is absent because its bundled keyboard reference makes Ctrl+U *undo*, and no
+  /// signed-in Grok was available to measure what does clear it. Cursor has no terminal
+  /// surface here.
+  static let killLineClearsTerminalInput = Self(rawValue: 1 << 44)
 }
 
 /// How a runtime accepts a long-lived sign-in token: the variable its CLI reads, what every such
@@ -504,7 +528,8 @@ enum AgentKind: String, Codable, CaseIterable {
         .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory,
         .modelAliasResolution, .selectableTerminalRenderer, .remoteExecutionHostLaunch,
-        .longLivedAccountToken, .answeringMailHooks, .remoteNativeConversation
+        .longLivedAccountToken, .answeringMailHooks, .remoteNativeConversation,
+        .killLineClearsTerminalInput
       ]
     case .codex:
       return [
@@ -514,7 +539,8 @@ enum AgentKind: String, Codable, CaseIterable {
         .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .inlineTerminalViewport, .lifecycleReportedTranscriptPath,
         .lifecycleReportedWorkingDirectory, .detectableExternalResume, .bankedUsageReset,
-        .answeringMailHooks, .runtimeOwnedApprovals, .remoteNativeConversation
+        .answeringMailHooks, .runtimeOwnedApprovals, .remoteNativeConversation,
+        .killLineClearsTerminalInput
       ]
     case .grok:
       return [
@@ -524,7 +550,7 @@ enum AgentKind: String, Codable, CaseIterable {
     case .openCode:
       return [
         .resume, .terminalUI, .deferredSessionIdentifier, .openingFileAttachments,
-        .transcriptUsageIndex
+        .transcriptUsageIndex, .killLineClearsTerminalInput
       ]
 
     // Every row below cites the measurement that grants it in the archived Cursor ACP findings. The

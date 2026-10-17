@@ -315,6 +315,118 @@ final class RemoteTerminalSubmissionTests: HostedStoreTestCase {
         XCTAssertEqual(fixture.capability.writes, [])
     }
 
+    // MARK: - Clearing The TUI's Input
+
+    /// The largest single write Claude Code 2.1.302 still read as keys rather than as a paste
+    /// it drops: 28 kill-line pairs went through, 32 vanished.
+    private static let largestWriteReadAsKeys = 56
+
+    func testAClearIsTypedAsPacedKillLineChunks() async throws {
+        let fixture = try makeFixture()
+        try attachWatcher(to: fixture)
+        let chunk = TerminalDefaults.inputClearChunk
+
+        XCTAssertTrue(fixture.registry.clearTerminalInput(
+            in: fixture.sessionID, device: "phone", authorization: Self.ownerInteract
+        ))
+        XCTAssertEqual(fixture.capability.writes, [chunk], "Only the first chunk is immediate")
+
+        await wait(until: {
+            fixture.capability.writes.count == TerminalDefaults.inputClearChunkCount
+        })
+        XCTAssertEqual(
+            fixture.capability.writes,
+            Array(repeating: chunk, count: TerminalDefaults.inputClearChunkCount)
+        )
+        XCTAssertEqual(chunk, String(repeating: "\u{15}\u{0b}", count: 8))
+        // Even three chunks taken in one read by a busy TUI stay keys.
+        XCTAssertLessThan(chunk.utf8.count * 3, Self.largestWriteReadAsKeys)
+        XCTAssertGreaterThan(TerminalDefaults.inputClearChunkSpacing, 0)
+    }
+
+    /// The next key was meant for the line the clear just emptied. Finishing the clear on top
+    /// of it would erase what the person started typing.
+    func testInputArrivingMidClearEndsIt() async throws {
+        let fixture = try makeFixture()
+        try attachWatcher(to: fixture)
+
+        XCTAssertTrue(fixture.registry.clearTerminalInput(
+            in: fixture.sessionID, device: "phone", authorization: Self.ownerInteract
+        ))
+        XCTAssertTrue(fixture.registry.sendInput(
+            Array("y".utf8), to: fixture.sessionID, device: "phone",
+            authorization: Self.ownerInteract
+        ))
+        try await Task.sleep(for: .seconds(TerminalDefaults.inputClearChunkSpacing * 4))
+
+        XCTAssertEqual(fixture.capability.writes, [TerminalDefaults.inputClearChunk, "y"])
+    }
+
+    /// A line whose Return is still owed was submitted before the clear was asked for, so it is
+    /// submitted rather than erased.
+    func testAClearPressesTheReturnASubmittedLineIsOwedFirst() throws {
+        let fixture = try makeFixture()
+        try attachWatcher(to: fixture)
+
+        _ = fixture.registry.submitTerminalLine(
+            "first message", to: fixture.sessionID, device: "phone",
+            authorization: Self.ownerInteract, requestID: "before-clear"
+        )
+        XCTAssertTrue(fixture.registry.clearTerminalInput(
+            in: fixture.sessionID, device: "phone", authorization: Self.ownerInteract
+        ))
+
+        XCTAssertEqual(
+            fixture.capability.writes,
+            ["first message", "\r", TerminalDefaults.inputClearChunk]
+        )
+    }
+
+    func testARuntimeWithoutMeasuredKeysIsNeverCleared() throws {
+        let fixture = try makeFixture(kind: .grok)
+        try attachWatcher(to: fixture)
+
+        XCTAssertFalse(RemoteSessionMirrorRegistry.clearsTerminalInput(fixture.sessionID))
+        XCTAssertFalse(fixture.registry.clearTerminalInput(
+            in: fixture.sessionID, device: "phone", authorization: Self.ownerInteract
+        ))
+        XCTAssertEqual(fixture.capability.writes, [])
+    }
+
+    func testAClearCannotBypassReadOnlyAccess() throws {
+        let fixture = try makeFixture()
+        try attachWatcher(to: fixture)
+
+        XCTAssertFalse(fixture.registry.clearTerminalInput(
+            in: fixture.sessionID, device: "phone", authorization: Self.viewOnly
+        ))
+        XCTAssertEqual(fixture.capability.writes, [])
+    }
+
+    /// The phone draws its button from this feature alone, so it is told only on a connection
+    /// that may type, attached to a session whose runtime has measured keys.
+    func testClearingIsAdvertisedOnlyWhereItWouldBeAccepted() throws {
+        let clearing = RemoteWebSocketFeature.terminalInputClearing.rawValue
+        let claude = try makeFixture(kind: .claude)
+        let grok = try makeFixture(kind: .grok)
+
+        XCTAssertTrue(RemoteSessionMirrorRegistry.clearsTerminalInput(claude.sessionID))
+        XCTAssertTrue(RemoteSessionMirrorRegistry.advertisedFeatures(
+            for: Self.ownerInteract,
+            clearsTerminalInput: RemoteSessionMirrorRegistry.clearsTerminalInput(claude.sessionID)
+        ).contains(clearing))
+        XCTAssertFalse(RemoteSessionMirrorRegistry.advertisedFeatures(
+            for: Self.ownerInteract,
+            clearsTerminalInput: RemoteSessionMirrorRegistry.clearsTerminalInput(grok.sessionID)
+        ).contains(clearing))
+        XCTAssertFalse(RemoteSessionMirrorRegistry.advertisedFeatures(
+            for: Self.viewOnly, clearsTerminalInput: true
+        ).contains(clearing))
+        XCTAssertFalse(RemoteSessionMirrorRegistry.advertisedFeatures(
+            for: Self.ownerInteract
+        ).contains(clearing), "A conversation hello names no terminal to clear")
+    }
+
     // MARK: - Fixture
 
     private struct Fixture {
@@ -335,7 +447,10 @@ final class RemoteTerminalSubmissionTests: HostedStoreTestCase {
         scope: .allSessions
     )
 
-    private func makeFixture(bracketedPaste: Bool = false) throws -> Fixture {
+    private func makeFixture(
+        kind: AgentKind = .claude,
+        bracketedPaste: Bool = false
+    ) throws -> Fixture {
         let store = ProjectStore.shared
         // A folder of its own: `addProject` returns the existing project for a folder it
         // already knows, so a shared temporary directory would hand this test a sibling's.
@@ -343,7 +458,7 @@ final class RemoteTerminalSubmissionTests: HostedStoreTestCase {
             folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("threading-terminal-submit-\(UUID().uuidString)")
         ))
-        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: kind))
         let capability = SubmissionCapability(
             sessionID: session.id,
             bracketedPaste: bracketedPaste

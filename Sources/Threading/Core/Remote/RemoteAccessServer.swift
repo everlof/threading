@@ -1007,6 +1007,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             authenticate(connection, message: parsed)
         case "input":
             handleInput(connection, data: parsed.data, requestID: parsed.requestID)
+        case "terminalInputClear":
+            handleTerminalInputClear(connection)
         case "submit":
             handleSubmit(
                 connection,
@@ -4331,6 +4333,40 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 accepted: accepted,
                 result: accepted ? "accepted" : "controlHeld"
             )
+        }
+    }
+
+    /// Empties the routed session's TUI input with that runtime's own editing keys.
+    ///
+    /// The client names no bytes; `RemoteSessionMirrorRegistry.clearTerminalInput` chooses them
+    /// from the session's runtime and refuses one with no measured keys. A refusal is answered
+    /// with a code the client survives, because nothing about the session is wrong.
+    private func handleTerminalInputClear(_ connection: RemoteConnection) {
+        guard let authorization = connection.authorization, authorization.capability == .interact else {
+            connection.sendText(#"{"type":"error","code":"forbidden"}"#)
+            services.eventLog.recordRemoteEvent("Remote input clear refused", [.reason: "view-only"])
+            return
+        }
+        guard let routed = connection.routedSessionID,
+              let sessionID = SessionID(uuidString: routed)
+        else {
+            connection.sendText(encode(RemoteErrorDTO(code: "terminalInputClearRefused")))
+            return
+        }
+        let device = connection.deviceID
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
+            guard self.services.mirrors.clearTerminalInput(
+                in: sessionID,
+                device: device,
+                authorization: authorization
+            ) else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "terminalInputClearRefused")))
+                return
+            }
         }
     }
 

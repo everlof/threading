@@ -66,7 +66,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Native project visibility and footer controls | — | host-only | hidden project identity and persistence, show-hidden filtering, human-input unhide policy, command routing and shortcut ownership; replacement navigators keep their own presentation | Host-only |
 | Command palette | — | host-only | command identity and availability, focus/dismissal, bounded search, shortcut ownership/conflicts, explicit target collection and last-moment invocation checks | Host-only |
 | Mobile collaboration presence | — | host-only | authenticated participant identity, self exclusion, per-person viewing/typing truth, socket lifetime, settings and accessibility | Host-only |
-| Mobile terminal key bar | — | host-only | Direct/Compose resolution, collaboration override, PTY encoding, input permission, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
+| Mobile terminal key bar | — | host-only | Direct/Compose resolution, collaboration override, PTY encoding, input permission, the Mac-chosen input clear, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
 | Mobile terminal return-to-end control | — | host-only | emulator scroll-end truth, TUI/local ownership, follow-mode transition, motion and accessibility | Host-only |
 | Mobile terminal selection quote tray | — | host-only | selected-text snapshot, bracketed-paste decision, insertion/submission path, removal, accessibility | Host-only |
 | Mobile session usage/action disc | — | host-only | provider/account identity, usage truth, session action, menu and accessibility; device-local account-badge preference changes only the overlay | Host-only |
@@ -295,8 +295,8 @@ and solo Direct/Compose choice are deliberately customizable by the person using
 presentation is inseparable from the collaboration rule that temporarily requires atomic
 Compose, permission-gated PTY writes, DECCKM/xterm encoding, latching and live two-finger
 modifier state, touch cancellation,
-haptic and accessibility feedback, attachment upload/custody and path insertion, and the
-device-local archive's validated fallback. Letting an extension replace that shell could show a
+haptic and accessibility feedback, attachment upload/custody and path insertion, the input
+clear whose keys the Mac chooses per runtime, and the device-local archive's validated fallback. Letting an extension replace that shell could show a
 key, file, input mode or pressed state that the host did not authorize. Threading owns those
 behaviors and the complete interactive cap; the built-in keyboard editor remains the one
 presentation customization seam.

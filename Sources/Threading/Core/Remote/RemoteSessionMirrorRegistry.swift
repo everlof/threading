@@ -134,6 +134,8 @@ final class RemoteSessionMirrorRegistry {
     /// Sessions whose submitted line has been typed and whose Return has not followed yet.
     /// Keyed per PTY, because the window it guards is the PTY's, not any one client's.
     private var owedTerminalReturns: [SessionID: Task<Void, Never>] = [:]
+    /// Sessions whose input clear has written its first chunk and still owes the rest.
+    private var pendingInputClears: [SessionID: Task<Void, Never>] = [:]
 
     init(
         terminalApplication: (any RemoteTerminalApplicationCapability)? = nil,
@@ -1512,7 +1514,13 @@ final class RemoteSessionMirrorRegistry {
     /// attach button from an advertised feature it would then be refused for has been told a
     /// lie by the host. A view-only or guest connection simply never sees it, so its composer
     /// draws nothing to press.
-    static func advertisedFeatures(for authorization: RemoteAuthorization?) -> [String] {
+    ///
+    /// Input clearing is filtered by the session as well as the connection: its keys belong to
+    /// the runtime, so only the caller attaching a terminal knows whether there are any.
+    static func advertisedFeatures(
+        for authorization: RemoteAuthorization?,
+        clearsTerminalInput: Bool = false
+    ) -> [String] {
         RemoteWebSocketFeature.allCases.filter { feature in
             switch feature {
             case .conversationFollowups:
@@ -1521,6 +1529,8 @@ final class RemoteSessionMirrorRegistry {
                 return authorization?.principal == .ownerDevice
                     && authorization?.scope == .allSessions
                     && authorization?.capability == .interact
+            case .terminalInputClearing:
+                return clearsTerminalInput && authorization?.capability == .interact
             default:
                 return true
             }
@@ -1589,7 +1599,10 @@ final class RemoteSessionMirrorRegistry {
             title: snapshot.title,
             theme: RemoteThemeBridge.appTheme(for: connection.authorization),
             terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
-            features: Self.advertisedFeatures(for: connection.authorization)
+            features: Self.advertisedFeatures(
+                for: connection.authorization,
+                clearsTerminalInput: Self.clearsTerminalInput(sessionID)
+            )
         )
         connection.sendText(encode(hello))
         sendCurrentRunPlan(to: connection, sessionID: sessionID)
@@ -1991,6 +2004,12 @@ final class RemoteSessionMirrorRegistry {
         for sessionID in Array(owedTerminalReturns.keys) {
             pressOwedReturn(in: sessionID)
         }
+        // Cancelled, unlike a Return: what is left of a clear only repeats keys that already
+        // emptied the line or found nothing to kill.
+        for clear in pendingInputClears.values {
+            clear.cancel()
+        }
+        pendingInputClears.removeAll()
         for starting in startingSessions.values {
             starting.expiry?.cancel()
         }
@@ -2027,8 +2046,12 @@ final class RemoteSessionMirrorRegistry {
     /// Every byte this registry writes into a session's PTY goes through here, so a Return
     /// still owed by an earlier submitted line is pressed before anything can land on top of
     /// that line — two messages merged into one prompt is the failure this ordering prevents.
+    ///
+    /// It also ends a clear still in progress. Whatever arrives next was meant for the line the
+    /// clear has emptied, and the clear's remaining chunks would erase it.
     @discardableResult
     private func writeTerminalInput(_ bytes: [UInt8], to sessionID: SessionID) -> Bool {
+        cancelPendingInputClear(in: sessionID)
         pressOwedReturn(in: sessionID)
         return terminalApplication?.sendInput(bytes, to: sessionID) == .applied
     }
@@ -2041,6 +2064,7 @@ final class RemoteSessionMirrorRegistry {
     /// needed to preserve that distinction for a remote attachment.
     @discardableResult
     private func pasteTerminalText(_ text: String, to sessionID: SessionID) -> Bool {
+        cancelPendingInputClear(in: sessionID)
         pressOwedReturn(in: sessionID)
         guard !text.isEmpty,
               let terminalApplication,
@@ -2083,6 +2107,51 @@ final class RemoteSessionMirrorRegistry {
             Array(TerminalDefaults.submitSequence.utf8),
             to: sessionID
         )
+    }
+
+    /// Whether this session's TUI can be told to empty its input line from a remote client,
+    /// which is what `RemoteWebSocketFeature.terminalInputClearing` advertises.
+    static func clearsTerminalInput(_ sessionID: SessionID) -> Bool {
+        ProjectStore.shared.session(withID: sessionID)?.kind
+            .supports(.killLineClearsTerminalInput) == true
+    }
+
+    /// Empties the TUI's own input line with the keys its runtime edits by.
+    ///
+    /// The first chunk is admitted like any typed key. The rest follow on
+    /// `TerminalDefaults.inputClearChunkSpacing`, because the TUI drops a larger write as a
+    /// paste. Each later chunk re-checks write access, so taking the session's focus away
+    /// mid-clear stops it. A second clear restarts the count; any other input ends it.
+    @discardableResult
+    func clearTerminalInput(
+        in sessionID: SessionID,
+        device: String?,
+        authorization: RemoteAuthorization
+    ) -> Bool {
+        guard mirrors[sessionID]?.surface == .terminal,
+              Self.clearsTerminalInput(sessionID)
+        else { return false }
+        let chunk = Array(TerminalDefaults.inputClearChunk.utf8)
+        guard sendInput(chunk, to: sessionID, device: device, authorization: authorization) else {
+            return false
+        }
+        pendingInputClears[sessionID] = Task { @MainActor [weak self] in
+            for _ in 1..<TerminalDefaults.inputClearChunkCount {
+                try? await Task.sleep(for: .seconds(TerminalDefaults.inputClearChunkSpacing))
+                // A cancelled clear was replaced or overtaken; its slot is no longer its own.
+                guard !Task.isCancelled, let self else { return }
+                guard self.canWrite(sessionID: sessionID, authorization: authorization),
+                      self.terminalApplication?.sendInput(chunk, to: sessionID) == .applied
+                else { break }
+            }
+            guard !Task.isCancelled else { return }
+            self?.pendingInputClears[sessionID] = nil
+        }
+        return true
+    }
+
+    private func cancelPendingInputClear(in sessionID: SessionID) {
+        pendingInputClears.removeValue(forKey: sessionID)?.cancel()
     }
 
     func answerQuestion(

@@ -244,6 +244,60 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         )
     }
 
+    /// A session that can be cleared gains a control at the head of the cluster without moving
+    /// the two already there, and the eraser rests on their ground line rather than floating
+    /// beside them.
+    func testTheClearControlLeadsTheClusterOnItsGroundLine() throws {
+        let controls = TerminalKeyBarActionControls(
+            customize: {},
+            showsInputModeControl: true,
+            inputPreference: .direct,
+            effectiveInputMode: .direct,
+            canChooseInputPreference: true,
+            toggleInputPreference: {},
+            showsInputClear: true,
+            canClearInput: true
+        )
+        let bitmap = try renderedAlpha(
+            of: controls,
+            size: CGSize(width: 132, height: 34),
+            scale: 3
+        )
+        let eraser = try mainInkRun(in: bitmap, xRange: 0..<132)
+        let customizationKeyboard = try mainInkRun(in: bitmap, xRange: 165..<195)
+
+        // The eraser is drawn tilted, so its lowest ink is a corner, and a pointed form
+        // overshoots the line it stands on the way a round one does: rendered on iOS 26.5 at
+        // 3x it reaches 72 against the flat keyboard chassis's 69. Above the line it floats,
+        // and more than a point below it is no longer standing on the same ground.
+        let overshoot = eraser.upperBound - customizationKeyboard.upperBound
+        XCTAssertGreaterThanOrEqual(overshoot, 0, "The clear control floats above the ground line")
+        XCTAssertLessThanOrEqual(
+            overshoot,
+            Int(Fixture.scale),
+            "The clear control no longer rests on the cluster's ground line"
+        )
+    }
+
+    // MARK: - Held Delete
+
+    /// The keyboard stops repeating a held delete the first time the input says it has no
+    /// text. SwiftTerm's own answer is its shadow of what this phone typed since the last
+    /// Return, which is empty under everything else on a TUI's line — so holding delete erased
+    /// one character there and stopped.
+    func testHeldDeleteHasTextToActOnAfterAReturnEmptiedTheShadow() {
+        let terminal = RemoteTerminalView(
+            frame: Fixture.windowFrame,
+            font: UIFont.monospacedSystemFont(ofSize: Fixture.fontSize, weight: .regular)
+        )
+        XCTAssertTrue(terminal.hasText, "A fresh input line may already hold restored text")
+
+        terminal.insertText("hi")
+        terminal.insertText("\n")
+
+        XCTAssertTrue(terminal.hasText, "The TUI's next line is the agent's, not the shadow's")
+    }
+
     // MARK: - Margins
 
     /// Both trailing glyphs share the cap run's margin; the paperclip's angled outline keeps

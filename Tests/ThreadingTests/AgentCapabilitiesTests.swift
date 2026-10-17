@@ -58,7 +58,12 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
             ("detectableExternalResume", .detectableExternalResume),
             ("selectableTerminalRenderer", .selectableTerminalRenderer),
             ("bankedUsageReset", .bankedUsageReset),
-            ("remoteExecutionHostLaunch", .remoteExecutionHostLaunch)
+            ("remoteExecutionHostLaunch", .remoteExecutionHostLaunch),
+            ("longLivedAccountToken", .longLivedAccountToken),
+            ("answeringMailHooks", .answeringMailHooks),
+            ("runtimeOwnedApprovals", .runtimeOwnedApprovals),
+            ("remoteNativeConversation", .remoteNativeConversation),
+            ("killLineClearsTerminalInput", .killLineClearsTerminalInput)
         ]
 
         var seen: [Int: String] = [:]
@@ -281,6 +286,24 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
             XCTAssertTrue(
                 kind.supports(.terminalUI),
                 "\(kind) is typed an Escape with no terminal to type it into"
+            )
+        }
+    }
+
+    /// The phone's clear button types Ctrl+U and Ctrl+K into the agent, so the runtimes it is
+    /// offered for are named by a measurement. The keys are the runtime's, not the terminal's:
+    /// Grok's own keyboard reference makes Ctrl+U undo. And like the Escape, a key needs a
+    /// terminal to land in, which Cursor does not have here.
+    func testOnlyMeasuredRuntimesAreClearedByKillLine() {
+        XCTAssertTrue(AgentKind.claude.supports(.killLineClearsTerminalInput))
+        XCTAssertTrue(AgentKind.codex.supports(.killLineClearsTerminalInput))
+        XCTAssertTrue(AgentKind.openCode.supports(.killLineClearsTerminalInput))
+        XCTAssertFalse(AgentKind.grok.supports(.killLineClearsTerminalInput))
+        XCTAssertFalse(AgentKind.cursor.supports(.killLineClearsTerminalInput))
+        for kind in AgentKind.allCases where kind.supports(.killLineClearsTerminalInput) {
+            XCTAssertTrue(
+                kind.supports(.terminalUI),
+                "\(kind) is offered a clear with no terminal to type it into"
             )
         }
     }

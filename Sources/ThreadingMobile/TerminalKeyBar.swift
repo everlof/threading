@@ -305,6 +305,7 @@ enum TerminalKeyBarSymbols {
     static let customizeKeys = "keyboard.badge.ellipsis"
     static let directInput = "terminal"
     static let composeInput = "square.and.pencil"
+    static let clearInput = "eraser"
 
     static let all = [
         attachments,
@@ -313,6 +314,7 @@ enum TerminalKeyBarSymbols {
         customizeKeys,
         directInput,
         composeInput,
+        clearInput,
     ]
 }
 
@@ -407,10 +409,27 @@ struct TerminalKeyBarActionControls: View {
     let effectiveInputMode: MobileTerminalInputMode
     let canChooseInputPreference: Bool
     let toggleInputPreference: () -> Void
+    /// Empties the TUI's own input line, drawn only for a session whose host advertised
+    /// `RemoteWebSocketFeature.terminalInputClearing`. It leads the cluster so the two input
+    /// controls people reach for most stay at the trailing edge, where they have always been.
+    var showsInputClear = false
+    var canClearInput = false
+    var clearInput: () -> Void = {}
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
+            if showsInputClear {
+                Button(action: clearInput) {
+                    trailingIcon(TerminalKeyBarSymbols.clearInput)
+                }
+                .disabled(!canClearInput)
+                .accessibilityLabel(MobileL10n.string("Clear terminal input"))
+                .accessibilityHint(MobileL10n.string(
+                    "Empties the agent's input line using its own editing keys"
+                ))
+            }
+
             Button(action: customize) {
                 trailingIcon(TerminalKeyBarSymbols.customizeKeys)
             }
@@ -550,7 +569,11 @@ struct TerminalKeyBar: View {
             inputPreference: inputPreference,
             effectiveInputMode: effectiveInputMode,
             canChooseInputPreference: canChooseInputPreference,
-            toggleInputPreference: toggleInputPreference
+            toggleInputPreference: toggleInputPreference,
+            showsInputClear: connection.supportsTerminalInputClearing
+                && effectiveInputMode != .none,
+            canClearInput: canSend,
+            clearInput: clearTerminalInput
         )
         return HStack(spacing: 0) {
             if showsAttachmentKey {
@@ -749,6 +772,11 @@ struct TerminalKeyBar: View {
         keyFeedback.perform()
         connection.sendTerminalKey(String(decoding: bytes, as: UTF8.self))
         bridge.consumeModifiersAfterKey()
+    }
+
+    private func clearTerminalInput() {
+        keyFeedback.perform()
+        connection.clearTerminalInput()
     }
 
     private func keyCap(_ label: String) -> some View {

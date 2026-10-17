@@ -51,6 +51,30 @@ public enum TerminalDefaults {
     /// thing typed lands in a list of checkpoints instead of in the conversation.
     public static let interruptSequence = "\u{1b}"
 
+    /// One write of the keys that empty a TUI's input line: Ctrl+U then Ctrl+K, eight times.
+    ///
+    /// Typed only into a runtime claiming `AgentCapabilities.killLineClearsTerminalInput`, whose
+    /// documentation holds the measurement. Each pair kills the text on both sides of the
+    /// cursor and then joins one neighbouring line from each side, so `inputClearChunkCount`
+    /// chunks empty an input of up to `inputClearChunkPairs * inputClearChunkCount / 2` lines
+    /// wherever the cursor stands. A shorter input leaves the remaining pairs nothing to kill,
+    /// and neither key ever submits, interrupts or quits.
+    ///
+    /// **The chunks cannot be one write.** Claude Code 2.1.302 read 28 pairs (56 bytes) in one
+    /// write as keys and silently dropped 32 pairs (64 bytes), the same paste heuristic
+    /// `submitSequenceDelay` describes, keyed on size. Sixteen bytes stay under that bound even
+    /// if a busy reader takes three chunks in one read.
+    public static let inputClearChunk = String(
+        repeating: "\u{15}\u{0b}",
+        count: inputClearChunkPairs
+    )
+    public static let inputClearChunkPairs = 8
+    public static let inputClearChunkCount = 8
+
+    /// The beat between two `inputClearChunk` writes, wide enough that the PTY hands the TUI
+    /// each one separately. The whole clear takes under a third of a second.
+    public static let inputClearChunkSpacing: TimeInterval = 0.04
+
     /// How long a turn waits after a pasted file path before Return is typed for it.
     ///
     /// Claude Code and Codex resolve a pasted image path asynchronously — they read the file

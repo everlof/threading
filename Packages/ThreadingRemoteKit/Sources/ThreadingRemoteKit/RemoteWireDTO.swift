@@ -3245,6 +3245,14 @@ public enum RemoteWebSocketFeature: String, Codable, CaseIterable, Sendable {
     /// A direct terminal client may place uploaded files in the session workspace and insert
     /// their quoted paths into the PTY without submitting the current TUI line.
     case terminalAttachmentInsertion
+    /// A terminal client may ask the host to empty the TUI's own input line with a
+    /// `terminalInputClear` message, which carries nothing but its type.
+    ///
+    /// Advertised per session, and only for a runtime whose editing keys were measured, because
+    /// the keys are the runtime's rather than the terminal's: what clears one CLI's input is
+    /// another's undo. The host therefore chooses the bytes, and a client draws its button only
+    /// when told this session can be cleared.
+    case terminalInputClearing
     /// The host publishes provider-owned run-plan summaries and serves checklist rows in pages.
     case runPlanProgress
 }

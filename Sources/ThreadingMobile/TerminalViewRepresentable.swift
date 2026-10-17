@@ -909,6 +909,16 @@ final class RemoteTerminalView: TerminalView, UIGestureRecognizerDelegate {
         super.insertText(text)
     }
 
+    /// Always yes, because the far side of this view is a program's input line.
+    ///
+    /// The keyboard asks this before every repeat of a held delete key and stops repeating on
+    /// the first no. SwiftTerm answers from its input-session shadow, which holds only what
+    /// this phone typed since the last Return. The shadow is therefore empty under text a TUI
+    /// restored, a composer submitted, a paste inserted or another device typed, so holding
+    /// delete removed one character and stopped. `deleteBackward()` already sends a backspace
+    /// when the shadow is empty, which is the answer SwiftTerm leaves to the embedder.
+    override var hasText: Bool { true }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         refreshThemeGlow()

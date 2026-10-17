@@ -1829,6 +1829,21 @@ final class RemoteProtocolTests: XCTestCase {
         )
     }
 
+    /// The request names no bytes. Which keys empty a TUI's input is the runtime's business,
+    /// and only the host knows the runtime, so the wire carries the intent alone.
+    func testTerminalInputClearCarriesOnlyItsIntent() throws {
+        let clear = RemoteClientMessage(type: "terminalInputClear")
+        let decoded = try JSONDecoder().decode(
+            RemoteClientMessage.self,
+            from: JSONEncoder().encode(clear)
+        )
+
+        XCTAssertEqual(decoded, clear)
+        XCTAssertNil(decoded.data)
+        XCTAssertNil(decoded.text)
+        XCTAssertEqual(RemoteWebSocketFeature.terminalInputClearing.rawValue, "terminalInputClearing")
+    }
+
     func testTerminalHydrationBoundaryKeepsItsViewportRequestIdentity() throws {
         let ready = RemoteTerminalReadyDTO(requestID: "viewport-generation-1")
         let decoded = try JSONDecoder().decode(

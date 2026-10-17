@@ -2341,6 +2341,23 @@ button style owns the immediate pressed travel and theme fill for every cap; ret
 feedback generators acknowledge completed key and latch actions instead of constructing a cold
 generator after each release.
 
+**Clear empties the agent's own input line, and the Mac chooses the keys.** The eraser leads the
+action row's fixed controls only when the terminal hello advertised `terminalInputClearing`, which
+the host does per session, for a connection that may type, and only for a runtime claiming
+`AgentCapabilities.killLineClearsTerminalInput`. The phone sends a bare `terminalInputClear`; the
+keys are never on the wire because they are the runtime's, not the terminal's — Ctrl+U kills to
+the line start in Claude Code, Codex and OpenCode and is *undo* in Grok's editor. The host types
+Ctrl+U/Ctrl+K pairs, which kill both sides of the cursor and then join one neighbouring line from
+each side, so they empty a multi-line input wherever the cursor stands and do nothing to an empty
+one. Nothing a TUI documents as "clear" was usable: Ctrl+C arms quitting on an empty prompt and
+interrupts a turn, a second Escape at an idle Claude prompt opens its rewind chooser, and Claude
+2.1.302's `ctrl+l` → `chat:clearInput` binding cleared nothing. The pairs go out as
+`TerminalDefaults.inputClearChunkCount` 16-byte writes `inputClearChunkSpacing` apart, because
+Claude Code dropped a single 64-byte write of them as a paste while reading 56 bytes as keys. The
+first write takes the ordinary input admission, each later one re-checks write access, and any
+other input to the session ends the clear so a key typed right after it is not erased. A refusal
+is answered with `terminalInputClearRefused`, which the phone survives.
+
 It is the only bar over the keyboard. SwiftTerm fits its own `TerminalAccessory` — a fixed
 esc/ctrl/tab/arrow row — from `TerminalView`'s initializer, which stacked a second row of nearly
 the same keys under this one; `RemoteTerminalView.dropBuiltInKeyboardAccessory()` clears it

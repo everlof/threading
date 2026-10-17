@@ -445,6 +445,9 @@ final class RemoteSessionConnection: ObservableObject {
     /// Direct-input terminals use a separate negotiated mutation: uploaded files enter the
     /// workspace and their paths are inserted at the TUI cursor without an implicit Return.
     @Published private(set) var supportsTerminalAttachmentInsertion = false
+    /// Whether the Mac can empty this session's TUI input line for the phone. Advertised per
+    /// session, because the keys that do it are the agent's own and only some were measured.
+    @Published private(set) var supportsTerminalInputClearing = false
     @Published private(set) var supportsRunPlanProgress = false
     @Published private(set) var runPlan: RemoteRunPlanSummaryDTO?
     @Published private(set) var runPlanSteps: [RemoteRunPlanStepDTO] = []
@@ -758,6 +761,7 @@ final class RemoteSessionConnection: ObservableObject {
             serverFeatures.removeAll()
             supportsComposerAttachmentUploads = false
             supportsTerminalAttachmentInsertion = false
+            supportsTerminalInputClearing = false
             supportsAtomicTerminalSubmission = false
             supportsAttentionRequests = false
             supportsFocusedInputControl = false
@@ -1363,6 +1367,15 @@ final class RemoteSessionConnection: ObservableObject {
               inputControl?.canWrite != false else { return }
         reportTyping(true)
         sendTerminalInputMessage(text)
+    }
+
+    /// Asks the Mac to empty the TUI's own input line. The request carries no keys: which ones
+    /// clear an agent's input differs by agent, and the Mac is the side that knows the agent.
+    func clearTerminalInput() {
+        guard supportsTerminalInputClearing, phase == .connected, capability == .interact,
+              inputControl?.canWrite != false else { return }
+        reportTyping(true)
+        try? send(RemoteClientMessage(type: "terminalInputClear"))
     }
 
     private func sendTerminalInputMessage(_ text: String, probeID suppliedProbeID: String? = nil) {
@@ -2162,6 +2175,9 @@ final class RemoteSessionConnection: ObservableObject {
             supportsTerminalAttachmentInsertion = serverFeatures.contains(
                 RemoteWebSocketFeature.terminalAttachmentInsertion.rawValue
             )
+            supportsTerminalInputClearing = serverFeatures.contains(
+                RemoteWebSocketFeature.terminalInputClearing.rawValue
+            )
             supportsRunPlanProgress = serverFeatures.contains(
                 RemoteWebSocketFeature.runPlanProgress.rawValue
             )
@@ -2508,6 +2524,9 @@ final class RemoteSessionConnection: ObservableObject {
         "permissionNotPending",
         "questionNotPending",
         "invalidViewport",
+        // The clear lost a race with focus moving to someone else; the line is merely left as
+        // it was, which is what the person now sees.
+        "terminalInputClearRefused",
     ]
 
     /// A refusal the session survives is still evidence. The Mac names the guard clause it

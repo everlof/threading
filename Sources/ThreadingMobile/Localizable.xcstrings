@@ -3244,6 +3244,17 @@
         }
       }
     },
+    "Clear terminal input" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Töm terminalens inmatning"
+          }
+        }
+      }
+    },
     "Close" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5093,6 +5104,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kvalificerade fönster: bestäms av Codex."
+          }
+        }
+      }
+    },
+    "Empties the agent's input line using its own editing keys" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tömmer agentens inmatningsrad med dess egna redigeringstangenter"
           }
         }
       }
