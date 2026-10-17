@@ -28,6 +28,7 @@ static int valid(const uint8_t *utf8, int length, const TATStyleSpan *spans, int
             (span->italic != 0 && span->italic != 1) ||
             (span->underline != 0 && span->underline != 1) ||
             !isfinite(span->pixel_size) || span->pixel_size < 1 || span->pixel_size > 128 ||
+            !isfinite(span->line_spacing) || span->line_spacing < 0 || span->line_spacing > 128 ||
             !isfinite(span->kern) || fabs(span->kern) > 64 ||
             !unit(span->foreground_red) || !unit(span->foreground_green) ||
             !unit(span->foreground_blue) || !unit(span->foreground_alpha) ||
@@ -44,6 +45,9 @@ static PangoLayout *layout_for(cairo_t *cr, const uint8_t *utf8, int length,
                                const TATStyleSpan *spans, int count) {
     PangoLayout *layout = pango_cairo_create_layout(cr);
     pango_layout_set_text(layout, (const char *)utf8, length);
+    // Like alignment and wrapping, a bounded label uses its leading paragraph style.
+    if (count > 0)
+        pango_layout_set_spacing(layout, (int)lround(spans[0].line_spacing * PANGO_SCALE));
     PangoAttrList *list = pango_attr_list_new();
     // AppKit's default paragraph hyphenation factor is zero. A code line wrapping by
     // character must not gain a synthetic '-' that was never present in its source.

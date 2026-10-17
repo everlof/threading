@@ -45,6 +45,9 @@ final class AgentChildProcess {
     /// question this file asks (the ledger's start time, the escalation, the hand-over) is
     /// answered differently enough that a shared protocol would be a name for a coincidence.
     private let host: PTYHostPipeLink?
+    private var hasLocalLedgerEntry = true
+    /// Only a PID in this kernel may be handed to local process inspectors or signal paths.
+    var localProcessIdentifier: pid_t? { hasLocalLedgerEntry ? processIdentifier : nil }
 
     /// Whether the child lives in `threading-ptyd` and can outlive this process.
     var isHostBacked: Bool { host != nil }
@@ -248,7 +251,7 @@ final class AgentChildProcess {
         guard let host, !detached.isSet, !stopped.isSet else { return false }
         guard host.detach(by: deadline, idleExpiresAt: idleExpiresAt) else { return false }
         detached.set()
-        ledger.clear(pid: processIdentifier)
+        if hasLocalLedgerEntry { ledger.clear(pid: processIdentifier) }
         ThreadingLogger.agent.notice(
             "Agent child handed to the PTY host pid=\(self.processIdentifier, privacy: .public)"
         )
@@ -351,7 +354,8 @@ final class AgentChildProcess {
         // The daemon's own reading of the child's identity, not a second one taken here: the pid
         // is the daemon's child, and a start time read a moment later races the very reuse the
         // pair exists to rule out.
-        let enrolment = ledger.recordHostBackedChild(
+        process.hasLocalLedgerEntry = !plan.isRemote
+        let enrolment = plan.isRemote ? .recorded : ledger.recordHostBackedChild(
             pid: spawned.pid,
             startTime: ProcessStartTime(
                 seconds: spawned.startTime.seconds,
@@ -387,7 +391,7 @@ final class AgentChildProcess {
 
         let pid = spawned.pid
         link.delivery = PTYHostPipeLink.Delivery(ended: { status in
-            ledger.clear(pid: pid)
+            if !plan.isRemote { ledger.clear(pid: pid) }
             ThreadingLogger.agent.info(
                 "Agent child exited pid=\(pid, privacy: .public) session=\(sessionID.uuidString, privacy: .public) status=\(status, privacy: .public)"
             )

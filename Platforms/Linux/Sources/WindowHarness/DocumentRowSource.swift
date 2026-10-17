@@ -185,7 +185,7 @@ final class DocumentRowSource: NSTableViewDataSource, NSTableViewDelegate {
         }
         host.identifier = identifier
         host.setColumnWidth(tableColumn?.width ?? tableView.bounds.width)
-        let available = max(1, min(Design.Size.readableWidth, tableView.bounds.width - Design.Spacing.inset * 2))
+        let available = max(1, min(Design.Chat.columnWidth, tableView.bounds.width - Design.Spacing.inset * 2))
         let entry = entries[row]
         let content: NSView
         switch entry.content {

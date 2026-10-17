@@ -26,15 +26,7 @@ enum ConversationUserRow {
         bubble.translatesAutoresizingMaskIntoConstraints = false
         bubble.applySurface(fill: Design.Chat.bubbleFill, radius: .panel)
 
-        #if os(Linux)
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.applyFont(.body, in: .conversation)
-        label.textColor = Design.Text.label
-        label.isSelectable = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        #else
         let label = ProseLabel(text: text)
-        #endif
         bubble.addSubview(label)
 
         // A bubble is padded tighter than a card — `medium`, measured against the conversation's

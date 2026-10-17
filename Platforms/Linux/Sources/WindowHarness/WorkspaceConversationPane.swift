@@ -41,7 +41,10 @@ final class WorkspaceConversationPane: WorkspacePane {
         self.runtime = runtime
         chrome = WorkspacePaneChrome(pageName: pageName, pageIdentity: runtime.id.uuidString,
             symbolName: "text.bubble", icon: icon, showsSessionActions: true, onReveal: onReveal)
-        status = ConversationRowView.streaming(runtime.status)
+        status = NSTextField(wrappingLabelWithString: runtime.status)
+        status.applyFont(.body, in: .conversation)
+        status.textColor = Design.Text.secondary
+        status.isSelectable = true
         // These peers are positioned by this bounded host, while each peer's own
         // internal constraints still own its content. Do not feed their intrinsic fits back
         // into the root as unconstrained Auto Layout siblings.

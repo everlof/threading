@@ -18,6 +18,7 @@ public extension NSMutableAttributedString {
 }
 
 open class NSParagraphStyle: NSObject {
+    open var lineSpacing: CGFloat = 0
     open var alignment: NSTextAlignment = .natural
     open var lineBreakMode: NSLineBreakMode = .byWordWrapping
 }
@@ -73,6 +74,8 @@ enum AttributedTextDrawing {
         let background = (attributes[.backgroundColor] as? NSColor) ?? .clear
         let weight = font.weight.rawValue
         var span = TATStyleSpan()
+        let spacing = (attributes[.paragraphStyle] as? NSParagraphStyle)?.lineSpacing ?? 0
+        span.line_spacing = spacing.isFinite ? min(128, max(0, spacing * scale)) : 0
         span.start_byte = Int32(start)
         span.end_byte = Int32(end)
         span.monospace = font.familyName?.contains("Mono") == true ? 1 : 0

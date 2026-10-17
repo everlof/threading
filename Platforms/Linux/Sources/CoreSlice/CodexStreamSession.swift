@@ -47,6 +47,8 @@ final class CodexStreamSession:
     var onProviderExecution: ((ProviderExecutionEvent) -> Void)?
     var onSubagentEvent: ((SubagentEvent) -> Void)?
     var onSessionTitleChange: ((String) -> Void)?
+    /// The provider's exact rollout location, used by remote hosts to mirror without scanning.
+    var onTranscriptPath: ((TranscriptID, String) -> Void)?
     var onExit: ((Int32) -> Void)?
     var onInteractionAvailabilityChange: (() -> Void)?
     var onQuestion: ((ConversationQuestionRequest, @escaping ([String: String]?) -> Void) -> Void)? {
@@ -85,7 +87,7 @@ final class CodexStreamSession:
 
     var rootProcessIdentifier: pid_t? {
         guard let process, process.isRunning else { return nil }
-        return process.processIdentifier
+        return process.localProcessIdentifier
     }
 
     private let preparedChild: ConversationPreparedChild?
@@ -680,6 +682,9 @@ final class CodexStreamSession:
         guard let threadID = thread["id"] as? String else { return }
 
         rootThreadID = threadID
+        if let path = thread["path"] as? String {
+            onTranscriptPath?(TranscriptID(threadID), path)
+        }
         reportSessionTitle(thread["name"])
         replaceComposerCapabilities(CodexComposerCatalog.builtIns)
         if !didReportThread {
@@ -1178,6 +1183,9 @@ final class CodexStreamSession:
         switch decision {
         case .allow: allowed = true
         case .deny: allowed = false
+        // Never produced for an app-server approval, which is Codex itself asking
+        // (`PermissionRequest.Origin`); refusing cannot run something nobody approved.
+        case .deferToAgent: allowed = false
         }
 
         if method == "item/permissions/requestApproval" {

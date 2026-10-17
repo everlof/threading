@@ -32,6 +32,9 @@ with sqlite3.connect(store / 'threading.db') as database:
     record = json.loads(payload)
     record.update(nativeUI=True, hasLaunched=False, lastExitCode=None, agentSessionID=None,
                   customTitle='Native conversation', kind=provider)
+    if provider == 'cursor':
+        # The Codex seed's Manual permission mode is not a Cursor launch setting.
+        record.pop('permissionMode', None)
     database.execute('UPDATE session SET data = ?, kind = ? WHERE id = ?', (json.dumps(record), provider, identifier))
 
 peer = root / (provider + '-peer')
@@ -141,7 +144,12 @@ from pathlib import Path
 args = sys.argv[1:]
 kind = os.environ['ACP_FIXTURE_KIND']
 if kind == 'grok':
-    assert args[0] == 'agent' and args[-1] == 'stdio', args
+    if '--permission-mode' in args:
+        mode_index = args.index('--permission-mode')
+        assert mode_index == 0 and args[2] == 'agent', args
+    else:
+        assert args[0] == 'agent', args
+    assert args[-1] == 'stdio', args
 else:
     assert args == ['acp'], args
     assert os.environ.get('NO_OPEN_BROWSER') == '1', os.environ

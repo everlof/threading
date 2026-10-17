@@ -58,6 +58,7 @@ typedef struct {
     int32_t underline;
     double pixel_size;
     double kern;
+    double line_spacing;
     double foreground_red, foreground_green, foreground_blue, foreground_alpha;
     double background_red, background_green, background_blue, background_alpha;
 } TATStyleSpan;

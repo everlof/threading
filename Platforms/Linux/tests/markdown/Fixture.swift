@@ -17,6 +17,7 @@ enum Fixture {
         try render(to: output)
         #if os(Linux)
         verifyBridge()
+        verifyParagraphSpacing()
         try verifySelection(to: output)
         verifyClipGeometry()
         verifyCursorLifecycle()
@@ -309,6 +310,24 @@ enum Fixture {
         precondition(lastLine > 30, "eighth line did not render beyond the first raster tile")
         try PNGWriter.write(tall, to: output.appendingPathComponent("selected-eight-lines-2x.png"))
         print("PASS selectable production Markdown label: grapheme keys, exact copy, readonly source and pointer range")
+    }
+
+    private static func verifyParagraphSpacing() {
+        let paragraph = NSMutableParagraphStyle()
+        let source = "First line\nSecond line\nThird line"
+        func label() -> NSTextField {
+            let field = NSTextField(labelWithAttributedString: NSAttributedString(
+                string: source, attributes: [.font: NSFont.systemFont(ofSize: 14),
+                                            .paragraphStyle: paragraph]))
+            field.maximumNumberOfLines = 3
+            return field
+        }
+        let naturalHeight = label().intrinsicContentSize.height
+        paragraph.lineSpacing = 6
+        let spacedHeight = label().intrinsicContentSize.height
+        precondition(abs(spacedHeight - naturalHeight - 12) <= 1,
+                     "paragraph spacing must contribute once per inter-line gap")
+        print("PASS paragraph spacing reaches the Pango label layout")
     }
 
     private static func verifyBridge() {

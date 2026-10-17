@@ -8109,3 +8109,63 @@ recording cases still time out waiting for their saved movie:
 failures, not counted as passing or assumed fixed by rebasing. The iOS suite remains unrun.
 The Linux runner contracts (12 tests), vendor identity checks and staged whitespace check pass.
 The checkpoint includes the existing ACP provider changes alongside the accumulated UI work.
+
+## 221. Rebase onto current master, 2026-10-17
+
+The requested checkpoint is committed and all 113 branch commits rebased onto local `master`
+`784c1cc43527c8fe2a29a5de5599a0f312611efe`, which contains fetched `origin/master`
+`f9178a72e5ce46c0175a72b69c9ffa164168ebb4` and the local mainline work. The repository names
+its mainline `master`. `backup/linux-appkit-before-rebase-20261017` preserves the original
+checkpoint `099dda4c0`, including the user's ACP changes. Nothing was pushed.
+
+Extraction conflicts preserve mainline's hook/runtime permission origin and `deferToAgent`
+policy, remote launch environment and transcript-mirror lookup (including the existing-file
+resume preflight helpers), transcript selection, reading
+measure, and Grok's permission flag before the `agent` subcommand. The portable permission
+policy accepts the host's optional provider kind, so the Mac still lets runtime-owned hook
+approvals reach the runtime before applying a standing mode. Native runtime requests retain
+their yes/no decision path. The CoreSlice copies are refreshed from the shared sources.
+
+Linux links the unchanged production `ProseLabel`; user bubbles and streaming prose no longer
+need a platform-specific label substitution. Its theme boundary states the new 14-point reading
+face, 13-point code face, 52-em column and production leading. The bounded Pango label bridge
+carries `NSParagraphStyle.lineSpacing` into the same layout used for measurement, drawing and
+selection. Like alignment and wrapping, that label uses its leading paragraph style; this does
+not add arbitrary per-paragraph styling to the complete-text document engine. A focused
+Markdown contract checks that three lines gain exactly two spacing gaps. The Markdown fixture's
+theme vocabulary follows the shared renderer's new API. The native workspace fixture now
+checks Grok's argument ordering and removes the Codex seed's permission mode when creating a
+Cursor record, which deliberately rejects that setting.
+
+This branch introduced the UI structural debt ratchet before these mainline changes. Its
+reconciled baseline is 104 controllers, 126 platform views, 3,232 constraints and 107 drawing
+sites. Every increase is accounted for by incoming mainline code: the web-extension workbench
+adds one controller, one view and 18 constraints; the remote-host prompt adds two constraints;
+the simulator pane adds three; the component gallery adds one. No new Linux feature ownership
+is hidden by this adjustment.
+
+The static Linux release builds of WindowHarness, CoreSliceHarness, MarkdownHarness and
+LinuxHost pass (`out/parity-rebase-build.log`, `out/parity-rebase-harness-build.log`). Core
+contracts pass in `out/parity-rebase-core.log`; Markdown rendering, selection and spacing pass
+in `out/parity-rebase-markdown.log`; all 12 Python runner contracts pass in
+`out/parity-rebase-python.log`. Both vendor identity checks pass, including all 131 core files.
+Codex, Claude and Grok saved-native journeys pass in `out/parity-rebase-runtime`; Cursor passes
+in `out/parity-rebase-runtime-remaining` after correcting its fixture. These exercise multiple
+turns on one daemon child, Unicode, composer growth and focus, pane switching, persistence,
+restart replay and same-thread resume. The real Codex light and dark shell captures were
+inspected, including the new prose and multiline user bubble. This is source-build evidence,
+not a new installed package or a claim that the paused UI-parity goal is complete.
+
+The final Linux runtime continuation exits successfully: all seven model/effort cases, the
+composer interaction journey and all 14 provider/permission launch cases pass in
+`out/parity-rebase-runtime-remaining`. They cover physical keyboard/pointer selection, inherited
+values, account switching, the bounded large catalogue, stale refusal before record/child
+creation, exact launch arguments and persisted choices. §219's installed-package, Wayland and
+2× matrix limits remain; its incorrectly timed dark matrix capture is not promoted to proof.
+
+The focused Mac run finishes with exit 0 and 75 tests passing in
+`out/parity-rebase-mac.log`: permission broker/deferral/modes, Grok ACP, transcript selection,
+conversation arrival, model/effort launch values and gallery coverage. Repository boundary
+checks and the full app/test-target compilation pass. The full-suite recording failures and
+unrun iOS suite in §220 remain explicit limitations; this focused run does not close them.
+All rebase integration work is committed before returning to the requested pause.

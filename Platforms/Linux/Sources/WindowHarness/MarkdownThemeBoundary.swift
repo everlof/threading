@@ -9,11 +9,25 @@ extension Design.Surface {
 }
 extension Design {
     enum Chat {
+        // The same reading measure as the production host; this host's typography scale is 1.
+        static let readingSize: CGFloat = 14
+        static let readingCodeSize: CGFloat = 13
+        static let readingLineHeight: CGFloat = 1.625
+        static let codeLineHeight: CGFloat = 1.45
+        static let headingLeading = Design.Spacing.large
+        static func lineSpacing(for font: NSFont, multiple: CGFloat) -> CGFloat {
+            let natural = (font.ascender - font.descender + font.leading).rounded(.up)
+            return max(0, (font.pointSize * multiple).rounded() - natural)
+        }
+        static let columnMeasure: CGFloat = 52
+        static var columnWidth: CGFloat {
+            (readingSize * Design.Typography.scale * columnMeasure).rounded()
+        }
         static var turnDivider: NSColor { LinuxTheme.color("divider") }
         static let turnDividerHeight = ConversationUserRowDefaults.turnDividerHeight
         static let bubbleMaxWidthFraction = ConversationUserRowDefaults.bubbleMaxWidthFraction
         static var bubbleFill: NSColor { LinuxTheme.color("accentMuted") }
-        static let blockSpacing = Design.Spacing.small
+        static let blockSpacing = Design.Spacing.inset
         static let arrivalRise = Design.Spacing.medium
         // The production tool row: nothing at rest, the control face under the pointer or open.
         static let toolIconWidth: CGFloat = 16
@@ -24,6 +38,8 @@ extension Design {
 extension Design.Typography {
     enum FontSurface { case chrome, conversation }
     static let scale: CGFloat = 1
+    static func reading() -> NSFont { .systemFont(ofSize: Design.Chat.readingSize * scale) }
+    static func readingCode() -> NSFont { .monospacedSystemFont(ofSize: Design.Chat.readingCodeSize * scale) }
     static func documentHeading(level: Int, from base: NSFont, surface: FontSurface) -> NSFont {
         let steps: [CGFloat] = [11, 7, 3, 1]
         let step = steps[min(max(level, 1), steps.count) - 1]

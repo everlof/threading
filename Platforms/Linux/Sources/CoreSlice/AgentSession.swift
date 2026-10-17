@@ -721,6 +721,9 @@ struct AgentSession: Codable, Identifiable {
   /// resumes the same id, since two live processes would interleave writes into that one
   /// transcript.
   var usesNativeUI: Bool
+  /// The remote account namespace chosen on first native launch. Changing host consent later
+  /// controls future credential transfers, never moves an existing conversation's history.
+  var remoteUsesCopiedAccount: Bool? = nil
 
   /// Whether the session has been filed away.
   ///
@@ -929,6 +932,7 @@ struct AgentSession: Codable, Identifiable {
     case fastMode, remoteControl, fullscreenRenderer, permissionMode, archived, archivedAt
     case providerArchiveState
     case pinned, nativeUI
+    case remoteUsesCopiedAccount
     case backgroundHost
     case snoozedAt, snoozedUntil, hadTurnInFlightWhenSnoozed, wake
     case forkParent
@@ -979,6 +983,7 @@ struct AgentSession: Codable, Identifiable {
     accountHandle = AccountHandle(
       storedName: try container.decodeIfPresent(String.self, forKey: .accountHandle)
     )
+    remoteUsesCopiedAccount = try container.decodeIfPresent(Bool.self, forKey: .remoteUsesCopiedAccount)
     model = try container.decodeIfPresent(String.self, forKey: .model)
     let decodedReasoningEffort = try container.decodeIfPresent(
       String.self,
@@ -1340,6 +1345,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(lastExitCode, forKey: .lastExitCode)
     try container.encodeIfPresent(lastLaunchFailure, forKey: .lastLaunchFailure)
     try container.encodeIfPresent(accountHandle.persistedSessionName, forKey: .accountHandle)
+    try container.encodeIfPresent(remoteUsesCopiedAccount, forKey: .remoteUsesCopiedAccount)
     try container.encodeIfPresent(model, forKey: .model)
     try container.encodeIfPresent(reasoningEffort, forKey: .reasoningEffort)
     try container.encodeIfPresent(fastMode, forKey: .fastMode)

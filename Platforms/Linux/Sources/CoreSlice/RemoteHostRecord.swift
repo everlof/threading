@@ -50,6 +50,8 @@ struct RemoteHostRecord: Equatable, Codable, Sendable, Identifiable {
     /// `/home/me/src` again for every checkout is the sort of friction that makes a person keep one
     /// project per machine.
     var defaultDirectory: String?
+    /// Explicit consent to copy the selected local login into a private account home here.
+    var reusesLocalCredentials: Bool
     var controllerExecutable: String? = nil
     var controllerDatabase: String? = nil
     let addedAt: Date
@@ -60,6 +62,7 @@ struct RemoteHostRecord: Equatable, Codable, Sendable, Identifiable {
         destination: String,
         sshConfigFile: String? = nil,
         defaultDirectory: String? = nil,
+        reusesLocalCredentials: Bool = false,
         addedAt: Date = Date()
     ) {
         self.id = id
@@ -67,6 +70,7 @@ struct RemoteHostRecord: Equatable, Codable, Sendable, Identifiable {
         self.destination = destination
         self.sshConfigFile = sshConfigFile
         self.defaultDirectory = defaultDirectory
+        self.reusesLocalCredentials = reusesLocalCredentials
         self.addedAt = addedAt
     }
 
@@ -82,6 +86,7 @@ struct RemoteHostRecord: Equatable, Codable, Sendable, Identifiable {
         destination = (try? container.decodeIfPresent(String.self, forKey: .destination)) ?? ""
         sshConfigFile = (try? container.decodeIfPresent(String.self, forKey: .sshConfigFile)) ?? nil
         defaultDirectory = (try? container.decodeIfPresent(String.self, forKey: .defaultDirectory)) ?? nil
+        reusesLocalCredentials = (try? container.decodeIfPresent(Bool.self, forKey: .reusesLocalCredentials)) ?? false
         addedAt = (try? container.decodeIfPresent(Date.self, forKey: .addedAt)) ?? Date()
     }
 

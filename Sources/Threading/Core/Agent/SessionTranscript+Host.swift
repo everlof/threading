@@ -52,4 +52,36 @@ extension SessionTranscript {
         readRequest(sessionID: sessionID, for: session, in: project, account: account)?
             .resolve(effort: effort)
     }
+
+    /// The same, for a session that has a conversation and an account of its own.
+    ///
+    /// Nil when the session has yet to be given an identifier, when its account cannot be
+    /// found, or when its runtime keeps no readable transcript.
+    ///
+    /// Account discovery and source selection stay on the main actor. A background reader
+    /// captures a `ReadRequest` before dispatching rather than recomputing a storage path there.
+    @MainActor
+    static func url(for session: AgentSession, in project: Project) -> URL? {
+        guard let sessionID = session.resumeState.transcriptID,
+              let account = AgentAccountDiscovery.account(
+                for: session.kind,
+                handle: session.accountHandle
+              )
+        else { return nil }
+
+        return url(sessionID: sessionID, for: session, in: project, account: account)
+    }
+
+    /// The transcript that is on disk right now, or nil.
+    ///
+    /// A path is not a file: an identifier is minted before the CLI has written anything, so a
+    /// caller that means "there is a conversation to move" has to ask the filesystem.
+    @MainActor
+    static func existingURL(for session: AgentSession, in project: Project) -> URL? {
+        guard let url = url(for: session, in: project),
+              FileManager.default.fileExists(atPath: url.path)
+        else { return nil }
+
+        return url
+    }
 }
