@@ -99,29 +99,15 @@ enum ProjectDefaultAccounts {
         fastMode: Bool?,
         to account: AgentAccount
     ) -> CarriedRunChoice {
-        let kind = account.provider
-        let options = AgentModels.options(for: kind, account: account)
-        let keptModel = model.flatMap { model in
-            options.contains { $0.identifier == model } ? model : nil
-        }
-        let keptEffort = reasoningEffort.flatMap { effort in
-            AgentModels.supports(
-                reasoningEffort: effort,
-                kind: kind,
-                model: keptModel,
-                account: account,
-                options: options
-            ) ? effort : nil
-        }
-        let keptFastMode = fastMode.flatMap { fastMode in
-            AgentModels.supportsFastMode(kind: kind, model: keptModel, account: account)
-                ? fastMode
-                : nil
-        }
+        let kept = AgentRunChoice(
+            model: model,
+            reasoningEffort: reasoningEffort,
+            fastMode: fastMode
+        ).honoured(kind: account.provider, account: account)
         return CarriedRunChoice(
-            model: keptModel,
-            reasoningEffort: keptEffort,
-            fastMode: keptFastMode
+            model: kept.model,
+            reasoningEffort: kept.reasoningEffort,
+            fastMode: kept.fastMode
         )
     }
 

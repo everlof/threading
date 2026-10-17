@@ -63,7 +63,12 @@ enum AgentLauncher {
         }
 
         return launchPlan(
-            route: routed(command, for: session, rendersTerminalUI: true),
+            route: routed(
+                command,
+                for: session,
+                brokersPermissions: brokersTerminalRun(session),
+                rendersTerminalUI: true
+            ),
             in: executionProject.folderPath,
             resumeState: resumeState,
             environmentOverrides: project.executionHost == nil
@@ -88,6 +93,17 @@ enum AgentLauncher {
         var editorCommand = ShellCommand(word: executablePath)
         editorCommand.append(flag: "--prompt-editor")
         return ["EDITOR": editorCommand.source]
+    }
+
+    /// Whether this terminal launch answers its permission questions through Threading's broker.
+    ///
+    /// Only while an unattended automation run owns the session: `TriggerStore.claimDispatch`
+    /// registers the approved revision before anything is launched in it. Every other terminal
+    /// raises the CLI's own prompt, which the person can see and answer. A process that outlives
+    /// its run keeps the hook it was launched with, so the broker passes such a hook back to that
+    /// same prompt (`PermissionBroker.decide`).
+    static func brokersTerminalRun(_ session: AgentSession) -> Bool {
+        UnattendedRunPermissions.registration(for: session.id) != nil
     }
 
     /// Builds the plan for a session Threading renders itself, rather than showing a terminal.
@@ -1081,10 +1097,15 @@ enum AgentLauncher {
         // prompt with a second one. With reporting off, no Remote Control override, no
         // status-line override and the TUI left on the account's own theme,
         // `writeHookSettings` returns nil and the terminal launches with no settings file.
+        //
+        // An unattended automation run is the exception to both halves: nobody is there to
+        // answer the prompt, so the broker is, and the run settles on its turn ending, so the
+        // lifecycle report is not optional for it.
+        let brokered = brokersTerminalRun(session)
         if let settingsPath = MCPSessionRegistry.writeHookSettings(
             for: session.id,
-            brokersPermissions: false,
-            reportsLifecycle: AppSettings.shared.reportsClaudeLifecycleEvents,
+            brokersPermissions: brokered,
+            reportsLifecycle: AppSettings.shared.reportsClaudeLifecycleEvents || brokered,
             remoteControl: remoteControlAtStartup(for: session),
             fastMode: fastModeAtStartup(for: session),
             statusLineOverride: statusLineOverride(for: session, in: project),

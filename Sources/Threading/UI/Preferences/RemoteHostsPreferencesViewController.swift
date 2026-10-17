@@ -24,6 +24,8 @@ final class RemoteHostsPreferencesViewController: NSViewController {
     private let store: RemoteHostStore
     private let hostsCoordinator: RemoteExecutionHosts
     private var rows: [RemoteHostRecord] = []
+    private var rowsByDestination: [RemoteHostDestination: IndexSet] = [:]
+    private var projectCounts: [RemoteHostID: Int] = [:]
     private var presentationRows: [PresentationRow] = []
     private var pageView: SettingsPageView?
     private let appEvents = AppEventObservations()
@@ -116,6 +118,12 @@ final class RemoteHostsPreferencesViewController: NSViewController {
         appEvents.observe(RemoteExecutionHosts.didChangeNotification) { [weak self] in
             self?.reload()
         }
+        appEvents.observe(RemoteHostAvailabilityDidChange.self) { [weak self] event in
+            guard let self, event.coordinator == ObjectIdentifier(hostsCoordinator),
+                  let index = rowsByDestination[event.destination] else { return }
+            tableView.reloadData(forRowIndexes: index, columnIndexes: IndexSet(integer: 0))
+            tableView.noteHeightOfRows(withIndexesChanged: index)
+        }
     }
 
     override func viewWillAppear() {
@@ -138,6 +146,12 @@ final class RemoteHostsPreferencesViewController: NSViewController {
 
     private func reload() {
         rows = store.ordered
+        projectCounts = ProjectStore.shared.projects.reduce(into: [:]) { counts, project in
+            if let id = project.executionHost?.hostID { counts[id, default: 0] += 1 }
+        }
+        rowsByDestination = rows.enumerated().reduce(into: [:]) { index, row in
+            index[row.element.sshDestination, default: IndexSet()].insert(row.offset + 1)
+        }
         presentationRows = [.note] + (rows.isEmpty ? [.empty] : rows.indices.map(PresentationRow.host))
         pageView?.updateSummary(RemoteHostsSettingsStrings.summary(rows.count))
         updateCardDecorations()
@@ -165,7 +179,7 @@ final class RemoteHostsPreferencesViewController: NSViewController {
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let usage = ProjectStore.shared.projects(onHost: record.id).count
+        let usage = projectCounts[record.id, default: 0]
         let captionText = RemoteHostsSettingsStrings.caption(record, projects: usage)
         let caption = NSTextField(labelWithString: captionText)
         caption.isHidden = captionText.isEmpty
@@ -205,20 +219,45 @@ final class RemoteHostsPreferencesViewController: NSViewController {
         row.setHuggingPriority(.defaultLow, for: .horizontal)
         labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        let availability = hostsCoordinator.availability(for: record.sshDestination)
+        let startup = NSTextField(wrappingLabelWithString: RemoteHostAvailabilityPresentation.startup(availability.facts.startup))
+        startup.applyFont(.caption)
+        startup.textColor = availability.facts.startup == .manual ? Design.Status.warning : Design.Text.secondary
+        startup.setAccessibilityIdentifier("settings.remote-hosts.startup.\(index)")
+        let sleep = NSTextField(wrappingLabelWithString: RemoteHostAvailabilityPresentation.sleep(availability.facts.sleep))
+        sleep.applyFont(.caption)
+        sleep.textColor = availability.facts.sleep == .maySleep ? Design.Status.warning : Design.Text.secondary
+        sleep.setAccessibilityIdentifier("settings.remote-hosts.sleep.\(index)")
+        let setup = SettingsUI.button(L10n.string("Startup & Sleep…"), target: self, action: #selector(showAvailabilitySetup(_:)))
+        setup.tag = index
+        let facts = NSStackView(views: [startup, sleep])
+        facts.orientation = .vertical
+        facts.alignment = .leading
+        facts.spacing = Design.Spacing.hairline
+        startup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        sleep.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let availabilityRow = NSStackView(views: [facts, setup, HelpPopoverButton(topic: RemoteHostAvailabilityPresentation.help)])
+        availabilityRow.orientation = .horizontal
+        availabilityRow.spacing = Design.Spacing.medium
+        let freshness = NSTextField(wrappingLabelWithString: RemoteHostAvailabilityPresentation.freshness(availability))
+        freshness.applyFont(.caption)
+        freshness.textColor = Design.Text.secondary
+        freshness.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        check.isEnabled = state.allowsChecking && !availability.isChecking
+        var content: [NSView] = [row, availabilityRow, freshness]
         if let detail = state.detail {
             let explanation = NSTextField(wrappingLabelWithString: detail)
             explanation.applyFont(.caption)
             explanation.textColor = Design.Text.secondary
             explanation.setAccessibilityIdentifier("settings.remote-hosts.detail.\(index)")
-            let stack = NSStackView(views: [row, explanation])
-            stack.orientation = .vertical
-            stack.alignment = .leading
-            stack.spacing = Design.Spacing.small
-            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            explanation.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            return padded(stack)
+            content.append(explanation)
         }
-        return padded(row)
+        let stack = NSStackView(views: content)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        for item in content { item.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        return padded(stack)
     }
 
     private func padded(_ content: NSView) -> NSView {
@@ -276,12 +315,19 @@ final class RemoteHostsPreferencesViewController: NSViewController {
     @objc private func checkHost(_ sender: NSButton) {
         guard rows.indices.contains(sender.tag) else { return }
         let record = rows[sender.tag]
-        _ = hostsCoordinator.readiness(
+        let phase = hostsCoordinator.readiness(
             for: record.sshDestination,
             components: RemoteHostComponentSource.current(),
             appSocketPath: MCPServer.shared.socketPath
         )
+        if case .ready = phase { hostsCoordinator.checkAvailability(for: record.sshDestination) }
         reload()
+    }
+
+    @objc private func showAvailabilitySetup(_ sender: NSButton) {
+        guard rows.indices.contains(sender.tag) else { return }
+        let facts = hostsCoordinator.availability(for: rows[sender.tag].sshDestination).facts
+        RemoteHostAvailabilityPresentation.showSetup(for: facts, in: view.window)
     }
 
     private func announce(_ outcome: RemoteHostStore.Outcome, record: RemoteHostRecord) {

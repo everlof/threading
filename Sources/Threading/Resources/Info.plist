@@ -2,6 +2,24 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Offer web browsing to Launch Services without changing the user's default browser. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Web URLs</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLSchemes</key>
+			<array><string>http</string><string>https</string></array>
+		</dict>
+	</array>
+	<!-- The browser accepts user-chosen HTTP sites. Keep ATS enabled for native app services. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
 	<!-- Advertise editor capability without claiming an OS default. Only Settings opt-in does so. -->
 	<key>UTImportedTypeDeclarations</key>
 	<array>

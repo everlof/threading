@@ -336,6 +336,20 @@ refetches immediately. The inherited default and any explicit in-progress choice
 so changing visibility cannot strand the launch state. iOS deliberately consumes the result but
 does not grow a second management surface.
 
+**What a picker offers and what a launch accepts are one rule.** `AgentModels.launchableOptions`
+is the catalogue plus the account's own configured default, which may be a variant no alias or
+cache names (`opus[1m]`); the pickers and the automation catalogue filter it for visibility.
+`AgentRunChoice` is the only judge of a model, effort and speed against it: `refusal` is the
+phone's create gate, and `honoured` — the same gate applied one choice at a time, dropping what
+fails to the login's default — produces the report-launch choices and a moved send's carried
+choices, so neither can publish something the gate refuses. The rule used to be copied four
+times and the copies drifted twice: once refusing a Fast the catalogue advertised, and once
+refusing every phone chat on a login configured for `opus[1m]`, because the phone turns Auto into
+the default's concrete id and the gate read the bare catalogue — with the refreshed catalogue
+offering the same model straight back. `LaunchChoiceContractTests` holds the line: for logins
+shaped like the real ones that broke, every combination the catalogue offers, and what the phone
+sends for Auto, must pass the gate. A new launch choice or account shape belongs in that test.
+
 A fresh composer in a project with [default accounts](#project-default-accounts) starts on that
 list's first login with usage left, runtime included. Everywhere else it starts on the enabled
 login this runtime most recently used, falling back to the standard login while it is on and then

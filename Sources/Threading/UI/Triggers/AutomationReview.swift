@@ -77,6 +77,7 @@ struct AutomationReview: Equatable {
         if let account = context.account(revision.agentKind, handle) {
             facts.append(accountFact(account, requested: revision.accountHandleName))
         }
+        facts.append(surfaceFact(revision.effectiveSurface))
 
         facts.append(.init(label: L10n.string("Permissions"), value: revision.executionMode.displayTitle,
                            detail: revision.checkoutPolicy.displayTitle, identifier: "permissions"))
@@ -104,6 +105,19 @@ struct AutomationReview: Equatable {
                            value: String(revision.sequence),
                            detail: revision.id.uuidString, identifier: "revision"))
         return AutomationReview(facts: facts, instructions: revision.instructions)
+    }
+
+    /// Named on every receipt, chat included: where a run is drawn decides how its permission
+    /// questions are answered, so it is part of what is being approved.
+    private static func surfaceFact(_ surface: AutomationSurface) -> FactSheetView.Fact {
+        switch surface {
+        case .chat:
+            return .init(label: L10n.string("Runs in"), value: L10n.string("Chat"), identifier: "surface")
+        case .terminal:
+            return .init(label: L10n.string("Runs in"), value: L10n.string("Terminal"),
+                         detail: L10n.string("The agent’s own terminal. Its permission questions are answered from this revision, as in Chat."),
+                         identifier: "surface")
+        }
     }
 
     private static func timing(

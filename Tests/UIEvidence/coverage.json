@@ -4,6 +4,41 @@
   "platform": "macOS",
   "entries": [
     {
+      "id": "remote-host-availability",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Remote host startup and sleep",
+      "description": "Startup, sleep and observation freshness in the shipping Settings canvas, plus the warning in the shipping project sidebar.",
+      "states": [
+        "Manual startup required",
+        "Autostart configured with sleep enabled",
+        "Not checked"
+      ],
+      "matrix": {
+        "themes": [
+          "System",
+          "Cyberpunk",
+          "Swiss Minimalist"
+        ],
+        "appearances": [
+          "Light",
+          "Dark",
+          "Authored"
+        ],
+        "sizes": [
+          "1280×820 shipping window"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/RemoteHostAvailabilityTests.swift",
+        "test": "ThreadingTests/RemoteHostAvailabilityTests/testRendersAvailabilityInTheShippingSettingsCanvas"
+      },
+      "capture": {
+        "glob": "remote-host-availability-*.png"
+      }
+    },
+    {
       "id": "remote-host-login",
       "kind": "surface",
       "status": "implemented",
@@ -1456,6 +1491,35 @@
       },
       "capture": {
         "glob": "browser-download-toast.png"
+      }
+    },
+    {
+      "id": "standalone-browser",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Standalone browser",
+      "description": "The production browser window exposes an address and search field without a project or agent conversation.",
+      "states": [
+        "Blank launch window"
+      ],
+      "matrix": {
+        "themes": [
+          "System"
+        ],
+        "appearances": [
+          "Light"
+        ],
+        "sizes": [
+          "900 by 600 points"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/StandaloneBrowserWindowTests.swift",
+        "test": "ThreadingTests/StandaloneBrowserWindowTests/testRendersBrowserWithoutAProjectOrSession"
+      },
+      "capture": {
+        "glob": "standalone-browser.png"
       }
     },
     {

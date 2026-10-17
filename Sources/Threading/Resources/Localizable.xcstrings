@@ -551,6 +551,28 @@
         }
       }
     },
+    "%@ can run only read-only automations in its terminal, because Threading can answer its edit approvals only in Chat. Choose Chat, Assess only or Read-only task." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ kan bara köra skrivskyddade automatiseringar i sin terminal, eftersom Threading bara kan besvara dess godkännanden för ändringar i Chatt. Välj Chatt, Bedöm endast eller Skrivskyddad uppgift."
+          }
+        }
+      }
+    },
+    "%@ can’t run automations in its terminal. Choose Chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ kan inte köra automatiseringar i sin terminal. Välj Chatt."
+          }
+        }
+      }
+    },
     "%@ closed before confirming the login. Nothing was registered." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10487,6 +10509,57 @@
         }
       }
     },
+    "Autostart: Configured" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autostart: Configured"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autostart: Konfigurerad"
+          }
+        }
+      }
+    },
+    "Autostart: Manual start required" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autostart: Manual start required"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autostart: Manuell start krävs"
+          }
+        }
+      }
+    },
+    "Autostart: Not checked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autostart: Not checked"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autostart: Inte kontrollerad"
+          }
+        }
+      }
+    },
     "Availability is checked when Claude Code starts" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13329,6 +13402,23 @@
         }
       }
     },
+    "Check failed. Last known settings: %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check failed. Last known settings: %@."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollen misslyckades. Senast kända inställningar: %@."
+          }
+        }
+      }
+    },
     "Check for Updates…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13380,6 +13470,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kontrollera att Tailscale körs på denna Mac och försök sedan igen."
+          }
+        }
+      }
+    },
+    "Check this host to read its startup and sleep settings." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check this host to read its startup and sleep settings."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollera värden för att läsa dess start- och viloinställningar."
           }
         }
       }
@@ -13490,6 +13597,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kontrollerar iPhone-styrning…"
+          }
+        }
+      }
+    },
+    "Checking startup and sleep settings…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking startup and sleep settings…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar start- och viloinställningar…"
           }
         }
       }
@@ -13694,6 +13818,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj Apples .mobileconfig-fil för Bluetooth-loggning. Filen kunde inte läsas eller är inte en profil för Bluetooth-loggning."
+          }
+        }
+      }
+    },
+    "Choose Check to identify this host and read its startup settings. If the host cannot be reached, start it manually and check again. Threading does not infer that an unreachable host is asleep or powered off." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose Check to identify this host and read its startup settings. If the host cannot be reached, start it manually and check again. Threading does not infer that an unreachable host is asleep or powered off."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj Kontrollera för att identifiera värden och läsa dess startinställningar. Starta den manuellt om den inte kan nås och kontrollera igen. Threading antar inte att en värd som inte kan nås sover eller är avstängd."
           }
         }
       }
@@ -17161,6 +17302,23 @@
         }
       }
     },
+    "Connection status describes whether the host answers now. Autostart describes its service configuration after a restart; it does not power on the computer. Sleep settings are checked separately. Closing a lid or choosing Sleep can still interrupt work. A reboot ends running agent processes; reopen saved chats to resume their conversations." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connection status describes whether the host answers now. Autostart describes its service configuration after a restart; it does not power on the computer. Sleep settings are checked separately. Closing a lid or choosing Sleep can still interrupt work. A reboot ends running agent processes; reopen saved chats to resume their conversations."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslutningsstatus visar om värden svarar just nu. Autostart beskriver tjänsternas konfiguration efter en omstart; den slår inte på datorn. Viloinställningar kontrolleras separat. Att stänga locket eller välja Vila kan fortfarande avbryta arbetet. En omstart avslutar pågående agentprocesser; öppna sparade chattar för att återuppta samtalen."
+          }
+        }
+      }
+    },
     "Connect…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18438,6 +18596,23 @@
         }
       }
     },
+    "Could not check startup and sleep settings. Try Check again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not check startup and sleep settings. Try Check again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte kontrollera start- och viloinställningarna. Välj Kontrollera igen."
+          }
+        }
+      }
+    },
     "Could not copy the screenshot" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18617,6 +18792,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte återställa"
+          }
+        }
+      }
+    },
+    "Could not save Windows setup" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not save Windows setup"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte spara Windows-installationen"
           }
         }
       }
@@ -28012,6 +28204,23 @@
         }
       }
     },
+    "Host availability" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Host availability"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdens tillgänglighet"
+          }
+        }
+      }
+    },
     "Hosted Direct" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30874,6 +31083,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Senast använd"
+          }
+        }
+      }
+    },
+    "Last checked: %@. Check again after changing settings." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last checked: %@. Check again after changing settings."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senast kontrollerad: %@. Kontrollera igen efter ändringar."
           }
         }
       }
@@ -38279,6 +38505,23 @@
         }
       }
     },
+    "On Windows, run the Threading WSL startup installer in Administrator PowerShell as the account that owns Ubuntu. It creates the background task named Threading WSL Host. Check that the task is enabled and starts at boot, not only at sign-in. In Windows Settings ▸ System ▸ Power & battery, review the sleep timers for plugged-in and battery power. Then return here and choose Check." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On Windows, run the Threading WSL startup installer in Administrator PowerShell as the account that owns Ubuntu. It creates the background task named Threading WSL Host. Check that the task is enabled and starts at boot, not only at sign-in. In Windows Settings ▸ System ▸ Power & battery, review the sleep timers for plugged-in and battery power. Then return here and choose Check."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "På Windows kör du Threadings WSL-startinstallation i PowerShell som administratör, med kontot som äger Ubuntu. Den skapar bakgrundsaktiviteten Threading WSL Host. Kontrollera att aktiviteten är aktiverad och startar när datorn startas, inte bara vid inloggning. Se över vilotiderna för nät- och batteridrift i Windows Inställningar ▸ System ▸ Ström och batteri. Gå sedan tillbaka hit och välj Kontrollera."
+          }
+        }
+      }
+    },
     "On battery this Mac goes to sleep after %@ idle, and a phone away from home cannot reach it while it sleeps." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38314,6 +38557,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna Inställningar → Face ID-godkännanden på iPhone och ange %@. Koden gäller i fem minuter och fem försök."
+          }
+        }
+      }
+    },
+    "On the Linux host, enable its installed Threading service to start at boot and enable linger for the account that runs it. Use the existing installer or service manager; do not restart a daemon holding active chats. Review the host’s power settings separately, then return here and choose Check." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On the Linux host, enable its installed Threading service to start at boot and enable linger for the account that runs it. Use the existing installer or service manager; do not restart a daemon holding active chats. Review the host’s power settings separately, then return here and choose Check."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera autostart för den installerade Threading-tjänsten på Linux-värden och aktivera linger för kontot som kör den. Använd den befintliga installationen eller tjänstehanteraren; starta inte om en tjänst som håller aktiva chattar. Se över värdens ströminställningar separat och välj sedan Kontrollera här."
           }
         }
       }
@@ -48774,6 +49034,28 @@
         }
       }
     },
+    "Runs in" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körs i"
+          }
+        }
+      }
+    },
+    "Runs in the agent’s own terminal. Threading still answers its permission questions from this automation’s rules. Some agents can run only read-only automations there." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körs i agentens egen terminal. Threading besvarar fortfarande dess behörighetsfrågor utifrån den här automatiseringens regler. Vissa agenter kan bara köra skrivskyddade automatiseringar där."
+          }
+        }
+      }
+    },
     "Runs on %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49049,6 +49331,23 @@
         }
       }
     },
+    "Save Windows Setup…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save Windows Setup…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara Windows-installation…"
+          }
+        }
+      }
+    },
     "Save a screenshot of the device (hold Control to copy; right-click for options)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49172,6 +49471,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Spara iPhone-skärmbild"
+          }
+        }
+      }
+    },
+    "Save this installer and run it in Administrator PowerShell on the Windows host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save this installer and run it in Administrator PowerShell on the Windows host."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara installationsfilen och kör den i PowerShell som administratör på Windows-värden."
           }
         }
       }
@@ -54546,6 +54862,57 @@
         }
       }
     },
+    "Sleep: Automatic sleep enabled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sleep: Automatic sleep enabled"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vila: Automatisk vila är aktiverad"
+          }
+        }
+      }
+    },
+    "Sleep: Idle timers disabled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sleep: Idle timers disabled"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vila: Inaktivitetstimers är avstängda"
+          }
+        }
+      }
+    },
+    "Sleep: Not checked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sleep: Not checked"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vila: Inte kontrollerad"
+          }
+        }
+      }
+    },
     "Slide Down" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55903,6 +56270,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppstart"
+          }
+        }
+      }
+    },
+    "Startup & Sleep…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startup & Sleep…"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start och vila…"
+          }
+        }
+      }
+    },
+    "Startup and sleep settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startup and sleep settings"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start- och viloinställningar"
           }
         }
       }
@@ -57438,6 +57839,17 @@
         }
       }
     },
+    "Terminal automation runs need a project that runs on this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatiseringskörningar i terminalen kräver ett projekt som körs på den här Macen."
+          }
+        }
+      }
+    },
     "Terminal command running" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58388,6 +58800,23 @@
         }
       }
     },
+    "The Windows startup installer is missing from this app." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Windows startup installer is missing from this app."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installationsfilen för Windows-autostart saknas i appen."
+          }
+        }
+      }
+    },
     "The above, plus every project, session, conversation and cache. Threading restarts as if newly installed." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58742,6 +59171,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agentens länk har gått ut"
+          }
+        }
+      }
+    },
+    "The agent’s own terminal. Its permission questions are answered from this revision, as in Chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentens egen terminal. Dess behörighetsfrågor besvaras utifrån den här revisionen, precis som i Chatt."
           }
         }
       }
@@ -59579,6 +60019,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den konfigurerade agenten kan inte garantera ett skrivskyddat bedömningssteg."
+          }
+        }
+      }
+    },
+    "The configured agent cannot run this automation unattended in its terminal." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den valda agenten kan inte köra den här automatiseringen obevakad i sin terminal."
           }
         }
       }
@@ -62946,6 +63397,17 @@
         }
       }
     },
+    "The terminal did not begin the run within %lld minutes. Open its chat to see where it stopped, such as a sign-in, folder-trust or update screen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminalen påbörjade inte körningen inom %lld minuter. Öppna dess chatt för att se var den stannade, till exempel vid en inloggning, en fråga om mappförtroende eller en uppdateringsskärm."
+          }
+        }
+      }
+    },
     "The terminal theme could not be saved for that selection." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -65222,6 +65684,23 @@
         }
       }
     },
+    "This host can sleep while remote work is running." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This host can sleep while remote work is running."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här värden kan gå i vila medan fjärrarbete pågår."
+          }
+        }
+      }
+    },
     "This host has no workers yet." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -65229,6 +65708,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här värden har inga arbetare än."
+          }
+        }
+      }
+    },
+    "This host needs manual startup after a restart." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This host needs manual startup after a restart."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här värden behöver startas manuellt efter en omstart."
           }
         }
       }
@@ -79071,6 +79567,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "”Tillåt alltid denna agent” ger den här chatten åtkomst till alla webbplatser i webbläsaren, även sådana som besöks senare. Återkalla i Inställningar ▸ Verktyg."
+          }
+        }
+      }
+    },
+    "“Assess, then fix” sends its fix as a second prompt, which only Chat can deliver. Choose Chat, or another mode for the terminal." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”Bedöm, åtgärda sedan” skickar åtgärden som en andra prompt, och det kan bara Chatt leverera. Välj Chatt, eller ett annat läge för terminalen."
           }
         }
       }

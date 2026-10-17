@@ -29,6 +29,7 @@ enum AutomationToolSchema {
         "checkoutPolicy": string("projectCheckout or managedWorktree"), "maximumRuntimeMinutes": integer("1–1440"),
         "options": options, "sourceID": string("Event source UUID; omit for schedules"), "eventKind": string("Source event kind; omit for schedules"),
         "permissions": permissions,
+        "surface": string("chat (default) or terminal: where runs are drawn. terminal uses the agent's own TUI; not with assessThenFix; codex only taskReadOnly or assessOnly"),
         "conditions": .init(type: .array, description: "Event match conditions. Empty array for schedules.", items: .init(type: .object, properties: [
             "attribute": string("Attribute name"), "comparison": string("equals, notEquals, contains, exists, greaterThan, lessThan"),
             "value": .init(type: .object, description: "Typed event attribute; omit for exists", properties: [

@@ -171,6 +171,14 @@ An event run still waiting for quiet hours or a free slot when you edit or delet
 or delete its source, is marked **Suppressed** in **Activity** with the reason; pausing keeps it
 waiting until you resume. One automation's backlog never holds up another automation's runs.
 
+**Runs in** chooses where a run's conversation appears: **Chat**, Threading's own view, or
+**Terminal**, the agent's own terminal interface. Either way a run never stops to ask: Threading
+answers its permission questions from the automation's rules, and the approval sheet shows which
+you chose. Claude can use its terminal for every mode except **Assess, then fix if
+straightforward**; Codex only for **Read-only task** and **Assess only**, because Threading can
+answer its edit approvals only in Chat. Once a run has finished, its terminal asks you its own
+permission questions again.
+
 Tasks can be read-only or permit local edits and tests. Event rules also retain **Assess only**
 and **Assess, then fix if straightforward**. Tasks changing product files use a clean project
 checkout or an isolated worktree. Automation permission does not include pushing, deployment or source write-back.
@@ -2958,6 +2966,23 @@ interface.
 Claude terminal sessions and Claude/Codex native chats can run on a configured SSH host while their conversation stays
 in Threading on your Mac. The host needs a POSIX login shell, its agent CLI, and Threading's
 compatible remote helpers. Windows hosts use Linux through WSL.
+
+Remote Hosts shows **Autostart** and **Sleep** separately from the current connection. Use
+**Check** to read those settings; the last-check time stays visible, and a failed check keeps
+previous values marked as last known. **Autostart: Configured** means the startup configuration
+was found, not that the computer will power itself on. Unknown settings stay **Not checked**.
+Manual startup or automatic sleep adds a warning mark to the project's remote host. Choose
+**Startup & Sleep…** for guidance; on Windows, **Save Windows Setup…** saves the installer for
+you to run on that PC. A successful connection does not prevent the host from sleeping.
+
+For an already installed WSL host, run
+[`scripts/windows/install-wsl-startup.ps1`](scripts/windows/install-wsl-startup.ps1) in
+Administrator PowerShell as the Windows account that owns Ubuntu. It adds a **Threading WSL Host**
+scheduled task that starts the backend at boot and keeps WSL running in the background. The
+desktop trial launcher can then be closed. The task stores no Windows password, checks again
+every five minutes if it has stopped, and leaves the computer's sleep settings alone. Disable
+that task in Task Scheduler before stopping WSL for maintenance. A Windows reboot ends running
+agent processes; reopening a saved chat resumes its conversation.
 
 Add the connection under **Settings > Remote Hosts**, then choose it from the project's
 **Remote Host…** menu and enter the absolute folder path on that host. New chats in that project

@@ -12,6 +12,11 @@ visible window — and then decides which window to show: `OnboardingState.needs
 swaps `showWindow(nil)` for an `OnboardingWindowController`. Nothing else in the launch
 sequence moves.
 
+The standalone browser is available alongside this flow. With no selected conversation,
+startup opens its address/search field; incoming HTTP/HTTPS links can open there before setup
+is complete. The browser has no agent account or project dependency. Closing it returns to
+the walkthrough without recording onboarding completion.
+
 **Session restore is the one gated step.** It used to run straight off the MCP listener's
 start callback; restoring a session attaches a terminal, and a terminal must land in a
 laid-out, on-screen view. `restoreSelectedSessionIfReady` therefore requires *both* facts —
@@ -20,13 +25,15 @@ restore. On a true first launch it is a no-op (nothing is selected); the gate ex
 walkthrough re-run and for upgrade paths.
 
 **Completion order is load-bearing** (`onboardingDidFinish`): record the completion, **show
-the main window, then close the walkthrough**. During first launch the walkthrough is the
-app's only window and `applicationShouldTerminateAfterLastWindowClosed` answers true — closing
-first would quit the app on the final click of its own setup. The same trap is why the
+the main window, then close the walkthrough**. The standalone browser may already have been
+closed, leaving the walkthrough as the app's only visible window, and
+`applicationShouldTerminateAfterLastWindowClosed` answers true — closing first would quit the
+app on the final click of its own setup. The same trap is why the
 flow maps **Escape to Back, not close**: abandoning setup by closing the window *is* allowed
-(and quits — nothing was recorded, so the walkthrough returns next launch), but not on a
-reflex key. A Dock click mid-walkthrough re-fronts the walkthrough, not the hidden main
-window (`applicationShouldHandleReopen`).
+(and quits if no browser is open — nothing was recorded, so the walkthrough returns next launch), but not on a
+reflex key. A Dock click mid-walkthrough re-fronts an open standalone browser, or the walkthrough
+when no browser is visible (`applicationShouldHandleReopen`). Launch Services can send this
+reopen event after a cold URL event, so setup must not cover the requested web page.
 
 ## The completed flag
 

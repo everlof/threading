@@ -748,6 +748,7 @@ actor TriggerStore {
         guard revision.effectivePermissions.rules.count <= AutomationPermissionPolicy.maximumRules else {
             throw AutomationPermissionPolicyError.tooManyRules
         }
+        try revision.effectiveSurface.validate(agent: revision.agentKind, mode: revision.executionMode)
         guard definition.id == revision.triggerID,
               definition.draftRevisionID == revision.id,
               revision.sequence > 0,
@@ -939,6 +940,7 @@ actor TriggerStore {
         config.conditions = file.conditions
         config.permissions = try ProjectAutomationFiles.resolvedPermissions(file.permissions, project: checkout,
             workspace: frozen.workspacePath, resources: frozen.resourcesPath)
+        config.surface = file.surface
         let local = ProjectAutomationBinding(triggerID: triggerID, projectID: projectID, automationID: file.id,
             checkoutPath: checkout, repositoryIdentity: GitInfo.repositoryIdentity(for: checkout) ?? checkout,
             fingerprint: snapshot.fingerprint, account: config.account, sourceID: config.sourceID, sourceName: file.source, diagnostic: nil)
@@ -1349,6 +1351,7 @@ extension TriggerStore {
             proposedBySessionID: proposedBy, createdAt: now)
         revision.automation = config.options
         revision.permissions = config.permissions ?? .readOnly
+        revision.surface = config.surface
         revision.projectAutomation = projectAutomation
         guard config.checkoutPolicy != .automationWorkspace || (projectAutomation != nil && config.executionMode.isTask) else {
             throw StoreError.invalidRecord("automation workspace requires a project-owned direct task")

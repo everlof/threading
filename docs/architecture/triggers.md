@@ -42,8 +42,10 @@ through MCP or placed in prompts.
 
 Every run has two possible stages:
 
-1. Assessment starts in the provider's native conversation surface with Plan/read-only
-   permission. The opening prompt separates host instructions from untrusted event evidence.
+1. Assessment starts on the revision's surface — the provider's native conversation unless the
+   revision chose its terminal (see [Where a run is drawn](#where-a-run-is-drawn)) — with
+   Plan/read-only permission. The opening prompt separates host instructions from untrusted event
+   evidence.
 2. A `straightforwardFix` result may start a second turn only when the activated revision already
    grants `assessThenFix`. Threading changes that same session to local edit permission, verifies
    an existing checkout is clean or uses an isolated managed worktree, and sends a host-authored
@@ -92,6 +94,57 @@ prompt is refused even under full permission, because nobody is there to answer 
 The authority is the approved revision, never the project folder: `.claude/settings*.json` can be
 checked into a repository, and letting it decide would let a clone widen what an approved
 automation may do without the sheet ever showing it.
+
+### Where a run is drawn
+
+A revision's `surface` (`AutomationSurface`) is `chat` or `terminal`. Nil — every revision saved
+before the choice existed — reads as chat, and the editor saves chat as nil, so those revisions and
+their `automation.json` files are unchanged. It belongs to the approved revision and the approval
+sheet names it, because it decides how the run's permission questions are answered, not only how
+they look.
+
+A terminal is offered only where nothing in it can wait for a person. `AutomationSurface.validate`
+holds the rule; the store runs it on save, `ProjectAutomationFiles` on read, and the dispatch again
+before launch, so a revision approved before a capability narrowed is held rather than started.
+
+- **Claude** (`AgentCapabilities.unattendedTerminalRuns`). `AgentLauncher.brokersTerminalRun`
+  writes the broker's `PreToolUse` hook into the terminal's settings file while
+  `UnattendedRunPermissions` holds a registration for the session, which `claimDispatch` makes
+  before anything launches. It also forces lifecycle reporting on, whatever the setting says,
+  because the run settles on its turn ending. A hook's `allow` and `deny` are final in the TUI as
+  they are headless, so the revision decides each call exactly as it does in chat.
+- **Codex** (`unattendedReadOnlyTerminalRuns`): read-only modes only. Plan launches with
+  `--ask-for-approval never --sandbox read-only`, the same flags as in chat, so it never asks; the
+  brokered launch exports `THREADING_BROKER_TOOLS`, so the shared `hooks.json` entry's `deny`
+  applies as in chat. An editing stage launches `untrusted`, whose approvals arrive in the
+  terminal, and Codex reports a hook's `allow` as unsupported (`runtimeOwnedApprovals`), so
+  nothing could answer them there. Codex 0.163 embeds a `PermissionRequest` hook schema (reply
+  `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`)
+  that could. It is unmeasured, and a new entry in `hooks.json` costs every account a trust
+  renewal, so it is the follow-on and not an assumption.
+- **Assess, then fix** stays in chat for every agent. The fix stage relaunches the same
+  conversation with a second prompt, and a terminal launch delivers a prompt only as a new
+  conversation's opening (`AgentSessionViewController.launch(initialPrompt:)` drops one handed to
+  a resume, by contract).
+- **A project on a remote execution host** is held: the host launches its terminal without the
+  broker.
+
+**A terminal can stop before its turn begins**, which a chat cannot: a sign-in screen for an
+expired login, Claude's folder-trust question (a managed worktree is a new folder under Application
+Support), an update or model notice. A run whose turn never begins never ends — no runtime edge
+settles it — and it holds the automation's only concurrency slot, so every later occurrence would be
+skipped. `TerminalRunOpeningWatch` arms before the launch and clears on the first
+`beganPendingOutcome`; after `TerminalRunDefaults.openingTimeoutMinutes` (2) it stops the agent
+with `terminate`, which keeps the screen it stopped at, and settles the run as needing attention.
+
+The process outlives its run with the hook still in its settings. So `PermissionBroker.decide`
+leaves a `toolHook` from a terminal session that no run owns to the CLI's own prompt, which is
+where the person sees it; a card would ask the same question a second time, somewhere else.
+
+With the background PTY host on, a terminal run keeps running through a quit and is adopted on
+relaunch, where a chat run's pipe child is ended and resumed from its transcript. Either way the
+startup settlement marks the stage interrupted and needing attention. The adopted terminal stays
+usable as an ordinary chat, answered at its own prompt from then on.
 
 ## Queue and recovery
 

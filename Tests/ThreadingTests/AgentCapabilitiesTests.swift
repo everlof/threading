@@ -63,7 +63,9 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
             ("answeringMailHooks", .answeringMailHooks),
             ("runtimeOwnedApprovals", .runtimeOwnedApprovals),
             ("remoteNativeConversation", .remoteNativeConversation),
-            ("killLineClearsTerminalInput", .killLineClearsTerminalInput)
+            ("killLineClearsTerminalInput", .killLineClearsTerminalInput),
+            ("unattendedTerminalRuns", .unattendedTerminalRuns),
+            ("unattendedReadOnlyTerminalRuns", .unattendedReadOnlyTerminalRuns)
         ]
 
         var seen: [Int: String] = [:]
@@ -312,6 +314,28 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
     /// mode back out of a transcript is only meaningful for a runtime whose modes Threading
     /// speaks in the first place. The reverse does not hold — Codex takes the vocabulary on its
     /// launch line and records nothing to read back.
+    /// An unattended terminal is one nobody answers, so only a runtime whose terminal Threading
+    /// can answer for qualifies — and it must have a terminal, a chat to fall back to and the
+    /// permission vocabulary the run's stage is stated in.
+    func testOnlyAnswerableTerminalsHostUnattendedRuns() {
+        XCTAssertTrue(AgentKind.claude.supports(.unattendedTerminalRuns))
+        XCTAssertFalse(AgentKind.claude.supports(.unattendedReadOnlyTerminalRuns),
+                       "the narrower grant is implied, not stated twice")
+        XCTAssertTrue(AgentKind.codex.supports(.unattendedReadOnlyTerminalRuns))
+        XCTAssertFalse(AgentKind.codex.supports(.unattendedTerminalRuns),
+                       "Codex asks for edit approvals in its terminal, where nobody answers them")
+        for kind in [AgentKind.grok, .openCode, .cursor] {
+            XCTAssertFalse(kind.supports(.unattendedTerminalRuns), kind.rawValue)
+            XCTAssertFalse(kind.supports(.unattendedReadOnlyTerminalRuns), kind.rawValue)
+        }
+        for kind in AgentKind.allCases
+        where kind.supports(.unattendedTerminalRuns) || kind.supports(.unattendedReadOnlyTerminalRuns) {
+            XCTAssertTrue(kind.supports(.terminalUI), kind.rawValue)
+            XCTAssertTrue(kind.supportsNativeUI, kind.rawValue)
+            XCTAssertTrue(kind.supportsPermissionModes, kind.rawValue)
+        }
+    }
+
     func testAnObservablePostureImpliesAPermissionVocabulary() {
         for kind in AgentKind.allCases where kind.supports(.transcriptPermissionModeRecord) {
             XCTAssertTrue(

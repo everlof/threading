@@ -16,6 +16,33 @@ private final class TriggerFixStageRegistry {
     }
 }
 
+/// Terminal runs whose opening turn has not yet been seen to begin.
+///
+/// A chat run's first turn begins on the wire. A terminal can stop before it ever submits the
+/// opening prompt — a sign-in screen for an expired login, Claude's folder-trust question, an
+/// update notice — and a run whose turn never begins never ends: no runtime edge settles it, and
+/// it keeps its automation's concurrency slot, so every later occurrence is skipped. Each terminal
+/// run therefore gets a bounded wait for its turn to begin.
+@MainActor
+private final class TerminalRunOpeningWatch {
+    static let shared = TerminalRunOpeningWatch()
+
+    private var waiting: Set<SessionID> = []
+
+    func arm(_ sessionID: SessionID) { waiting.insert(sessionID) }
+
+    func noteTurnBegan(_ sessionID: SessionID) { waiting.remove(sessionID) }
+
+    /// True exactly once, and only for a run whose turn never began.
+    func expire(_ sessionID: SessionID) -> Bool { waiting.remove(sessionID) != nil }
+}
+
+enum TerminalRunDefaults {
+    /// How long a terminal run may take to begin its opening turn. A login shell, the CLI's boot
+    /// and its MCP handshake take seconds; minutes means the terminal is waiting for a person.
+    static let openingTimeoutMinutes = 2
+}
+
 @MainActor
 extension SessionCoordinator {
     func performTriggerDispatch(_ dispatch: TriggerDispatch) {
@@ -34,6 +61,32 @@ extension SessionCoordinator {
                     revision: dispatch.revision,
                     because: L10n.string(
                         "The configured agent cannot guarantee a read-only assessment stage."
+                    )
+                )
+                return
+            }
+            // Asked again at launch rather than trusted from the save: a revision approved before
+            // a capability narrowed must not start a terminal nobody can answer.
+            let surface = dispatch.revision.effectiveSurface
+            guard surface.admits(dispatch.revision.agentKind, mode: dispatch.revision.executionMode) else {
+                await holdBeforeLaunch(
+                    run,
+                    revision: dispatch.revision,
+                    because: L10n.string(
+                        "The configured agent cannot run this automation unattended in its terminal."
+                    )
+                )
+                return
+            }
+            // A terminal on a remote host is launched by the host, which writes no broker into
+            // it, so its permission prompts would wait for a person nobody is there to be.
+            if surface == .terminal,
+               environment.projectStore.project(withID: dispatch.revision.projectID)?.executionHost != nil {
+                await holdBeforeLaunch(
+                    run,
+                    revision: dispatch.revision,
+                    because: L10n.string(
+                        "Terminal automation runs need a project that runs on this Mac."
                     )
                 )
                 return
@@ -66,7 +119,7 @@ extension SessionCoordinator {
                 model: dispatch.revision.model,
                 reasoningEffort: dispatch.revision.reasoningEffort,
                 branch: nil,
-                usesNativeUI: dispatch.revision.agentKind.supportsNativeUI,
+                usesNativeUI: surface == .chat,
                 permissionMode: dispatch.revision.executionMode == .taskLocalEdits ? .acceptEdits : .plan,
                 managedWorkspacePlan: managedPlan,
                 automationWorkspace: dispatch.revision.checkoutPolicy == .automationWorkspace
@@ -110,6 +163,8 @@ extension SessionCoordinator {
                 )
                 return
             }
+            // Armed before the launch, so a turn that begins at once is not missed.
+            if surface == .terminal { watchTerminalOpening(sessionID: session.id) }
             guard container.launchInBackground(sessionID: session.id, initialPrompt: prompt) else {
                 await settleNeedsAttention(
                     run,
@@ -120,6 +175,28 @@ extension SessionCoordinator {
             sidebar.reload()
             onPresentationChanged()
         }
+    }
+
+    private func watchTerminalOpening(sessionID: SessionID) {
+        TerminalRunOpeningWatch.shared.arm(sessionID)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(TerminalRunDefaults.openingTimeoutMinutes * 60))
+            guard TerminalRunOpeningWatch.shared.expire(sessionID) else { return }
+            await self?.settleTerminalRunThatNeverBegan(sessionID: sessionID)
+        }
+    }
+
+    private func settleTerminalRunThatNeverBegan(sessionID: SessionID) async {
+        guard let run = try? await TriggerStore.shared.run(sessionID: sessionID),
+              run.state == .running || run.state == .assessing else { return }
+        // Stopped rather than left at its prompt: a sign-in or trust question answered hours later
+        // would start the run's work with nobody expecting it. `terminate` keeps the terminal, so
+        // the screen it stopped at stays readable in the chat.
+        environment.agentRuntime.terminate(sessionID: sessionID)
+        await settleNeedsAttention(run, because: L10n.format(
+            "The terminal did not begin the run within %lld minutes. Open its chat to see where it stopped, such as a sign-in, folder-trust or update screen.",
+            Int64(TerminalRunDefaults.openingTimeoutMinutes)
+        ))
     }
 
     private func holdBeforeLaunch(_ original: TriggerRun, revision: TriggerRevision, because diagnostic: String) async {
@@ -165,6 +242,9 @@ extension SessionCoordinator {
     }
 
     func triggerRuntimeDidChange(_ event: SessionRuntimeDidChange) {
+        if event.transition.beganPendingOutcome {
+            TerminalRunOpeningWatch.shared.noteTurnBegan(event.sessionID)
+        }
         guard event.transition.completedPendingOutcome else { return }
         if let pending = TriggerFixStageRegistry.shared.take(sessionID: event.sessionID) {
             Task { @MainActor [weak self] in

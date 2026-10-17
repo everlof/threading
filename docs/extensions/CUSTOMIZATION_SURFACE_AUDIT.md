@@ -58,7 +58,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
 | Native and mobile work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence, mobile three-chat and Mac five-chat preview/disclosure (the Mac's staged by `SidebarChatPreview`, published to navigators only as the `chat-preview` option), hidden activity counts and scroll return | Host-only |
 | Archived conversations browser | — | host-only navigation/filter around existing additive Archived settings slots | archive chronology/search, provider lifecycle truth, Restore/Delete authority, bounded virtual list | Host-only |
-| Automations editor and remote controller page | — | host-only | execution owner, schedule/revision identity, permissions, SSH trust, activation, archive eligibility and durable run results; themes customize shared controls | Host-only |
+| Automations editor and remote controller page | — | host-only | execution owner, schedule/revision identity, permissions, run surface (chat or terminal), SSH trust, activation, archive eligibility and durable run results; themes customize shared controls | Host-only |
 | Usage Agents breakdown and remote worker usage sheet | — | host-only | attribution (host billing, no double counting between transcript ledger and controller cells), host freshness/staleness and unread-is-not-zero, bounded paging, receipt coverage, budget revision and the always-asked `changeWorkerBudget` confirmation; themes customize the shared ledger table and controls | Host-only |
 | WebExtension development workbench | — | host-only | checkout and target identity, browser/process lifecycle, diagnostic provenance, instrumentation, source confinement and test verdicts; themes customize shared controls | Host-only |
 | Remote hosts settings (machine list, state, setup) | — | host-only | ssh destination validity and trust (the person's own `known_hosts`), component digests and download, host preparation/upgrade truth, which projects a removal moves back to this Mac | Host-only |
@@ -696,6 +696,12 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+**Remote-host startup and sleep status** extends the host-only machine settings and project host
+mark. Threading owns the read-only probe, its bounds, the distinction between configuration and
+current reachability, last-observed freshness, and the Windows setup export. Unknown facts are
+never promoted to automatic startup. Themes style existing labels, glyphs, help and buttons;
+extensions cannot suppress or replace this availability warning or change host power settings.
+
 **Remote-chat login reuse** extends the host-only remote host editor with the shared themed
 checkbox and explanatory label. Threading owns SSH destination selection, explicit per-host
 credential-copy consent, selected-account custody, private remote storage, provider launch and
@@ -925,3 +931,13 @@ compilation and GPU/power/visibility budgets. Font parsing, process registration
 verified receipts and notification consent remain host-owned. The usage widget is deliberately
 host-only: it accepts one pinned accent while WidgetKit rendering mode, identity, dates, readings,
 contrast and deep links retain ownership. A theme cannot replace these rules or supply controls.
+
+## Standalone browser window
+
+The independently navigable standalone browser is deliberately host-only. Its existing themed
+browser controls provide presentation; the host owns incoming HTTP/HTTPS dispatch, exact URL
+navigation, the user-only website profile, window lifecycle and credential prompts. It has no
+agent session identity and exposes no new extension props, slots or facts. Uncustomized behavior
+is the same production controller used for the `standalone-browser` evidence entry and the
+standalone browsing application journey. Native auxiliary-window chrome follows the detached
+browser boundary.

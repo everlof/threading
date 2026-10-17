@@ -411,7 +411,7 @@ enum AppCommands {
                    scope: .session),
         AppCommand(id: ID.browser, group: .view, title: "Browser",
                    defaultShortcut: KeyboardShortcut(key: "b", modifiers: [.command, .shift]), isEditable: true,
-                   scope: .session),
+                   scope: .application),
         AppCommand(id: ID.files, group: .view, title: "Activity",
                    defaultShortcut: KeyboardShortcut(key: "p", modifiers: .command), isEditable: true,
                    scope: .session),

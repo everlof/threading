@@ -719,6 +719,15 @@ private extension ProjectSidebarViewController {
     }
 
     private func observeStoreChanges() {
+        appEvents.observe(RemoteHostAvailabilityDidChange.self) { [weak self] event in
+            guard let self, event.coordinator == ObjectIdentifier(RemoteExecutionHosts.shared) else { return }
+            let check = RemoteExecutionHosts.shared.availability(for: event.destination)
+            outlineView.enumerateAvailableRowViews { row, _ in
+                for case let cell as ProjectRowView in row.subviews {
+                    cell.refreshRemoteHostAvailability(for: event.destination, check: check)
+                }
+            }
+        }
         appEvents.observe(.triggersDidChange) { [weak self] in
             self?.requestAutomationProjectRefresh()
         }
@@ -4205,7 +4214,9 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
                 // Summarised here, from *this* sidebar's store: a row must not reach for the
                 // singleton to answer a question about the records it was handed.
                 conduct: RowConductSummary.forProject(project),
-                executionHost: project.executionHost?.destination
+                executionHost: project.executionHost?.destination,
+                hostAvailability: project.executionHost.map { RemoteExecutionHosts.shared.availability(for: $0.sshDestination) }
+                    ?? RemoteHostAvailabilityCheck()
             )
             cell.onHoverAction = { [weak self] anchor in
                 self?.showProjectActions(for: projectNode.projectID, from: anchor)

@@ -104,7 +104,7 @@ current_directory="${run_directory}/current"
 report_directory="${run_directory}/report"
 # Evidence rendering is often run while Instruments or another test task is building the app.
 # Keep its incremental products separate so those workflows cannot contend for Xcode's build.db.
-derived_data_directory="${repository_directory}/.build/ui-evidence-derived-data"
+derived_data_directory="${THREADING_UI_EVIDENCE_DERIVED_DATA:-${repository_directory}/.build/ui-evidence-derived-data}"
 mkdir -p "${current_directory}"
 
 selected_tests=()

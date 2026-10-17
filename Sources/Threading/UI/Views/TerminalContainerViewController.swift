@@ -790,7 +790,7 @@ final class TerminalContainerViewController: NSViewController {
     /// Puts a settings-shaped child in the pane: centred, capped at the shared Settings width,
     /// floored by margins — pinned straight to the pane rather than through an intermediate
     /// container, which did not size its child.
-    private func install(
+    func install(
         settings page: NSViewController,
         repaint: Bool
     ) {

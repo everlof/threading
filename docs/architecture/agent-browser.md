@@ -4,7 +4,7 @@ The live browser an agent drives, kept separate from the rendered-document web v
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-The live browser and the rendered-document web view are deliberately separate. Each shared
+The live browser and the rendered-document web view are deliberately separate. Each session's shared
 `BrowserViewController` uses its owning project's website data store and can carry authenticated
 state; agent access therefore goes through an app-level origin grant even though Threading's MCP server
 itself is pre-approved. Localhost is admitted for development. Other origins offer once,
@@ -1093,3 +1093,46 @@ review dashboard: the compare surface and the panel are the review surface. No r
 archive. No baking overlays or annotations into page pixels. Imported design images would need their
 own `imported_reference` provenance, alignment offset and scale contract — the provenance case exists,
 and nothing feeds it yet, precisely so a Figma export cannot wander into a pass/fail comparison.
+
+## Standalone web browsing and incoming links
+
+`Info.plist` advertises HTTP and HTTPS URL handling to Launch Services without changing the
+person's default browser. `ApplicationOpenURLDelivery` holds incoming URL values until async
+startup has acquired the single-instance lock and constructed the windows. This is essential:
+the cold-launch URL event can precede that work. Losing instances and hosted test processes
+never open the delivery gate. Warm events use the same route, after the Dock drag callback has
+unwound. File URLs retain the Markdown, project-folder and screenshot routes; other schemes
+cannot be mistaken for local file paths.
+
+The `NSAllowsArbitraryLoadsInWebContent` ATS exception permits user-chosen HTTP websites in
+WebKit while native URLSession services retain ATS. This is the scoped exception Apple
+[documents for embedded browsers](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsallowsarbitraryloadsinwebcontent).
+
+External web links open `StandaloneBrowserWindowController`, a user-owned window with the
+existing `BrowserViewController`. URLs are loaded directly, preserving escaped paths, queries
+and fragments. Each URL gets a visible window; the first reuses an untouched blank window.
+When no conversation is selected, launch provides a blank browser alongside the main window
+or setup walkthrough, and View → Browser remains available without finishing setup or creating
+a project. With a conversation selected, that command retains its existing session-browser
+behavior; from a standalone browser it focuses the address field. Close and Find act on the
+active standalone window. The existing browser handles Reload, and Command-L selects its address.
+During setup, Launch Services' reopen event preserves a visible browser instead of covering the
+requested page with the welcome tour.
+
+The standalone browser explicitly uses WebKit's default persistent website store. Project
+browsers continue to use their named project stores (ephemeral on macOS 13); an unknown project
+owner still gets a fresh ephemeral store. Standalone windows have no session ID, are not
+registered with `SessionBrowserResolver`, and grant no agent access. WebKit and the system own
+credential prompts. The window frame is native, like a detached browser; all content uses the
+existing themed browser controls. This is a host-only surface: URL delivery, profile ownership,
+navigation and credentials are not extension presentation hooks.
+
+Scaling: startup buffers URL values only, O(incoming launch URLs), and drains once. Window lookup
+and ownership are O(open user windows); every WebKit tree corresponds to an explicitly opened
+visible window and is released on close. No project/session inventory is walked to open a link,
+no hidden browser trees are prebuilt, and WebKit handles profile disk I/O.
+
+Apple's `com.apple.developer.web-browser.public-key-credential` capability still requires approval,
+an application identifier, and signing/provisioning that includes that managed entitlement.
+Registering schemes does not enable passkeys by itself. Do not add an unapproved entitlement to
+ad-hoc builds or claim successful passkey authentication based only on URL-delivery tests.

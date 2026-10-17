@@ -135,6 +135,8 @@ enum ConfirmationPrompt: String, CaseIterable {
 
     case installUpdate
     case installUpdateAndRelaunch
+    /// The host-specific setup guide offers an installer export or a way to close it.
+    case saveRemoteHostSetup
 
     // MARK: - Policy
 
@@ -361,7 +363,7 @@ enum ConfirmationPrompt: String, CaseIterable {
              .approveSystemPermissionPrompt:
             return .alwaysAsks(.securityGrant)
 
-        case .installUpdate, .installUpdateAndRelaunch:
+        case .installUpdate, .installUpdateAndRelaunch, .saveRemoteHostSetup:
             return .alwaysAsks(.newQuestionEachTime)
 
         // Two different quits, and a remembered answer would have to be one of them. The sibling

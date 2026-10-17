@@ -667,6 +667,33 @@ than one that ended. It is R4 in the design's risk register, answered.
   `.jsonl` it finds in its own directory, and two processes appending to one file has damaged a
   journal here before.
 
+### Remote host startup and sleep
+
+The Remote Hosts page keeps connection status separate from **Autostart** and **Sleep**.
+`RemoteHostAvailabilityProbe` is read-only and runs on a separate serial worker after preparation
+or an explicit Check, with one in-flight request per destination and a 20-second command bound.
+The configured-startup result requires linger, an enabled daemon unit and enabled SSH startup;
+WSL additionally requires the matching Windows owner's boot task for this exact distribution,
+Unix account and helper path. A different task, inaccessible Windows interop, ambiguous daemon
+generations or missing facts remain unknown. Windows idle sleep and hibernate timers are read for
+both AC and battery power. A disabled idle timer does not claim that lid closure or manual sleep
+is prevented. Linux sleep policy remains unknown.
+
+Checks do not delay launches or run during row construction/layout. The host table remains
+virtualized; availability events reload one indexed host row and update only mounted project
+marks, with no project-tree rebuild or new per-row observer. Expected cardinality is 1–10 hosts;
+the viewport and per-host coalescing hold at 1,000 hosts as well. A failed recheck keeps the last
+successful values with their original timestamp and an explicit failure label. These observations
+are process-local, never persisted as durable readiness in `RemoteHostRecord`.
+
+Manual startup or enabled sleep timers add a warning glyph to the existing host-owned project
+mark; the host chooser repeats the settings and freshness. No per-chat alert is raised. Settings
+offers startup/power guidance and exports the bundled Windows installer through an ordinary save
+panel. The saved script is run explicitly in Administrator PowerShell on the Windows host; the
+status check changes no settings. The canonical installer lives in Resources/RemoteHosts;
+[`scripts/windows/install-wsl-startup.ps1`](../../scripts/windows/install-wsl-startup.ps1)
+forwards its parameters to that file, so a Windows checkout does not need symbolic links.
+
 ### Linux
 
 The same sources build for Linux, so a session's agent can run on a machine the person owns and be

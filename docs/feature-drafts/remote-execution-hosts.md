@@ -61,6 +61,42 @@ Linux UI is built.
 
 ## The gaps, in delivery order
 
+### Windows WSL startup
+
+The current status, warning and bounded-probe contracts live in
+[`pty-host.md`](../architecture/pty-host.md#remote-host-startup-and-sleep).
+
+An installed controller-host bundle in WSL uses its existing `threading-ptyd.service` and
+`threading-controller.service` user units. `systemd=true`, enabled `ssh.service`, and linger for
+the Linux account are prerequisites. Windows OpenSSH must also start automatically for the
+existing TCP tunnel to work. No service is restarted to enable automatic startup.
+
+[`scripts/windows/install-wsl-startup.ps1`](../../scripts/windows/install-wsl-startup.ps1)
+runs in Administrator PowerShell **as the distribution's Windows owner**:
+
+```powershell
+.\scripts\windows\install-wsl-startup.ps1 -Distribution Ubuntu-24.04 -LinuxUser threading
+```
+
+It registers one `Threading WSL Host` task with a least-privilege S4U principal, boot and logon
+triggers, and an indefinite five-minute recovery trigger. `IgnoreNew` prevents duplicate
+instances, `PT0S` removes Task Scheduler's default three-day time limit, and battery changes
+do not stop the task. It does not wake the PC or change sleep settings. S4U stores no Windows
+password; the task starts a local WSL executable, and the Linux processes own network access.
+The helper waits at most 60 seconds for the user manager, starts the existing units, verifies
+each active state, then waits in a foreground `sleep infinity`. This keeps the WSL invocation
+alive without a visible console or a polling loop. Systemd services alone do not keep a WSL
+instance running ([Microsoft's WSL documentation](https://learn.microsoft.com/en-us/windows/wsl/systemd)).
+
+The installer never copies provider credentials, installs a new daemon generation, or unpauses
+controller workers. It refuses an unrelated task with the same name. Its Linux helper lives at
+`~/.local/lib/threading/wsl-startup/keep-running.sh`; the PID file under
+`~/.local/state/threading/wsl-startup.pid` is diagnostic, not authority to signal a process.
+To stop automatic startup, disable the task before stopping it; otherwise recovery brings WSL
+back. A reboot restores services, not old agent processes. Cold-boot and sleep/reconnect checks
+remain necessary on the target Windows installation; starting the task on demand verifies its
+S4U launch path without ending current chats.
+
 ### 1. `threading-ptyd` builds and passes on Linux
 
 The daemon's platform surface is small and named:

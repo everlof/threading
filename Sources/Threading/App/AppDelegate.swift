@@ -163,6 +163,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var componentGalleryWindowController: ComponentGalleryWindowController?
     private var aboutWindowController: AboutWindowController?
     private let markdownWindows = MarkdownEditorWindows()
+    private let standaloneBrowserWindows = StandaloneBrowserWindows()
+    private lazy var openURLDelivery = ApplicationOpenURLDelivery { [weak self] urls in
+        self?.openDroppedURLs(urls)
+    }
     private let markdownPreviewThemePublisher = MarkdownQuickLookThemePublisher()
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
     private var hostFactPipeline: HostFactPipeline?
@@ -649,6 +653,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         } else {
             mainWindowController.showWindow(nil)
         }
+        // Browsing needs neither agent setup nor a conversation. Keep the walkthrough intact
+        // behind the user browser, and leave selected workspaces' normal restoration alone.
+        if !plan.isRecovery, environment.projectStore.selectedSessionID == nil {
+            standaloneBrowserWindows.open()
+        }
+        openURLDelivery.becomeReady()
         #if DEBUG
         UIScenarioBootstrap.startProxyIfRequested()
         #endif
@@ -1420,10 +1430,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // a click. It found one, in the middle of a test run that was pumping the main run loop.
         guard let mainWindowController else { return true }
 
-        // Mid-walkthrough, a Dock click re-fronts the walkthrough. Without this it would
-        // surface the deferred main window over the setup that is not finished with it.
+        // Launch Services may send reopen after delivering a cold-start URL. Keep the user's
+        // browser in front of setup; otherwise the walkthrough hides the requested page.
         if isOnboardingActive {
-            onboardingWindowController?.showWindow(nil)
+            if !standaloneBrowserWindows.revealVisibleWindow() {
+                onboardingWindowController?.showWindow(nil)
+            }
             return true
         }
 
@@ -1447,24 +1459,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// do not compete: nobody drops a screenshot meaning to add its enclosing folder, and a
     /// screenshot is the one file type this app has a second obvious thing to do with.
     func application(_ application: NSApplication, open urls: [URL]) {
-        // Same reachability, worse consequence: *instantiating* `ProjectStore` writes
-        // projects.json, which is the exact clobber the lock exists to prevent — so an instance
-        // that does not own the state does not adopt folders into it either.
-        guard ownsSingleInstanceLock else { return }
-
         // Launch Services delivers a Dock-icon drop from inside CoreDrag's completion callback.
         // Activating the app or presenting a sheet before that callback unwinds re-enters the
         // process drag manager; on macOS 26 one such re-entry leaves later drags reporting a
         // completed transaction and no usable drag reference. Cross the run-loop boundary once
         // so CoreDrag can finish before any dropped URL mutates application or window state.
         AppIconDropDelivery.afterDragCompletion { [weak self] in
-            guard let self, self.ownsSingleInstanceLock else { return }
-            self.openDroppedURLs(urls)
+            // Before startup, this stores URL values only. The winning instance opens the
+            // delivery gate after constructing its windows; a losing instance never does.
+            self?.openURLDelivery.receive(urls)
         }
     }
 
     private func openDroppedURLs(_ urls: [URL]) {
         for url in urls {
+            if ApplicationOpenURLDelivery.isWebURL(url) {
+                standaloneBrowserWindows.open(url)
+                continue
+            }
+            guard url.isFileURL else { continue }
             if MarkdownFileAssociation.accepts(url) {
                 markdownWindows.open(url)
                 continue
@@ -3291,6 +3304,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         if RecoveryMode.isActive, !RecoveryModeCommandPolicy.allows(commandID: command.id) {
             return .unavailable(L10n.string("This command is unavailable in Recovery Mode."))
         }
+        if standaloneBrowserWindows.active != nil,
+           [AppCommands.ID.closeTab, AppCommands.ID.find, AppCommands.ID.findNext,
+            AppCommands.ID.findPrevious].contains(command.id) {
+            return .available
+        }
         if let target = command.appearanceTarget {
             if case .terminalTheme = target,
                AppearanceCommands.unavailableReason(target, host: appearanceHost) == nil {
@@ -3659,15 +3677,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.addProject: mainWindowController?.addProject()
         case AppCommands.ID.renameSession: mainWindowController?.renameCurrentSession()
         case AppCommands.ID.closeSession: mainWindowController?.closeCurrentSession()
-        case AppCommands.ID.closeTab: mainWindowController?.closeActiveTab()
+        case AppCommands.ID.closeTab:
+            if let browser = standaloneBrowserWindows.active { browser.close() }
+            else { mainWindowController?.closeActiveTab() }
         case AppCommands.ID.find:
-            if mainWindowController?.showFind() != true { showUniversalSearch(everywhere: false) }
+            if let browser = standaloneBrowserWindows.active { browser.browser.showFind() }
+            else if mainWindowController?.showFind() != true { showUniversalSearch(everywhere: false) }
         case AppCommands.ID.findNext:
-            if universalSearchController?.repeatSelection(backwards: false) != true {
+            if let browser = standaloneBrowserWindows.active { browser.browser.repeatFind(backwards: false) }
+            else if universalSearchController?.repeatSelection(backwards: false) != true {
                 _ = mainWindowController?.repeatFind(backwards: false)
             }
         case AppCommands.ID.findPrevious:
-            if universalSearchController?.repeatSelection(backwards: true) != true {
+            if let browser = standaloneBrowserWindows.active { browser.browser.repeatFind(backwards: true) }
+            else if universalSearchController?.repeatSelection(backwards: true) != true {
                 _ = mainWindowController?.repeatFind(backwards: true)
             }
         case AppCommands.ID.searchEverywhere: showUniversalSearch(everywhere: true)
@@ -3690,7 +3713,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // and the Settings row both follow, which is what keeps the three surfaces one state.
         case AppCommands.ID.silenceSounds: AppSettings.shared.silencesAllSounds.toggle()
         case AppCommands.ID.newTerminalTab: mainWindowController?.showTerminalTab()
-        case AppCommands.ID.browser: mainWindowController?.showBrowser()
+        case AppCommands.ID.browser:
+            if let browser = standaloneBrowserWindows.active { browser.browser.focusAddress() }
+            else if mainWindowController?.currentSessionID == nil { standaloneBrowserWindows.open() }
+            else { mainWindowController?.showBrowser() }
         case AppCommands.ID.files: mainWindowController?.showFilesTab()
         case AppCommands.ID.review: mainWindowController?.showReview()
         case AppCommands.ID.attachments: mainWindowController?.showAttachments()

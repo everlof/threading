@@ -45,6 +45,8 @@ struct AutomationConfiguration: Codable, Equatable, Sendable {
     /// What unattended runs may do without asking. Omitted means read-only, and is saved as
     /// that explicit policy.
     var permissions: AutomationPermissionPolicy?
+    /// Where runs are drawn. Omitted means chat.
+    var surface: AutomationSurface?
 
     init(projectID: ProjectID) {
         self.projectID = projectID; name = ""; instructions = ""; agent = .codex
@@ -69,5 +71,6 @@ struct AutomationConfiguration: Codable, Equatable, Sendable {
         eventKind = options.schedule == nil ? revision.eventKind : nil
         conditions = revision.conditions
         permissions = revision.permissions
+        surface = revision.surface
     }
 }

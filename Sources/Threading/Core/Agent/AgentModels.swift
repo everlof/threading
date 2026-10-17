@@ -187,6 +187,26 @@ enum AgentModels {
         }
     }
 
+    /// Every model a new session on this login may start with: the catalogue, plus the account's
+    /// own configured default where the catalogue omits it.
+    ///
+    /// A configured default may be a dated or long-context variant the provider's ordinary
+    /// picker catalogue omits — `opus[1m]` names no alias and is in no cache, yet it is what the
+    /// CLI runs when nothing is passed. It joins through the same capability sorter as every
+    /// other row: prepending it in the presentation made the inherited model look like the most
+    /// capable choice even when a higher tier was available.
+    ///
+    /// This is both what a picker offers and what a launch is checked against, and the two must
+    /// be one list. The phone resolves Auto to the default's concrete id before it sends, so a
+    /// gate reading only the catalogue refused every phone chat on such a login, and the
+    /// refreshed catalogue offered the same model straight back.
+    static func launchableOptions(
+        for kind: AgentKind,
+        account: AgentAccount?
+    ) -> [AgentModelOption] {
+        options(for: kind, account: account, including: defaultModel(for: kind, account: account))
+    }
+
     /// The catalogue rows offered by a new-session picker after the owner has hidden models.
     ///
     /// Visibility is per provider-qualified login. The account's inherited default always stays
@@ -200,11 +220,7 @@ enum AgentModels {
         preserving modelIDs: Set<String> = []
     ) -> [AgentModelOption] {
         let inherited = defaultModel(for: kind, account: account)
-        // A configured default may be a dated or long-context variant the provider's ordinary
-        // picker catalogue omits. Include it through the same capability sorter as every other
-        // row: prepending it in the presentation made the inherited model look like the most
-        // capable choice even when a higher tier was available.
-        let options = options(for: kind, account: account, including: inherited)
+        let options = launchableOptions(for: kind, account: account)
         let accountID = AccountID(
             provider: kind,
             handle: account?.handle ?? .standard

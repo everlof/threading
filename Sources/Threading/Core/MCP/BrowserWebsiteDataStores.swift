@@ -3,6 +3,11 @@ import WebKit
 /// Website state belongs to the owning project, independently of a tab's session or host.
 @MainActor
 enum BrowserWebsiteDataStores {
+    /// Explicitly user-owned browsing. Missing project owners still get ephemeral stores below.
+    /// Keep this outside the project namespace, including on macOS 13, where projects never
+    /// use the default persistent store. WebKit owns persistence and disk access.
+    static let standalone = WKWebsiteDataStore.default()
+
     // WebKit raises an Objective-C exception for this UUID rather than returning an error.
     private static let invalidProfileIdentifier = UUID(uuid: (
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0

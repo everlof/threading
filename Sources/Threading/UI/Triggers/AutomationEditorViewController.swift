@@ -20,6 +20,8 @@ final class AutomationEditorViewController: NSViewController {
     private let account = ThemedPopUp()
     private let model = ThemedPopUp()
     private let effort = ThemedPopUp()
+    private let surfaceChoice = ThemedPopUp()
+    private let surfaces = AutomationSurface.allCases
     private let choices: AutomationAgentChoiceProvider
     private let events = AppEventObservations()
     private var accountValues: [String?] = [nil]
@@ -114,6 +116,7 @@ final class AutomationEditorViewController: NSViewController {
     private var rulesRow: NSView?
     private var grammarRow: NSView?
     private var fullPermissionRow: NSView?
+    private var terminalRow: NSView?
     /// Every row's label, so the column can be as wide as the widest of them.
     private var rowLabels: [NSTextField] = []
 
@@ -232,6 +235,14 @@ final class AutomationEditorViewController: NSViewController {
             addRow("Account", account, width: Layout.choiceWidth, to: form)
             addRow("Model", model, width: Layout.choiceWidth, to: form)
             addRow("Reasoning effort", effort, width: Layout.choiceWidth, to: form)
+            for title in ["Chat", "Terminal"] { surfaceChoice.addItem(withTitle: L10n.string(title)) }
+            surfaceChoice.selectItem(at: surfaces.firstIndex(of: configuration?.surface ?? .chat) ?? 0)
+            surfaceChoice.setAccessibilityIdentifier("automation.surface")
+            surfaceChoice.target = self; surfaceChoice.action = #selector(surfaceChanged)
+            addRow("Runs in", surfaceChoice, width: Layout.choiceWidth, to: form)
+            terminalRow = addRow(nil, note(
+                "Runs in the agent’s own terminal. Threading still answers its permission questions from this automation’s rules. Some agents can run only read-only automations there.",
+                color: Design.Text.secondary), width: Layout.controlWidth, to: form)
 
             // Permissions: what a run may do with nobody there to ask.
             addSection("Permissions", to: form)
@@ -317,6 +328,7 @@ final class AutomationEditorViewController: NSViewController {
         }
         cadenceChanged()
         unattendedChanged()
+        surfaceChanged()
         if !remoteMode {
             events.observe(AgentModelsDidChange.self) { [weak self] _ in self?.loadCatalog() }
             events.observe(AccountUsageDidChange.self) { [weak self] _ in self?.updateAccounts() }
@@ -562,6 +574,9 @@ final class AutomationEditorViewController: NSViewController {
         grammarRow?.isHidden = !isAllowList
         fullPermissionRow?.isHidden = isAllowList
     }
+    @objc private func surfaceChanged() {
+        terminalRow?.isHidden = surfaceChoice.indexOfSelectedItem != surfaces.firstIndex(of: .terminal)
+    }
     @objc private func cancelPressed() { presentingViewController?.dismiss(self) }
     @objc private func savePressed() {
         errorLabel.stringValue = ""
@@ -599,6 +614,10 @@ final class AutomationEditorViewController: NSViewController {
         config.account = selectedValue(account, values: accountValues)
         config.model = selectedValue(model, values: modelValues)
         config.reasoningEffort = selectedValue(effort, values: effortValues)
+        // Chat is saved as nil, so a revision that never chose the terminal reads exactly as it
+        // did before the choice existed.
+        config.surface = surfaces.indices.contains(surfaceChoice.indexOfSelectedItem)
+            && surfaces[surfaceChoice.indexOfSelectedItem] == .terminal ? .terminal : nil
         config.permissions = unattended.indexOfSelectedItem == 1
             ? .full
             : try AutomationPermissionPolicy.allowList(parsing: rules.textView.string.components(separatedBy: .newlines))

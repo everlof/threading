@@ -1819,24 +1819,25 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 }
                 account = selected
             }
-            let modelOptions = AgentModels.options(for: kind, account: account)
-            if let model = creation.model,
-               !modelOptions.contains(where: { $0.identifier == model })
-            {
+            // The rule the catalogue's offers are tested against, so a choice the phone was
+            // shown is never refused here — see `AgentRunChoice`.
+            let runChoice = AgentRunChoice(
+                model: creation.model,
+                reasoningEffort: creation.reasoningEffort,
+                fastMode: creation.fastMode
+            )
+            switch runChoice.refusal(kind: kind, account: account) {
+            case .unknownModel:
                 refuse(422, "Unknown Model", .unknownModel)
                 return
-            }
-            if let effort = creation.reasoningEffort {
-                guard AgentModels.supports(
-                    reasoningEffort: effort,
-                    kind: kind,
-                    model: creation.model,
-                    account: account,
-                    options: modelOptions
-                ) else {
-                    refuse(422, "Unknown Reasoning Effort", .unknownReasoningEffort)
-                    return
-                }
+            case .unknownReasoningEffort:
+                refuse(422, "Unknown Reasoning Effort", .unknownReasoningEffort)
+                return
+            case .unsupportedSpeed:
+                refuse(422, "Unsupported Speed", .unsupportedSpeed)
+                return
+            case nil:
+                break
             }
             let permissionMode = creation.permissionMode.flatMap(AgentPermissionMode.init(rawValue:))
             guard creation.permissionMode == nil
@@ -1844,16 +1845,6 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             else {
                 refuse(422, "Unknown Permission Mode", .unknownPermissionMode)
                 return
-            }
-            if creation.fastMode != nil {
-                guard AgentModels.supportsFastMode(
-                    kind: kind,
-                    model: creation.model,
-                    account: account
-                ) else {
-                    refuse(422, "Unsupported Speed", .unsupportedSpeed)
-                    return
-                }
             }
             let usesNativeUI = creation.surface == .conversation
             guard !usesNativeUI || kind.supportsNativeUI else {

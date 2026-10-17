@@ -240,6 +240,9 @@ scripts/ui-evidence.sh --only conversation-timeline
 scripts/ui-evidence-ios.sh --only ios-native-conversation
 ```
 
+Concurrent macOS evidence runs can set `THREADING_UI_EVIDENCE_DERIVED_DATA` to separate build
+directories, avoiding Xcode's shared build-database lock while using the same capture pipeline.
+
 macOS additionally catalogues `app-theme-chrome-matrix`: one rich conversation under every
 `AppThemeLibrary.stock` value, with both appearances for adaptive themes. The test derives its
 matrix from the product registry, so adding a stock theme adds evidence automatically. During one
@@ -569,3 +572,11 @@ provider conversation and requires its skills lookup to use the second worktree.
 must complete there, and Git Review must show an untracked file that exists only in that target.
 This covers the durable fence, runtime relaunch, canonical project ownership, conversation resume
 and checkout-scoped review as one critical work-attribution promise.
+
+### Loopback browser fixtures
+
+The macOS UI test runner permits incoming network connections so its browser journeys can serve
+deterministic HTTP pages on `127.0.0.1`. This setting belongs to `ThreadingUITests`, not the
+shipping app's entitlements. A listener must reach a nonzero assigned port before a test opens
+its URL: a failed listener can still report port zero, which must fail fixture startup instead
+of turning a sandbox denial into an apparent browser-navigation failure.

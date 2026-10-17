@@ -118,4 +118,15 @@ final class BrowserProjectStorageTests: HostedStoreTestCase {
         XCTAssertFalse(unknownOwner.websiteDataStore.isPersistent)
         XCTAssertFalse(privateTab.websiteDataStore.isPersistent)
     }
+
+    func testStandaloneProfilePersistsWithoutSharingAnAgentsProject() {
+        let browser = BrowserViewController(websiteDataStore: BrowserWebsiteDataStores.standalone)
+        let projectBrowser = BrowserViewController(projectID: ProjectID())
+        let unownedBrowser = BrowserViewController()
+        XCTAssertTrue(browser.websiteDataStore.isPersistent)
+        XCTAssertFalse(browser.websiteDataStore === projectBrowser.websiteDataStore)
+        XCTAssertFalse(browser.websiteDataStore === unownedBrowser.websiteDataStore)
+        XCTAssertNil(browser.annotationSessionID)
+        XCTAssertNil(browser.baselineSessionID)
+    }
 }

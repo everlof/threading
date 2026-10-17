@@ -1071,32 +1071,27 @@ final class RemoteSessionMirrorRegistry {
         let kind = inherited.kind
 
         // The standard handle needs no proof: the server resolves it to whichever login is
-        // default at the time. A named one must still exist.
+        // default at the time. A named one must still exist, and one that does not is sent as
+        // no account at all — which the server also resolves to the default login, so that is
+        // the login the choices below are measured against.
         let discoveredAccounts = AgentAccountDiscovery.accounts(for: kind)
-        let account: AgentAccount? = inherited.accountHandle.isStandard
-            ? discoveredAccounts.first(where: \.isDefault)
+        let named = inherited.accountHandle.isStandard
+            ? nil
             : discoveredAccounts.first { $0.handle == inherited.accountHandle }
+        let account = named ?? discoveredAccounts.first(where: \.isDefault)
         let accountID: String? = {
             guard kind.supportsAccounts else { return nil }
             if inherited.accountHandle.isStandard { return AccountHandle.standardName }
-            return account == nil ? nil : inherited.accountHandle.name
+            return named == nil ? nil : inherited.accountHandle.name
         }()
 
-        let modelOptions = AgentModels.options(for: kind, account: account)
-        let model = inherited.model.flatMap { identifier in
-            modelOptions.contains { $0.identifier == identifier } ? identifier : nil
-        }
-        let reasoningEffort = model.flatMap { identifier in
-            inherited.reasoningEffort.flatMap { effort in
-                modelOptions.first { $0.identifier == identifier }?
-                    .supports(reasoningEffort: effort) == true ? effort : nil
-            }
-        }
-        let fastMode = inherited.fastMode.flatMap { requested in
-            AgentModels.supportsFastMode(kind: kind, model: model, account: account)
-                ? requested
-                : nil
-        }
+        // The create gate's own rule, applied one choice at a time, so nothing published here
+        // can be what refuses the report.
+        let choice = AgentRunChoice(
+            model: inherited.model,
+            reasoningEffort: inherited.reasoningEffort,
+            fastMode: inherited.fastMode
+        ).honoured(kind: kind, account: account)
 
         let workspace = AppSettings.shared.phoneReportWorkspace.resolvedPlan(
             canProvisionWorkspace: ManagedGitWorkspace.canProvision(from: project),
@@ -1109,9 +1104,9 @@ final class RemoteSessionMirrorRegistry {
         return RemoteReportLaunchDTO(
             agentID: kind.rawValue,
             accountID: accountID,
-            model: model,
-            reasoningEffort: reasoningEffort,
-            fastMode: fastMode,
+            model: choice.model,
+            reasoningEffort: choice.reasoningEffort,
+            fastMode: choice.fastMode,
             permissionMode: inherited.permissionMode?.rawValue,
             surface: inherited.usesNativeUI ? .conversation : .terminal,
             managedWorkspace: workspace.map {

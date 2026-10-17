@@ -92,7 +92,8 @@ final class ConfirmationPromptTests: XCTestCase {
             "runNativePlugin",
             "connectSourceControlProvider",
             "installUpdate",
-            "installUpdateAndRelaunch"
+            "installUpdateAndRelaunch",
+            "saveRemoteHostSetup"
         ])
     }
 

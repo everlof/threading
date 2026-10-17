@@ -427,6 +427,26 @@ struct AgentCapabilities: OptionSet {
   /// signed-in Grok was available to measure what does clear it. Cursor has no terminal
   /// surface here.
   static let killLineClearsTerminalInput = Self(rawValue: 1 << 44)
+
+  /// An unattended automation run may be drawn in this runtime's terminal in every execution
+  /// mode, because Threading answers every permission question the terminal would otherwise put
+  /// to a person.
+  ///
+  /// Claude only. Its `PreToolUse` hook is the same one the native transport is brokered
+  /// through, and a hook's `allow` and `deny` are both final, so the approved revision decides a
+  /// call in the terminal exactly as it does in chat. The launch writes the broker into the
+  /// settings file only while a run owns the session (`AgentLauncher.brokersTerminalRun`).
+  static let unattendedTerminalRuns = Self(rawValue: 1 << 45)
+
+  /// Narrower than `unattendedTerminalRuns`: only a mode that never edits may run unattended in
+  /// this runtime's terminal, because only that posture never stops to ask.
+  ///
+  /// Codex. Plan launches with `--ask-for-approval never --sandbox read-only`, the same flags as
+  /// in chat, so nothing in its terminal waits for a person and the brokered `PreToolUse` hook's
+  /// `deny` is the same refusal it is in chat. An editing stage launches `untrusted`, which asks
+  /// in the terminal, and the hook's `allow` cannot answer for it (`runtimeOwnedApprovals`);
+  /// in chat those questions arrive over app-server, where Threading can answer them.
+  static let unattendedReadOnlyTerminalRuns = Self(rawValue: 1 << 46)
 }
 
 /// How a runtime accepts a long-lived sign-in token: the variable its CLI reads, what every such
@@ -529,7 +549,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory,
         .modelAliasResolution, .selectableTerminalRenderer, .remoteExecutionHostLaunch,
         .longLivedAccountToken, .answeringMailHooks, .remoteNativeConversation,
-        .killLineClearsTerminalInput
+        .killLineClearsTerminalInput, .unattendedTerminalRuns
       ]
     case .codex:
       return [
@@ -540,7 +560,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .inlineTerminalViewport, .lifecycleReportedTranscriptPath,
         .lifecycleReportedWorkingDirectory, .detectableExternalResume, .bankedUsageReset,
         .answeringMailHooks, .runtimeOwnedApprovals, .remoteNativeConversation,
-        .killLineClearsTerminalInput
+        .killLineClearsTerminalInput, .unattendedReadOnlyTerminalRuns
       ]
     case .grok:
       return [

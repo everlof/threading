@@ -656,7 +656,7 @@ final class BrowserViewController: NSViewController {
     ///
     /// The one thing this controller cannot work out for itself, and the only thing the baseline
     /// commands need: a session resolves to a project, and a project owns the library. Unset — a
-    /// fixture, a gallery sample — the baseline commands are simply not offered.
+    /// fixture, a gallery sample, standalone browsing — the baseline commands are not offered.
     var baselineSessionID: SessionID?
 
     /// Fired when the page a caller asked for finishes (or fails, or times out), so an agent's
@@ -669,6 +669,7 @@ final class BrowserViewController: NSViewController {
         urlSchemeHandlers: [String: WKURLSchemeHandler] = [:],
         contextKind: BrowserContextKind = .shared,
         projectID: ProjectID? = nil,
+        websiteDataStore: WKWebsiteDataStore? = nil,
         networkCaptureSettings: BrowserNetworkCaptureSettings = .shared,
         openPanelProvider: BrowserOpenPanelProvider? = nil,
         savePanelProvider: BrowserSavePanelProvider? = nil
@@ -679,7 +680,8 @@ final class BrowserViewController: NSViewController {
         self.openPanelProvider = openPanelProvider
         self.savePanelProvider = savePanelProvider
         websiteDataProjectID = projectID
-        websiteDataStore = BrowserWebsiteDataStores.store(for: contextKind, projectID: projectID)
+        self.websiteDataStore = websiteDataStore
+            ?? BrowserWebsiteDataStores.store(for: contextKind, projectID: projectID)
         super.init(nibName: nil, bundle: nil)
         appEvents.observe(BrowserNetworkCaptureDidChange.self) { [weak self] _ in
             self?.refreshNetworkCapture()
@@ -1166,6 +1168,26 @@ final class BrowserViewController: NSViewController {
     }
 
     // MARK: - Public — Navigation
+
+    /// Launch Services already supplied a URL. Preserve its path, query and fragment rather
+    /// than passing it through the address bar's search/URL heuristics.
+    func navigate(to url: URL) {
+        load(url, waitUntil: .load) { _, _ in }
+    }
+
+    func focusAddress() {
+        _ = view
+        view.window?.makeFirstResponder(addressField)
+        addressField.selectText(nil)
+    }
+
+    /// External links may reuse a blank launch window, but never replace a destination the
+    /// person is still typing. A live field editor can be ahead of the field's stored value.
+    var hasBlankPageAndAddress: Bool {
+        guard isViewLoaded else { return restoredURL == nil }
+        return webView.url == nil && !webView.isLoading && addressField.stringValue.isEmpty
+            && (addressField.currentEditor()?.string.isEmpty ?? true)
+    }
 
     /// Loads a URL or search query typed anywhere (address bar, an agent tool), normalising it.
     func navigate(to input: String) {
@@ -2740,6 +2762,10 @@ final class BrowserViewController: NSViewController {
     /// Outside it the chord stays Rename Session's. The chord is the browser's own
     /// rather than read from the command table, so rebinding Rename does not move Reload.
     private func performBrowserShortcut(_ event: NSEvent) -> Bool {
+        if BrowserDefaults.addressShortcut.matches(event) {
+            focusAddress()
+            return true
+        }
         guard BrowserDefaults.reloadShortcut.matches(event) else { return false }
         reload()
         return true
@@ -4557,6 +4583,7 @@ enum BrowserDefaults {
     static var addressPlaceholder: String { L10n.string("Search or enter address") }
     static let searchPrefix = "https://duckduckgo.com/?q="
     static let reloadShortcut = KeyboardShortcut(key: "r", modifiers: .command)
+    static let addressShortcut = KeyboardShortcut(key: "l", modifiers: .command)
     static let consoleMessageHandler = "threadingConsole"
     static let networkMessageHandler = "threadingNetwork"
     static let navigationReadinessMessageHandler = "threadingNavigationReadiness"

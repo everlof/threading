@@ -23,6 +23,8 @@ struct ProjectAutomation: Codable, Equatable, Sendable {
     var eventKind: String?
     var conditions: [TriggerCondition]
     var permissions: ProjectAutomationPermissions
+    /// Omitted means chat, so a file written before the choice existed reads as it always did.
+    var surface: AutomationSurface?
 
     init(id: String, configuration: AutomationConfiguration, source: String?) {
         self.id = id
@@ -38,6 +40,7 @@ struct ProjectAutomation: Codable, Equatable, Sendable {
         eventKind = configuration.eventKind
         conditions = configuration.conditions
         permissions = ProjectAutomationPermissions(configuration.permissions ?? .readOnly)
+        surface = configuration.surface
     }
 }
 

@@ -188,6 +188,47 @@ final class PermissionDeferralTests: HostedStoreTestCase {
         }
     }
 
+    /// An automation run drawn in a terminal is answered by its revision exactly as in chat:
+    /// nobody is at that terminal's prompt either.
+    func testAnAutomationRunInATerminalIsDecidedByItsRevision() throws {
+        let session = try makeSession(kind: .claude, mode: .plan, native: false)
+        UnattendedRunPermissions.register(
+            .init(policy: try .allowList(parsing: ["Bash(make test)"]), revisionSequence: 3),
+            for: session
+        )
+
+        let (refused, askedRefused) = decide(hook(
+            session, reporting: "plan", tool: "Bash", ["command": "npm publish"]
+        ))
+        let (allowed, askedAllowed) = decide(hook(
+            session, reporting: "plan", tool: "Bash", ["command": "make test"]
+        ))
+
+        XCTAssertFalse(askedRefused || askedAllowed, "a card was raised for a run nobody watches")
+        guard case .deny = refused else {
+            return XCTFail("the terminal run's allow-list was bypassed: \(String(describing: refused))")
+        }
+        guard case .allow = allowed else {
+            return XCTFail("an allow-listed call waited at the terminal: \(String(describing: allowed))")
+        }
+    }
+
+    /// The process outlives its run with the broker still in its settings. Once the run has let
+    /// go, the terminal's own prompt is where the person answers; a card would ask twice.
+    func testATerminalWhoseRunHasSettledAnswersItsOwnPrompts() throws {
+        let session = try makeSession(kind: .claude, mode: .manual, native: false)
+
+        let (decision, asked) = decide(hook(
+            session, reporting: "default", tool: "Write",
+            ["file_path": "/tmp/notes.txt", "content": "hello"]
+        ))
+
+        XCTAssertFalse(asked, "a terminal session was asked on a card as well as at its prompt")
+        guard case .deferToAgent = decision else {
+            return XCTFail("expected the call left to the terminal, got \(String(describing: decision))")
+        }
+    }
+
     /// The macOS dialog is not the runtime's to explain, so Auto still gets the briefing first.
     func testAutoStillBriefsAMacOSPromptBeforeLeavingTheCall() throws {
         let session = try makeSession(kind: .claude, mode: .auto)
@@ -278,14 +319,18 @@ final class PermissionDeferralTests: HostedStoreTestCase {
 
     // MARK: - Helpers
 
-    private func makeSession(kind: AgentKind, mode: AgentPermissionMode?) throws -> SessionID {
+    /// A chat by default: the hook is how a natively rendered session asks, and that is what
+    /// these cases are about. A terminal reaches the hook only while an automation run owns it.
+    private func makeSession(
+        kind: AgentKind, mode: AgentPermissionMode?, native: Bool = true
+    ) throws -> SessionID {
         let store = ProjectStore.shared
         // A folder of its own: `addProject` returns the existing project for a known folder.
         let project = try XCTUnwrap(store.addProject(
             folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("threading-permission-deferral-\(UUID().uuidString)")
         ))
-        let session = try XCTUnwrap(store.addSession(to: project.id, kind: kind))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: kind, usesNativeUI: native))
         store.setPermissionMode(mode, for: session.id)
         sessions.append(session.id)
         return session.id

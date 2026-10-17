@@ -8,9 +8,9 @@ import AppKit
 /// fitting size, so the intended size must be applied afterwards. Fixed-size and centered; a
 /// walkthrough is a fixed composition, not a document.
 ///
-/// During first launch this is the application's only window, and
+/// Once the optional standalone browser closes, this can be the application's only window.
 /// `applicationShouldTerminateAfterLastWindowClosed` answers true — closing it abandons setup
-/// and quits, and because nothing was recorded, the walkthrough returns on the next launch.
+/// and quits if no browser remains; because nothing was recorded, setup returns next launch.
 /// Finishing must therefore show the main window *before* this one closes; that ordering
 /// lives in `AppDelegate.onboardingDidFinish`.
 final class OnboardingWindowController: ThemedWindowController {

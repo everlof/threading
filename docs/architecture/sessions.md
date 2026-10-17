@@ -1799,7 +1799,10 @@ reply, which both CLIs read as "no decision" — in two cases:
 
 Threading's own refusals are untouched: an unattended automation run's revision and the macOS
 grant briefing both answer in `PermissionBroker.decide` before the policy is consulted, and a
-runtime's own request is never handed back to it. `PermissionDeferralTests` holds the matrix and
+runtime's own request is never handed back to it. A hook from a **terminal** session is left to
+the CLI whenever no automation run owns it: a terminal reaches the broker only because a run's
+launch put the hook there, and once the run has settled the terminal's own prompt is where the
+person answers ([`triggers.md`](triggers.md#where-a-run-is-drawn)). `PermissionDeferralTests` holds the matrix and
 runs the generated hook against a live listener.
 
 **The record is the launch mode, not a live mirror.** Changing the mode on a running terminal

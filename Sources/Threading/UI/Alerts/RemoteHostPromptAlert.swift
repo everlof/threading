@@ -89,6 +89,8 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
     let hostPopUp = ThemedPopUp()
     let remoteDirectoryField = ThemedTextField()
     let helperLabel = NSTextField(wrappingLabelWithString: "")
+    private let availabilityLabel = NSTextField(wrappingLabelWithString: "")
+    private let availabilityEvents = AppEventObservations()
     private var hasValidationError = false
     /// The records the menu offers, in its order. The last menu item is Add Host…, which is why
     /// this is read by index rather than by title.
@@ -127,6 +129,12 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
         setup()
         selectHost(current)
         offerDefaultDirectory()
+        updateAvailability()
+        availabilityEvents.observe(RemoteHostAvailabilityDidChange.self) { [weak self] event in
+            guard event.coordinator == ObjectIdentifier(RemoteExecutionHosts.shared),
+                  self?.selectedRecord?.sshDestination == event.destination else { return }
+            self?.updateAvailability()
+        }
     }
 
     @available(*, unavailable)
@@ -156,7 +164,10 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
             )
         ]
 
-        let stack = NSStackView(views: rows + [helperLabel])
+        availabilityLabel.applyFont(.caption)
+        availabilityLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        availabilityLabel.setAccessibilityIdentifier("remote-host.availability")
+        let stack = NSStackView(views: rows + [availabilityLabel, helperLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.small
@@ -174,6 +185,7 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         helperLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        availabilityLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
     private func row(
@@ -234,6 +246,7 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
 
     /// Add Host… is the last item: it opens the machine editor and comes back with it chosen.
     @objc private func hostChosen() {
+        defer { updateAvailability() }
         guard hostPopUp.indexOfSelectedItem == records.count else {
             offerDefaultDirectory()
             return
@@ -249,6 +262,15 @@ final class RemoteHostPromptAccessory: NSView, NSTextFieldDelegate {
             hostPopUp.selectItem(at: index)
         }
         offerDefaultDirectory()
+    }
+
+    private func updateAvailability() {
+        guard let selectedRecord else { availabilityLabel.isHidden = true; return }
+        let check = RemoteExecutionHosts.shared.availability(for: selectedRecord.sshDestination)
+        availabilityLabel.isHidden = false
+        availabilityLabel.stringValue = RemoteHostAvailabilityPresentation.summary(check)
+        availabilityLabel.textColor = RemoteHostAvailabilityPresentation.warning(check.facts) == nil
+            ? Design.Text.secondary : Design.Status.warning
     }
 
     /// Fills an empty folder from the machine's own default. Only ever *offers*: a folder already

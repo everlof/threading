@@ -27,6 +27,12 @@ public final class DeviceLogStore {
     private var handle: OpaquePointer?
     private var insert: OpaquePointer?
     /// Row ids are ours rather than SQLite's, so a caller can name a row before it is written.
+    ///
+    /// They continue from the file's highest id when it is opened. Starting every open at 1 meant a
+    /// session's history stopped growing at the first relaunch: the first insert collided with the
+    /// file's own row 1, the batch rolled back, and the recorder — which keeps a failed write from
+    /// reaching the pane — swallowed it for every batch after. Retention then made it worse, since
+    /// `trim` reads the highest id as the newest and deleted the rows written at reused low ids.
     private var nextID: Int64 = 1
 
     public let url: URL
@@ -42,6 +48,8 @@ public final class DeviceLogStore {
         try configure()
         try createSchema()
         try prepareInsert()
+        // `MAX` of an empty table is NULL, which reads back as 0.
+        nextID = (try scalar("SELECT MAX(id) FROM rows") ?? 0) + 1
     }
 
     deinit {

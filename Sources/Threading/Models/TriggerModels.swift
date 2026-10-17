@@ -278,6 +278,62 @@ enum TriggerExecutionMode: String, Codable, CaseIterable, Sendable {
     case taskLocalEdits
 
     var isTask: Bool { self == .taskReadOnly || self == .taskLocalEdits }
+
+    /// Whether some stage of this mode may change files. Assess-then-fix counts: its assessment
+    /// is read-only, but the fix stage it may start edits in the same session.
+    var mayEdit: Bool { self == .taskLocalEdits || self == .assessThenFix }
+}
+
+/// Where an unattended run's conversation is drawn: Threading's own chat, or the runtime's
+/// terminal UI. It is part of the approved revision because it decides how the run's permission
+/// questions are answered, not only how they look.
+///
+/// Nil on a revision means chat, which is every revision saved before the choice existed.
+enum AutomationSurface: String, Codable, CaseIterable, Sendable {
+    case chat
+    case terminal
+
+    /// Refuses a surface `agent` cannot host for an unattended run of `mode`.
+    ///
+    /// Chat is the native transport, which every automation agent already has to support. A
+    /// terminal qualifies only where nothing in it can stop and wait for a person: see
+    /// `AgentCapabilities.unattendedTerminalRuns` and `.unattendedReadOnlyTerminalRuns`.
+    ///
+    /// Assess-then-fix stays in chat whatever the agent. Its fix stage relaunches the same
+    /// conversation with a second prompt, and a terminal launch takes a prompt only as a new
+    /// conversation's opening: `AgentLauncher` drops one handed to a resume, by contract.
+    func validate(agent: AgentKind, mode: TriggerExecutionMode) throws {
+        guard self == .terminal else { return }
+        guard agent.supports(.terminalUI),
+              agent.supports(.unattendedTerminalRuns) || agent.supports(.unattendedReadOnlyTerminalRuns) else {
+            throw AutomationSurfaceError.terminalUnavailable(agent: agent.displayName)
+        }
+        guard mode != .assessThenFix else { throw AutomationSurfaceError.terminalHasOneStage }
+        guard agent.supports(.unattendedTerminalRuns) || !mode.mayEdit else {
+            throw AutomationSurfaceError.terminalNeedsReadOnlyMode(agent: agent.displayName)
+        }
+    }
+
+    func admits(_ agent: AgentKind, mode: TriggerExecutionMode) -> Bool {
+        (try? validate(agent: agent, mode: mode)) != nil
+    }
+}
+
+enum AutomationSurfaceError: LocalizedError, Equatable {
+    case terminalUnavailable(agent: String)
+    case terminalHasOneStage
+    case terminalNeedsReadOnlyMode(agent: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .terminalUnavailable(let agent):
+            L10n.format("%@ can’t run automations in its terminal. Choose Chat.", agent)
+        case .terminalHasOneStage:
+            L10n.string("“Assess, then fix” sends its fix as a second prompt, which only Chat can deliver. Choose Chat, or another mode for the terminal.")
+        case .terminalNeedsReadOnlyMode(let agent):
+            L10n.format("%@ can run only read-only automations in its terminal, because Threading can answer its edit approvals only in Chat. Choose Chat, Assess only or Read-only task.", agent)
+        }
+    }
 }
 
 enum TriggerCheckoutPolicy: String, Codable, CaseIterable, Sendable {
@@ -354,6 +410,10 @@ struct TriggerRevision: Codable, Equatable, Sendable {
     /// policies existed, which `effectivePermissions` reads as read-only.
     var permissions: AutomationPermissionPolicy? = nil
     var projectAutomation: ProjectAutomationRevision? = nil
+    /// Nil only on revisions saved before the choice existed; `effectiveSurface` reads it as chat.
+    var surface: AutomationSurface? = nil
+
+    var effectiveSurface: AutomationSurface { surface ?? .chat }
 }
 
 struct TriggerDefinition: Codable, Equatable, Sendable {

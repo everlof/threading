@@ -96,6 +96,26 @@ final class DeviceLogStoreTests: XCTestCase {
         }
     }
 
+    /// A history outlives the process that wrote it. Ids that restarted at 1 on every open collided
+    /// with the file's own first row, so after a relaunch every batch rolled back unseen and nothing
+    /// more was recorded; once retention had freed the low ids, `trim` — which reads the highest id
+    /// as the newest — deleted the rows that had been written there.
+    func testAReopenedStoreKeepsRecordingAfterItsExistingRows() throws {
+        do {
+            let first = try makeStore()
+            try first.append(rows(1_000))
+        }
+        let later = Date(timeIntervalSince1970: 1_757_000_000)
+        let reopened = try makeStore()
+        try reopened.append(rows(10, from: later))
+        XCTAssertEqual(try reopened.count(), 1_010)
+        XCTAssertEqual(try reopened.row(1_001)?.timestamp, later, "new rows continue after the old ones")
+
+        try reopened.trim(to: 10)
+        XCTAssertEqual(try reopened.count(), 10)
+        XCTAssertEqual(try reopened.row(1_001)?.timestamp, later, "retention keeps the newest rows")
+    }
+
     // MARK: - Can it keep up
 
     /// The number that decides the design. Batches are the size one 100 ms drain produces at the

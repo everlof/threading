@@ -28,6 +28,10 @@ final class ThreadingLaunchUITests: XCTestCase {
 
         sandbox.launch(app)
 
+        // Browsing is available immediately on an empty profile. Return to the workspace to
+        // keep this journey's original main-window sizing and appearance contract.
+        closeLaunchBrowser(in: app)
+
         let window = app.windows.firstMatch
         XCTAssertTrue(
             window.waitForExistence(timeout: 10),
@@ -54,6 +58,7 @@ final class ThreadingLaunchUITests: XCTestCase {
         hiddenApp.launchEnvironment["THREADING_UI_SCENARIO_STALL_HUD"] = "0"
         application = hiddenApp
         sandbox.launch(hiddenApp)
+        closeLaunchBrowser(in: hiddenApp)
         XCTAssertTrue(hiddenApp.windows.firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(hiddenApp.buttons["debug.main-thread-hud"].exists)
         hiddenApp.terminate()
@@ -63,6 +68,7 @@ final class ThreadingLaunchUITests: XCTestCase {
         visibleApp.launchEnvironment["THREADING_UI_SCENARIO_STALL_HUD"] = "1"
         application = visibleApp
         sandbox.launch(visibleApp)
+        closeLaunchBrowser(in: visibleApp)
         let window = visibleApp.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 10))
         XCTAssertTrue(
@@ -97,5 +103,12 @@ final class ThreadingLaunchUITests: XCTestCase {
         )
         XCTAssertLessThan(hud.frame.midX, resting.midX - 20,
                           "the readout should leave the corner when the pointer approaches")
+    }
+
+    private func closeLaunchBrowser(in app: XCUIApplication) {
+        let address = app.textFields["browser.address"]
+        XCTAssertTrue(address.waitForExistence(timeout: 20))
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertFalse(address.exists)
     }
 }

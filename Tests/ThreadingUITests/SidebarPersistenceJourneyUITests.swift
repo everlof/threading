@@ -9,6 +9,7 @@ final class SidebarPersistenceJourneyUITests: XCTestCase {
         sandbox.configure(app)
         defer { app.terminate(); try? sandbox.remove() }
         sandbox.launch(app)
+        closeLaunchBrowser(in: app)
 
         for title in ["Headings for Lone Branches", "Compact Tree", "Show Five Chats per Project"] {
             openArrangement(in: app)
@@ -32,6 +33,7 @@ final class SidebarPersistenceJourneyUITests: XCTestCase {
                 app.typeKey(.escape, modifierFlags: [])
                 app.terminate()
                 sandbox.launch(app)
+                closeLaunchBrowser(in: app)
             }
             openArrangement(in: app)
             assertSelected("Headings for Lone Branches", false, in: app)
@@ -57,6 +59,13 @@ final class SidebarPersistenceJourneyUITests: XCTestCase {
         XCTAssertTrue(button.waitForExistence(timeout: 10))
         button.click()
         XCTAssertTrue(app.menuItems["Compact Tree"].waitForExistence(timeout: 5))
+    }
+
+    private func closeLaunchBrowser(in app: XCUIApplication) {
+        let address = app.textFields["browser.address"]
+        XCTAssertTrue(address.waitForExistence(timeout: 20))
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertFalse(address.exists)
     }
 
     private func assertSelected(

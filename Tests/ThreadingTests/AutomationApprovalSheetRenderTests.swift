@@ -19,7 +19,7 @@ final class AutomationApprovalSheetRenderTests: XCTestCase {
         let review = AutomationReview.make(revision, purpose: .runNow, context: Self.context())
 
         XCTAssertEqual(review.facts.map(\.identifier),
-                       ["project", "when", "agent", "account", "permissions", "allowed", "limits", "afterSuccess", "revision"])
+                       ["project", "when", "agent", "account", "surface", "permissions", "allowed", "limits", "afterSuccess", "revision"])
         XCTAssertEqual(fact("project", in: review)?.value, "sonda-automations")
         XCTAssertEqual(fact("project", in: review)?.detail, "~/repo/sonda-automations")
         XCTAssertEqual(fact("when", in: review)?.value, L10n.string("Once, now"))
@@ -60,7 +60,7 @@ final class AutomationApprovalSheetRenderTests: XCTestCase {
         let review = AutomationReview.make(Self.eventRevision(), purpose: .activate, context: Self.context())
 
         XCTAssertEqual(review.facts.map(\.identifier),
-                       ["project", "when", "conditions", "agent", "account", "permissions", "allowed", "limits", "revision"])
+                       ["project", "when", "conditions", "agent", "account", "surface", "permissions", "allowed", "limits", "revision"])
         XCTAssertEqual(fact("when", in: review)?.value, L10n.format("“%@” arrives", "case.review-required"))
         XCTAssertEqual(fact("when", in: review)?.detail, L10n.format("From %@", "Sonda review feed"))
         XCTAssertEqual(fact("conditions", in: review)?.value, "lab  equals  \"ALS\"")

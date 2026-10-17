@@ -44,7 +44,7 @@ private actor AutomationCatalogWorker {
     func read(kind: AgentKind, account: AgentAccount?) -> AutomationAgentCatalog {
         guard !Task.isCancelled else { return .init(models: [], defaultModel: nil) }
         let inherited = AgentModels.defaultModel(for: kind, account: account)
-        return .init(models: Array(AgentModels.options(for: kind, account: account, including: inherited).prefix(512)),
+        return .init(models: Array(AgentModels.launchableOptions(for: kind, account: account).prefix(512)),
                      defaultModel: inherited)
     }
 }

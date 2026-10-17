@@ -36,6 +36,8 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// Materialized only when one does; see `setConductMark`.
     private var conductIndicator: GlyphView?
     private var executionHostIndicator: GlyphView?
+    private var executionHostWarning: String?
+    private var executionHostDestination: String?
     private var unavailableCheckoutIndicator: GlyphView?
     private let nativeContent = NSView()
     private let afterTitleSlot = NSStackView()
@@ -219,7 +221,8 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         style: Style = .standalone,
         collapsedSessionCount: Int = 0,
         conduct: RowConductSummary? = nil,
-        executionHost: String? = nil
+        executionHost: String? = nil,
+        hostAvailability: RemoteHostAvailabilityCheck = RemoteHostAvailabilityCheck()
     ) {
         isHeading = false
 
@@ -267,6 +270,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         // for carrying configuration" rule was too broad for.
         setConductMark(conduct)
         setExecutionHostMark(executionHost)
+        updateRemoteHostAvailability(hostAvailability)
         let checkoutUnavailable = project.lastKnownRepositoryIdentity != nil
             && GitInfo.repositoryIdentity(for: project.folderPath) == nil
         setUnavailableCheckoutMark(checkoutUnavailable)
@@ -1071,6 +1075,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
     /// must never look like one that runs them here. Materialized on first need and hidden on
     /// reuse, exactly like the settings mark beside it.
     private func setExecutionHostMark(_ destination: String?) {
+        executionHostDestination = destination
         guard let destination else {
             executionHostIndicator?.isHidden = true
             return
@@ -1104,6 +1109,26 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
             indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
         ])
         executionHostIndicator = indicator
+    }
+
+    /// Only the sidebar's already materialized project rows receive availability updates.
+    /// A coordinator callback does not rebuild the tree or re-run project discovery.
+    func refreshRemoteHostAvailability(for destination: RemoteHostDestination, check: RemoteHostAvailabilityCheck) {
+        guard popoverProject?.executionHost?.sshDestination == destination else { return }
+        updateRemoteHostAvailability(check)
+    }
+
+    private func updateRemoteHostAvailability(_ check: RemoteHostAvailabilityCheck) {
+        executionHostWarning = RemoteHostAvailabilityPresentation.warning(check.facts)
+        guard let indicator = executionHostIndicator, !indicator.isHidden else { return }
+        indicator.setSymbol(executionHostWarning == nil ? RemoteExecutionHostMark.symbol : "exclamationmark.triangle",
+                            slot: Design.Size.inlineButtonGlyph)
+        let summary = RemoteHostAvailabilityPresentation.summary(check)
+        let host = executionHostDestination ?? ""
+        indicator.toolTip = [RemoteExecutionHostMark.runsOn(host), executionHostWarning, summary].compactMap { $0 }.joined(separator: "\n")
+        indicator.setAccessibilityLabel([RemoteExecutionHostMark.runsOn(host), executionHostWarning].compactMap { $0 }.joined(separator: ". "))
+        indicator.setAccessibilityHelp(summary)
+        applyTextColors()
     }
 
     /// Host-owned availability remains visible even when an extension replaces row content.
@@ -1174,7 +1199,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
 
         countLabel?.textColor = Design.Text.secondary
         conductIndicator?.tint = Design.Text.secondary
-        executionHostIndicator?.tint = Design.Text.secondary
+        executionHostIndicator?.tint = executionHostWarning == nil ? Design.Text.secondary : Design.Status.warning
         unavailableCheckoutIndicator?.tint = Design.Text.secondary
         iconView.tint = Design.Text.secondary
         nativeIconTint = iconView.tint

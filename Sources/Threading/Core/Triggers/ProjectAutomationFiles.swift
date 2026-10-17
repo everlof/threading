@@ -98,6 +98,9 @@ enum ProjectAutomationFiles {
             throw Failure.invalid("unsupported version, identity or settings")
         }
         try definition.options.schedule?.validate()
+        guard (definition.surface ?? .chat).admits(definition.agent, mode: definition.executionMode) else {
+            throw Failure.invalid("this agent cannot run this mode in its terminal")
+        }
         guard (definition.options.schedule == nil) == (definition.source != nil),
               definition.options.schedule != nil || definition.eventKind?.isEmpty == false else {
             throw Failure.invalid("choose a schedule or a named event source")

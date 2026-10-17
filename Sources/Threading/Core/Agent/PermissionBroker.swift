@@ -345,6 +345,18 @@ enum PermissionBroker {
             return
         }
 
+        // A terminal reaches this hook only because an unattended run owned it at launch
+        // (`AgentLauncher.brokersTerminalRun`). Once that run has settled the process may live on
+        // with the person at its prompt, and the CLI's own permission prompt is the one they can
+        // see and answer there; a card would ask the same question a second time, elsewhere.
+        if case .toolHook = request.origin,
+           ProjectStore.shared.session(withID: request.sessionID)?.usesNativeUI == false {
+            auditedCompletion(.deferToAgent(
+                reason: "A terminal session answers its own permission prompts."
+            ))
+            return
+        }
+
         // Ahead of every other rule, including the modes that promise not to interrupt. What
         // follows is not one of Threading's permission questions — it is the only warning the
         // user will get that *macOS* is about to put a dialog on their screen naming Threading

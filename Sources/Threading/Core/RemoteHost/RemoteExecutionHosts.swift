@@ -312,7 +312,10 @@ final class RemoteExecutionHosts: @unchecked Sendable {
     private var phases: [RemoteHostDestination: RemoteHostPhase] = [:]
     private var steps: [RemoteHostDestination: RemoteHostStep] = [:]
     private var tunnels: [RemoteHostDestination: RemoteHostTunnel] = [:]
+    private var availabilityChecks: [RemoteHostDestination: RemoteHostAvailabilityCheck] = [:]
+    private let availabilityQueue = DispatchQueue(label: "codes.threading.remote-hosts.availability", qos: .utility)
     private let build: String
+    private let availabilityClock: @Sendable () -> Date
     /// The `0700` directory holding the forwarded sockets. Injectable because a unix socket path is
     /// bounded (`PTYHostDefaults.maximumSocketPathBytes`) and a hosted test's scratch root alone is
     /// most of that.
@@ -320,11 +323,13 @@ final class RemoteExecutionHosts: @unchecked Sendable {
 
     init(
         runner: RemoteHostCommandRunning = SystemSSHCommandRunner(),
+        availabilityClock: @escaping @Sendable () -> Date = { Date() },
         build: String = PTYHostBuild.string(),
         localDirectory: URL = PTYHostLocation.supportRoot
             .appendingPathComponent(RemoteHostDefaults.localDirectoryName, isDirectory: true)
     ) {
         self.runner = runner
+        self.availabilityClock = availabilityClock
         self.build = build
         self.localDirectory = localDirectory
     }
@@ -342,6 +347,49 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return phases[destination] ?? .idle
+    }
+
+    func availability(for destination: RemoteHostDestination) -> RemoteHostAvailabilityCheck {
+        lock.lock()
+        defer { lock.unlock() }
+        return availabilityChecks[destination] ?? RemoteHostAvailabilityCheck()
+    }
+
+    /// Explicit refresh, also requested after successful preparation. Coalesced per destination,
+    /// with one process at a time across hosts. Reading a row never starts a probe.
+    func checkAvailability(for destination: RemoteHostDestination) {
+        guard destination.isValid else { return }
+        lock.lock()
+        var check = availabilityChecks[destination] ?? RemoteHostAvailabilityCheck()
+        guard !check.isChecking else { lock.unlock(); return }
+        check.isChecking = true
+        availabilityChecks[destination] = check
+        lock.unlock()
+        postAvailabilityChange(destination)
+        availabilityQueue.async { [weak self] in
+            guard let self else { return }
+            let result = try? runCommand(destination, "sh -s",
+                input: .data(Data(RemoteHostAvailabilityProbe.script.utf8)), timeout: RemoteHostAvailabilityProbe.timeout)
+            let facts = result.flatMap { $0.succeeded ? RemoteHostAvailabilityProbe.parse($0.output) : nil }
+            lock.lock()
+            var current = availabilityChecks[destination] ?? RemoteHostAvailabilityCheck()
+            current.isChecking = false
+            current.failed = facts == nil
+            if let facts {
+                current.facts = facts
+                current.checkedAt = availabilityClock()
+            }
+            availabilityChecks[destination] = current
+            lock.unlock()
+            postAvailabilityChange(destination)
+        }
+    }
+
+    private func postAvailabilityChange(_ destination: RemoteHostDestination) {
+        let event = RemoteHostAvailabilityDidChange(coordinator: ObjectIdentifier(self), destination: destination)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(event)
+        }
     }
 
     /// The host's phase now, starting preparation if it is idle or failed. Never blocks.
@@ -446,6 +494,7 @@ final class RemoteExecutionHosts: @unchecked Sendable {
         steps[destination] = nil
         lock.unlock()
         postChange()
+        if case .ready = outcome { checkAvailability(for: destination) }
     }
 
     private func prepareOrThrow(
