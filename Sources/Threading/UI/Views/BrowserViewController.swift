@@ -555,7 +555,7 @@ final class BrowserViewController: NSViewController {
     private var testConditionsMenuSession: AnyObject?
     private var overflowMenuSession: AnyObject?
     private var downloadsMenuSession: AnyObject?
-    private lazy var downloadToasts = ToastPresenter(host: view, above: view.bottomAnchor)
+    private lazy var toasts = ToastPresenter(host: view, above: view.bottomAnchor)
 
     // MARK: - Web View
 
@@ -3344,23 +3344,48 @@ final class BrowserViewController: NSViewController {
     }
 
     @objc private func saveVisiblePageScreenshot() {
-        webView.takeSnapshot(with: nil) { [weak self] image, error in
-            guard let self else { return }
-            guard let image,
-                  let data = image.tiffRepresentation,
-                  let representation = NSBitmapImageRep(data: data),
-                  let png = representation.representation(using: .png, properties: [:]) else {
-                self.showScreenshotFailure(error?.localizedDescription)
-                return
-            }
-            self.chooseScreenshotDestination { destination in
-                guard let destination else { return }
+        let failureTitle = L10n.string("Couldn’t Save Screenshot")
+        captureVisiblePage(failureTitle: failureTitle) { [weak self] png, _ in
+            self?.chooseScreenshotDestination { destination in
+                guard let self, let destination else { return }
                 do {
                     try png.write(to: destination, options: .atomic)
                 } catch {
-                    self.showScreenshotFailure(error.localizedDescription)
+                    self.showScreenshotFailure(failureTitle, detail: error.localizedDescription)
                 }
             }
+        }
+    }
+
+    /// PNG and TIFF on one pasteboard item, so the paste lands whether the target reads PNG
+    /// (web pages, chat apps, agent CLIs) or only TIFF (older AppKit text views). The pasteboard
+    /// is a parameter so a test copies into its own rather than the developer's clipboard.
+    func copyVisiblePageScreenshot(to pasteboard: NSPasteboard = .general) {
+        captureVisiblePage(failureTitle: L10n.string("Could not copy the screenshot")) { [weak self] png, tiff in
+            let item = NSPasteboardItem()
+            item.setData(png, forType: .png)
+            item.setData(tiff, forType: .tiff)
+            pasteboard.clearContents()
+            pasteboard.writeObjects([item])
+            self?.toasts.present(ToastRequest(
+                message: L10n.string("Copied screenshot"),
+                identifier: "browser.screenshot.copied"
+            ))
+        }
+    }
+
+    /// The visible page as WebKit draws it, encoded once for whichever destination asked.
+    private func captureVisiblePage(failureTitle: String, deliver: @escaping (_ png: Data, _ tiff: Data) -> Void) {
+        webView.takeSnapshot(with: nil) { [weak self] image, error in
+            guard let self else { return }
+            guard let image,
+                  let tiff = image.tiffRepresentation,
+                  let representation = NSBitmapImageRep(data: tiff),
+                  let png = representation.representation(using: .png, properties: [:]) else {
+                self.showScreenshotFailure(failureTitle, detail: error?.localizedDescription)
+                return
+            }
+            deliver(png, tiff)
         }
     }
 
@@ -3401,10 +3426,10 @@ final class BrowserViewController: NSViewController {
         alert.runModal()
     }
 
-    private func showScreenshotFailure(_ detail: String?) {
+    private func showScreenshotFailure(_ title: String, detail: String?) {
         let alert = ThemedAlert()
         alert.alertStyle = .warning
-        alert.messageText = L10n.string("Couldn’t Save Screenshot")
+        alert.messageText = title
         alert.informativeText = detail
             ?? L10n.string("WebKit did not return an image for the visible page.")
         alert.runModal()
@@ -3592,6 +3617,14 @@ final class BrowserViewController: NSViewController {
                 accessibility: L10n.string("Take a Screenshot")
             ),
             onChoose: { [weak self] in self?.saveVisiblePageScreenshot() }
+        )))
+        entries.append(.item(ThemedMenuItem(
+            title: L10n.string("Copy Screenshot"),
+            image: BrowserChromeBar.image(
+                "doc.on.doc",
+                accessibility: L10n.string("Copy Screenshot")
+            ),
+            onChoose: { [weak self] in self?.copyVisiblePageScreenshot() }
         )))
         if let baselineSessionID {
             // Beside Take a Screenshot rather than as another address-bar glyph: the strip protects
@@ -4477,7 +4510,7 @@ extension BrowserViewController: WKDownloadDelegate {
     }
 
     func presentSavedDownloadToast(for destination: URL) {
-        downloadToasts.present(ToastRequest(
+        toasts.present(ToastRequest(
             message: L10n.string("Download Complete"),
             detail: destination.lastPathComponent,
             actionTitle: L10n.string("Reveal in Finder"),
