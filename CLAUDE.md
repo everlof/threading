@@ -567,14 +567,11 @@ the following cases genuinely need to be visible, and they are skipped by name i
 - `BrowserAgentBridgeIntegrationTests` (the whole class) — WKWebView will not load or render
   offscreen, so each test calls `orderFront`. Note the sibling class in the same file,
   `BrowserAgentBridgeTests`, needs no window and stays in `fast`.
-- `BrowserOffScreenCaptureTests` (the whole class) — measures what an agent can still capture
-  from a browser whose window is miniaturized, moved off the visible frame, or fully occluded,
-  which needs a real window ordered on screen to *stop* being visible in each of those ways. It
-  is a platform tripwire rather than a behaviour test: `browser_screenshot` and the remote
-  workspace preview both go through `WKSnapshotConfiguration.afterScreenUpdates = true`, and
-  the detached-browser-window work rests on that still returning pixels. Today it does in all
-  three conditions; the class exists so a macOS update changing that is a failing test rather
-  than an agent quietly reading blank pages.
+- `BrowserOffScreenCaptureTests` (the whole class) — verifies clicks and fresh screenshots after
+  minimizing, moving off-display, covering or detaching a browser, plus new background-session
+  tabs. Real visibility transitions need a window ordered on screen first. Missing and stale
+  captures both fail. A 70-second idle case probes WebKit throttling, and a deterministic case
+  disables DOM timers to prove agent waits use the host clock; see `agent-browser.md`.
 - `BrowserCaptureGeometryTests` (the whole class) — the same platform question asked of a
   window's geometry rather than its capture, and it needs the window server to answer for the
   same reason.

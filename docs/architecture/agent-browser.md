@@ -824,9 +824,54 @@ JavaScript alert, confirm, and prompt dialogs are also native sheets tied to the
 browser window. Persistent website and chat-wide grants can be reviewed individually or revoked
 together on the Tools settings page.
 
-Do not wait on `requestAnimationFrame` in an agent action: WebKit pauses it in an occluded
-display-panel tab. Browser waits use bounded timers, navigation and snapshots have timeouts, and
-full-page captures are capped to keep one tool call from pinning the app.
+Do not wait on `requestAnimationFrame` **or DOM timers** in an agent action. WebKit pauses
+animation frames and can throttle a nominal 50 ms `setTimeout` beyond the native bridge's
+15-second deadline after a page has been hidden long enough. `BrowserAgentDelayHandler` supplies
+the action clock through `WKScriptMessageHandlerWithReply` in `.defaultClient` only. Stability,
+scroll, typing, selection and option-discovery deadlines register a random token and await a
+native-timed continuation. The timer resumes that token in the requesting frame through a fresh
+`callAsyncJavaScript` evaluation. Resolving only through the message reply loses WebKit's user
+gesture context and prevents file choosers and pop-ups from opening; the fresh API evaluation
+preserves the activation semantics of the existing action API. A replacement document has no
+matching token and is not acted on. The message reply reports transport failure back to the
+waiting promise. Page scripts cannot access this channel, and their own timers retain WebKit's
+normal scheduling.
+
+Both the isolated continuation map and native timer queue admit at most 64 waits, each between
+zero and 1,000 ms. Native timers retire before resuming JavaScript. Normally one wait is pending,
+with a stress test admitting 64 and refusing the 65th. There is no polling or page/session
+enumeration. Pop-ups inherit the isolated handler through their WebKit configuration.
+
+A native clock alone does not keep WebKit's process runnable. On macOS 14+, each agent-bridge
+JavaScript or capture operation temporarily sets the target's public `inactiveSchedulingPolicy` to `.none`.
+`BrowserExecutionActivity` counts overlapping work by preferences identity (which pop-ups can
+share), restoring the previous policy after the last completion or timeout. It retains only
+entries with active work, normally one, and changes one dictionary entry per begin/end.
+The same operation scope holds a `.userInitiatedAllowingIdleSystemSleep` process activity:
+App Nap can otherwise delay the host/WebKit reply path even after the native timer fires.
+Both the host activity and page policy end with the last operation; there is no idle keepalive
+loop, window activation or system-sleep prevention. On macOS 13 the host activity, native clock
+and initial viewport still apply, but the WebKit scheduling API is unavailable. Changing only
+the WebKit scheduling policy does not cure hidden-page stalls.
+
+A new web view starts at 1024 × 768 until its host supplies a nonzero layout. This is host-owned
+initial geometry, not responsive emulation: an explicit viewport still wins, and ordinary
+visible layout replaces the initial size. This matters for a tab created in a background session,
+where no host view is installed at all. Do not move or activate the user's window to obtain a
+viewport. Bridge and screenshot timeouts report native viewport/window facts without claiming
+occlusion proves the cause; a timed-out action may still complete, so callers must inspect before
+retrying. Navigation and snapshots retain their deadlines and full-page capture caps.
+
+`BrowserOffScreenCaptureTests` requires successful clicks and fresh changed pixels while
+minimized, covered, off-display, detached and newly created in a background session. A missing
+capture is a failure, not an acceptable alternative to blank pixels. The off-display fixture
+overrides AppKit's titled-window frame constraint and asserts its actual location; this does not
+prove another Space or screen-lock behavior. A deterministic case disables isolated-world DOM
+timers and drives click, slow typing and element capture through the production bridge. The
+70-second idle case remains a platform tripwire; other web pages can affect process scheduling.
+On macOS the [WebKit snapshot implementation](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/Cocoa/WKWebView.mm)
+uses a software capture and does not use `afterScreenUpdates` to wait for a screen presentation.
+Changing that flag is therefore not a fix for hidden-page action timers.
 
 ## Visual baselines
 

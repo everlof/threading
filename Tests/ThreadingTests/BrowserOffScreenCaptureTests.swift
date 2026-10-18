@@ -3,32 +3,23 @@ import WebKit
 import XCTest
 @testable import Threading
 
-/// What an agent can still see of a browser whose window is not in front of the user.
-///
-/// This exists because the detached-browser-window plan rests on it. The point of moving the
-/// browser to its own window is to put a developer's own app fullscreen on a second display
-/// while an agent keeps driving it — and every read the agent performs on that page
-/// (`browser_screenshot`, and the remote workspace preview the phone shows) goes through
-/// `WKSnapshotConfiguration.afterScreenUpdates = true`, which by its name waits for the
-/// *screen* to update. Whether that returns pixels, blank pixels, or nothing at all when the
-/// window is miniaturized, occluded or off the visible frame is a platform behaviour, not a
-/// decision this codebase gets to make, so it is measured rather than assumed.
-///
-/// Kept as a test rather than run once and thrown away: it is the tripwire for a macOS update
-/// changing the answer under a shipped feature.
-///
-/// Every case orders a real window on screen, so the whole class is excluded from the fast test
-/// plan — WebKit renders nothing offscreen, which is the very property under measurement.
+/// Exercises the shipping browser after its host stops being visible. A successful capture
+/// must contain a mutation performed while hidden: old pixels and timeouts both fail.
+/// Real visibility transitions require WindowServer, so this class stays in the all plan.
 @MainActor
-final class BrowserOffScreenCaptureTests: XCTestCase {
+final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
 
     private enum Fixture {
         /// A page that is one flat, unmistakable colour, so "did it render" is one pixel read
         /// rather than an image comparison.
-        static let html = "<html><body style='margin:0;background:#FF0000'></body></html>"
-        static let expected = (red: 255, green: 0, blue: 0)
+        static let html = """
+            <html><body style='margin:0;background:#FF0000'>
+            <button id='change' onclick="document.body.style.background='#00FF00'">Change</button>
+            <input id='text' aria-label='Text'>
+            </body></html>
+            """
         static let size = NSSize(width: 480, height: 320)
-        static let loadTimeout: TimeInterval = 10
+        static let operationLimit: TimeInterval = 5
     }
 
     private var window: NSWindow?
@@ -62,14 +53,14 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
 
         window.miniaturize(nil)
         defer { window.deminiaturize(nil) }
-        settle()
+        try await settle()
 
-        let reading = await capture(browser)
+        try await changeWhileHidden(browser)
+        let reading = await capture(browser, green: true)
         record("miniaturized", reading)
-        XCTAssertNotEqual(
-            reading, .blank,
-            "a miniaturized window returned a blank capture — an agent would read a white page "
-                + "as the page, which is worse than an error it could report"
+        XCTAssertEqual(
+            reading, .rendered,
+            "a minimized browser must capture the mutation performed while hidden"
         )
     }
 
@@ -77,17 +68,18 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
         let browser = try await loadedBrowser()
         let window = try XCTUnwrap(self.window)
 
-        // Far beyond any attached display, which is what a window on another Space looks like
-        // to the compositor as far as this process can arrange one in a test.
+        // This verifies off-display geometry, not a Space switch. A titled window normally
+        // constrains this back onto a screen, so the fixture explicitly disables that clamp.
         window.setFrameOrigin(NSPoint(x: -50_000, y: -50_000))
-        settle()
+        try await settle()
+        XCTAssertFalse(NSScreen.screens.contains { $0.frame.intersects(window.frame) })
 
-        let reading = await capture(browser)
+        try await changeWhileHidden(browser)
+        let reading = await capture(browser, green: true)
         record("off the visible frame", reading)
-        XCTAssertNotEqual(
-            reading, .blank,
-            "an off-frame window returned a blank capture, so an agent driving a browser the "
-                + "user parked on another Space would be told the page is empty"
+        XCTAssertEqual(
+            reading, .rendered,
+            "an off-display browser must capture the mutation performed while hidden"
         )
     }
 
@@ -107,14 +99,14 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
         cover.level = .floating
         cover.orderFrontRegardless()
         defer { cover.orderOut(nil) }
-        settle()
+        try await settle()
 
-        let reading = await capture(browser)
+        try await changeWhileHidden(browser)
+        let reading = await capture(browser, green: true)
         record("fully occluded", reading)
-        XCTAssertNotEqual(
-            reading, .blank,
-            "an occluded window returned a blank capture, so anything laid over the browser "
-                + "would silently empty what the agent reads"
+        XCTAssertEqual(
+            reading, .rendered,
+            "a covered browser must capture the mutation performed while hidden"
         )
     }
 
@@ -126,13 +118,22 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
         /// A capture arrived, but not of this page — the failure that cannot be reported,
         /// because an agent cannot tell a white capture from a white page.
         case blank
-        /// No capture at all. Honest: the tool reports failure and the agent retries.
+        /// A timeout or failed capture is a regression too.
         case none
     }
 
-    private func capture(_ browser: BrowserViewController) async -> Reading {
-        guard let shot = try? await browser.screenshot(),
-              let bitmap = NSBitmapImageRep(data: shot.data),
+    private func capture(_ browser: BrowserViewController, green: Bool = false) async -> Reading {
+        let started = Date()
+        let shot: BrowserScreenshotCapture
+        do { shot = try await browser.screenshot() }
+        catch {
+            XCTFail("Capture failed: \(error.localizedDescription)")
+            return .none
+        }
+        let elapsed = Date().timeIntervalSince(started)
+        XCTAssertLessThan(elapsed, Fixture.operationLimit)
+        print("[off-screen capture] screenshot completed in \(elapsed)s")
+        guard let bitmap = NSBitmapImageRep(data: shot.data),
               let colour = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)
         else { return .none }
 
@@ -151,9 +152,9 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
         // other channels. The question this class asks is only "is this the page or a blank
         // surface", so it asks whether red overwhelmingly dominates — true of the fixture in any
         // colour space, false of the white, grey or black a non-rendering capture yields.
-        let matches = read.red >= 200
-            && read.green <= 100
-            && read.blue <= 100
+        let matches = green
+            ? read.green >= 200 && read.red <= 100 && read.blue <= 100
+            : read.red >= 200 && read.green <= 100 && read.blue <= 100
         return matches ? .rendered : .blank
     }
 
@@ -181,7 +182,7 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
         )
         self.browser = browser
 
-        let window = NSWindow(
+        let window = UnconstrainedCaptureWindow(
             contentRect: NSRect(origin: .zero, size: Fixture.size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
@@ -193,8 +194,7 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
         browser.view.frame = window.contentView?.bounds
             ?? NSRect(origin: .zero, size: Fixture.size)
         window.center()
-        // WebKit will not load or render a view that is in no on-screen window, so this class
-        // is the exception the fast plan documents rather than an oversight.
+        // Establish the visible baseline before each real visibility transition.
         window.animationBehavior = .none
         window.orderFront(nil)
         self.window = window
@@ -207,14 +207,127 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
             }
         }
         XCTAssertTrue(outcome.success, "the fixture page never loaded: \(outcome.message)")
-        settle(0.3)
+        try await settle(0.3)
         return browser
     }
 
     /// Lets AppKit and WebKit act on what was just asked of them. A window's miniaturize,
     /// move or occlusion is not observable to the compositor on the same turn of the run loop.
-    private func settle(_ seconds: TimeInterval = 0.4) {
-        RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+    private func settle(_ seconds: TimeInterval = 0.4) async throws {
+        try await Task.sleep(for: .seconds(seconds))
+    }
+
+    private func changeWhileHidden(_ browser: BrowserViewController) async throws {
+        let started = Date()
+        let outcome = try await browser.agentClick(ref: nil, selector: "#change")
+        XCTAssertTrue(outcome.ok, outcome.message)
+        let elapsed = Date().timeIntervalSince(started)
+        XCTAssertLessThan(elapsed, Fixture.operationLimit)
+        print("[off-screen capture] click completed in \(elapsed)s")
+        let context = try await browser.captureContext()
+        XCTAssertGreaterThan(context.viewportWidth, 0)
+        XCTAssertGreaterThan(context.viewportHeight, 0)
+    }
+
+    func testActionsAndElementCaptureDoNotDependOnPageTimers() async throws {
+        let browser = try await loadedBrowser()
+        browser.view.removeFromSuperview()
+        window?.orderOut(nil)
+        // Deterministically model a throttled isolated-world timer. The 70-second platform
+        // tripwire beside this varies with other pages sharing WebKit's process assertions.
+        let _: Any = try await withCheckedThrowingContinuation { continuation in
+            browser.webView.callAsyncJavaScript(
+                "globalThis.setTimeout = () => { throw new Error('DOM timer used by agent action'); }; return true;",
+                arguments: [:], in: nil, in: .defaultClient
+            ) { continuation.resume(with: $0) }
+        }
+        try await changeWhileHidden(browser)
+        let typed = try await browser.agentType(
+            ref: nil, selector: "#text", text: "abc", slowly: true, submit: false
+        )
+        XCTAssertTrue(typed.ok, typed.message)
+        let value = try await browser.evaluate("document.querySelector('#text').value") as? String
+        XCTAssertEqual(value, "abc")
+        let shot = try await browser.screenshot(ref: nil, selector: "#change")
+        XCTAssertTrue(shot.target.ok, shot.target.message)
+        XCTAssertNotNil(shot.capture)
+        let pageCanUseHostTimer = try await browser.evaluate(
+            "typeof window.webkit?.messageHandlers?.threadingAgentDelay !== 'undefined'"
+        ) as? Bool
+        XCTAssertEqual(pageCanUseHostTimer, false, "host timers belong only to the isolated agent world")
+    }
+
+    func testHostDelayRejectsInvalidAndExcessRequests() async throws {
+        let browser = try await loadedBrowser()
+        let result: Any = try await withCheckedThrowingContinuation { continuation in
+            browser.webView.callAsyncJavaScript(
+                """
+                const delay = (milliseconds, index) =>
+                  webkit.messageHandlers.threadingAgentDelay.postMessage({milliseconds, token: String(index)});
+                const invalid = await Promise.allSettled([-1, 1001, '50', null].map(delay));
+                const batch = await Promise.allSettled(Array.from({length: 65}, (_, index) => delay(1000, index)));
+                return JSON.stringify({
+                  invalid: invalid.filter(r => r.status === 'rejected').length,
+                  completed: batch.filter(r => r.status === 'fulfilled').length,
+                  refused: batch.filter(r => r.status === 'rejected').length
+                });
+                """,
+                arguments: [:], in: nil, in: .defaultClient
+            ) { continuation.resume(with: $0) }
+        }
+        let data = try XCTUnwrap((result as? String)?.data(using: .utf8))
+        let counts = try JSONDecoder().decode([String: Int].self, from: data)
+        XCTAssertEqual(counts, ["invalid": 4, "completed": 64, "refused": 1])
+    }
+
+    func testDetachedIdlePageCanClickAndCaptureFreshPixels() async throws {
+        let browser = try await loadedBrowser()
+        browser.view.removeFromSuperview()
+        window?.orderOut(nil)
+        // Allow WebKit's default idle policy to take effect before starting the action.
+        try await settle(70)
+        try await changeWhileHidden(browser)
+        let reading = await capture(browser, green: true)
+        XCTAssertEqual(reading, .rendered)
+    }
+
+    func testNewTabInBackgroundSessionHasAViewportAndCanBeDriven() async throws {
+        let host = DisplayPaneController(browserFactory: { _, _ in
+            BrowserViewController(
+                urlSchemeHandlers: ["threading-capture": FlatColourSchemeHandler(html: Fixture.html)],
+                contextKind: .private
+            )
+        })
+        let window = UnconstrainedCaptureWindow(
+            contentRect: NSRect(origin: .zero, size: Fixture.size),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = host
+        self.window = window
+        let sessionID = SessionID()
+        host.showSession(SessionID())
+        let browser = try XCTUnwrap(host.addBrowserTab(for: sessionID, contextKind: .private))
+        self.browser = browser
+        XCTAssertNil(browser.view.window)
+        // Do not force fixture layout: the tool path must prepare a tab whose window has
+        // never received an onscreen layout/display pass.
+        let success = await withCheckedContinuation { continuation in
+            browser.navigate(to: "threading-capture://fixture/new") { ok, _ in
+                continuation.resume(returning: ok)
+            }
+        }
+        XCTAssertTrue(success)
+        try await changeWhileHidden(browser)
+        let reading = await capture(browser, green: true)
+        XCTAssertEqual(reading, .rendered)
+        XCTAssertFalse(window.isVisible)
+    }
+}
+
+private final class UnconstrainedCaptureWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
     }
 }
 
