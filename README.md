@@ -83,8 +83,6 @@ sees.
   account reaches a usage percentage you choose.
 - **Automations** — saved tasks that run on a schedule or an event. They are created paused, run
   only the exact revision you approved, and cannot push, deploy or write back to their source.
-- **Remote hosts** — run a project's Claude Code terminal chats on a Linux machine over SSH, with
-  hooks, tools, transcripts, usage and Git Review carried back to the Mac.
 
 ### Accounts and usage
 
@@ -101,6 +99,24 @@ or Threading Direct from anywhere (new Macs currently need a pilot invitation). 
 off until you turn it on, and Direct verifies your Mac's paired certificate before sending
 anything, so the hosted service never sees a transcript, prompt or terminal byte. The app is not
 on the App Store yet; it can also be built from this repository.
+
+### Beyond the Mac (in development)
+
+Threading's window stays a Mac app, but more of the work underneath it is moving to other
+machines. This is not switched on in public releases yet; builds from source have it.
+
+- **Chats on a Linux host.** Choose an SSH host for a project and its Claude Code terminal chats
+  run there, with hooks, Threading's tools, transcripts, usage and Git Review carried back to the
+  Mac. The host installs verified, version-matched components from GitHub Releases, so it needs
+  no build of its own. Claude and Codex native chats on a host are next.
+- **Windows through WSL.** A Windows PC joins as a Linux host running under WSL, with a startup
+  task that keeps it reachable after a reboot. This is landing now.
+- **A portable core.** The daemon that keeps a session's terminal alive (`threading-ptyd`) ships
+  as a single static Linux binary. The experimental `threading-controller` runs queued agent work
+  on a macOS or Linux machine, such as a VPS, and agents on different hosts can mail each other.
+  The traffic-capture proxy is a portable C program built for macOS, Linux and Windows.
+- **A native Linux app** is at the research stage:
+  [`docs/feature-drafts/linux-host-runtime.md`](docs/feature-drafts/linux-host-runtime.md).
 
 ### Make it yours
 
@@ -169,7 +185,7 @@ scripts/test.sh all      # the whole suite
 | `Sources/ThreadingMobile/` | The iPhone app |
 | `Packages/` | First-party Swift packages — remote wire protocol, PTY host, extension and plugin kits, simulator and Android support, usage, Markdown |
 | `Packages/Vendor/` | SwiftTerm (vendored) and the ThinkingOrbs, LabelMorph and BorderBeamKit submodules |
-| `Targets/` | Helper executables — the PTY host, MCP bridge, proxy, trigger daemon, Simulator helper, Quick Look preview |
+| `Targets/` | Helper executables — the PTY host, controller, MCP bridge, proxy, trigger daemon, Simulator helper, Quick Look preview |
 | `Plugins/` | Native plugins that ship with the app, such as Device Logs |
 | `Service/` | The hosted rendezvous control plane and supporting services |
 | `docs/` | Architecture notes, extension authoring, feature drafts and decisions |
