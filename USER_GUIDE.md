@@ -4774,7 +4774,8 @@ device-scale, browser-engine, or complete hardware emulation.
 The current address rests as plain toolbar text. Point at it to reveal the editable field; click it
 to edit. Focus and text selection use the ordinary macOS text editor.
 When the browser tab is visible, Cmd+F opens its native find bar inside that tab.
-Cmd+R reloads while the page, its address field, or its selected tab has keyboard focus.
+Cmd+R reloads while the page, its address field, or its selected tab has keyboard focus, and
+Cmd+T opens another browser tab beside it, with the cursor in its address field.
 After a download finishes, a brief toast names the saved file and offers **Reveal in Finder**.
 You can find it later in the browser's recent downloads menu.
 When an agent calls `browser_download`, it can suggest an absolute filename and folder in the
@@ -7116,6 +7117,7 @@ Everywhere else the same keys keep their app command.
 | Action | Shortcut |
 |--------|----------|
 | Reload the page (instead of Rename Session) | Cmd+R |
+| New browser tab in the same pane (instead of Terminal) | Cmd+T |
 | Simulator: Home | Cmd+Shift+H |
 | Simulator: Lock | Cmd+L |
 | Simulator: Side Button (instead of Browser) | Cmd+Shift+B |

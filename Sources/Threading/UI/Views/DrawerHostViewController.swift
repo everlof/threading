@@ -63,6 +63,10 @@ final class DrawerHostViewController: NSViewController {
     /// where else a tab could live is the window's knowledge, not this host's.
     var transferEntries: ((UUID) -> [ThemedMenuEntry])?
 
+    /// How many browsers the session holds across every host, so the cap is the session's and
+    /// not this strip's. Unset, the drawer counts its own.
+    var sessionBrowserCount: ((SessionID) -> Int)?
+
     /// The drag half of the same wiring: whether a window point is over another pane that
     /// would adopt the tab, the move itself when the drop lands there, and the drag's end —
     /// dropped or not — so the window can settle what it arranged for the gesture. The
@@ -350,15 +354,18 @@ final class DrawerHostViewController: NSViewController {
         return controller
     }
 
+    /// Nil at the session's browser cap, which a live browser is never evicted to make room under.
     @discardableResult
     func addBrowserTab(
         for sessionID: SessionID,
         contextKind: BrowserContextKind = .shared
-    ) -> BrowserViewController {
+    ) -> BrowserViewController? {
         restoreIfNeeded(sessionID)
-        let controller = makeBrowser(for: sessionID, contextKind: contextKind)
-
         var state = statesBySession[sessionID] ?? TabListState()
+        let existing = sessionBrowserCount?(sessionID) ?? state.tabs.lazy.filter { $0.browser != nil }.count
+        guard existing < DisplayPaneDefaults.maximumBrowserTabs else { return nil }
+
+        let controller = makeBrowser(for: sessionID, contextKind: contextKind)
         let tab = PaneTab(body: .browser(controller))
         state.insert(tab)
         state.activate(id: tab.id)
@@ -427,13 +434,15 @@ final class DrawerHostViewController: NSViewController {
             .item(ThemedMenuItem(
                 title: L10n.string("Browser"),
                 image: ThemedMenuIcon.symbol("globe"),
-                onChoose: { [weak self] in _ = self?.addBrowserTab(for: sessionID) }
+                onChoose: { [weak self] in
+                    if self?.addBrowserTab(for: sessionID) == nil { SystemAlert.refuse() }
+                }
             )),
             .item(ThemedMenuItem(
                 title: L10n.string("Private Browser"),
                 image: ThemedMenuIcon.symbol("hand.raised.fill"),
                 onChoose: { [weak self] in
-                    _ = self?.addBrowserTab(for: sessionID, contextKind: .private)
+                    if self?.addBrowserTab(for: sessionID, contextKind: .private) == nil { SystemAlert.refuse() }
                 }
             ))
         ]
@@ -533,6 +542,8 @@ final class DrawerHostViewController: NSViewController {
         let active = state.activeTab
         if let active, let browser = active.browser {
             browser.tabShortcutFocusOwner = strip.chipView(for: active.id)
+            let sessionID = currentSessionID
+            browser.openNewTab = { [weak self] in sessionID.flatMap { self?.addBrowserTab(for: $0) } }
         }
         installHosted(active?.hostedController)
 

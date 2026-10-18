@@ -375,6 +375,7 @@ final class DetachedBrowserHostViewController: NSViewController {
         })
         if let active = tabs.activeTab, let browser = active.browser {
             browser.tabShortcutFocusOwner = strip.chipView(for: active.id)
+            browser.openNewTab = { [weak self] in self?.addBrowserTab() }
         }
         installHosted(tabs.activeTab?.hostedController)
     }

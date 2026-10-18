@@ -86,6 +86,8 @@ final class StandaloneBrowserWindows {
             let id = UUID()
             windows[id] = controller
             controller.onClose = { [weak self] in self?.windows.removeValue(forKey: id) }
+            // No strip to add a tab to, so ⌘T's fresh browser is a window of its own.
+            controller.browser.openNewTab = { [weak self] in self?.open().browser }
         }
         controller.showWindow(nil)
         if let url { controller.browser.navigate(to: url) }
