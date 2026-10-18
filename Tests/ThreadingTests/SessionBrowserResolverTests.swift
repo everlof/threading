@@ -57,7 +57,7 @@ final class SessionBrowserResolverTests: XCTestCase {
         drawer.showSession(sessionID)
         defer { closePanelTabs(panel, sessionID) }
 
-        let moved = drawer.addBrowserTab(for: sessionID)
+        let moved = try XCTUnwrap(drawer.addBrowserTab(for: sessionID))
         let resolver = makeResolver(panel: panel, drawer: drawer)
 
         let location = try XCTUnwrap(
@@ -78,7 +78,7 @@ final class SessionBrowserResolverTests: XCTestCase {
         drawer.showSession(sessionID)
         defer { closePanelTabs(panel, sessionID) }
 
-        let moved = drawer.addBrowserTab(for: sessionID)
+        let moved = try XCTUnwrap(drawer.addBrowserTab(for: sessionID))
         let drawerTabID = try XCTUnwrap(drawer.tabs(for: sessionID).first?.id)
         let resolver = makeResolver(panel: panel, drawer: drawer)
 
@@ -156,7 +156,7 @@ final class SessionBrowserResolverTests: XCTestCase {
         defer { closePanelTabs(panel, sessionID) }
 
         let inPanel = panel.activateBrowser(for: sessionID)
-        let inDrawer = drawer.addBrowserTab(for: sessionID)
+        let inDrawer = try XCTUnwrap(drawer.addBrowserTab(for: sessionID))
 
         let located = makeResolver(panel: panel, drawer: drawer).locations(for: sessionID)
 
@@ -438,7 +438,7 @@ final class SessionBrowserResolverTests: XCTestCase {
         drawer.showSession(sessionID)
         defer { closePanelTabs(panel, sessionID) }
 
-        let moved = drawer.addBrowserTab(for: sessionID)
+        let moved = try XCTUnwrap(drawer.addBrowserTab(for: sessionID))
         let coordinator = AgentToolCoordinator(
             displayPaneController: panel,
             browserResolver: makeResolver(panel: panel, drawer: drawer),

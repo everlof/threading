@@ -3301,6 +3301,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         containerViewController.drawerHostController.transferEntries = { [weak self] tabID in
             self?.transferMenuEntries(from: .drawer, tabID: tabID) ?? []
         }
+        containerViewController.drawerHostController.sessionBrowserCount =
+            displayPaneController.sessionBrowserCount
 
         displayPaneController.dragOutDestination = { [weak self] tabID, windowPoint in
             guard let self, let point = screenPoint(windowPoint, in: displayPaneController.view)

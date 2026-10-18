@@ -352,6 +352,12 @@ related control, independent of page size and retained tab/session counts; no ev
 focus transfer is added. Shortcut routing and navigation remain host-owned when a tab header's
 presentation is customized.
 
+Cmd+T follows the same scope and takes it from the Terminal command: it opens a shared browser
+beside the focused one and moves the keyboard to the new address field. Only the host knows its
+strip, so each host's render sets `openNewTab` beside the focus owner. The panel, drawer and
+detached window add a tab there under the session-wide browser cap, and beep at it rather than
+evict a live browser. The standalone browser has no strip, so it opens another window.
+
 `browser_emulate` applies public per-view WebKit conditions to the active tab. `NSAppearance`
 makes `prefers-color-scheme`, matchMedia, rendered pixels, and screenshots agree without changing
 Threading's window or global appearance; `WKWebView.customUserAgent` changes JavaScript identity and

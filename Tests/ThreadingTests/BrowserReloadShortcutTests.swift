@@ -20,6 +20,112 @@ final class BrowserReloadShortcutTests: HostedStoreTestCase {
         }
     }
 
+    /// ⌘T belongs to Terminal in the menu; with browser focus it opens another browser in the
+    /// same host and hands the keyboard to its address field, up to the session's cap.
+    func testCommandTOpensABrowserTabOnlyWhileTheBrowserHasFocus() throws {
+        for host in Host.allCases {
+            try assertNewTabShortcut(in: host)
+        }
+    }
+
+    private enum NewTabFocus: CaseIterable { case address, page, tab }
+
+    private func assertNewTabShortcut(in kind: Host) throws {
+        let factory: @MainActor (BrowserContextKind, ProjectID?) -> BrowserViewController = { context, _ in
+            BrowserViewController(contextKind: context, websiteDataStore: .nonPersistent())
+        }
+        let sessionID = SessionID()
+        let host: NSViewController & TabHosting
+        let fillToCap: () -> Void
+        switch kind {
+        case .panel:
+            let panel = DisplayPaneController(browserFactory: factory)
+            _ = panel.view
+            panel.showSessionTabs(sessionID)
+            XCTAssertNotNil(panel.addBrowserTab(for: sessionID))
+            fillToCap = { panel.sessionBrowserCount = { _ in DisplayPaneDefaults.maximumBrowserTabs } }
+            host = panel
+        case .drawer:
+            let drawer = DrawerHostViewController(
+                directoryProvider: { _ in nil },
+                browserFactory: factory,
+                loadPanel: { _ in nil },
+                persistDrawer: { _, _, _, _ in }
+            )
+            _ = drawer.view
+            drawer.showSession(sessionID)
+            XCTAssertNotNil(drawer.addBrowserTab(for: sessionID))
+            fillToCap = { drawer.sessionBrowserCount = { _ in DisplayPaneDefaults.maximumBrowserTabs } }
+            host = drawer
+        case .detached:
+            let detached = DetachedBrowserHostViewController(sessionID: sessionID, browserFactory: factory)
+            _ = detached.view
+            XCTAssertNotNil(detached.addBrowserTab())
+            fillToCap = { detached.sessionBrowserCount = { DisplayPaneDefaults.maximumBrowserTabs } }
+            host = detached
+        }
+        let browsers = { host.tabs(for: sessionID).compactMap(\.browser) }
+        let rect = NSRect(origin: NSPoint(x: -10_000, y: -10_000), size: NSSize(width: 480, height: 360))
+        let window = NSWindow(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.animationBehavior = .none
+        window.isReleasedWhenClosed = false
+        window.contentViewController = host
+        NSLayoutConstraint.activate([
+            host.view.widthAnchor.constraint(equalToConstant: 480),
+            host.view.heightAnchor.constraint(equalToConstant: 360)
+        ])
+        window.setFrameOrigin(rect.origin)
+        defer {
+            window.makeFirstResponder(nil)
+            window.orderOut(nil)
+            window.contentViewController = nil
+        }
+        window.orderFront(nil)
+        host.view.layoutSubtreeIfNeeded()
+
+        let commandT = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [.command], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: "t",
+            charactersIgnoringModifiers: "t", isARepeat: false, keyCode: 17
+        ))
+
+        XCTAssertTrue(window.makeFirstResponder(nil))
+        XCTAssertFalse(window.performKeyEquivalent(with: commandT),
+                       "without browser focus ⌘T must reach the menu's Terminal command in \(kind)")
+        XCTAssertEqual(browsers().count, 1)
+
+        for focus in NewTabFocus.allCases {
+            let active = try XCTUnwrap(browsers().last)
+            let address = try XCTUnwrap(descendant(BrowserChromeBar.self, in: active.view)).addressField
+            let responder: NSView
+            switch focus {
+            case .address: responder = address
+            case .page: responder = active.webView
+            case .tab: responder = try XCTUnwrap(active.tabShortcutFocusOwner)
+            }
+            XCTAssertTrue(window.makeFirstResponder(responder))
+            let before = browsers().count
+
+            XCTAssertTrue(window.performKeyEquivalent(with: commandT), "⌘T with \(focus) focus in \(kind)")
+
+            let opened = try XCTUnwrap(browsers().last)
+            XCTAssertEqual(browsers().count, before + 1, "⌘T with \(focus) focus in \(kind) opens one browser")
+            XCTAssertFalse(opened === active)
+            XCTAssertTrue(opened.view.window === window, "the new browser is shown in the same \(kind)")
+            let openedAddress = try XCTUnwrap(descendant(BrowserChromeBar.self, in: opened.view)).addressField
+            let focused = ((window.firstResponder as? NSText)?.delegate as? NSView) ?? window.firstResponder as? NSView
+            XCTAssertTrue(focused?.isDescendant(of: openedAddress) == true,
+                          "the new tab in \(kind) takes the keyboard at its address field")
+        }
+
+        fillToCap()
+        let atCap = browsers().count
+        let last = try XCTUnwrap(browsers().last)
+        XCTAssertTrue(window.makeFirstResponder(last.webView))
+        XCTAssertTrue(window.performKeyEquivalent(with: commandT), "at the cap ⌘T is still the browser's")
+        XCTAssertEqual(browsers().count, atCap, "at the cap \(kind) refuses rather than evicting a browser")
+    }
+
     private func assertReloadShortcut(in kind: Host, throughApplication: Bool) throws {
         let pages = ReloadCountingPageHandler()
         let browser = BrowserViewController(urlSchemeHandlers: ["threading-reload": pages])

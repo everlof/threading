@@ -523,6 +523,11 @@ final class BrowserViewController: NSViewController {
         }
     }
 
+    /// Opens a fresh browser beside this one for ⌘T, in whichever host is showing it — only the
+    /// host knows its strip. Hosts set it with `tabShortcutFocusOwner`; nil means the session's
+    /// browser cap refused. Unset, ⌘T stays the app's Terminal command.
+    var openNewTab: (() -> BrowserViewController?)?
+
     /// The address text a navigation last wrote. `syncAddress` compares the field editor against
     /// it to tell a user's half-typed destination from a field that merely holds focus.
     private var syncedAddress = ""
@@ -2758,12 +2763,18 @@ final class BrowserViewController: NSViewController {
     @objc private func goForward() { webView.goForward() }
     @objc private func reload() { webView.reload() }
 
-    /// ⌘R reloads while focus belongs to the page, address bar, or selected browser tab.
-    /// Outside it the chord stays Rename Session's. The chord is the browser's own
-    /// rather than read from the command table, so rebinding Rename does not move Reload.
+    /// ⌘R reloads and ⌘T opens a browser tab while focus belongs to the page, address bar, or
+    /// selected browser tab. Outside it the chords stay Rename Session's and Terminal's. They
+    /// are the browser's own rather than read from the command table, so rebinding Rename or
+    /// Terminal does not move Reload or New Tab.
     private func performBrowserShortcut(_ event: NSEvent) -> Bool {
         if BrowserDefaults.addressShortcut.matches(event) {
             focusAddress()
+            return true
+        }
+        if BrowserDefaults.newTabShortcut.matches(event), let openNewTab {
+            // Straight to the address, as a new tab is for typing where to go.
+            if let opened = openNewTab() { opened.focusAddress() } else { SystemAlert.refuse() }
             return true
         }
         guard BrowserDefaults.reloadShortcut.matches(event) else { return false }
@@ -4584,6 +4595,7 @@ enum BrowserDefaults {
     static let searchPrefix = "https://duckduckgo.com/?q="
     static let reloadShortcut = KeyboardShortcut(key: "r", modifiers: .command)
     static let addressShortcut = KeyboardShortcut(key: "l", modifiers: .command)
+    static let newTabShortcut = KeyboardShortcut(key: "t", modifiers: .command)
     static let consoleMessageHandler = "threadingConsole"
     static let networkMessageHandler = "threadingNetwork"
     static let navigationReadinessMessageHandler = "threadingNavigationReadiness"
