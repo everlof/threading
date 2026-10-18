@@ -20,6 +20,10 @@
   Apple silicon · macOS 13 or later · Free and open source under GPLv3
 </p>
 
+<p align="center">
+  <img src="docs/assets/readme/mac-threading-claude-review.png" alt="The Threading window: projects and chats in the sidebar, a Claude Code terminal in the middle, and Git Review of its changes on the right">
+</p>
+
 ---
 
 Threading is not a coding agent. The agents you already use do the coding; Threading runs their
@@ -57,6 +61,10 @@ as it does anywhere else.
 - **Managed workspaces** — give a session its own Git worktree, then merge it, keep it for
   review, or open a pull request.
 - **Execution Audit** — a local, hash-linked record of every tool call and permission answer.
+
+<p align="center">
+  <img src="docs/assets/readme/mac-git-review.png" width="600" alt="Git Review showing an uncommitted diff with per-file Stage File buttons">
+</p>
 
 ### Tools for agents
 
@@ -100,6 +108,19 @@ off until you turn it on, and Direct verifies your Mac's paired certificate befo
 anything, so the hosted service never sees a transcript, prompt or terminal byte. The app is not
 on the App Store yet; it can also be built from this repository.
 
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/assets/readme/ios-session-list.png" width="240" alt="The iPhone session list for a paired Mac, with each chat's status"></td>
+    <td align="center"><img src="docs/assets/readme/ios-claude-tui.png" width="240" alt="A Claude Code terminal on iPhone, with its task strip and terminal key bar"></td>
+    <td align="center"><img src="docs/assets/readme/ios-codex-tui.png" width="240" alt="A Codex terminal on iPhone showing a diff"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Every chat on your Mac, at a glance</sub></td>
+    <td align="center"><sub>Claude Code's own terminal</sub></td>
+    <td align="center"><sub>Codex, with its diff</sub></td>
+  </tr>
+</table>
+
 ### Beyond the Mac (in development)
 
 Threading's window stays a Mac app, but more of the work underneath it is moving to other
@@ -128,7 +149,78 @@ machines. This is not switched on in public releases yet; builds from source hav
 - **Command palette and editable shortcuts** for every action, and a standalone **Markdown
   editor** with Finder Quick Look.
 
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/assets/readme/theme-tui-swiss.png" width="400" alt="A Codex terminal and Git Review in the light Swiss Minimalist theme"></td>
+    <td align="center"><img src="docs/assets/readme/theme-tui-cyberpunk.png" width="400" alt="The same Codex terminal and Git Review in the dark Cyberpunk theme"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Swiss Minimalist</sub></td>
+    <td align="center"><sub>Cyberpunk</sub></td>
+  </tr>
+</table>
+
 The [user guide](USER_GUIDE.md) covers every feature and shortcut in detail.
+
+## How it fits together
+
+Everything runs on your Mac unless you add another machine. The iPhone and any Linux host
+connect *to* the Mac and are driven from it; nothing needs to be installed in the cloud.
+
+```mermaid
+flowchart TB
+    subgraph PHONE["📱 iPhone"]
+        IOS["<b>Threading for iPhone</b><br/>chats · terminal · review · approvals"]
+    end
+
+    CLOUD["☁️ <b>Threading service</b><br/>pairing · signalling · push<br/>never sees terminal content"]
+
+    subgraph MAC["💻 Your Mac"]
+        APP["<b>Threading.app</b><br/>sidebar · terminals · Git Review · browser<br/>agent tools (MCP) · Remote Access<br/><i>+ proxy, Simulator and extension helpers</i>"]
+        DAEMONS["<b>launchd daemons</b><br/>threading-ptyd · optional, keeps chats alive after quit<br/>threading-triggerd · wakes automations"]
+        AGENTS["<b>Agent CLIs</b> · one per chat<br/>claude · codex · grok · opencode · cursor-agent"]
+        APP <-->|"starts · tools + hooks"| AGENTS
+        APP <--> DAEMONS
+        DAEMONS -.->|"or hosts"| AGENTS
+    end
+
+    subgraph HOST["🐧 Linux or WSL host, over SSH · in development"]
+        CTRL["<b>threading-controller</b><br/>runs queued agent work"]
+        HPTYD["<b>threading-ptyd</b>"]
+        HAGENT["<b>claude</b> + MCP bridge"]
+        CTRL --> HPTYD --> HAGENT
+    end
+
+    PROVIDERS["<b>Model providers</b><br/>Anthropic · OpenAI · xAI and more<br/>with your own accounts"]
+
+    CLOUD -.->|"push"| PHONE
+    PHONE <-->|"Wi-Fi · VPN · Tailscale<br/>or Threading Direct (WebRTC)"| MAC
+    CLOUD -.- MAC
+    MAC ==> HOST
+    AGENTS -->|"HTTPS"| PROVIDERS
+    HAGENT -->|"HTTPS"| PROVIDERS
+```
+
+- **Agents are the provider's own command-line tools.** Threading launches each one through
+  your login shell in the project folder, so it finds the same `PATH` and sign-ins as your
+  terminal, and it talks to its provider directly. Threading sells no model access and sits in
+  no model traffic.
+- **Agents call back into Threading** through a local MCP server for its tools — browser,
+  Simulator, display panel, notifications, other sessions — and, for Claude Code and Codex,
+  through lifecycle hooks that report when a turn starts, stops or needs you. For a chat on the
+  Mac, both stay on the Mac.
+- **Two small launchd daemons.** `threading-ptyd` is optional: with it on, chats run under it
+  instead of the app, so quitting Threading hands them over rather than ending them, and the next
+  launch takes them back. `threading-triggerd` watches automation event sources and wakes
+  Threading when one fires.
+- **The iPhone connects to the Mac**, never to a server holding your work. Threading Direct uses
+  the hosted service to introduce the two devices and send push notifications; the connection
+  itself is end-to-end encrypted WebRTC, peer-to-peer when possible and relayed through TURN
+  when not.
+- **A Linux host is driven over SSH.** One tunnel carries the chat's terminal to the Mac and
+  Threading's tools and hooks back to the agent, and the transcript is mirrored back to the
+  Mac. `threading-controller` can also run queued agent work there on its own, driven from the
+  Mac over SSH. See [Beyond the Mac](#beyond-the-mac-in-development).
 
 ## Install
 
