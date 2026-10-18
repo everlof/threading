@@ -223,6 +223,18 @@ The protocol needs operation ids rather than relying on stable personal identifi
 Optional fields must be introduced compatibly; diagnostics must never force an otherwise
 compatible old client to update.
 
+**Every route reaching TLS and then waiting is the Mac's main queue, not the network.** When a
+phone's report shows `trust.accepted` with `tcpMS`/`tlsMS` of a few milliseconds, catalogue
+requests ending at `networkStage: server`, and sockets failing `connection.helloTimeout` — on
+LAN, Tailscale and Hosted Direct alike — the listener accepted and the answer never left,
+because hellos and catalogue projections are answered on the main queue. Read the Mac's
+`Performance/Stalls` incidents for that window before the network: both known occurrences were
+a `ThemedAlert` modal session waiting for a click on an unattended Mac
+([`launch-failure.md`](architecture/launch-failure.md),
+[`design-system.md`](architecture/design-system.md)). The Mac's remote journal records no
+`socketConnected` or `terminalAttachEnded` for that window, since those are recorded on the
+queue that is waiting.
+
 ## Health checks
 
 Checks are read-only unless the user explicitly chooses a test delivery.

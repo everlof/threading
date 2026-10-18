@@ -278,7 +278,9 @@ final class ArtifactScanService {
     /// still writing.
     func refresh(_ project: Project, force: Bool = false) {
         guard !inFlight.contains(project.id) else { return }
-        guard force || !isWorking(project) else { return }
+        guard Self.mayScan(force: force, busy: isWorking(project), lastScannedAt: scans[project.id]?.scannedAt) else {
+            return
+        }
 
         inFlight.insert(project.id)
         notifyChanged()
@@ -319,7 +321,9 @@ final class ArtifactScanService {
     /// project busy" would answer about the wrong disk.
     func refreshScratch(force: Bool = false) {
         guard !isScratchInFlight else { return }
-        guard force || !isAnySessionWorking() else { return }
+        guard Self.mayScan(force: force, busy: isAnySessionWorking(), lastScannedAt: scratchScan?.scannedAt) else {
+            return
+        }
 
         isScratchInFlight = true
         notifyChanged()
@@ -330,13 +334,23 @@ final class ArtifactScanService {
         // census is a fact about the moment the scan starts, not something to sample repeatedly
         // from a background queue while directories are being measured.
         let dormantSessionIDs = DormantSessionCensus.dormant(in: projectsProvider())
+        // Paths only, taken here for the same reason: the project files they are joined to are
+        // found on the queue, where filesystem work belongs.
+        let workspaceProjects = projectsProvider().map { project in
+            XcodeWorkspaceCandidates.Project(
+                folder: project.folderPath,
+                checkouts: project.sessions.map { $0.workingDirectory(in: project) }
+            )
+        }
         let startedAt = Date()
         ThreadingLogger.storage.debug(
             "Scratch scan started roots=\(roots.count, privacy: .public) dormant_sessions=\(dormantSessionIDs.count, privacy: .public) forced=\(force, privacy: .public)"
         )
 
         queue.async { [weak self] in
-            let xcodeArtifacts = derivedDataRoot.map { XcodeDerivedDataScanner.scan(root: $0) } ?? []
+            let xcodeArtifacts = derivedDataRoot.map {
+                XcodeDerivedDataScanner.scan(root: $0, candidates: XcodeWorkspaceCandidates.gather(workspaceProjects))
+            } ?? []
             let artifacts = xcodeArtifacts + ArtifactScanner.scanScratch(
                 roots: roots,
                 dormantSessionIDs: dormantSessionIDs
@@ -438,6 +452,20 @@ final class ArtifactScanService {
         Self.isWorking(project.sessions)
     }
 
+    /// Whether a pass may start: always when forced or when nothing is working, and otherwise only
+    /// once an existing reading has waited out `busyDeferralLimit`.
+    ///
+    /// The busy rule is a courtesy to a build in progress, and it was never meant to be a gate —
+    /// but on a machine where some agent is always working it became one. Measured on 2026-10-17
+    /// with agents running continuously in four projects: the external reading was a day old with
+    /// the disk at 99%, and three live Xcode caches holding 26 GB were not in it at all. A reading
+    /// that has never been taken still waits for a quiet moment, as before.
+    static func mayScan(force: Bool, busy: Bool, lastScannedAt: Date?, now: Date = Date()) -> Bool {
+        if force || !busy { return true }
+        guard let lastScannedAt else { return false }
+        return now.timeIntervalSince(lastScannedAt) > ArtifactScanDefaults.busyDeferralLimit
+    }
+
     /// Whether any session anywhere is working, which is the scratch scope's busy rule — asked
     /// of the same project list the passive sweep walks, so the two cannot disagree about what
     /// exists.
@@ -497,4 +525,8 @@ enum ArtifactScanDefaults {
 
     /// When a reading stops being worth showing without checking again.
     static let staleAfter: TimeInterval = 60 * 60
+
+    /// The longest the busy rule may hold back a reading that already exists. Past this, a stale
+    /// scope is measured while agents work, at `.background` priority.
+    static let busyDeferralLimit: TimeInterval = 6 * 60 * 60
 }

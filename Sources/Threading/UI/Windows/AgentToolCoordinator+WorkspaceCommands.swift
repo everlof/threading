@@ -29,11 +29,14 @@ extension AgentToolCoordinator {
                 if let parent = row.forkedFrom {
                     line += " (side chat of \(parent.uuidString.lowercased()))"
                 }
+                if let parent = row.subagentParentID {
+                    line += " (subagent of \(parent.uuidString.lowercased()))"
+                }
                 return line
             }
 
             let footer = rows.count > 1
-                ? "send_to_session delivers a message to one of the others by its id."
+                ? "mail_send writes to one of the others by its id; it reads the text with mail_inbox."
                 : "This session is the only one here; there is no one to message yet."
             return .success(([heading] + lines + [footer]).joined(separator: "\n"))
         }

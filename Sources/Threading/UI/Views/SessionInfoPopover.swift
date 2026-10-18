@@ -117,6 +117,14 @@ final class SessionInfoPopoverViewController: NSViewController {
                         Int64(count),
                         detail.isEmpty ? "" : " · \(detail)"
                     )
+            } else if let parentID = session.subagentParentID,
+                      let parent = ProjectStore.shared.session(withID: parentID) {
+                // The brief is the tenure's while it lasts; the lineage outlives it.
+                let brief = supervision.managedBy == parentID
+                    ? supervision.brief?.split(whereSeparator: \.isNewline).first.map(String.init)
+                    : nil
+                roleLine = [L10n.format("Subagent of %@", parent.displayTitle), brief]
+                    .compactMap { $0 }.joined(separator: " · ")
             } else if let managerID = supervision.managedBy,
                       let manager = ProjectStore.shared.session(withID: managerID) {
                 let brief = supervision.brief?

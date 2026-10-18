@@ -12,25 +12,43 @@ final class ControlGrantStore {
         let projects: ProjectStore
         let events: NotificationCenter
         let now: () -> Date
+        /// Told when an archive is about to close a child's tenure, while the manager's
+        /// subscription to that child still exists to carry the notice.
+        var childArchived: @MainActor (Supervision) -> Void = { _ in }
     }
 
-    static let shared = ControlGrantStore(
+    static let shared: ControlGrantStore = ControlGrantStore(
         dependencies: Dependencies(
             state: .shared,
             projects: .shared,
             events: .default,
-            now: Date.init
+            now: Date.init,
+            childArchived: tellSubscribedManager
         )
     )
 
+    /// A function rather than an inline closure: `SupervisionSubscriptionCenter.shared` reads
+    /// this store in its own initializer, and two inferred static initializers naming each
+    /// other are a circular reference to the type checker.
+    private static func tellSubscribedManager(_ supervision: Supervision) {
+        SupervisionSubscriptionCenter.shared.childArchived(supervision)
+    }
+
     private let dependencies: Dependencies
+    private let observations: AppEventObservations
     private var grantsBySession: [SessionID: [ControlGrant]] = [:]
     private var supervisionsByManager: [SessionID: [Supervision]] = [:]
     private var supervisionsByChild: [SessionID: [Supervision]] = [:]
     private var eventsBySupervision: [SupervisionID: [SupervisionEvent]] = [:]
+    private var expectedManagerArchives: [SessionID: SessionID] = [:]
 
     init(dependencies: Dependencies) {
         self.dependencies = dependencies
+        observations = AppEventObservations(center: dependencies.events)
+        observations.observe(SessionArchivedStateDidChange.self) { [weak self] event in
+            guard event.isArchived else { return }
+            self?.sessionWasArchived(event.sessionID)
+        }
     }
 
     // MARK: - Grants
@@ -79,6 +97,7 @@ final class ControlGrantStore {
     func effectiveOperations(for sessionID: SessionID) -> Set<ControlOperation> {
         ControlOperation.regularProjectOperations
             .union(ControlOperation.regularSelfOperations)
+            .union(ControlOperation.implicitOnlyOperations)
             .union(activeGrants(for: .agentSession(sessionID)).flatMap(\.operations))
     }
 
@@ -253,8 +272,19 @@ final class ControlGrantStore {
         )
     }
 
-    /// Closes the relationship only after provider-backed archival succeeded, preserving the
-    /// manager attribution for the Archived settings row and audit history.
+    /// Marks an archive `managerID` asked for, so the archive edge closes the child's tenure as
+    /// the manager's. It has to be recorded before archiving starts: the edge can arrive before
+    /// the archive's own completion, so attribution written afterwards would be too late.
+    func expectArchive(of childID: SessionID, by managerID: SessionID) {
+        expectedManagerArchives[childID] = managerID
+    }
+
+    func cancelExpectedArchive(of childID: SessionID) {
+        expectedManagerArchives.removeValue(forKey: childID)
+    }
+
+    /// Closes the relationship as the manager's archive, preserving the manager attribution for
+    /// the Archived settings row and audit history.
     @discardableResult
     func archive(childID: SessionID, by managerID: SessionID) -> Bool {
         switch close(
@@ -343,6 +373,35 @@ final class ControlGrantStore {
     }
 
     // MARK: - Private
+
+    /// Every archive closes the archived chat's tenures, whichever route filed it: the sidebar,
+    /// the iPhone, the provider's own archive, the chat's agent or its manager.
+    ///
+    /// Only the manager's own request closes as `.archived`, because Settings ▸ Archived credits
+    /// the manager with exactly that. Any other route releases, so the child stops counting
+    /// against the manager's live children and leaves its Chats tab. Before this, only the
+    /// manager's route closed anything, and a child the user archived stayed "managed" for good.
+    ///
+    /// An archived manager releases its children: it can no longer act for them, and the
+    /// one-manager rule would otherwise keep any other manager from adopting them.
+    private func sessionWasArchived(_ sessionID: SessionID) {
+        let requestedBy = expectedManagerArchives.removeValue(forKey: sessionID)
+        if let supervision = activeManager(of: sessionID) {
+            dependencies.childArchived(supervision)
+            if requestedBy == supervision.managerID {
+                archive(childID: sessionID, by: supervision.managerID)
+            } else {
+                _ = close(
+                    childID: sessionID,
+                    by: supervision.managerID,
+                    state: .released,
+                    event: .archived,
+                    outcome: "Archived, not by its manager"
+                )
+            }
+        }
+        releaseAllChildren(of: sessionID, outcome: "Manager archived")
+    }
 
     private func invalidateSupervision(managerID: SessionID, childID: SessionID) {
         supervisionsByManager.removeValue(forKey: managerID)

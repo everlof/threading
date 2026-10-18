@@ -1264,6 +1264,7 @@ final class SimulatorPaneViewController: NSViewController {
             }
         }
         if !requiresLeaseRefresh, let lease, deviceID == nil || lease.device.id == deviceID {
+            reconnectTransportForInputIfNeeded(on: lease.device.id)
             completion(.success(lease))
             return
         }
@@ -2167,7 +2168,9 @@ final class SimulatorPaneViewController: NSViewController {
             inputAuthorizer.resetDecision(for: device.id)
             controlAuthorizationDecisions.removeValue(forKey: device.id)
         }
-        reconnectTransportForInputIfNeeded(on: device.id)
+        if inputAuthorizer.decision(for: device.id) == false {
+            throw ControlAuthorizationError.denied(device.name, device.platform)
+        }
         let session = try await awaitLiveSession(for: device.id)
         let approved = await inputAuthorization(for: device)
         controlAuthorizationDecisions[device.id] = approved
@@ -2200,6 +2203,18 @@ final class SimulatorPaneViewController: NSViewController {
     private func awaitLiveSession(
         for deviceID: SimulatorDeviceID
     ) async throws -> any SimulatorLiveStreamSession {
+        // One bounded recovery before inspection or input. Never replay input whose delivery
+        // already started: a missing acknowledgement is not proof that a tap did not happen.
+        if requiresLeaseRefresh, lease?.device.id == deviceID {
+            let result: SimulatorPaneAgentResult<SimulatorDeviceLease> = await withCheckedContinuation { continuation in
+                prepareForAgent(deviceID: deviceID) { continuation.resume(returning: $0) }
+            }
+            if case .failure(let message) = result {
+                throw SimulatorLiveStreamError.helperUnavailable(message)
+            }
+        }
+        try Task.checkCancellation()
+        reconnectTransportForInputIfNeeded(on: deviceID)
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(4))
         var openedOnDemand = false
@@ -2212,9 +2227,10 @@ final class SimulatorPaneViewController: NSViewController {
                 throw SimulatorLiveStreamError.helperUnavailable(message)
             }
             if let streamSession, liveCapabilities != nil { return streamSession }
-            if case .screenshotFallback = liveBackend {
+            if case .screenshotFallback(let reason) = liveBackend {
                 throw SimulatorLiveStreamError.helperUnavailable(
-                    "Direct Simulator control is unavailable while the pane uses screenshot fallback."
+                    "Direct Simulator control could not recover: \(reason.prefix(Self.maximumDiagnosticCharacters)). "
+                        + "Call simulator_prepare with device_id \(deviceID.rawValue) to retry the same device."
                 )
             }
             // A hidden pane has no transport once its grace lapses, and nothing else will open one

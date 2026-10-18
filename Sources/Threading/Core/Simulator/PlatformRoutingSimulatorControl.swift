@@ -23,6 +23,10 @@ final class PlatformRoutingSimulatorControl: SimulatorControlling, @unchecked Se
 
     var supportsAndroid: Bool { android != nil }
 
+    func createDevice(_ request: SimulatorDeviceCreationRequest) async throws -> SimulatorDevice {
+        try await iOS.createDevice(request)
+    }
+
     func availableDevices() async throws -> [SimulatorDevice] {
         guard let android else { return try await iOS.availableDevices() }
         async let iOSDevices = Self.result { try await self.iOS.availableDevices() }

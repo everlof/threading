@@ -328,6 +328,44 @@ final class SessionAttachmentStoreTests: XCTestCase {
         XCTAssertEqual(makeStore().attachment(for: session, id: attachment.id)?.id, attachment.id)
     }
 
+    func testAComparisonDiffIsKeptAsAnImmutableDiffThatSurvivesAReload() throws {
+        let store = makeStore()
+        let session = SessionID()
+        let diff = Data("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n".utf8)
+
+        let first = try XCTUnwrap(store.recordGeneratedDiff(
+            diff,
+            title: "design-system.md",
+            sessionID: session
+        ))
+        let second = try XCTUnwrap(store.recordGeneratedDiff(
+            diff,
+            title: "design-system.md",
+            sessionID: session
+        ))
+
+        XCTAssertEqual(first.kind, .diff)
+        XCTAssertEqual(first.name, "design-system.md.diff")
+        XCTAssertTrue(first.isImmutableSnapshot)
+        XCTAssertNotEqual(first.id, second.id, "each showing is its own moment, never deduplicated")
+        XCTAssertEqual(try Data(contentsOf: first.url), diff)
+        // Every read re-derives the kind from the file's extension, so a kept diff that did not
+        // classify would vanish from the list the first time anything read it back.
+        XCTAssertEqual(makeStore().attachment(for: session, id: first.id)?.kind, .diff)
+    }
+
+    func testDiffAndPatchFilesClassifyButAreNotScannedFromOutput() {
+        XCTAssertEqual(AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/tmp/a.diff")), .diff)
+        XCTAssertEqual(
+            AttachmentReferenceDetector.kind(for: URL(fileURLWithPath: "/tmp/0001-fix.patch")),
+            .diff
+        )
+        // `git format-patch` prints a column of these; none of them is a handoff.
+        XCTAssertTrue(
+            AttachmentReferenceDetector.candidates(in: "wrote 0001-fix.patch and `a.diff`").isEmpty
+        )
+    }
+
     func testNotificationTargetReferencesAreScopedOpaqueAndExpiring() throws {
         var instant = Date(timeIntervalSince1970: 1_000)
         let registry = NotificationTargetRegistry(now: { instant })

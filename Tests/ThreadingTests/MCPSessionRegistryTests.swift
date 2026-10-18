@@ -1101,9 +1101,13 @@ final class MCPWireTests: XCTestCase {
     XCTAssertTrue(prefix.contains("browser_navigate opens a tab"))
     XCTAssertTrue(prefix.contains("browser_navigate"))
     XCTAssertTrue(prefix.contains("browser_snapshot"))
-    XCTAssertTrue(prefix.contains("another chat/session"))
+    XCTAssertTrue(prefix.contains("other chats"))
     XCTAssertTrue(prefix.contains("list_sessions"))
-    XCTAssertTrue(prefix.contains("send_to_session"))
+    XCTAssertTrue(prefix.contains("mail_send"))
+    XCTAssertFalse(
+      prefix.contains("send_to_session"),
+      "agents told each other things through send_to_session's user turns while mail existed"
+    )
     XCTAssertTrue(prefix.contains("watch_session"))
     XCTAssertTrue(prefix.contains("display panel"))
     XCTAssertTrue(prefix.contains("archive_session"))
@@ -1154,9 +1158,9 @@ final class MCPWireTests: XCTestCase {
     XCTAssertFalse(sessionPrefix.contains("list_reclaimable_storage"))
 
     let workspacePrefix = MCPToolCatalog.decisionPrefix(for: [MCPToolCatalog.workspace])
-    XCTAssertTrue(workspacePrefix.contains("another chat/session"))
+    XCTAssertTrue(workspacePrefix.contains("other chats"))
     XCTAssertTrue(workspacePrefix.contains("list_sessions"))
-    XCTAssertTrue(workspacePrefix.contains("send_to_session"))
+    XCTAssertTrue(workspacePrefix.contains("mail_send"))
     XCTAssertTrue(workspacePrefix.contains("watch_session"))
     XCTAssertFalse(workspacePrefix.contains("archive_session"))
   }

@@ -530,6 +530,10 @@ FSEvents owners (Codex rollout and extension-theme watchers), synchronous Git me
 and project-script catalog loading retain their existing boundaries; this repair does not claim
 that all chat-selection work is now off-main.
 
+The extension-theme watcher later moved onto the shared `FileSystemEventStream` worker. It now
+gets the same off-main registration and post-registration read as checkout and project-script
+watchers; the Codex rollout observer still owns its direct stream.
+
 Validation used a detached checkout of the installed revision with the production watcher patch:
 44 focused tests passed across stream lifecycle, Git filtering, branch following, and project
 scripts, including native atomic replacement. The latency lint and its self-tests passed. An
@@ -1197,13 +1201,62 @@ at 60 ms and the live cell count at 500. Its first unpaced version ran much fast
 and introduced compositor/recorder backpressure; the fixture now leaves the remainder of each
 100 ms tick to the run loop, just as production does. The product's capture cadence is unchanged.
 
-Streaming uses `noteNumberOfRowsChanged` and configures existing viewport labels in place;
-fixed-height cells keep their labels and use frame layout. Programmatic updates preserve follow,
+A strict stream tells the table exactly what happened — `removeRows` at the head, `insertRows` at
+the tail — and moves the viewport inside that same update, so lines already on screen keep their
+cells, text and drawn layers. Only a followed tail that brings a whole viewport of new lines
+re-binds the existing cells in place (`noteNumberOfRowsChanged`), because nothing on screen
+survives it and building fresh rows costs more; fixed-height cells keep their labels and use frame
+layout. Programmatic updates preserve follow,
 paused line position and selection. Context projection and filtered bursts above 2,048 rows use
 the cancellable snapshot worker, while ordinary strict filtering tests only incoming rows.
 Tests also hold a displayed snapshot steady while capture rolls, then restore its selected line.
 
-The same investigation found a second freeze in USB source lifecycle: global `ps -Ao … args=`
+The 2026-10-18 report — opening Device Logs on a USB iPhone took "so much CPU" — was measured by
+replaying 14 s of a real `pymobiledevice3 syslog live --native --format json` capture (2,614
+rows/s; 75% Debug) through the shipping pane in an onscreen 1,400 × 1,000 window at the production
+100 ms cadence. The earlier fixture missed both causes: every generated row matched Info and
+above, so the filtered count never changed and the table never churned.
+
+- **Re-binding by row number.** Under a level filter the matched count changed on 98 of 100 ticks,
+  so the visible row numbers moved and AppKit built ~30 new cells a tick that were never reused.
+  A reader scrolled up to read held the main thread at 46% while nothing they saw changed. With
+  `removeRows`/`insertRows` alone that fell only to 34%: the head removal slid every row under a
+  stationary clip view, the table built a whole fresh viewport for that position, and the
+  compensating scroll then tore it down. Moving the clip view inside the update made it 7%.
+- **Reading what the view hides.** The pane opens at Info and above, but the reader asked the phone
+  for Debug, then parsed, buffered and recorded it (the trigram FTS insert alone was 15% of a core).
+  The level menu now scopes capture; see
+  [the device-log draft](../feature-drafts/device-and-simulator-logs.md#exact-app-scope-and-strict-filtering-september-2026).
+  Measured live from the phone over 10 s, `pymobiledevice3` itself went from 2,237 rows/s at 12%
+  of a core to ~500 rows/s at 3.5%.
+
+Matched Release-optimised SwiftPM runs, old pane on the full stream against the new pane on the stream a
+reader at Info and above now receives (729 rows/s), two repetitions each:
+
+| Threading process, % of one core | Before | After |
+|---|---|---|
+| Following (main thread) | 58–89% | 37–39% |
+| Following (process) | 72–112% | 43–44% |
+| Scrolled up, paused (main thread) | 46% | 7–8% |
+| Scrolled up, paused (process) | 66% | 13% |
+
+The machine's load average was 370–520 throughout (other sessions' builds and a VM), so absolute
+figures are inflated and only the back-to-back comparisons carry weight. What remains while
+following is AppKit typesetting and drawing ~285 text cells ten times a second whenever arrivals
+replace the viewport; decoding is ~1% and recording ~4%. The paused path is the regression
+boundary: `DeviceLogStreamingTests` asserts that a paused reader's and a slow tail's lines keep
+their cells, and the replay asserts zero new cells while paused.
+
+```bash
+PYMOBILEDEVICE3_UDID=<udid> pymobiledevice3 --no-color syslog live --native --format json > capture.ndjson
+THREADING_DEVICE_LOG_REPLAY=$PWD/capture.ndjson THREADING_DEVICE_LOG_REPLAY_CAPTURE_SEVERITY=1 \
+  swift test -c release -Xswiftc -enable-testing -Xswiftc -DDEBUG \
+  --package-path Plugins/DeviceLogsPlugin --filter DeviceLogReplayCostTests
+```
+
+A capture holds a device's real log and stays local; it is never committed.
+
+The 2026-10-12 investigation also found a second freeze in USB source lifecycle: global `ps -Ao … args=`
 scans took 98–217 seconds, and a main-thread `stop()` waited behind that scan on the structured
 reader's serial queue. The legacy reader performed it directly in `start()`. Both source
 lifecycles now enqueue transport work and invalidate cancelled requests immediately. Orphan

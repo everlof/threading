@@ -5,6 +5,67 @@ import XCTest
 
 @MainActor
 final class SimulatorAgentToolTests: HostedStoreTestCase {
+    func testCreatePrepareAndInputUseTheNewDeviceWithoutPromptingForControl() async throws {
+        let fixture = makeFixture(visible: false)
+        defer { fixture.cleanup() }
+        // Decode the advertised wire argument, then drive the shipping coordinator and pane.
+        let arguments = try JSONDecoder().decode(SimulatorPrepareArguments.self,
+            from: Data(#"{"create_name":"Agent Test"}"#.utf8))
+        let result = await execute(.simulatorPrepare(arguments), with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertFalse(result.isError, result.text)
+        let state = await fixture.control.snapshot()
+        let created = try XCTUnwrap(state.created.first)
+        XCTAssertTrue(result.text.contains(created.id.rawValue))
+        XCTAssertEqual(fixture.authorizer.createdDeviceIDs, [created.id])
+        let tap = await execute(.simulatorTap(SimulatorTapArguments(x: 0.5, y: 0.5,
+                                ref: nil, role: nil, label: nil, identifier: nil, deviceID: created.id.rawValue)),
+                                with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertFalse(tap.isError, tap.text)
+        XCTAssertTrue(fixture.authorizer.authorizedDeviceIDs.isEmpty, "Creation must not ask again on the first tap.")
+        let prepared = await execute(.simulatorPrepare(SimulatorPrepareArguments(deviceID: created.id.rawValue)),
+                                     with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertFalse(prepared.isError, prepared.text)
+        let after = await fixture.control.snapshot()
+        XCTAssertEqual(after.created.count, 1)
+        XCTAssertEqual(fixture.pane.simulatorWorkspace(for: fixture.sessionID)?.heldDevices, [created.id])
+    }
+
+    func testInvalidCreationDoesNotCreateADeviceOrGrantControl() async {
+        let fixture = makeFixture(visible: false)
+        defer { fixture.cleanup() }
+        for arguments in [
+            SimulatorPrepareArguments(deviceID: nil, platform: "android", createName: "Agent Test"),
+            SimulatorPrepareArguments(deviceID: nil, createName: " "),
+            SimulatorPrepareArguments(deviceID: nil, devices: [simulatorAgentTestDevice.id.rawValue], createName: "Agent Test")
+        ] {
+            let result = await execute(.simulatorPrepare(arguments), with: fixture.coordinator, sessionID: fixture.sessionID)
+            XCTAssertTrue(result.isError, result.text)
+        }
+        let state = await fixture.control.snapshot()
+        XCTAssertTrue(state.created.isEmpty)
+        XCTAssertTrue(fixture.authorizer.createdDeviceIDs.isEmpty)
+        XCTAssertTrue(fixture.pane.tabs(for: fixture.sessionID).isEmpty)
+    }
+
+    func testCreationFailureGrantsNothingAndBootFailureReturnsTheCreatedIdentity() async throws {
+        let fixture = makeFixture(visible: false)
+        defer { fixture.cleanup() }
+        await fixture.control.failCreation()
+        let failed = await execute(.simulatorPrepare(SimulatorPrepareArguments(deviceID: nil, createName: "Agent Test")),
+                                   with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertTrue(failed.isError)
+        XCTAssertTrue(fixture.authorizer.createdDeviceIDs.isEmpty)
+        await fixture.control.failPreparingCreatedDevice()
+        let bootFailed = await execute(.simulatorPrepare(SimulatorPrepareArguments(deviceID: nil, createName: "Agent Test")),
+                                       with: fixture.coordinator, sessionID: fixture.sessionID)
+        XCTAssertTrue(bootFailed.isError)
+        let state = await fixture.control.snapshot()
+        let id = try XCTUnwrap(state.created.first?.id)
+        XCTAssertTrue(bootFailed.text.contains(id.rawValue), bootFailed.text)
+        XCTAssertTrue(bootFailed.text.contains("leave out create_name"), bootFailed.text)
+        XCTAssertEqual(fixture.authorizer.createdDeviceIDs, [id])
+    }
+
     func testSimulatorGroupTellsAgentsToPreferTheAdoptedPanel() throws {
         let group = MCPToolCatalog.simulator
 
@@ -459,6 +520,7 @@ private actor SimulatorAgentControlFake: SimulatorControlling {
     }
 
     struct Snapshot: Sendable {
+        var created: [SimulatorDevice] = []
         var prepares = 0
         var launch: Launch?
         var screenshots = 0
@@ -467,17 +529,36 @@ private actor SimulatorAgentControlFake: SimulatorControlling {
     }
 
     private var state = Snapshot()
+    private var creationFails = false
+    private var createdDevicePreparationFails = false
     private let multipleDevices: Bool
     init(multipleDevices: Bool = false) { self.multipleDevices = multipleDevices }
 
     func snapshot() -> Snapshot { state }
+    func failCreation() { creationFails = true }
+    func failPreparingCreatedDevice() { creationFails = false; createdDevicePreparationFails = true }
 
     func availableDevices() async throws -> [SimulatorDevice] {
-        multipleDevices ? [simulatorAgentTestDevice, simulatorAgentSecondDevice] : [simulatorAgentTestDevice]
+        (multipleDevices ? [simulatorAgentTestDevice, simulatorAgentSecondDevice] : [simulatorAgentTestDevice]) + state.created
+    }
+
+    func createDevice(_ request: SimulatorDeviceCreationRequest) async throws -> SimulatorDevice {
+        if creationFails { throw SimulatorControlError.commandFailed(operation: "create", detail: "Creation failed") }
+        let template = simulatorAgentTestDevice
+        let device = SimulatorDevice(id: SimulatorDeviceID(UUID().uuidString)!, name: request.name,
+            runtimeIdentifier: template.runtimeIdentifier, runtimeName: template.runtimeName,
+            deviceTypeIdentifier: template.deviceTypeIdentifier, family: template.family,
+            state: .shutdown, lastBootedAt: nil)
+        state.created.append(device)
+        return device
     }
 
     func prepare(deviceID: SimulatorDeviceID?) async throws -> SimulatorDeviceLease {
-        let device = deviceID == simulatorAgentSecondDevice.id && multipleDevices ? simulatorAgentSecondDevice : simulatorAgentTestDevice
+        if createdDevicePreparationFails, state.created.contains(where: { $0.id == deviceID }) {
+            throw SimulatorControlError.bootFailed(deviceName: "Agent Test", detail: "Boot failed")
+        }
+        let devices = try await availableDevices()
+        let device = devices.first { $0.id == deviceID } ?? simulatorAgentTestDevice
         if let deviceID, deviceID != device.id { throw SimulatorControlError.deviceNotFound(deviceID) }
         state.prepares += 1
         return SimulatorDeviceLease(device: device, bootOwnership: .user)
@@ -582,7 +663,13 @@ private final class SimulatorAgentStreamSessionFake: SimulatorLiveStreamSession,
 @MainActor
 private final class SimulatorAgentInputAuthorizerFake: SimulatorInputAuthorizing {
     private(set) var authorizedDeviceIDs: [SimulatorDeviceID] = []
+    private(set) var createdDeviceIDs: [SimulatorDeviceID] = []
     private var decisions: Set<SimulatorDeviceID> = []
+
+    func grantControlForCreatedDevice(_ deviceID: SimulatorDeviceID) {
+        createdDeviceIDs.append(deviceID)
+        decisions.insert(deviceID)
+    }
 
     func authorize(
         device: SimulatorDevice,

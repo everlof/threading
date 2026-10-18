@@ -983,6 +983,9 @@ Three decisions carry it:
 The watchers reconcile in `syncAppearanceRegistry` — the same wholesale pass as the
 registries, keyed by identifier *and root*, because an update swaps the package directory
 aside and a stream on the old path reports nothing about the new one.
+The watcher now uses the shared `FileSystemEventStream` worker: registration does not block the
+main actor, and its first report re-inspects a write that raced registration. Native FSEvents
+delivery remains a separate operating-system dependency.
 
 ## 2026-07-30 — the standing choice is written where a hosted test cannot reach it
 

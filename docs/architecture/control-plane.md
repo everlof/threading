@@ -99,9 +99,10 @@ them before it.
 
 Regular sessions retain the implicit contract they had before grants: list, send, steer and watch
 within their own project, and archive or rename themselves. A Manager grant adds the complete
-operation set. Nine grant-derived tools form the **Supervision** catalogue: `list_accounts`,
+operation set. Ten grant-derived tools form the **Supervision** catalogue: `list_accounts`,
 `session_cost`, `resume_session`, `spawn_session`, `move_session_to_account`,
-`finish_workspace`, `adopt_session`, `release_session` and `subscribe_to_children`. Targeted
+`finish_workspace`, `adopt_session`, `release_session`, `subscribe_to_children` and
+`respond_to_permission`. Targeted
 archive, cancel-archive and rename extend the existing lifecycle tools. Tool listing and
 admission are derived from the same effective-operation set; listing is still only ergonomics,
 because every call authorizes again in `WorkspaceControlPlane`.
@@ -132,6 +133,81 @@ so every admission path shares the same invariant. `subscribe_to_children` uses
 receipt-backed delivery seam as one-shot watches. `list_sessions`, the Chats host tab, row/hover
 attribution and Archived attribution all read this record rather than trying to recover fleet
 state from the manager's transcript.
+
+**Every archive closes a tenure, whichever route filed it.** `ControlGrantStore` observes
+`SessionArchivedStateDidChange` itself, because the sidebar, the iPhone, a provider's own
+archive, the chat's agent and its manager all archive through `ProviderArchiveSync`, and the
+iPhone path never reaches the window's coordinator. Only the manager's own request closes as
+`.archived`: Settings ▸ Archived credits the manager with exactly that. Every other route
+closes as `.released`. Before this, only the manager's route closed anything, so a child the
+user archived kept counting against the manager's eight live children and stayed in its Chats
+tab.
+
+The archive edge can arrive before the archive's own completion. So the manager's route records
+its intent before archiving starts (`expectArchive(of:by:)`, cancelled on failure) rather than
+attributing afterwards. The subscribed manager's *was archived* notice is sent from the same
+handler, before the close drops the subscription, and the store appends the one `.archived`
+event. An archived manager releases its children (*Manager archived*). It can no longer act for
+them, and the one-manager index would otherwise keep any other manager from adopting them. Its
+grant stays, so a restore returns the authority but not the fleet.
+
+## Subagents: delegation without a grant
+
+Any chat may start a **subagent** (`start_subagent`): a chat of its own, on any runtime that
+can report back, nested under it and recorded as its responsibility. Managing reaches other
+chats and is conferred by the user; delegating reaches only what the chat itself starts, so it
+needs no grant. The draft that designed it is
+[`subagents.md`](../feature-drafts/subagents.md).
+
+- **Implicit, never stored.** `ControlOperation.startSubagent` is in `implicitOnlyOperations`,
+  held by every chat beside the regular sets and excluded from `managerOperations`. A stored
+  grant persists its exact operations, and an older build that reads an unknown one marks the
+  row corrupt and puts the whole store into recovery. So a new operation that every chat holds
+  must never reach a grant. (`managerOperations` therefore stays the 16-operation set, and
+  `prePermissionResponseManagerOperations`' upgrade is unchanged.) A test pins both facts.
+- **A parent's reach is a scope, not a list.** `ControlScope.subagentsOf(parentID)` contains
+  every session whose `lineage` names the parent, resolved at each authorization and never
+  stored. Through it a parent holds `regularSubagentOperations`: archive (and cancel an
+  archive) of its own subagents, which `archive` routes through the manager path, so the
+  tenure closes as the parent's. Everything else a manager can do stays a manager's.
+- **Admission is the plane's own** (`admitSubagent`), in refusal order:
+  1. The caller is not itself a subagent, so delegation is one level deep.
+  2. The plan uses the native surface, because report-back reads what a native transport
+     captures.
+  3. Fewer than four live subagents.
+  4. The plan's permission mode ranks at most the parent's own.
+  5. Managed-workspace delivery is `keepForReview` only.
+  6. The parent's own limit and curfew.
+  7. At most six starts per ten minutes, counted last so a refused start spends nothing.
+
+  Choices left out follow `SpawnChildChoices`, exactly as for `spawn_session`.
+- **The tenure is the ordinary `Supervision`, held by the parent.** `ControlGrantStore.adopt`
+  never checked for a grant (its callers did), so a parent can hold one. The sidebar reads the
+  child's lineage rather than the tenure, so the row says *Subagent of …* and the parent is not
+  dressed as a manager.
+- **Report-back is the subagent's own mail** (`SubagentReportBack`). When a subagent turn that
+  the user did not type completes, its final reply goes to the parent as mail from the
+  subagent's own mailbox. The reply comes from `CompletedTurnSnapshotStore`, captured at the
+  provider's turn boundary. The host cannot author mail (there is no host mailbox kind, and
+  `mail_inbox` attributes every message to its sending agent), but the subagent's own reply,
+  sent from the subagent's own mailbox, is attributed truthfully.
+  - The turn's origin is recorded where each surface knows its prompt: the native queue's
+    hand-over, and the terminal's `UserPromptSubmit`. The test is
+    `MailHumanTurn.isAgentOriginated`.
+  - A turn that ends without a reply mails nothing; `watch_session` reports that edge.
+  - Only a reply captured *during* the turn is sent. The store keeps one value per session, so
+    a turn that captured nothing still shows the previous turn's reply. Report-back therefore
+    compares the capture at the turn's start with the one at its end.
+  - Each report appends the `reportReceived` event, which was declared long before anything
+    emitted it.
+- **Lifecycle follows the parent** (`SubagentLifecycle`, on the archive edge for the same
+  reason the tenure close is). Archiving a parent archives its live subagents. Restoring it
+  this run restores exactly those and re-adopts them with their last brief.
+- **One tool, its own group.** `start_subagent` is alone in the **Subagents** group (family
+  `.subagents`), so turning delegation off does not also turn off messaging. With every group
+  on, the decision prefix sat at 496 of its 512 characters. So the tool rides the existing
+  sentence ("For other chats: list_sessions, mail_send, watch_session, start_subagent.") instead
+  of adding one, which brings the full prefix to exactly 512.
 
 ## Delivery is per surface, and the outcome is the surface's own answer
 
@@ -353,8 +429,9 @@ watch reaches exactly as far as a message does.
 Durable, addressed mail between agents ([`agent-mail.md`](../feature-drafts/agent-mail.md);
 the store is the controller's, [`autonomous-controller.md`](autonomous-controller.md#agent-mail-schema-v7)).
 The Mac opens a controller store of its own as its mailbox — `MacMailbox`,
-`…/Threading/Mail/mailbox.db`, redirected under hosted tests, reported unavailable and never
-recreated when it cannot be opened — and registers each session lazily as
+`…/Threading/Mail/mailbox.db`, redirected under hosted tests to a per-process scratch directory
+separate from the project store's per-case cleanup, reported unavailable and never recreated
+when it cannot be opened — and registers each session lazily as
 `<macHost>/session/<session uuid>` under its title. The same store holds Linked Workrooms and
 its local-only person mailboxes ([`linked-workrooms.md`](linked-workrooms.md)).
 
@@ -482,7 +559,20 @@ Threading ids — the whole reason a hand-typed version of this went wrong.
   the scheduled-messages feature departs from this deliberately for its own actor — the user,
   in advance and in writing — and documents where it still refuses.
 - **No reply channel.** A send is fire-and-forget; the receiving session answers into its own
-  conversation. Report-back is another `send_to_session` in the other direction.
+  conversation. Report-back is mail in the other direction (`mail_send`, `reply_to` to continue
+  the chain).
+- **Agents tell each other things by mail; `send_to_session` is for handing a turn.** Every
+  surface that teaches an agent how to reach another chat names `mail_send` for conclusions,
+  briefs and questions, and keeps `send_to_session` for when the user asked one chat to hand
+  another a turn now. Those surfaces are the decision prefix, the "Other sessions" group, the
+  `list_sessions` footer, the dragged-row brief and Send Result to Parent. The reason is
+  provenance. A send puts the sender's words into the receiver's conversation as a user turn,
+  where only the header line is Threading's (below). Mail leaves a notice Threading writes and
+  hands the body over through `mail_inbox` under a vouched header. Two weeks after mail shipped
+  (2026-10-03), when every one of those surfaces still named `send_to_session` and none named
+  `mail_send`, Claude transcripts on the development Mac showed 316 `send_to_session` calls
+  against 217 `mail_send`. Re-count after this change before deciding whether the tool needs to
+  narrow further.
 - **No implied cross-project or workspace scope.** The contract can represent explicit project
   sets, but the shipped Manager UI grants exactly the selected project. A broader grant requires
   a future user-authored consent surface.

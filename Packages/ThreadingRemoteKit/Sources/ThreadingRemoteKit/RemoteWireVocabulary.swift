@@ -390,6 +390,12 @@ public enum RemoteAttachmentKind: RemoteLosslessStringToken {
     case video
     case media
     case text
+    /// A unified diff — a `display_compare_files` text comparison frozen when the agent showed it,
+    /// or a `.diff`/`.patch` file. The phone draws it with the same renderer as its Review screen.
+    case diff
+    /// Two of the session's pictures held against each other, as `display_compare_files` showed
+    /// them. The bytes are a `RemoteImageComparisonDTO` naming both, never pixels of its own.
+    case comparison
     case unknown(String)
 
     public init(rawValue: String) {
@@ -403,6 +409,8 @@ public enum RemoteAttachmentKind: RemoteLosslessStringToken {
         case "video": self = .video
         case "media": self = .media
         case "text": self = .text
+        case "diff": self = .diff
+        case "comparison": self = .comparison
         default: self = .unknown(rawValue)
         }
     }
@@ -418,6 +426,8 @@ public enum RemoteAttachmentKind: RemoteLosslessStringToken {
         case .video: return "video"
         case .media: return "media"
         case .text: return "text"
+        case .diff: return "diff"
+        case .comparison: return "comparison"
         case let .unknown(value): return value
         }
     }

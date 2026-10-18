@@ -248,6 +248,11 @@ A person choosing Archive is not that handshake. It preserves an active checkout
 4. the source is still at that base, or already contains the managed final commit;
 5. Git accepts a fast-forward-only merge.
 
+A successful merge-and-clean forces the storage scan's external pass, so the removed worktree's
+Xcode caches surface as ORPHANED on the Storage page and in `list_reclaimable_storage` at once
+rather than at the next quiet moment; removing them still asks the user
+([`storage-and-stats.md`](storage-and-stats.md)).
+
 There is no conflict resolver and no forced worktree removal. A refusal persists
 `needsAttention`, keeps the session visible, records the reason, and leaves the detached checkout
 intact. Retrying is safe after the source checkout is repaired: a merge that already succeeded

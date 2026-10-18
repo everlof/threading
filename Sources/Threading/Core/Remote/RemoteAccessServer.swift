@@ -4007,6 +4007,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         case "dot", "gv": return "text/vnd.graphviz; charset=utf-8"
         case "mmd", "mermaid": return "text/plain; charset=utf-8"
+        case "diff", "patch": return "text/x-diff; charset=utf-8"
         default: return "application/octet-stream"
         }
     }

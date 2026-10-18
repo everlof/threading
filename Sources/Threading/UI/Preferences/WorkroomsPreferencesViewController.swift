@@ -36,7 +36,9 @@ final class WorkroomsPreferencesViewController: NSViewController {
     private let appEvents = AppEventObservations()
     private var snapshot = Snapshot()
     private var loading: Task<Void, Never>?
-    private var page: NSView?
+    private let peopleCards = NSStackView()
+    private let roomCards = NSStackView()
+    private var statusField: NSTextField?
     private var personButtons: [ObjectIdentifier: WorkroomPersonID] = [:]
     private var roomButtons: [ObjectIdentifier: WorkroomID] = [:]
     private var copiedPerson: WorkroomPersonID?
@@ -60,6 +62,7 @@ final class WorkroomsPreferencesViewController: NSViewController {
     private lazy var nameField = SettingsUI.textField(target: self, action: #selector(addPerson), width: 150)
     private lazy var handleField = SettingsUI.textField(target: self, action: #selector(addPerson), width: 110)
     private lazy var languageField = SettingsUI.textField(target: self, action: #selector(addPerson), width: 60)
+    private lazy var addButton = SettingsUI.button("Add", target: self, action: #selector(addPerson))
 
     // MARK: - Lifecycle
 
@@ -68,14 +71,19 @@ final class WorkroomsPreferencesViewController: NSViewController {
         nameField.placeholderString = L10n.string("Name")
         handleField.placeholderString = L10n.string("handle")
         languageField.placeholderString = "sv" // localization-ignore: a BCP-47 example, not copy
-        appEvents.observe(WorkroomStatusDidChange.self) { [weak self] _ in self?.load() }
+        appEvents.observe(WorkroomStatusDidChange.self) { [weak self] _ in
+            self?.refreshStatus()
+            self?.load()
+        }
         appEvents.observe(AppSettingsDidChange.self) { [weak self] change in
             guard change.affects(AppSettingIdentity.workroomsEnabled.rawValue,
                                  AppSettingIdentity.workroomTunnelProvider.rawValue,
                                  AppSettingIdentity.workroomNgrokDomain.rawValue) else { return }
-            self?.rebuild()
+            self?.refreshSettings()
         }
-        rebuild()
+        buildPage()
+        refreshSettings()
+        refreshData()
     }
 
     override func viewWillAppear() {
@@ -91,7 +99,7 @@ final class WorkroomsPreferencesViewController: NSViewController {
             let snapshot = await Self.read()
             guard !Task.isCancelled, let self else { return }
             self.snapshot = snapshot
-            self.rebuild()
+            self.refreshData()
         }
     }
 
@@ -130,16 +138,17 @@ final class WorkroomsPreferencesViewController: NSViewController {
 
     // MARK: - Building
 
-    private func rebuild() {
-        personButtons.removeAll()
-        roomButtons.removeAll()
-        enabledToggle.state = AppSettings.shared.workroomsEnabled ? .on : .off
-        let provider = AppSettings.shared.workroomTunnelProvider
-        providerPopUp.selectItem(at: WorkroomTunnelProvider.allCases.firstIndex(of: provider) ?? 0)
-        if domainField.currentEditor() == nil { domainField.stringValue = AppSettings.shared.workroomNgrokDomain ?? "" }
-        domainField.isEnabled = provider == .ngrok
-
-        var sections: [NSView] = [
+    private func buildPage() {
+        for cards in [peopleCards, roomCards] {
+            cards.orientation = .vertical
+            cards.alignment = .leading
+            cards.spacing = 0
+        }
+        var tunnelStatus: NSTextField?
+        let tunnel = SettingsUI.row(title: "Tunnel", subtitle: statusLine(), control: providerPopUp,
+                                    subtitleField: &tunnelStatus)
+        statusField = tunnelStatus
+        let sections: [NSView] = [
             SettingsUI.section(nil, SettingsCard(rows: [SettingsUI.row(
                 title: "Ask people outside this Mac",
                 subtitle: "Structured questions to domain experts; answers return as mail.",
@@ -151,37 +160,85 @@ final class WorkroomsPreferencesViewController: NSViewController {
                 control: enabledToggle
             )])),
             SettingsUI.section("Public Address", SettingsCard(rows: [
-            SettingsUI.row(title: "Tunnel", subtitle: statusLine(), control: providerPopUp),
-            SettingsUI.row(title: "Reserved domain", subtitle: "Optional. Keeps links working after a restart.",
-                           control: domainField)
-        ]), help: SettingsUI.help(
-            "Public Address",
-            "An open room is published through a tunnel to a port on this Mac that serves only the people's pages. The tunnel provider terminates the connection and can read what passes through it.",
-            "ngrok uses your own ngrok configuration and account. A Cloudflare Quick Tunnel needs no account, but its address changes whenever Threading restarts, so links you sent stop working."
-        ))
+                tunnel,
+                SettingsUI.row(title: "Reserved domain", subtitle: "Optional. Keeps links working after a restart.",
+                               control: domainField)
+            ]), help: SettingsUI.help(
+                "Public Address",
+                "An open room is published through a tunnel to a port on this Mac that serves only the people's pages. The tunnel provider terminates the connection and can read what passes through it.",
+                "ngrok uses your own ngrok configuration and account. A Cloudflare Quick Tunnel needs no account, but its address changes whenever Threading restarts, so links you sent stop working."
+            )),
+            SettingsUI.section("People", peopleCards),
+            SettingsUI.section("Rooms", roomCards)
         ]
-        sections.append(SettingsUI.section("People", SettingsCard(rows: peopleRows())))
-        sections.append(SettingsUI.section("Rooms", SettingsCard(rows: roomRows())))
-
         let closeAll = SettingsUI.button("Close All Workrooms", target: self, action: #selector(closeAll))
-        let built = SettingsUI.page(title: "Workrooms",
-                                    summary: "Questions for people outside this Mac.",
-                                    actions: [closeAll], sections: sections)
-        page?.removeFromSuperview()
-        built.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(built)
+        let page = SettingsUI.page(title: "Workrooms",
+                                   summary: "Questions for people outside this Mac.",
+                                   actions: [closeAll], sections: sections)
+        page.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(page)
         NSLayoutConstraint.activate([
-            built.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            built.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            built.topAnchor.constraint(equalTo: view.topAnchor),
-            built.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            page.topAnchor.constraint(equalTo: view.topAnchor),
+            page.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
-        page = built
+    }
+
+    private func refreshSettings() {
+        enabledToggle.state = AppSettings.shared.workroomsEnabled ? .on : .off
+        let provider = AppSettings.shared.workroomTunnelProvider
+        providerPopUp.selectItem(at: WorkroomTunnelProvider.allCases.firstIndex(of: provider) ?? 0)
+        if domainField.currentEditor() == nil { domainField.stringValue = AppSettings.shared.workroomNgrokDomain ?? "" }
+        domainField.isEnabled = provider == .ngrok
+        refreshStatus()
+    }
+
+    private func refreshStatus() {
+        statusField?.stringValue = statusLine()
+    }
+
+    private func refreshData() {
+        let focusedControl = keyControls(in: view).first { control in
+            guard let responder = view.window?.firstResponder else { return false }
+            return responder === control || (control as? NSTextField)?.currentEditor() === responder
+        }
+        personButtons.removeAll()
+        roomButtons.removeAll()
+        replaceCard(in: peopleCards, rows: peopleRows())
+        replaceCard(in: roomCards, rows: roomRows())
+        updateKeyViewLoop()
+        if let focusedControl, focusedControl.window === view.window {
+            view.window?.makeFirstResponder(focusedControl)
+        }
+    }
+
+    private func replaceCard(in stack: NSStackView, rows: [NSView]) {
+        for old in stack.arrangedSubviews { stack.removeArrangedSubview(old); old.removeFromSuperview() }
+        let card = SettingsCard(rows: rows)
+        stack.addArrangedSubview(card)
+        card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    }
+
+    private func updateKeyViewLoop() {
+        let controls = keyControls(in: view)
+        guard let first = controls.first else { return }
+        for (current, next) in zip(controls, Array(controls.dropFirst()) + [first]) {
+            current.nextKeyView = next
+        }
+    }
+
+    /// Settings rows add their help buttons inside the label column. Following the view tree
+    /// keeps those buttons in the Tab loop beside the form controls and any loaded room actions.
+    private func keyControls(in root: NSView) -> [NSView] {
+        let current: [NSView] = (root is ThemedControl || root is ThemedTextField) ? [root] : []
+        return current + root.subviews.flatMap(keyControls(in:))
     }
 
     private func statusLine() -> String {
+        guard AppSettings.shared.workroomsEnabled else { return L10n.string("Workrooms is off.") }
         switch WorkroomHost.shared.status {
-        case .off: return L10n.string("Workrooms is off.")
+        case .off: return L10n.string("Nothing is published until you open a room.")
         case .idle: return L10n.string("Nothing is published until you open a room.")
         case .starting: return L10n.string("Starting the tunnel…")
         case .published(let url): return L10n.format("Published at %@", url.host ?? url.absoluteString)
@@ -224,11 +281,10 @@ final class WorkroomsPreferencesViewController: NSViewController {
             rows.append(SettingsUI.row(title: L10n.format("and more than %d others", WorkroomsPageDefaults.people),
                                        localizes: false))
         }
-        let add = SettingsUI.button("Add", target: self, action: #selector(addPerson))
         rows.append(SettingsUI.row(
             title: "Add a person",
             subtitle: addMessage ?? "Their name, a short handle agents use, and their language.",
-            control: SettingsUI.controlGroup([nameField, handleField, languageField, add], spacing: Design.Spacing.small),
+            control: SettingsUI.controlGroup([nameField, handleField, languageField, addButton], spacing: Design.Spacing.small),
             localizes: addMessage == nil
         ))
         return rows
@@ -333,13 +389,13 @@ final class WorkroomsPreferencesViewController: NSViewController {
                 self.load()
             } catch {
                 self?.addMessage = WorkroomAgentCommandService.words(for: error)
-                self?.rebuild()
+                self?.refreshData()
             }
         }
     }
 
     /// A fresh single-use link on the clipboard; any unused earlier one stops working.
-    @objc private func copyLink(_ sender: NSButton) {
+    @objc private func copyLink(_ sender: ThemedButton) {
         guard let person = personButtons[ObjectIdentifier(sender)], let origin = WorkroomHost.shared.publishedOrigin else { return }
         Task { [weak self] in
             guard let store = try? await MacMailbox.shared.controllerStore(),
@@ -351,7 +407,7 @@ final class WorkroomsPreferencesViewController: NSViewController {
         }
     }
 
-    @objc private func signOut(_ sender: NSButton) {
+    @objc private func signOut(_ sender: ThemedButton) {
         guard let person = personButtons[ObjectIdentifier(sender)] else { return }
         Task { [weak self] in
             guard let store = try? await MacMailbox.shared.controllerStore() else { return }
@@ -362,7 +418,7 @@ final class WorkroomsPreferencesViewController: NSViewController {
         }
     }
 
-    @objc private func closeRoom(_ sender: NSButton) {
+    @objc private func closeRoom(_ sender: ThemedButton) {
         guard let room = roomButtons[ObjectIdentifier(sender)] else { return }
         Task { [weak self] in
             _ = try? await MacMailbox.shared.controllerStore().closeWorkroom(room)

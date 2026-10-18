@@ -30,6 +30,7 @@ public final class DeviceLogRecorder {
         let file = directory.appendingPathComponent("\(name).sqlite")
         queue.async { [weak self] in
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            DeviceLogStoreRetention.sweepIfFirst(directory: directory, protecting: file.lastPathComponent)
             guard let opened = try? DeviceLogStore(url: file) else { return }
             self?.store = opened
             self?.url = file

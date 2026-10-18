@@ -3,8 +3,8 @@ import AppKit
 /// App-owned, themed alert presentation.
 ///
 /// Its small API intentionally mirrors the subset the app used: title and message, ordered
-/// buttons, an optional accessory, a suppression choice, modal or sheet presentation, and the
-/// ordinary alert response values. The visual surface and attached-sheet placement are ours;
+/// buttons, an optional accessory, a suppression choice, modal, sheet or stand-alone presentation,
+/// and the ordinary alert response values. The visual surface and attached-sheet placement are ours;
 /// AppKit still owns modal dispatch, focus, windows, and assistive-technology transport.
 @MainActor
 final class ThemedAlert {
@@ -71,7 +71,8 @@ final class ThemedAlert {
     private weak var parentWindow: NSWindow?
     private weak var previousKeyWindow: NSWindow?
     private weak var previousFirstResponder: NSResponder?
-    private var sheetCompletion: ((NSApplication.ModalResponse) -> Void)?
+    /// The answer's destination for every presentation that is not `runModal()`'s return value.
+    private var pendingCompletion: ((NSApplication.ModalResponse) -> Void)?
     private var parentIsClosing = false
     private let attachmentEvents = AppEventObservations()
     private let parentInputMonitor = LocalEventMonitor()
@@ -156,7 +157,7 @@ final class ThemedAlert {
         prepareDefaultButtonIfNeeded()
         parentWindow = window
         previousFirstResponder = window.firstResponder
-        sheetCompletion = completionHandler
+        pendingCompletion = completionHandler
         let panel = makePanel()
 
         // Native sheets impose their own rounded mask, even on a borderless panel. Attach our
@@ -174,6 +175,43 @@ final class ThemedAlert {
             self?.parentIsClosing = true
             self?.dismiss()
         }
+        panel.makeKeyAndOrderFront(nil)
+        panel.refreshPresentedShapeAndShadow()
+        focusInitialResponder(in: panel)
+        NSAccessibility.post(element: panel, notification: .created)
+    }
+
+    /// Presents for an answer delivered through `completionHandler`, and never as a modal session:
+    /// attached to `window` when there is one, standing alone over the app when there is not.
+    ///
+    /// A caller that takes its answer through a completion is almost always running in a
+    /// main-queue job — a main-actor task, a `DispatchQueue.main` block, a socket callback hopped
+    /// to main. `runModal()` there nests a run loop inside that job, and CoreFoundation does not
+    /// drain the main queue from a run loop nested in one of its own callouts: AppKit events keep
+    /// arriving while every main-queue block and main-actor task waits for somebody to click.
+    /// On 2026-10-17 an agent's first tap on a newly created Simulator, from a session that was not
+    /// on screen, put the device's control consent up that way while the Mac's display slept. The
+    /// main queue stayed shut for 39 minutes, until somebody woke the display and answered; the
+    /// paired iPhone completed TCP and TLS on every route and timed out on every hello and
+    /// catalogue request, because both are answered on the main queue.
+    ///
+    /// The window-less dialog keeps the modal panel's stacking, so it does not sink behind the
+    /// window it is about, and the question stays owed until it is answered or `dismiss()`ed.
+    func begin(
+        in window: NSWindow?,
+        completionHandler: ((NSApplication.ModalResponse) -> Void)? = nil
+    ) {
+        if let window {
+            beginSheetModal(for: window, completionHandler: completionHandler)
+            return
+        }
+        prepareDefaultButtonIfNeeded()
+        previousKeyWindow = NSApp.keyWindow
+        previousFirstResponder = previousKeyWindow?.firstResponder
+        pendingCompletion = completionHandler
+        let panel = makePanel()
+        panel.level = .modalPanel
+        panel.center()
         panel.makeKeyAndOrderFront(nil)
         panel.refreshPresentedShapeAndShadow()
         focusInitialResponder(in: panel)
@@ -301,16 +339,16 @@ final class ThemedAlert {
             parentInputMonitor.remove()
             attachmentEvents.removeAll()
             parentWindow.removeChildWindow(panel)
-            let completion = sheetCompletion
-            sheetCompletion = nil
+            let completion = pendingCompletion
+            pendingCompletion = nil
             cleanup(panel: panel, restoring: parentIsClosing ? nil : parentWindow)
             parentIsClosing = false
             completion?(response)
         } else {
             panel.orderOut(nil)
             cleanup(panel: panel, restoring: previousKeyWindow)
-            let completion = sheetCompletion
-            sheetCompletion = nil
+            let completion = pendingCompletion
+            pendingCompletion = nil
             completion?(response)
         }
     }

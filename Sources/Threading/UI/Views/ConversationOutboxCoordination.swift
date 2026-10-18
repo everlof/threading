@@ -107,6 +107,7 @@ extension ConversationViewController {
         }
         guard let item = outbox.handOverNext() else { return }
         preparingOutboxMessageID = item.id
+        SubagentReportBack.shared.turnStarted(sessionID: sessionID, prompt: item.prompt.text)
 
         refreshOutboxRail()
 

@@ -128,8 +128,10 @@ and that answer comes from the **host** holding the browser (`SessionBrowserHost
 not from the browser's own `view.window`: a host installs only its active tab, so a browser
 sitting behind another tab is in no window at all and would otherwise have sent its prompt
 wherever the app considered primary. The main window remains the fallback when no host can be
-named, and `ConfirmationAlert` runs app-modal rather than as a sheet when there is no window at
-all — a prompt with nowhere to attach is still answerable, never skipped. The host is asked only
+named, and `ConfirmationAlert` stands the dialog alone, centred at modal-panel level, when there
+is no window at all — a prompt with nowhere to attach is still answerable, never skipped. It is
+not an app-modal session: that held the main queue until somebody answered
+([`design-system.md`](design-system.md)). The host is asked only
 when its view is already loaded, so answering "which window" never builds a pane for a session
 nobody has opened.
 
@@ -284,7 +286,8 @@ A private tab clears its entire unique store. A shared tab filters site-level da
 within its project's profile to the active host or the parent record WebKit grouped it under,
 and tells the user that related
 subdomains may therefore be signed out. Clearing does not implicitly reload or reconstruct the
-current request.
+current request. The completion also waits for matching cookies to be deleted from that captured
+store: a cookie written immediately before clearing may not yet appear in WebKit's site records.
 
 **Browser sizing belongs to the user.** Ordinary browsing, sign-in, page interaction and screenshots
 use the pane or window as sized, preserving any viewport the user selected. Agents must not set a

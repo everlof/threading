@@ -5,6 +5,34 @@ import XCTest
 final class SimulatorInputConsentTests: XCTestCase {
     private let grantsKey = "codes.threading.simulator.controlGrantedDeviceIDs"
 
+    func testHostCreatedDeviceCanBeControlledWithoutAPromptAcrossRelaunch() {
+        let (defaults, name) = scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let id = SimulatorDeviceID(UUID().uuidString)!
+        let controller = SimulatorInputConsentController(store: defaults) { _, _, _ in
+            XCTFail("Creating an empty test device already authorizes its control.")
+        }
+        controller.grantControlForCreatedDevice(id)
+        var answer: Bool?
+        controller.authorize(device: device(id), in: nil) { answer = $0 }
+        XCTAssertEqual(answer, true)
+        XCTAssertEqual(SimulatorInputConsentController(store: defaults).decision(for: id), true)
+        XCTAssertNil(controller.decision(for: SimulatorDeviceID(UUID().uuidString)!))
+    }
+
+    func testCreationGrantCannotAuthorizePhysicalHardwareOrOverrideADenial() {
+        let (defaults, name) = scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let controller = SimulatorInputConsentController(store: defaults) { _, _, complete in complete(false) }
+        let phone = SimulatorDeviceID("android-usb:phone")!
+        controller.grantControlForCreatedDevice(phone)
+        XCTAssertNil(controller.decision(for: phone))
+        let denied = SimulatorDeviceID(UUID().uuidString)!
+        controller.authorize(device: device(denied), in: nil) { _ in }
+        controller.grantControlForCreatedDevice(denied)
+        XCTAssertEqual(controller.decision(for: denied), false)
+    }
+
     private func scratchDefaults() -> (UserDefaults, String) {
         let name = "\(PreferenceStore.hostedTestSuitePrefix).simulator-consent.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!

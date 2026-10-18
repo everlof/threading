@@ -493,6 +493,14 @@ enum MCPSessionRegistry {
             groups["Stop", default: []].append(group(
                 command: WorkroomQuestionGuard.claudeCommand(token: token, event: .stop), matcher: nil
             ))
+
+            // The disk-pressure notice: answering, and silent unless the disk is short when a
+            // tool call fails. Written with the lifecycle hooks and decided at request time,
+            // since both the disk and the Disk space tools switch change mid-session. Failures
+            // are rare, so the hook process it costs is too.
+            groups[DiskPressureNotice.hookName, default: []].append(group(
+                command: DiskPressureNotice.claudeCommand(token: token), matcher: nil
+            ))
         }
 
         for (name, entries) in groups {

@@ -911,7 +911,7 @@ final class SessionReportBackRequestTests: XCTestCase {
         let prompt = SessionReportBackRequest.prompt(parentID: parentID)
 
         XCTAssertTrue(
-            prompt.contains("send_to_session"),
+            prompt.contains("mail_send"),
             "Asked in prose, an agent answers in prose and the parent hears nothing"
         )
         XCTAssertTrue(

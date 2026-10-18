@@ -62,6 +62,10 @@ final class SessionReferenceTests: XCTestCase {
             text.contains("send_to_session with session_id \"\(ref.threadingID)\""),
             "The Threading id has to be named beside the one tool that takes it: \(text)"
         )
+        XCTAssertTrue(
+            text.contains("mail_send to \"\(ref.threadingID)\""),
+            "Mail is how one agent tells another something: \(text)"
+        )
         XCTAssertTrue(text.contains("list_sessions"), text)
         XCTAssertTrue(text.contains("watch_session"), text)
         XCTAssertTrue(

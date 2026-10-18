@@ -1074,7 +1074,7 @@ final class HookLifecycleTests: XCTestCase {
         tracker.noteTurnFinished(continuationGrace: 0.02)
 
         XCTAssertEqual(tracker.activity, .working)
-        waitOutContinuationGrace(0.02)
+        waitForFinishCommit(of: tracker)
 
         XCTAssertEqual(tracker.activity, .needsAttention)
         XCTAssertFalse(tracker.hasPendingReportedTurnFinish)
@@ -1095,7 +1095,7 @@ final class HookLifecycleTests: XCTestCase {
         tracker.noteTurnStarted(turnID: "turn-1")
         tracker.noteTurnFinished(continuationGrace: 0.02)
         tracker.isVisible = true
-        waitOutContinuationGrace(0.02)
+        waitForFinishCommit(of: tracker)
 
         XCTAssertEqual(tracker.activity, .idle)
         XCTAssertEqual(attentionCount, 1)
@@ -1135,7 +1135,7 @@ final class HookLifecycleTests: XCTestCase {
 
         XCTAssertFalse(tracker.noteTurnStartedFromTranscript(turnID: "turn-1"))
         XCTAssertTrue(tracker.hasPendingReportedTurnFinish)
-        waitOutContinuationGrace(0.02)
+        waitForFinishCommit(of: tracker)
 
         XCTAssertEqual(tracker.activity, .needsAttention)
     }
@@ -1408,6 +1408,15 @@ final class HookLifecycleTests: XCTestCase {
     @MainActor
     private func waitOutContinuationGrace(_ grace: TimeInterval) {
         RunLoop.current.run(until: Date().addingTimeInterval(grace * 2 + 0.01))
+    }
+
+    @MainActor
+    private func waitForFinishCommit(of tracker: SessionActivityTracker) {
+        let deadline = Date().addingTimeInterval(5)
+        while tracker.hasPendingReportedTurnFinish, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertFalse(tracker.hasPendingReportedTurnFinish, "The grace must commit a final turn")
     }
 
     // MARK: - Unattended Launch

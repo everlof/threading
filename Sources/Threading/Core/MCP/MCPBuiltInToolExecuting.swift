@@ -21,9 +21,12 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   func displayChart(_ arguments: DisplayChartArguments, for sessionID: SessionID) -> MCPToolResult
   func displayScene(_ arguments: DisplaySceneArguments, for sessionID: SessionID) -> MCPToolResult
   func displayHTML(_ arguments: DisplayHTMLArguments, for sessionID: SessionID) -> MCPToolResult
+  /// Asynchronous only for a text pair, whose diff is frozen into an attachment off the main
+  /// actor before the result can name it. Everything else completes before returning.
   func displayCompareFiles(
-    _ arguments: DisplayCompareFilesArguments, for sessionID: SessionID
-  ) -> MCPToolResult
+    _ arguments: DisplayCompareFilesArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
 
   /// Asynchronous because it decodes: the frames are read off the main actor, and a tool that
   /// returned before they existed would return a sheet of nothing.
@@ -303,6 +306,10 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     _ arguments: SpawnSessionArguments, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
+  func startSubagent(
+    _ arguments: StartSubagentArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
   func moveSessionToAccount(
     _ arguments: MoveSessionToAccountArguments, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
@@ -320,7 +327,7 @@ protocol MCPBuiltInToolExecuting: AnyObject {
   func respondToPermission(
     _ arguments: RespondToPermissionArguments, for sessionID: SessionID
   ) -> MCPToolResult
-  func listReclaimableStorage() -> MCPToolResult
+  func listReclaimableStorage(_ arguments: ListReclaimableStorageArguments) -> MCPToolResult
   func suggestReclaimableLocation(
     _ arguments: SuggestReclaimableLocationArguments,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void

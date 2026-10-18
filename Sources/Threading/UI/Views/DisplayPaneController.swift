@@ -1621,6 +1621,13 @@ final class DisplayPaneController: NSViewController {
     (tabs(for: sessionID) + (peerTabs?(sessionID) ?? [])).compactMap(\.simulatorWorkspace).first
   }
 
+  /// Creation is the proof of authority. Adopting or booting an existing device never grants it.
+  func createSimulatorForAgent(_ request: SimulatorDeviceCreationRequest) async throws -> SimulatorDevice {
+    let device = try await simulatorControl.createDevice(request)
+    simulatorInputAuthorizer.grantControlForCreatedDevice(device.id)
+    return device
+  }
+
   private func makeSimulatorWorkspace(
     for sessionID: SessionID, state: SimulatorWorkspaceState
   ) -> SimulatorWorkspaceViewController {

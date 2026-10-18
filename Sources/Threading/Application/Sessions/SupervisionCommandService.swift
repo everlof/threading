@@ -31,6 +31,14 @@ extension SupervisionToolProviding {
         supervisionCommands.spawnSession(arguments, for: sessionID, completion: completion)
     }
 
+    func startSubagent(
+        _ arguments: StartSubagentArguments,
+        for sessionID: SessionID,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        supervisionCommands.startSubagent(arguments, for: sessionID, completion: completion)
+    }
+
     func moveSessionToAccount(
         _ arguments: MoveSessionToAccountArguments,
         for sessionID: SessionID,
@@ -305,21 +313,14 @@ final class SupervisionCommandService {
               let action = actions.current() else {
             return completion(.failure(ControlRefusal.callerUnknown.toolWords))
         }
-        let requested = arguments.plan?.account
-        let build: @MainActor (AgentAccount) -> Void = { [weak self] account in
+        resolveChildPlan(arguments.plan, caller: manager, project: project) { [weak self] result in
             guard let self else { return completion(.failure("The manager command ended before launch.")) }
-            let plan = ScheduledSessionPlan(
-                projectID: project.id,
-                kind: arguments.plan?.kind ?? manager.kind,
-                accountHandle: account.handle,
-                model: arguments.plan?.model ?? manager.model,
-                reasoningEffort: arguments.plan?.reasoningEffort ?? manager.reasoningEffort,
-                fastMode: arguments.plan?.fastMode ?? manager.fastMode,
-                branch: arguments.plan?.branch,
-                usesNativeUI: arguments.plan?.usesNativeUI ?? true,
-                permissionMode: arguments.plan?.permissionMode ?? manager.permissionMode,
-                managedWorkspacePlan: arguments.plan?.managedWorkspacePlan
-            )
+            let plan: ScheduledSessionPlan
+            let accountName: String
+            switch result {
+            case .success(let resolved): (plan, accountName) = resolved
+            case .failure(let failure): return completion(.failure(failure.words))
+            }
             if let refusal = self.control.admitSpawn(plan, from: .agentSession(sessionID)) {
                 return completion(.failure(refusal.toolWords))
             }
@@ -335,22 +336,125 @@ final class SupervisionCommandService {
             }
             switch action.spawn(plan, brief, parentID, sessionID) {
             case .success(let child):
-                completion(.success("Started “\(child.displayTitle)” (\(child.id.uuidString.lowercased())) as \(account.displayName), model \(child.model ?? "default"), and recorded it as your child."))
+                completion(.success("Started “\(child.displayTitle)” (\(child.id.uuidString.lowercased())) as \(accountName), model \(child.model ?? "default"), and recorded it as your child."))
             case .failure(let failure):
                 completion(.failure(failure.words))
             }
         }
-        resolveAccount(
-            requested ?? manager.accountHandle.name,
-            provider: arguments.plan?.kind ?? manager.kind,
-            model: arguments.plan?.model ?? manager.model,
-            excluding: nil
-        ) { result in
+    }
+
+    /// Starts a subagent of the calling chat. No grant: `admitSubagent` holds every chat's own
+    /// bounds, and the child is recorded as the caller's — nested under it, its tenure the
+    /// caller's, its replies mailed back (`SubagentReportBack`).
+    func startSubagent(
+        _ arguments: StartSubagentArguments,
+        for sessionID: SessionID,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        let brief = (arguments.brief ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !brief.isEmpty else {
+            return completion(.failure("Provide a brief: the task, written for an agent with none of your context."))
+        }
+        guard brief.count <= SupervisionDefaults.maximumBriefLength else {
+            return completion(.failure(ControlRefusal.messageTooLong(limit: SupervisionDefaults.maximumBriefLength).toolWords))
+        }
+        guard let parent = projects.session(withID: sessionID),
+              let project = projects.project(forSessionID: sessionID),
+              let action = actions.current() else {
+            return completion(.failure(ControlRefusal.callerUnknown.toolWords))
+        }
+        // Refused before an account reading is spent on a start that can never be admitted.
+        if parent.isSubagent {
+            return completion(.failure(ControlRefusal.subagentCannotDelegate.toolWords))
+        }
+        resolveChildPlan(arguments.plan, caller: parent, project: project) { [weak self] result in
+            guard let self else { return completion(.failure("The command ended before launch.")) }
+            let plan: ScheduledSessionPlan
+            let accountName: String
             switch result {
-            case .success(let resolved): build(resolved.account)
-            case .failure(let failure): completion(.failure(failure.words))
+            case .success(let resolved): (plan, accountName) = resolved
+            case .failure(let failure): return completion(.failure(failure.words))
+            }
+            if let refusal = self.control.admitSubagent(plan, from: .agentSession(sessionID)) {
+                return completion(.failure(refusal.toolWords))
+            }
+            switch action.spawnSubagent(plan, brief, sessionID) {
+            case .success(let child):
+                let id = child.id.uuidString.lowercased()
+                completion(.success("""
+                    Started subagent “\(child.displayTitle)” (\(id)) — \(child.kind.displayName) \
+                    as \(accountName), model \(child.model ?? "default"). Its final reply to your \
+                    brief arrives as mail from it; read it with mail_inbox when you are told it \
+                    is waiting. watch_session with session_id \(id) waits for its turn without polling.
+                    """))
+            case .failure(let failure):
+                completion(.failure(failure.words))
             }
         }
+    }
+
+    /// A child's frozen plan from the caller's choices: `SpawnChildChoices` for what was left
+    /// out, then the login against a fresh reading. Shared by a manager's spawn and a chat's
+    /// subagent, which differ only in who admits them and how the child is recorded.
+    private func resolveChildPlan(
+        _ arguments: SpawnSessionPlanArguments?,
+        caller: AgentSession,
+        project: Project,
+        completion: @escaping @MainActor (
+            Result<(plan: ScheduledSessionPlan, accountName: String), SupervisionActionFailure>
+        ) -> Void
+    ) {
+        let choices: SpawnChildChoices
+        switch SpawnChildChoices.resolve(
+            plan: arguments,
+            manager: caller,
+            defaultAccountName: { kind in Self.newChatAccountName(for: kind, in: project.id) }
+        ) {
+        case .success(let resolved): choices = resolved
+        case .failure(let failure): return completion(.failure(failure))
+        }
+        let plan: (AccountHandle) -> ScheduledSessionPlan = { handle in
+            ScheduledSessionPlan(
+                projectID: project.id,
+                kind: choices.kind,
+                accountHandle: handle,
+                model: choices.model,
+                reasoningEffort: choices.reasoningEffort,
+                fastMode: choices.fastMode,
+                branch: arguments?.branch,
+                usesNativeUI: choices.usesNativeUI,
+                permissionMode: choices.permissionMode,
+                managedWorkspacePlan: arguments?.managedWorkspacePlan
+            )
+        }
+        switch choices.account {
+        case .standard:
+            completion(.success((plan(.standard), choices.kind.displayName)))
+        case .named(let requested):
+            resolveAccount(
+                requested,
+                provider: choices.kind,
+                model: choices.model,
+                excluding: nil
+            ) { result in
+                switch result {
+                case .success(let resolved):
+                    completion(.success((plan(resolved.account.handle), resolved.account.displayName)))
+                case .failure(let failure):
+                    completion(.failure(failure))
+                }
+            }
+        }
+    }
+
+    /// The login a new chat on `kind` would start on in this project: the first of the project's
+    /// listed logins that is not out, else the provider's preferred login. Admission still checks
+    /// it against a fresh reading, as for any named account.
+    private static func newChatAccountName(for kind: AgentKind, in projectID: ProjectID) -> String {
+        if let chosen = ProjectDefaultAccounts.resolve(projectID: projectID, runtime: kind)?.chosen {
+            return chosen.handle.name
+        }
+        return AgentAccountDiscovery.preferredHandle(for: kind).name
     }
 
     func moveSessionToAccount(

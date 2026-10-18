@@ -319,6 +319,20 @@ final class SessionAttachmentsViewController: NSViewController {
     /// source is short, legible, and exactly what gets dragged into a chat box next.
     private var sourcePreview: ThemedTextScrollView?
     private var sourceTextView: ThemedTextView? { sourcePreview?.textView }
+
+    /// A diff, drawn by the Compare tab's own renderer. The scroll view is kept; its document is
+    /// rebuilt per row, because `DiffView` takes its lines at construction.
+    private var diffPreview: ThemedScrollView?
+    /// Moves whenever the pane stops showing a diff, so a parse that finishes after the
+    /// selection moved on lands nowhere.
+    private var diffPreviewGeneration = 0
+    private(set) var diffPreviewLineCountForTesting: Int?
+
+    /// A kept picture comparison, drawn by the Compare tab's own surface.
+    private var comparisonPreview: ImageCompareView?
+    /// Moves whenever the pane stops showing a comparison, for the diff preview's reason.
+    private var comparisonPreviewGeneration = 0
+    private(set) var comparisonPreviewTitlesForTesting: [String]?
     private lazy var fileLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.applyFont(.subheading)
@@ -1334,7 +1348,147 @@ final class SessionAttachmentsViewController: NSViewController {
             sourcePreview.textView.string = source
             sourcePreview.isHidden = false
             timing.presentNanoseconds = DispatchTime.now().uptimeNanoseconds - presentStarted
+
+        case .diff:
+            let clearStarted = DispatchTime.now().uptimeNanoseconds
+            hideInstalledPreviews()
+            timing.clearNanoseconds = DispatchTime.now().uptimeNanoseconds - clearStarted
+            showDiff(attachment)
+
+        case .comparison:
+            let clearStarted = DispatchTime.now().uptimeNanoseconds
+            hideInstalledPreviews()
+            timing.clearNanoseconds = DispatchTime.now().uptimeNanoseconds - clearStarted
+            showComparison(attachment)
         }
+    }
+
+    /// Holds a kept comparison's two pictures against each other, as the Compare tab would.
+    /// The record and both pictures are read and decoded on a worker.
+    private func showComparison(_ attachment: SessionAttachment) {
+        guard let pair = comparedPair(of: attachment) else {
+            showPreviewMessage(L10n.string(
+                "A picture in this comparison is no longer in this session."
+            ))
+            return
+        }
+        let generation = comparisonPreviewGeneration
+        let record = attachment.url
+        let old = (url: pair.old.url, name: pair.old.name)
+        let new = (url: pair.new.url, name: pair.new.name)
+        Task { [weak self] in
+            let frames = await Task.detached(priority: .userInitiated) {
+                AttachmentComparisonFrames.load(record: record, old: old, new: new)
+            }.value
+            guard let self, self.comparisonPreviewGeneration == generation else { return }
+            self.presentComparison(frames)
+        }
+    }
+
+    private func presentComparison(_ frames: AttachmentComparisonFrames) {
+        guard let old = frames.old, let new = frames.new else {
+            showPreviewMessage(L10n.string("A picture in this comparison could not be decoded."))
+            return
+        }
+        let compare = installedComparisonPreview()
+        compare.configure(
+            old: ImageCompareView.Side(image: Self.image(old.frame), title: old.title),
+            new: ImageCompareView.Side(image: Self.image(new.frame), title: new.title)
+        )
+        compare.isHidden = false
+        comparisonPreviewTitlesForTesting = [old.title, new.title]
+    }
+
+    private static func image(_ frame: CGImage) -> NSImage {
+        NSImage(cgImage: frame, size: NSSize(width: frame.width, height: frame.height))
+    }
+
+    /// The two picture rows a comparison holds, or nil once either has left the list.
+    private func comparedPair(
+        of attachment: SessionAttachment
+    ) -> (old: SessionAttachment, new: SessionAttachment)? {
+        guard let ids = attachment.comparedAttachmentIDs,
+              let old = allAttachments.first(where: { $0.id == ids.old }),
+              let new = allAttachments.first(where: { $0.id == ids.new }) else { return nil }
+        return (old, new)
+    }
+
+    /// Reads and parses the diff on a worker, then draws it the way the Compare tab does.
+    ///
+    /// Unlike diagram source this is not held to the source-preview ceiling: a frozen comparison
+    /// may be as large as the comparison that produced it, and parsing megabytes of hunks is not
+    /// a frame's work. What reaches the main actor is already capped to one line budget.
+    private func showDiff(_ attachment: SessionAttachment) {
+        let generation = diffPreviewGeneration
+        let url = attachment.url
+        Task { [weak self] in
+            let display = await Task.detached(priority: .userInitiated) {
+                DiffDisplayLines.read(url)
+            }.value
+            guard let self, self.diffPreviewGeneration == generation else { return }
+            self.presentDiff(display)
+        }
+    }
+
+    private func presentDiff(_ display: DiffDisplayLines?) {
+        guard let display else {
+            showPreviewMessage(L10n.string("This file is too large to preview here."))
+            return
+        }
+        // A frozen comparison is never empty — identical files are not kept — but a patch
+        // handed over by hand can carry only binary changes.
+        guard !display.lines.isEmpty else {
+            showPreviewMessage(L10n.string("This diff has no text changes to show."))
+            return
+        }
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.small
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.medium,
+            left: Design.Spacing.medium,
+            bottom: Design.Spacing.medium,
+            right: Design.Spacing.medium
+        )
+        let diff = DiffView(
+            gitLines: display.lines,
+            displayCap: display.lines.count,
+            path: display.path,
+            wraps: true
+        )
+        diff.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(diff)
+        var fills: [NSView] = [diff]
+        if display.hasMore {
+            let note = NSTextField(wrappingLabelWithString: L10n.format(
+                "Showing the first %lld diff lines.",
+                Int64(display.lines.count)
+            ))
+            note.translatesAutoresizingMaskIntoConstraints = false
+            note.applyFont(.caption)
+            note.textColor = Design.Text.tertiary
+            stack.addArrangedSubview(note)
+            fills.append(note)
+        }
+
+        let scroll = installedDiffPreview()
+        scroll.documentView = stack
+        NSLayoutConstraint.activate(
+            [stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)]
+                + fills.flatMap { [
+                    $0.leadingAnchor.constraint(
+                        equalTo: stack.leadingAnchor, constant: Design.Spacing.medium
+                    ),
+                    $0.trailingAnchor.constraint(
+                        equalTo: stack.trailingAnchor, constant: -Design.Spacing.medium
+                    )
+                ] }
+        )
+        scroll.isHidden = false
+        diffPreviewLineCountForTesting = display.lines.count
     }
 
     /// The Mermaid reader's synchronous half. Reading, parsing and layout happen after this
@@ -1532,7 +1686,7 @@ final class SessionAttachmentsViewController: NSViewController {
             switch $0.kind {
             case .image, .pdf: true
             case .media, .video: Self.inspectableMediaFormat(for: $0) != nil
-            case .html, .archive, .document, .diagram: false
+            case .html, .archive, .document, .diagram, .diff, .comparison: false
             }
         }
         guard let selectedIndex = inspectable.firstIndex(where: { $0.id == selectedID }) else {
@@ -1718,6 +1872,29 @@ final class SessionAttachmentsViewController: NSViewController {
         return scroll
     }
 
+    private func installedDiffPreview() -> ThemedScrollView {
+        if let diffPreview { return diffPreview }
+        let clipView = FlippedClipView()
+        clipView.drawsBackground = false
+        let scroll = ThemedScrollView()
+        scroll.contentView = clipView
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.isHidden = true
+        installPreviewSurface(scroll)
+        diffPreview = scroll
+        return scroll
+    }
+
+    private func installedComparisonPreview() -> ImageCompareView {
+        if let comparisonPreview { return comparisonPreview }
+        let compare = ImageCompareView(frame: .zero)
+        compare.isHidden = true
+        installPreviewSurface(compare)
+        comparisonPreview = compare
+        return compare
+    }
+
     private func installedMermaidPreview() -> MermaidPreviewView {
         if let mermaidPreview { return mermaidPreview }
         let preview = MermaidPreviewView()
@@ -1761,6 +1938,8 @@ final class SessionAttachmentsViewController: NSViewController {
         documentView?.isHidden = true
         clearHTMLPreview()
         clearSourcePreview()
+        clearDiffPreview()
+        clearComparisonPreview()
         if !keepingMermaid {
             mermaidPreview?.clear()
             mermaidPreview?.isHidden = true
@@ -1783,6 +1962,20 @@ final class SessionAttachmentsViewController: NSViewController {
     private func clearSourcePreview() {
         sourceTextView?.string = ""
         sourcePreview?.isHidden = true
+    }
+
+    private func clearComparisonPreview() {
+        comparisonPreviewGeneration += 1
+        comparisonPreviewTitlesForTesting = nil
+        comparisonPreview?.configure(old: nil, new: nil)
+        comparisonPreview?.isHidden = true
+    }
+
+    private func clearDiffPreview() {
+        diffPreviewGeneration += 1
+        diffPreviewLineCountForTesting = nil
+        diffPreview?.documentView = nil
+        diffPreview?.isHidden = true
     }
 
     private func applyPreviewTheme() {
@@ -2062,7 +2255,17 @@ final class SessionAttachmentsViewController: NSViewController {
         take(action, on: [attachment])
     }
 
-    private func perform(_ action: AttachmentAction, on attachments: [SessionAttachment]) {
+    private func perform(_ action: AttachmentAction, on selection: [SessionAttachment]) {
+        // A comparison opens as one, in the Compare tab. For everything else it stands for the
+        // two pictures it holds — its own file is only the record naming them.
+        if action == .open, selection.count == 1, let pair = selection.first.flatMap(comparedPair(of:)) {
+            onCompare?(pair.old, pair.new)
+            return
+        }
+        let attachments = selection.flatMap { attachment -> [SessionAttachment] in
+            guard attachment.kind == .comparison else { return [attachment] }
+            return comparedPair(of: attachment).map { [$0.old, $0.new] } ?? []
+        }
         guard !attachments.isEmpty else { return }
         switch action {
         case .open:
@@ -2215,7 +2418,8 @@ final class SessionAttachmentsViewController: NSViewController {
                 onChoose: { [weak self] in self?.take(.openInBrowser, on: attachment) }
             )))
         }
-        if let openIn = OpenInMenu.submenuEntry(for: .file(attachment.url, line: nil)) {
+        if attachment.kind != .comparison,
+           let openIn = OpenInMenu.submenuEntry(for: .file(attachment.url, line: nil)) {
             entries.append(openIn)
         }
         entries.append(.item(ThemedMenuItem(
@@ -2236,9 +2440,7 @@ final class SessionAttachmentsViewController: NSViewController {
 
         entries.append(.separator)
         entries.append(.item(ThemedMenuItem(
-            title: attachment.kind == .image
-                ? L10n.string("Copy Image")
-                : L10n.string("Copy File"),
+            title: AttachmentAction.copyFile.buttonTitle(for: [attachment]),
             onChoose: { [weak self] in self?.take(.copyFile, on: attachment) }
         )))
         entries.append(.item(ThemedMenuItem(
@@ -3032,7 +3234,7 @@ enum SessionAttachmentThumbnails {
             return thumbnail(for: attachment.url, size: SessionAttachmentsDefaults.iconSize)
         case .video:
             return cache.object(forKey: posterKey(for: attachment.url) as NSString)
-        case .pdf, .html, .archive, .document, .diagram, .media:
+        case .pdf, .html, .archive, .document, .diagram, .media, .diff, .comparison:
             return nil
         }
     }
@@ -3146,7 +3348,9 @@ enum AttachmentAction: String, CaseIterable {
         case .reveal: return L10n.string("Finder")
         case .copyPath: return L10n.string("Copy Path")
         case .copyFile:
-            if selection.count > 1 { return L10n.string("Copy Files") }
+            if selection.count > 1 || selection.first?.kind == .comparison {
+                return L10n.string("Copy Files")
+            }
             return selection.first?.kind == .image
                 ? L10n.string("Copy Image")
                 : L10n.string("Copy File")

@@ -384,7 +384,10 @@ final class ThemedTabStripViewTests: XCTestCase {
         let edge = strip.convert(NSPoint(x: strip.bounds.maxX - 2, y: strip.bounds.midY), to: nil)
         chip.mouseDown(with: try dragEvent(at: start, type: .leftMouseDown))
         chip.mouseDragged(with: try dragEvent(at: edge))
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        let scrollDeadline = Date().addingTimeInterval(3)
+        while scroll.contentView.bounds.minX == 0, Date() < scrollDeadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
         XCTAssertGreaterThan(scroll.contentView.bounds.minX, 0)
         chip.mouseDragged(with: try dragEvent(at: strip.convert(NSPoint(x: strip.bounds.midX, y: strip.bounds.midY), to: nil)))
         let stopped = scroll.contentView.bounds.minX

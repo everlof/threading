@@ -97,6 +97,15 @@ final class RemoteVocabularyTests: XCTestCase {
             try roundTrip(RemoteAttachmentKind.unknown("spreadsheet")),
             .unknown("spreadsheet")
         )
+        // A known kind decodes to its case, so the phone can choose the diff renderer from it.
+        XCTAssertEqual(try roundTrip(RemoteAttachmentKind.diff), .diff)
+        XCTAssertEqual(RemoteAttachmentKind(rawValue: "diff"), .diff)
+        XCTAssertEqual(try roundTrip(RemoteAttachmentKind.comparison), .comparison)
+        let comparison = RemoteImageComparisonDTO(
+            old: .init(attachmentID: "a1", title: "Baseline"),
+            new: .init(attachmentID: "b2", title: "After")
+        )
+        XCTAssertEqual(try roundTrip(comparison), comparison)
         XCTAssertEqual(
             try roundTrip(RemoteAttachmentOrigin.unknown("extension")),
             .unknown("extension")

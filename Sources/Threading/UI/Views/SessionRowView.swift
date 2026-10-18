@@ -1085,7 +1085,20 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         setManager(isManager)
         setConductMark(hasCustomConduct ? conductDetail : nil)
         setExecutionHostMark(rowExecutionHost)
-        if let managerID = supervision.managedBy,
+        // A subagent keeps its own agent mark (it may run another provider than its parent), so
+        // the lineage is spoken rather than drawn. It outranks "managed by": the chat that
+        // started it is the one responsible for it, and the more specific word.
+        let subagentParentID = NativeSidebarParity.fact(.sessionParent, session.subagentParentID)
+        if let subagentParentID,
+           let subagentParent: AgentSession = NativeSidebarParity.fact(
+               .sessionTitle,
+               ProjectStore.shared.session(withID: subagentParentID)
+           ) {
+            let parentTitle = NativeSidebarParity.fact(.sessionTitle, subagentParent.displayTitle)
+            titleLabel.setAccessibilityLabel(
+                L10n.format("%@, subagent of %@", row.title, parentTitle)
+            )
+        } else if let managerID = supervision.managedBy,
            let manager: AgentSession = NativeSidebarParity.fact(
                .sessionTitle,
                ProjectStore.shared.session(withID: managerID)

@@ -89,6 +89,17 @@
         }
       }
     },
+    "%@ against %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ mot %@"
+          }
+        }
+      }
+    },
     "%@ are here" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -151,6 +162,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ cacheskrivningar"
+          }
+        }
+      }
+    },
+    "%@ compared with %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ jämförd med %@"
           }
         }
       }
@@ -1381,6 +1403,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En ny chatt i det här projektet startar på den första inloggningen som har användning kvar."
+          }
+        }
+      }
+    },
+    "A picture in this comparison could not be decoded." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En bild i jämförelsen kunde inte avkodas."
           }
         }
       }
@@ -3564,6 +3597,28 @@
         }
       }
     },
+    "Comparison mode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jämförelseläge"
+          }
+        }
+      }
+    },
+    "Comparison position" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jämförelsens läge"
+          }
+        }
+      }
+    },
     "Complete" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4904,6 +4959,17 @@
         }
       }
     },
+    "Difference" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skillnad"
+          }
+        }
+      }
+    },
     "Direct" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5670,6 +5736,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Face ID skyddar de två nycklar som skapas. De lämnar aldrig den här iPhonen."
+          }
+        }
+      }
+    },
+    "Fade" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Övertoning"
           }
         }
       }
@@ -9894,6 +9971,28 @@
         }
       }
     },
+    "Reading comparison…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läser jämförelse…"
+          }
+        }
+      }
+    },
+    "Reading diff…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läser diff…"
+          }
+        }
+      }
+    },
     "Reading repository…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11916,6 +12015,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visar verktygsutdata"
+          }
+        }
+      }
+    },
+    "Side by Side" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sida vid sida"
           }
         }
       }
@@ -14170,6 +14280,17 @@
         }
       }
     },
+    "This comparison could not be read." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jämförelsen kunde inte läsas."
+          }
+        }
+      }
+    },
     "This connection has no saved Mac certificate. Pair again using the QR code for the Mac’s LAN or Tailscale connection." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14216,6 +14337,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här anpassade tilläggsytan är tillgänglig på din Mac."
+          }
+        }
+      }
+    },
+    "This diff has no text changes to show." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här diffen har inga textändringar att visa."
           }
         }
       }
@@ -15934,6 +16066,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fönstret slutade %@ · %@"
+          }
+        }
+      }
+    },
+    "Wipe ↔" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Svep ↔"
+          }
+        }
+      }
+    },
+    "Wipe ↕" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Svep ↕"
           }
         }
       }

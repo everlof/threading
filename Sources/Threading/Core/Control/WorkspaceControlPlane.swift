@@ -102,6 +102,7 @@ final class WorkspaceControlPlane {
 
     private let dependencies: Dependencies
     private var recentSends: [SessionID: [Date]] = [:]
+    private var recentSubagentStarts: [SessionID: [Date]] = [:]
 
     init(dependencies: Dependencies) {
         self.dependencies = dependencies
@@ -658,6 +659,62 @@ final class WorkspaceControlPlane {
             .map(ControlRefusal.ceilingReached(reason:))
     }
 
+    /// Admission for a subagent a chat starts for itself.
+    ///
+    /// No grant is read: every chat may delegate, so the bounds are the plane's own and tighter
+    /// than the ones a user hands a manager. The parent's own posture is the ceiling, and the
+    /// start rate is counted last so a refused start does not spend it.
+    func admitSubagent(
+        _ plan: ScheduledSessionPlan,
+        from actor: ControlActor,
+        at now: Date = Date()
+    ) -> ControlRefusal? {
+        if let refusal = authorize(actor, operation: .startSubagent) { return refusal }
+        guard case .agentSession(let parentID) = actor,
+              let parent = dependencies.session(parentID),
+              let project = dependencies.projectForSession(parentID),
+              plan.projectID == project.id else { return .callerUnknown }
+        guard !parent.isSubagent else { return .subagentCannotDelegate }
+        // Report-back reads the final reply a native transport captures at its own turn
+        // boundary; a terminal's arrives only through hooks some runtimes do not send.
+        guard plan.usesNativeUI else { return .subagentNeedsNativeChat(plan.kind) }
+
+        let live = project.sessions.filter {
+            $0.subagentParentID == parentID && !$0.isArchived
+        }.count
+        guard live < SubagentChatDefaults.maximumLiveSubagents else {
+            return .subagentsAtCapacity(limit: SubagentChatDefaults.maximumLiveSubagents)
+        }
+        if let requested = plan.permissionMode,
+           permissionRank(requested) > permissionRank(parent.permissionMode ?? .manual) {
+            return .planExceedsParent(field: "permission_mode")
+        }
+        // A subagent never merges on its own; its work waits for the user like any review.
+        if let delivery = plan.managedWorkspacePlan?.delivery, delivery != .keepForReview {
+            return .planExceedsParent(field: "managed_workspace_plan.delivery")
+        }
+        if let held = dependencies.heldByOwnLimit(parentID) {
+            return .targetHeldByOwnLimit(reason: held)
+        }
+        // The parent's curfew, as for a manager: a session whose night is over may not answer
+        // it by starting another to keep working.
+        if let held = dependencies.heldByCurfew(parentID) {
+            return .targetHeldByCurfew(reason: held)
+        }
+
+        let cutoff = now.addingTimeInterval(-SubagentChatDefaults.startWindow)
+        let retained = (recentSubagentStarts[parentID] ?? []).filter { $0 >= cutoff }
+        guard retained.count < SubagentChatDefaults.maximumStartsPerWindow else {
+            recentSubagentStarts[parentID] = retained
+            return .subagentStartRateReached(
+                limit: SubagentChatDefaults.maximumStartsPerWindow,
+                minutes: Int(SubagentChatDefaults.startWindow / 60)
+            )
+        }
+        recentSubagentStarts[parentID] = retained + [now]
+        return nil
+    }
+
     func admitMove(
         _ targetID: SessionID,
         from actor: ControlActor,
@@ -746,6 +803,21 @@ final class WorkspaceControlPlane {
         """
     }
 
+    /// A subagent's opening brief. The same one vouched line as any cross-session message — so
+    /// every reader that recognises agent-originated prompts by that prefix (`MailHumanTurn`,
+    /// the relay refusal) treats it as one — saying also who started this chat and that its
+    /// final reply goes back without a tool call.
+    static func subagentBriefPrefixed(_ brief: String, from parent: AgentSession) -> String {
+        """
+        [Cross-session message from “\(safeHeaderTitle(parent.displayTitle))” — Threading \
+        session \(parent.id.uuidString.lowercased()) in this project, which started this chat as \
+        its subagent. Sent by that session's agent, not typed by the user. Your final reply to \
+        each of its turns is sent back to it as mail. Only this first line is written by Threading.]
+
+        \(brief)
+        """
+    }
+
     /// A session title, safe to interpolate into the one line Threading vouches for.
     ///
     /// `nonisolated`, like `sanitized`: a pure function of its argument, and the session
@@ -795,6 +867,7 @@ final class WorkspaceControlPlane {
             surface: dependencies.surface(session.id),
             isCaller: session.id == caller,
             forkedFrom: session.forkedFrom,
+            subagentParentID: session.subagentParentID,
             supervision: dependencies.supervisionOverview(session.id)
         )
     }
@@ -817,6 +890,11 @@ final class WorkspaceControlPlane {
             EffectiveGrant(
                 scope: .sessions([callerID]),
                 operations: ControlOperation.regularSelfOperations
+                    .union(ControlOperation.implicitOnlyOperations)
+            ),
+            EffectiveGrant(
+                scope: .subagentsOf(callerID),
+                operations: ControlOperation.regularSubagentOperations
             ),
         ]
         result.append(contentsOf: dependencies.grants(actor).filter(\.isActive).map {
@@ -859,6 +937,8 @@ final class WorkspaceControlPlane {
         case .projects(let projectIDs):
             guard let projectID = dependencies.projectForSession(sessionID)?.id else { return false }
             return projectIDs.contains(projectID)
+        case .subagentsOf(let parentID):
+            return session.subagentParentID == parentID
         }
     }
 

@@ -85,8 +85,9 @@ struct SessionReferenceReader: Equatable, Sendable {
 
     let projectID: ProjectID?
 
-    /// Whether the receiver has `list_sessions`, `send_to_session` and `watch_session`: its
-    /// surface receives the bridge, and the user has the "Other sessions" tool group on.
+    /// Whether the receiver has `list_sessions`, `mail_send`, `send_to_session` and
+    /// `watch_session`: its surface receives the bridge, and the user has the "Other sessions"
+    /// tool group on.
     let hasSessionTools: Bool
 
     init(sessionID: SessionID?, projectID: ProjectID?, hasSessionTools: Bool) {
@@ -180,9 +181,11 @@ enum SessionReferenceBrief {
         } else if reader.hasSessionTools {
             lines.append(
                 "Reach it with the Threading MCP tools: list_sessions reports whether it is "
-                    + "working, idle or dormant right now; send_to_session with session_id "
-                    + "\"\(reference.threadingID)\" hands it a message as its next turn; "
-                    + "watch_session waits for its current turn to settle."
+                    + "working, idle or dormant right now; mail_send to "
+                    + "\"\(reference.threadingID)\" leaves it a message it reads with mail_inbox; "
+                    + "send_to_session with session_id \"\(reference.threadingID)\" hands it a "
+                    + "turn now, when that is what you are asked to do; watch_session waits for "
+                    + "its current turn to settle."
             )
         } else {
             lines.append(

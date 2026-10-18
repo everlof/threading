@@ -11,6 +11,7 @@ final class DeviceMovieWriter {
     private let width: Int
     private let height: Int
     private var startedAt: TimeInterval?
+    private var lastPresentationTick: Int64?
     private var finished = false
 
     /// AVFoundation calls this only after finalization. The owner has already set `finished`
@@ -70,6 +71,8 @@ final class DeviceMovieWriter {
         let now = ProcessInfo.processInfo.systemUptime
         if startedAt == nil { startedAt = now }
         let elapsed = now - (startedAt ?? now)
+        let clockTick = Int64(elapsed * 600)
+        let presentationTick = max(clockTick, (lastPresentationTick ?? -1) + 1)
 
         var pixelBuffer: CVPixelBuffer?
         guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer) == kCVReturnSuccess,
@@ -88,7 +91,9 @@ final class DeviceMovieWriter {
         // this draw turns the entire recorded frame, including touch marks, upside down.
         context.draw(composited, in: CGRect(x: 0, y: 0, width: width, height: height))
 
-        adaptor.append(buffer, withPresentationTime: CMTime(seconds: elapsed, preferredTimescale: 600))
+        if adaptor.append(buffer, withPresentationTime: CMTime(value: presentationTick, timescale: 600)) {
+            lastPresentationTick = presentationTick
+        }
     }
 
     func finish(completion: @escaping @Sendable (URL?) -> Void) {
@@ -98,8 +103,9 @@ final class DeviceMovieWriter {
         }
         finished = true
         if let startedAt {
-            let elapsed = max(1.0 / 600.0, ProcessInfo.processInfo.systemUptime - startedAt)
-            writer.endSession(atSourceTime: CMTime(seconds: elapsed, preferredTimescale: 600))
+            let elapsedTick = Int64((ProcessInfo.processInfo.systemUptime - startedAt) * 600)
+            let endTick = max(elapsedTick, (lastPresentationTick ?? 0) + 1)
+            writer.endSession(atSourceTime: CMTime(value: endTick, timescale: 600))
         }
         input.markAsFinished()
         let url = outputURL

@@ -543,6 +543,11 @@ final class MCPServer: @unchecked Sendable {
             return
         }
 
+        if request.path.hasPrefix(MCPDefaults.diskNoticePathPrefix) {
+            routeDiskNotice(request, respond: respond)
+            return
+        }
+
         guard let token = endpointToken,
               let sessionID = MCPSessionRegistry.session(forToken: token) else {
             respond(.status(404, "Not Found"))

@@ -99,19 +99,40 @@ final class DeviceLogStreamingTests: XCTestCase {
         .init(time: "12:34:56", level: "Info", process: "Test", subsystem: nil, message: message)
     }
 
-    func testFullRingUpdatesTheTailWithoutReplacingItsCellOrLabel() async throws {
+    /// A slow tail moves the lines already on screen instead of re-binding their cells: the old
+    /// last line keeps its cell and its text one row up, and only the arriving line is configured.
+    func testFullRingTailMovesTheLinesOnScreenInsteadOfRebindingThem() async throws {
         try await withPane { pane, reader, table in
             let last = table.numberOfRows - 1
             let cell = try XCTUnwrap(table.view(atColumn: 4, row: last, makeIfNecessary: true) as? ThemedTableTextCell)
             let label = cell.label
+            let line = label.stringValue
             table.selectRowIndexes(IndexSet(integer: last), byExtendingSelection: false)
             reader.enqueue([row("new tail")])
             pane.drain()
             table.layoutSubtreeIfNeeded()
-            XCTAssertTrue(table.view(atColumn: 4, row: last, makeIfNecessary: false) === cell)
+            XCTAssertEqual(table.numberOfRows, last + 1, "A full ring keeps its size")
+            XCTAssertTrue(table.view(atColumn: 4, row: last - 1, makeIfNecessary: false) === cell, "The line keeps its cell")
             XCTAssertTrue(cell.label === label)
-            XCTAssertEqual(label.stringValue, "new tail")
+            XCTAssertEqual(label.stringValue, line, "Nothing already on screen was re-bound")
+            let tail = try XCTUnwrap(table.view(atColumn: 4, row: last, makeIfNecessary: false) as? ThemedTableTextCell)
+            XCTAssertEqual(tail.label.stringValue, "new tail")
             XCTAssertEqual(table.selectedRow, last - 1, "Selection follows the line, not its old row number")
+            XCTAssertEqual(NSMaxRange(table.rows(in: table.visibleRect)), table.numberOfRows)
+        }
+    }
+
+    /// A tail that replaces the whole viewport keeps the cells it has: there is nothing on screen
+    /// to preserve, and building fresh rows costs more than writing new text into these.
+    func testFollowingABurstLargerThanTheViewportRebindsTheCellsItHas() async throws {
+        try await withPane { pane, reader, table in
+            let visible = table.rows(in: table.visibleRect)
+            let cell = try XCTUnwrap(table.view(atColumn: 4, row: NSMaxRange(visible) - 1, makeIfNecessary: true) as? ThemedTableTextCell)
+            reader.enqueue((0..<(visible.length + 10)).map { row("burst \($0)") })
+            pane.drain()
+            table.layoutSubtreeIfNeeded()
+            XCTAssertTrue(table.view(atColumn: 4, row: table.numberOfRows - 1, makeIfNecessary: false) === cell)
+            XCTAssertEqual(cell.label.stringValue, "burst \(visible.length + 9)")
             XCTAssertEqual(NSMaxRange(table.rows(in: table.visibleRect)), table.numberOfRows)
         }
     }
@@ -121,7 +142,8 @@ final class DeviceLogStreamingTests: XCTestCase {
             table.scrollRowToVisible(25_000)
             table.layoutSubtreeIfNeeded()
             let first = table.rows(in: table.visibleRect).location
-            let before = try XCTUnwrap(table.view(atColumn: 4, row: first, makeIfNecessary: true) as? ThemedTableTextCell).label.stringValue
+            let cell = try XCTUnwrap(table.view(atColumn: 4, row: first, makeIfNecessary: true) as? ThemedTableTextCell)
+            let before = cell.label.stringValue
             table.selectRowIndexes(IndexSet(integer: first + 3), byExtendingSelection: false)
             reader.enqueue((0..<300).map { row("new \($0)") })
             pane.drain()
@@ -129,7 +151,9 @@ final class DeviceLogStreamingTests: XCTestCase {
             let after = table.rows(in: table.visibleRect).location
             XCTAssertEqual(after, first - 300)
             XCTAssertEqual(table.selectedRow, first + 3 - 300)
-            XCTAssertEqual(try XCTUnwrap(table.view(atColumn: 4, row: after, makeIfNecessary: true) as? ThemedTableTextCell).label.stringValue, before)
+            XCTAssertTrue(table.view(atColumn: 4, row: after, makeIfNecessary: false) === cell,
+                          "A paused reader's lines keep their cells: nothing they can see is rebuilt")
+            XCTAssertEqual(cell.label.stringValue, before)
         }
     }
 

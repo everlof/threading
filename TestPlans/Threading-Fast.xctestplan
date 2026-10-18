@@ -126,6 +126,8 @@
         "ThemedPresentationTests\/testAlertEscapeEndsTheSheetAndReturnsFocus()",
         "ThemedPresentationTests\/testPopoverEscapeClosesOnceAndReturnsFocus()",
         "ThemedPresentationTests\/testPopoverWithAnInitialResponderTakesKeyStatusAndGivesItBack()",
+        "ThemedPresentationTests\/testAWindowlessAlertStandsAloneWithoutAModalSession()",
+        "ThemedPresentationTests\/testAWindowlessConfirmationLeavesTheMainQueueServing()",
         "UpdateSheetRenderTests\/testRealClassicSheetKeepsSquareTitleHardware()",
         "UpdateSheetRenderTests\/testRealInstallingSheetKeepsSquareThemedBorder()"
       ],

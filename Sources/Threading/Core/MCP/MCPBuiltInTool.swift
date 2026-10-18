@@ -87,6 +87,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case releaseSession
   case subscribeToChildren
   case respondToPermission
+  case startSubagent
   case listReclaimableStorage
   case suggestReclaimableLocation
   case proposeStorageCleanup
@@ -140,6 +141,7 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
     case project
     case session
     case workspace
+    case subagents
     case supervision
     case storage
     case triggers

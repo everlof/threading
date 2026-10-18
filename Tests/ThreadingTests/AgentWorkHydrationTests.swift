@@ -374,7 +374,9 @@ final class AgentWorkHydrationTests: XCTestCase {
             transcriptAt: url, kind: .claude, projectID: projectID,
             session: session, rootPath: rootPath
         )
-        let folded = try await eventually(timeout: .seconds(20)) {
+        // The full hosted suite contends with render and process workers; this waits for the
+        // eventual 2,000-call fold, while the assertions below still bound main-actor cost.
+        let folded = try await eventually(timeout: .seconds(60)) {
             let presentation = store.presentation(for: target)
             return presentation?.totalActionCount == calls ? presentation : nil
         }

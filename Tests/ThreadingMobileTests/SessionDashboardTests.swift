@@ -1465,6 +1465,10 @@ final class MobileDemoSceneTests: XCTestCase {
                 expected = ("attachment-detail-pdf", .attachmentDetail(kind: .pdf))
             case .attachmentDetailText:
                 expected = ("attachment-detail-text", .attachmentDetail(kind: .text))
+            case .attachmentDetailDiff:
+                expected = ("attachment-detail-diff", .attachmentDetail(kind: .diff))
+            case .attachmentDetailComparison:
+                expected = ("attachment-detail-comparison", .attachmentDetail(kind: .comparison))
             case .usage: expected = ("usage", .shippingRoot)
             case .usageLimit: expected = ("usage-limit", .shippingRoot)
             case .usageLimitUnavailable: expected = ("usage-limit-unavailable", .shippingRoot)

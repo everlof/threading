@@ -92,4 +92,114 @@ final class ControlGrantStoreTests: XCTestCase {
         )
         XCTAssertEqual(stateManager.persistenceHealth, .healthy)
     }
+
+    // MARK: - Archive closes tenures
+
+    func testAChildArchivedByAnyoneButItsManagerIsReleased() throws {
+        let fixture = try makeFixture()
+        let supervision = try fixture.adopt()
+
+        fixture.notifications.post(SessionArchivedStateDidChange(
+            sessionID: fixture.child.id,
+            isArchived: true
+        ))
+
+        XCTAssertTrue(fixture.store.activeChildren(of: fixture.manager.id).isEmpty)
+        let closed = try XCTUnwrap(stateManager.supervisions(childID: fixture.child.id)?.last)
+        XCTAssertEqual(closed.id, supervision.id)
+        XCTAssertEqual(closed.state, .released, "Archived must stay the manager's own act.")
+        XCTAssertEqual(
+            try XCTUnwrap(stateManager.supervisionEvents(for: supervision.id)).map(\.kind),
+            [.assigned, .archived]
+        )
+    }
+
+    func testTheManagersOwnArchiveClosesAsArchived() throws {
+        let fixture = try makeFixture()
+        _ = try fixture.adopt()
+
+        fixture.store.expectArchive(of: fixture.child.id, by: fixture.manager.id)
+        fixture.notifications.post(SessionArchivedStateDidChange(
+            sessionID: fixture.child.id,
+            isArchived: true
+        ))
+
+        let closed = try XCTUnwrap(stateManager.supervisions(childID: fixture.child.id)?.last)
+        XCTAssertEqual(closed.state, .archived)
+        XCTAssertEqual(closed.outcome, "Archived by manager")
+    }
+
+    func testAnArchivedManagerReleasesItsChildren() throws {
+        let fixture = try makeFixture()
+        _ = try fixture.adopt()
+
+        fixture.notifications.post(SessionArchivedStateDidChange(
+            sessionID: fixture.manager.id,
+            isArchived: true
+        ))
+
+        XCTAssertNil(fixture.store.activeManager(of: fixture.child.id))
+        let closed = try XCTUnwrap(stateManager.supervisions(childID: fixture.child.id)?.last)
+        XCTAssertEqual(closed.state, .released)
+        XCTAssertEqual(closed.outcome, "Manager archived")
+    }
+
+    func testTheSubscriberIsToldBeforeTheTenureCloses() throws {
+        var activeWhenTold: Bool?
+        let fixture = try makeFixture { store, supervision in
+            activeWhenTold = store?.activeManager(of: supervision.childID) != nil
+        }
+        _ = try fixture.adopt()
+
+        fixture.notifications.post(SessionArchivedStateDidChange(
+            sessionID: fixture.child.id,
+            isArchived: true
+        ))
+
+        XCTAssertEqual(activeWhenTold, true)
+    }
+
+    // MARK: - Private Methods
+
+    @MainActor
+    private struct Fixture {
+        let manager: AgentSession
+        let child: AgentSession
+        let notifications: NotificationCenter
+        let store: ControlGrantStore
+
+        func adopt() throws -> Supervision {
+            guard case .adopted(let supervision) = store.adopt(
+                childID: child.id,
+                by: manager.id,
+                brief: "Brief"
+            ) else { throw XCTSkip("Adoption failed; the fixture is broken.") }
+            return supervision
+        }
+    }
+
+    private func makeFixture(
+        childArchived: @escaping (ControlGrantStore?, Supervision) -> Void = { _, _ in }
+    ) throws -> Fixture {
+        let manager = AgentSession(kind: .codex, title: "Manager")
+        let child = AgentSession(kind: .claude, title: "Child")
+        var project = Project(
+            name: "Project",
+            folderURL: URL(fileURLWithPath: "/tmp/control-grant-store")
+        )
+        project.sessions = [manager, child]
+        XCTAssertTrue(stateManager.saveProjectsState(ProjectsState(projects: [project])))
+
+        let notifications = NotificationCenter()
+        weak var weakStore: ControlGrantStore?
+        let store = ControlGrantStore(dependencies: .init(
+            state: stateManager,
+            projects: ProjectStore(stateManager: stateManager),
+            events: notifications,
+            now: Date.init,
+            childArchived: { childArchived(weakStore, $0) }
+        ))
+        weakStore = store
+        return Fixture(manager: manager, child: child, notifications: notifications, store: store)
+    }
 }

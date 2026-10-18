@@ -1103,6 +1103,52 @@ because a repeat almost always means the agent just rewrote one side; a turn end
 visible compare tab for the same reason. The user's own route in is the `+` menu's "Compare
 Files…", which is an open panel asked for exactly two files.
 
+**A comparison is also kept, because the tab cannot leave the Mac.** The Compare tab is a
+panel surface and a paired phone has no panel; the phone's door to what a session showed is the
+Attachments list. So in a session with a project, `ComparisonKeepingService` (an application
+service, not coordinator code — the coordinator's line ratchet is at its ceiling) files the
+comparison there too, and the call completes only once the row exists, so its result can carry a
+`target_ref` for `notify_user` to open that exact comparison on the phone.
+
+- **Two text files** run the same `git diff --no-index` (`GitProcess.compareFiles`) on a detached
+  worker and file the output through `SessionAttachmentStore.recordGeneratedDiff` — the immutable
+  door `display_html` uses, never deduplicated, named after the file (`notes.md.diff`, or
+  `old.json → new.json.diff` when the sides differ). Frozen rather than referenced because the
+  "before" side is routinely a scratch copy in `$TMPDIR`, gone by the next turn. Identical files
+  keep nothing and say so.
+- **Two pictures** are recorded as declared files (copied in from wherever they live, as before),
+  and then a `.comparison` row names the pair: its file is a `RemoteImageComparisonDTO` — two
+  attachment ids and the agent's captions, a few hundred bytes, encoded off the main actor.
+  Unlike a diff it is *not* a snapshot. It follows the two picture rows exactly as the tab
+  follows its two paths, so it is one row per pair: its source key is
+  `comparison:<old id>|<new id>`, and comparing the same pair again rewrites the record in its
+  slot and lifts the row to the top. The key also lets the Mac read the pair without opening the
+  file (`SessionAttachment.comparedAttachmentIDs`).
+
+The phone draws a `.comparison` with `RemoteImageComparisonView`: the Mac's five modes and one
+shared scrub, under the Mac's shared-scale rule (`MobileImageCompareLayout` mirrors
+`ImageCompareLayout`, so a resized asset still looks resized). Each side is fetched by id through
+the ordinary bounded attachment route and decoded off-main at no more than
+`maximumDecodedPixelDimension`, keeping its true pixel size for the layout and the size-mismatch
+note. **Only the seam handle takes a drag**: the gallery pages horizontally, and a canvas that
+claimed every horizontal drag would have trapped the person on the comparison. A tap places the
+seam and a slider scrubs it, which is also the accessible path. Side by side splits whichever
+way gives the pictures the larger scale, so wide screenshots stack on a portrait phone. Share is
+disabled on a comparison page; its bytes are only the record.
+
+On the Mac the row previews inline as `ImageCompareView` — record and pictures decoded on a
+worker (`AttachmentComparisonFrames`) — **Open** puts the pair in a Compare tab, and every other
+action (Finder, copy, Add to Chat) stands for its two pictures, since the record names nothing a
+person would want to send. A comparison whose picture has left the list says so.
+
+`.diff` and `.comparison` are attachment kinds (and wire kinds) of their own; both extensions
+are reserved from extension registration. The Mac previews a `.diff` with the Compare tab's
+`DiffView` under the same line budget (`DiffDisplayLines`), parsed off the main actor; the phone
+draws it with Review's `DiffUIKitViewController` (`RemoteDiffAttachmentView`), so it virtualizes
+like Review does. `.diff`, `.patch` and `.comparison` *classify* — every read re-derives a row's
+kind from its extension, so a kept row that did not would vanish — but are deliberately absent
+from the terminal scan: `git format-patch` prints a column of patches and none is a handoff.
+
 **`video_frames` is the one tool that exists because of what an agent kept doing instead.**
 Screen recordings arrive here as a quoted path in a prompt — never as an attachment, since the
 attachment store has only ever held images. So every recording began with the agent shelling out

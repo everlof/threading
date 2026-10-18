@@ -85,6 +85,11 @@ listener and the tunnel when Workrooms is on and at least one room is open, and 
 otherwise — at launch, on a Workrooms setting change, after an opening or a close, and every five
 minutes so an expired room stops the tunnel unattended. It never starts in a hosted test.
 
+The Settings page keeps its header, switch and address controls mounted while status changes or
+people and rooms reload. A full page replacement detached the switch during its flip and discarded
+keyboard focus. The page links its controls in visual Tab order, including the Add a person fields
+and any room actions; a data refresh replaces only the bounded people and room cards.
+
 **The git context is the host's.** `WorkroomGitContextReader` reads the asking session's working
 directory (`ProjectStore.workingDirectory(forSessionID:)`) off the main actor through
 `GitProcess`: head, base (the agent's `base_ref` or the default branch), merge-base, the first 50

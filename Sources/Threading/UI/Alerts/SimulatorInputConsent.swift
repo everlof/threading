@@ -9,6 +9,9 @@ protocol SimulatorInputAuthorizing: AnyObject {
     /// Repeated gestures never call this, so a denial cannot turn into repeated prompting.
     func resetDecision(for deviceID: SimulatorDeviceID)
 
+    /// Called only with the identity returned by the host's successful empty-device creation.
+    func grantControlForCreatedDevice(_ deviceID: SimulatorDeviceID)
+
     func authorize(
         device: SimulatorDevice,
         in window: NSWindow?,
@@ -19,9 +22,11 @@ protocol SimulatorInputAuthorizing: AnyObject {
 extension SimulatorInputAuthorizing {
     func decision(for deviceID: SimulatorDeviceID) -> Bool? { nil }
     func resetDecision(for deviceID: SimulatorDeviceID) {}
+    func grantControlForCreatedDevice(_ deviceID: SimulatorDeviceID) {}
 }
 
-/// One explicit decision for one exact adopted device, an **approval remembered across launches**.
+/// One decision for one exact device, remembered across launches. Existing devices ask; a fresh
+/// empty device created through the host's agent route receives its grant from that creation.
 ///
 /// Approving control for a device is a durable user choice: once granted, that exact device stays
 /// controllable without another sheet on the next launch, because re-asking every relaunch was
@@ -72,6 +77,13 @@ final class SimulatorInputConsentController: SimulatorInputAuthorizing {
 
     func decision(for deviceID: SimulatorDeviceID) -> Bool? {
         decisions[deviceID]
+    }
+
+    func grantControlForCreatedDevice(_ deviceID: SimulatorDeviceID) {
+        guard deviceID.platform == .iOSSimulator,
+              decisions[deviceID] == nil, pending[deviceID] == nil else { return }
+        decisions[deviceID] = true
+        rememberGrant(deviceID)
     }
 
     func resetDecision(for deviceID: SimulatorDeviceID) {

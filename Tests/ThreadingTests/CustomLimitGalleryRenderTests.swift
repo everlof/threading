@@ -135,18 +135,18 @@ final class CustomLimitGalleryRenderTests: XCTestCase {
             plain.show(usage: usage, limits: [], at: now)
             capped.show(usage: usage, limits: [loud], at: now)
         }) { _ in
-            // Shown *before* measuring: the width is pinned from the fitting size, and an empty
-            // pill fits to its ring. Pinning first and filling afterwards froze both pills at
-            // ring width — which the picture showed and no assertion would have.
+            // Shown *before* measuring: the preferred width includes the current reading.
+            // The pill gives width back to a narrow real toolbar, so its fitting size is the
+            // ring alone; this unconstrained gallery gives each pill its intrinsic width.
             plain.show(usage: self.usage(), limits: [], at: self.now)
             capped.show(usage: self.usage(), limits: [loud], at: self.now)
 
-            // Each pill is pinned to its own fitting width. `setContentHuggingPriority` is not
+            // Each pill is pinned to its own preferred width. `setContentHuggingPriority` is not
             // what an `NSStackView` lays out by — the trap `SettingsUI.holdsItsWidth` documents —
             // and without this the row stretched the first pill across the whole fixture and
             // squeezed the second to its ring, which is the opposite of what the picture is for.
             for pill in [plain, capped] {
-                pill.widthAnchor.constraint(equalToConstant: pill.fittingSize.width).isActive = true
+                pill.widthAnchor.constraint(equalToConstant: pill.intrinsicContentSize.width).isActive = true
             }
             // A spacer takes the slack, so neither pill is stretched or squeezed by the row it
             // sits in — the pills are what the picture is about.
@@ -256,7 +256,7 @@ final class CustomLimitGalleryRenderTests: XCTestCase {
         let pill = AccountUsageItemView()
         pill.show(usage: usage(), limits: [], at: now)
         XCTAssertGreaterThan(
-            pill.fittingSize.width,
+            pill.intrinsicContentSize.width,
             AccountUsageItemDefaults.ringSize * 3,
             "the usage pill is drawing no reading at all"
         )

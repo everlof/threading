@@ -55,6 +55,8 @@ enum NativeSidebarMemberAlias: String, CaseIterable, Sendable {
     case sessionAccount = "AgentSession.accountHandle"
     case sessionParentFork = "AgentSession.forkedFrom"
     case sessionParentSideChat = "AgentSession.isSideChat"
+    case sessionParentSubagent = "AgentSession.subagentParentID"
+    case sessionParentNesting = "AgentSession.nestingParentID"
     case projectScratchpad = "Project.isTheScratchpad"
     case projectSessions = "Project.sessions"
     case projectTerminals = "Project.terminals"
@@ -86,7 +88,12 @@ struct NativeSidebarSessionFacts: Equatable, Sendable {
     let accountID: String
     let activity: SessionActivity
     let branch: String?
+    /// The row this one nests under: the chat it was forked from, or the chat that started it
+    /// as a subagent.
     let parentID: String?
+    /// Whether `parentID` is a fork's parent rather than a subagent's. Defaults to the fork
+    /// reading every parent had before subagents existed.
+    var parentIsFork = true
     let isArchived: Bool
     let usesNativeUI: Bool
     let isPinned: Bool
@@ -262,11 +269,14 @@ enum HostFactCatalog {
         session(
             ExtensionHostFactKey.sessionParentID, "Parent Session", .string, identityUsages,
             parity: [.sessionParent],
-            nativeAliases: [.sessionParentFork, .sessionParentSideChat]
+            nativeAliases: [
+                .sessionParentFork, .sessionParentSideChat, .sessionParentSubagent,
+                .sessionParentNesting,
+            ]
         ) { $0.parentID.map(ExtensionFactValue.string) },
         session(
             ExtensionHostFactKey.sessionIsSideChat, "Side Chat", .boolean, stateUsages
-        ) { .boolean($0.parentID != nil) },
+        ) { .boolean($0.parentID != nil && $0.parentIsFork) },
         session(
             ExtensionHostFactKey.sessionIsArchived, "Archived", .boolean, stateUsages,
             parity: [.sessionArchived]

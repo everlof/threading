@@ -332,11 +332,7 @@ final class CompareViewController: NSViewController {
         newPath: String
     ) -> Comparison {
         do {
-            let data = try GitProcess.run(
-                GitReviewCommands.compareFiles(oldPath: oldPath, newPath: newPath),
-                in: URL(fileURLWithPath: (oldPath as NSString).deletingLastPathComponent),
-                acceptedExitCodes: [0, 1]
-            )
+            let data = try GitProcess.compareFiles(oldPath: oldPath, newPath: newPath)
             let files = GitDiffParser.files(fromUnifiedDiff: GitDiffParser.decode(data))
             guard files.contains(where: { !$0.hunks.isEmpty }) else {
                 return .message(L10n.string("The files are identical."))
@@ -428,11 +424,10 @@ final class CompareViewController: NSViewController {
             updateCompareHeight()
 
         case .text(let files):
-            // The old cap applied once per hunk, so a generated diff with thousands of tiny
-            // hunks still built thousands of text views and constraint pairs on the main
-            // thread. One comparison gets one global display budget and one view. `comparison`
-            // remains complete in `lastComparison`, so export still carries every hunk and line.
-            let display = Self.displayedTextLines(in: files)
+            // One comparison gets one global display budget and one view (`DiffDisplayLines`).
+            // `comparison` remains complete in `lastComparison`, so export still carries every
+            // hunk and line.
+            let display = DiffDisplayLines(files: files)
             let diff = DiffView(
                 gitLines: display.lines,
                 displayCap: display.lines.count,
@@ -469,26 +464,6 @@ final class CompareViewController: NSViewController {
                 ])
             }
         }
-    }
-
-    /// Takes at most the pane's complete line budget without first flattening or copying the
-    /// unbounded diff. Line numbers stay attached to each source line, so hunk/file boundaries
-    /// remain legible as jumps even though they no longer allocate separate views.
-    private static func displayedTextLines(
-        in files: [GitFileDiff]
-    ) -> (lines: [GitDiffLine], hasMore: Bool) {
-        var lines: [GitDiffLine] = []
-        lines.reserveCapacity(DiffDefaults.displayCap)
-
-        for file in files {
-            for hunk in file.hunks where !hunk.lines.isEmpty {
-                let remaining = DiffDefaults.displayCap - lines.count
-                guard remaining > 0 else { return (lines, true) }
-                lines.append(contentsOf: hunk.lines.prefix(remaining))
-                if hunk.lines.count > remaining { return (lines, true) }
-            }
-        }
-        return (lines, false)
     }
 
     /// What the header says about the comparison under it.

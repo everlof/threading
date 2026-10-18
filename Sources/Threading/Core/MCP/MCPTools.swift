@@ -2254,6 +2254,20 @@ struct ConversationRepairArguments: Codable, Sendable {
 /// Same line-per-path shape as `StorageCleanupArguments`, and deliberately so: an agent that
 /// gets a path vetted quotes the identical string back to `propose_storage_cleanup`, and a
 /// second spelling would be a second chance to get it wrong.
+/// One page of the reclaimable-storage listing. Every field is optional: the bare call is the
+/// bounded first page, and an agent narrows or pages only when that page says there is more.
+struct ListReclaimableStorageArguments: Codable, Sendable {
+  let limit: Int?
+  let offset: Int?
+  let under: String?
+
+  init(limit: Int? = nil, offset: Int? = nil, under: String? = nil) {
+    self.limit = limit
+    self.offset = offset
+    self.under = under
+  }
+}
+
 struct SuggestReclaimableLocationArguments: Codable, Sendable {
   let paths: String?
   let reason: String?
@@ -2340,10 +2354,13 @@ struct SimulatorPrepareArguments: Codable, Sendable {
   var layout: String? = nil
   /// Exact device ids the workspace should hold, in order: the whole workspace in one call.
   var devices: [String]? = nil
+  /// Create a new empty iOS device; device_id optionally supplies its hardware/runtime profile.
+  var createName: String? = nil
 
   private enum CodingKeys: String, CodingKey {
     case deviceID = "device_id"
     case platform, beside, layout, devices
+    case createName = "create_name"
   }
 }
 
@@ -4231,7 +4248,7 @@ enum MCPTools {
       },
       observesPanel: true,
       executeArguments: { handler, arguments, sessionID, completion in
-        completion(handler.displayCompareFiles(arguments, for: sessionID))
+        handler.displayCompareFiles(arguments, for: sessionID, completion: completion)
       },
       description: """
         Compare two files in Threading's side panel. Two images open an interactive \
@@ -4240,7 +4257,10 @@ enum MCPTools {
         regenerated asset against the original. Two text files render as a native \
         diff. What the files are is decided from their bytes, so a mismatched pair \
         (one image, one text) is refused rather than guessed at. Asking again about \
-        the same pair re-reads the files into the existing tab.
+        the same pair re-reads the files into the existing tab. The comparison is also \
+        kept in the session's attachments — a text diff as it was when you showed it, a \
+        picture pair as one entry naming both pictures — so a paired iPhone can open it \
+        interactively; that result returns target_ref for notify_user.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -6683,7 +6703,7 @@ enum MCPTools {
       annotations: MCPToolAnnotations(
         readOnlyHint: false,
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: false
       ),
       title: "Prepare Simulator",
@@ -6701,7 +6721,12 @@ enum MCPTools {
         Show an exact iOS Simulator, Android emulator or USB Android device in this session's workspace \
         in Threading's right display panel, boot or adopt it, and return its exact device_id. Call this \
         before building when the user should see the app in Threading instead of a separate Simulator or \
-        emulator window. Calling it again with the same arguments changes nothing. The workspace holds up \
+        emulator window. For a new empty iOS test device, pass create_name; Threading creates it and \
+        enables control without a permission question. Optional device_id supplies only the hardware \
+        type and runtime to match, never data to copy. Each create_name call creates a new device: \
+        reuse the returned device_id and omit create_name on later calls, including recovery. Leave \
+        out devices and platform android when creating. Without create_name, calling again with the \
+        same arguments reuses the device and attempts to recover a failed connection. The workspace holds up \
         to four devices side by side. devices sets the whole workspace in one call: exactly those \
         device ids in that order. Members already showing one keep running, the rest are removed, and \
         the result describes device_id (default: the first). Without devices, a device_id already in the \
@@ -6719,6 +6744,10 @@ enum MCPTools {
         """,
       inputSchema: MCPInputSchema(
         properties: [
+          "create_name": MCPPropertySchema(
+            type: .string,
+            description: "Optional: create a new empty iOS Simulator with this 1–80 character name and automatic control permission. device_id optionally supplies its hardware/runtime profile. Omit on retries; reuse the returned id."
+          ),
           "device_id": MCPPropertySchema(
             type: .string,
             description: "Optional exact device id: a CoreSimulator UUID, android-avd:<AVD name> or "
@@ -7024,7 +7053,7 @@ enum MCPTools {
         is top-left and (1,1) is bottom-right). Prefer an element over a coordinate: the target is \
         re-resolved against a fresh snapshot immediately before the tap, so it survives layout \
         changes and scrolling, and an ambiguous locator fails instead of guessing. The user is \
-        asked once before this device accepts input. Call simulator_prepare first.
+        asked once for existing devices; an empty iOS device created with create_name is already authorized. Call simulator_prepare first.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -7078,7 +7107,7 @@ enum MCPTools {
       description: """
         Swipe on the exact Simulator shown live in Threading's right panel. Coordinates are \
         normalized from the screen's top-left (0,0) to bottom-right (1,1). duration_ms defaults \
-        to 300 and is bounded to 100–2000. The user is asked once before this device accepts input.
+        to 300 and is bounded to 100–2000. Existing devices ask once before accepting input; an empty iOS device created with create_name is already authorized.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -7125,7 +7154,7 @@ enum MCPTools {
         simulator_snapshot ref (like "e12") or a semantic locator (label and/or identifier, \
         optionally narrowed by role) — it is re-resolved against a fresh snapshot and tapped before \
         typing, and an ambiguous locator fails instead of guessing. With no target, text goes to \
-        whatever is already focused. The user is asked once before this device accepts input; \
+        whatever is already focused. Existing devices ask once before accepting input; an empty iOS device created with create_name is already authorized; \
         Threading never forwards arbitrary keyboard events to a helper.
         """,
       inputSchema: MCPInputSchema(
@@ -7181,7 +7210,7 @@ enum MCPTools {
         Press a hardware button on the exact device shown live in Threading's right panel: Home, \
         Lock, Side or volume on an iOS Simulator; Back, Home, Overview, Power or volume on Android, \
         and rotateLeft/rotateRight on an Android emulator. \
-        The user is asked once before this device accepts input. Call simulator_prepare first.
+        Existing devices ask once before accepting input; an empty iOS device created with create_name is already authorized. Call simulator_prepare first.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -7483,7 +7512,8 @@ enum MCPTools {
 
         Only archive when you have been asked to. A conversation the user has not finished \
         with is not yours to close, and a session that merely looks done is not an \
-        instruction.
+        instruction. The one exception is a subagent you started: once it has settled and you \
+        no longer need it, archiving it with session_id is your own housekeeping.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -7497,7 +7527,7 @@ enum MCPTools {
           ),
           "session_id": MCPPropertySchema(
             type: .string,
-            description: "Manager-only target id. Omit to archive this session."
+            description: "A managed child's or one of your own subagents' id. Omit to archive this session."
           )
         ],
         required: []
@@ -7534,7 +7564,7 @@ enum MCPTools {
       inputSchema: MCPInputSchema(properties: [
         "session_id": MCPPropertySchema(
           type: .string,
-          description: "Manager-only target id. Omit to cancel this session's archive."
+          description: "A managed child's or one of your own subagents' id. Omit to cancel this session's archive."
         )
       ], required: [])
     ),
@@ -7663,11 +7693,14 @@ enum MCPTools {
         instead, the session is told mail is waiting at a point it can act on it, and it \
         reads the text with mail_inbox. Resuming a dormant session stays the user's decision.
 
+        Use this only when the user asked you to hand another chat a turn now. To tell \
+        another agent something — a conclusion, a brief, a question, a side chat's result for \
+        its parent — use mail_send: the recipient reads it under a line Threading vouches \
+        for, instead of finding your words in its conversation as if the user had typed them.
+
         Every delivered message is prefixed with which session sent it, and it runs on \
-        the receiving session's own usage. Send conclusions and briefs, not chatter: the \
-        canonical use is a side chat reporting its result back to the session it was \
-        forked from. Never mechanically relay a message that itself arrived as a \
-        cross-session message — that is how two sessions ping-pong forever.
+        the receiving session's own usage. Never mechanically relay a message that itself \
+        arrived as a cross-session message — that is how two sessions ping-pong forever.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -7865,21 +7898,33 @@ enum MCPTools {
       },
       description: """
         Start one supervised child in this project. plan mirrors the project composer and is \
-        capped by the manager grant. account defaults to the manager's login and may be best. \
-        Managed workspaces resolve their checkout at launch. as_side_chat_of creates a fork.
+        capped by the manager grant. A child on the manager's runtime inherits the manager's \
+        login, model, effort and fast mode; a child on another runtime starts on the login a new \
+        chat there would, with that runtime's defaults, unless plan names them. permission_mode \
+        is inherited either way. Managed workspaces resolve their checkout at launch. \
+        as_side_chat_of creates a fork.
         """,
       inputSchema: MCPInputSchema(properties: [
         "plan": MCPPropertySchema(
           type: .object,
           description: "Frozen launch choices.",
           properties: [
-            "kind": MCPPropertySchema(type: .string, description: "Agent kind; defaults to the manager's."),
-            "account": MCPPropertySchema(type: .string, description: "Login id, best, or omit for the manager's."),
+            "kind": MCPPropertySchema(
+              type: .string,
+              description: "claude, codex, grok, opencode or cursor; defaults to the manager's."
+            ),
+            "account": MCPPropertySchema(
+              type: .string,
+              description: "Login id or best; omit for the default. Not accepted for grok, opencode or cursor."
+            ),
             "model": MCPPropertySchema(type: .string, description: "Optional model identifier."),
             "reasoning_effort": MCPPropertySchema(type: .string, description: "Optional reasoning effort."),
             "fast_mode": MCPPropertySchema(type: .boolean, description: "Optional fast-mode choice."),
             "branch": MCPPropertySchema(type: .string, description: "Optional existing checkout branch."),
-            "uses_native_ui": MCPPropertySchema(type: .boolean, description: "Use Threading's native chat surface."),
+            "uses_native_ui": MCPPropertySchema(
+              type: .boolean,
+              description: "Use Threading's native chat surface; defaults to it where the runtime has one."
+            ),
             "permission_mode": MCPPropertySchema(type: .string, description: "Permission mode capped by the grant."),
             "managed_workspace_plan": MCPPropertySchema(
               type: .object,
@@ -8123,12 +8168,12 @@ enum MCPTools {
       detail: "Read what build output can be deleted and rebuilt, and how big it is.",
       symbol: "list.bullet.rectangle",
       decodeArguments: { container in
-        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
-          ?? EmptyToolArguments()
+        try container.decodeIfPresent(ListReclaimableStorageArguments.self, forKey: .arguments)
+          ?? ListReclaimableStorageArguments()
       },
       observesPanel: false,
-      executeArguments: { handler, _, sessionID, completion in
-        completion(handler.listReclaimableStorage())
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.listReclaimableStorage(arguments))
       },
       description: """
         Find safe, rebuildable build output when disk space is short, a command fails \
@@ -8143,9 +8188,34 @@ enum MCPTools {
         are rechecked before removal: recent writes, Xcode/build processes, or a running \
         executable inside the cache prevent removal. This is a list of verified cleanup \
         candidates; it does not measure all disk usage such as swap, simulator data, app \
-        containers, backups, Trash, or profiling traces. Reading this changes nothing.
+        containers, backups, Trash, or profiling traces. Reading this changes nothing. \
+        The answer is one bounded page: totals by location, then directories with ORPHANED \
+        ones first and the rest largest first. It says when there is more; page with \
+        offset, or pass under to list one location.
         """,
-      inputSchema: MCPInputSchema(properties: [:], required: [])
+      inputSchema: MCPInputSchema(
+        properties: [
+          "limit": MCPPropertySchema(
+            type: .integer,
+            description: """
+              How many directories to list, 1 to \(ReclaimableStorageListing.maximumLimit). \
+              Defaults to \(ReclaimableStorageListing.defaultLimit).
+              """
+          ),
+          "offset": MCPPropertySchema(
+            type: .integer,
+            description: "How many directories to skip, for the next page. Defaults to 0."
+          ),
+          "under": MCPPropertySchema(
+            type: .string,
+            description: """
+              Only directories at or below this absolute path — a checkout or location the \
+              first page named. `~` stands for the home directory.
+              """
+          )
+        ],
+        required: []
+      )
     ),
     MCPToolDefinition(
       tool: .suggestReclaimableLocation,
@@ -9664,6 +9734,7 @@ enum MCPTools {
       )
     ])
     declarations.append(contentsOf: mailDeclarations)
+    declarations.append(contentsOf: subagentDeclarations)
     declarations.append(contentsOf: trafficDeclarations)
     declarations.append(contentsOf: webExtensionDeclarations)
     declarations.append(contentsOf: workroomDeclarations)

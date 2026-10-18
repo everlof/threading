@@ -23,9 +23,10 @@ final class FloatingScrollTargetMotionTests: XCTestCase {
 
     private enum Fixture {
         static let paneSize = NSSize(width: 420, height: 320)
-        /// Long enough for a departure of `Design.Motion.vanish` to have finished, short enough
-        /// that a broken completion fails the test rather than stalling the suite.
-        static let settleWindow: TimeInterval = 1
+        /// Core Animation can deliver a completion well after its nominal duration when the
+        /// full render suite is competing for the main thread. Keep a bounded wait for the
+        /// actual layer state instead of treating a late completion as a new animation.
+        static let settleWindow: TimeInterval = 5
 
         /// How many points the arrival is sampled at. Finer than a frame at 60Hz, so a curve
         /// that carries the arrow through the middle of its rise cannot slip between samples.
@@ -429,6 +430,8 @@ final class FloatingScrollTargetMotionTests: XCTestCase {
               Date() < deadline {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
         }
+        XCTAssertNil(button.layer?.animation(forKey: FloatingTargetMotion.animationKey),
+                     "The first arrival must settle before idempotence is checked")
     }
 
     private func waitForSettling() {

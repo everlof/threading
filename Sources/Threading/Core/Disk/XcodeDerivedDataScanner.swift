@@ -1,8 +1,11 @@
 import Darwin
 import Foundation
 
-/// Xcode's standard cache location is not a scratch root. Only its direct, manifest-bearing
-/// children are candidates; neither the root nor shared caches nor arbitrary descendants are.
+/// Xcode's standard cache location is not a scratch root. Only its direct children are
+/// candidates — neither the root nor shared caches nor arbitrary descendants are — and a child
+/// is offered on one of two pieces of evidence Xcode itself wrote: its `info.plist` manifest, or,
+/// when that is gone, its folder name in Xcode's hashed shape over contents that are nothing but
+/// Xcode's own output directories (see `XcodeDerivedDataName`).
 enum XcodeDerivedDataScanner {
     static var defaultRoot: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -43,7 +46,8 @@ enum XcodeDerivedDataScanner {
     /// with a 30-second cooperative deadline. Incomplete measurements are never published.
     static func scan(
         root: URL = defaultRoot,
-        maximumEntries: Int = Limits.measuredEntries
+        maximumEntries: Int = Limits.measuredEntries,
+        candidates: XcodeWorkspaceCandidates = .empty
     ) -> [ReclaimableArtifact] {
         guard isRealDirectory(root),
               let walker = FileManager.default.enumerator(
@@ -58,7 +62,7 @@ enum XcodeDerivedDataScanner {
             walker.skipDescendants()
             examined += 1
             guard examined <= Limits.rootEntries, budget.consume() else { break }
-            guard let artifact = vet(url, root: root, budget: &budget) else { continue }
+            guard let artifact = vet(url, root: root, candidates: candidates, budget: &budget) else { continue }
             found.append(artifact)
         }
         if examined > Limits.rootEntries || budget.remainingEntries == 0 || Date() >= budget.deadline {
@@ -67,31 +71,52 @@ enum XcodeDerivedDataScanner {
         return found.sorted { $0.byteCount > $1.byteCount }
     }
 
-    static func vet(_ url: URL, root: URL = defaultRoot) -> ReclaimableArtifact? {
+    static func vet(
+        _ url: URL,
+        root: URL = defaultRoot,
+        candidates: XcodeWorkspaceCandidates = .empty
+    ) -> ReclaimableArtifact? {
         var budget = measurementBudget()
-        return vet(url, root: root, budget: &budget)
+        return vet(url, root: root, candidates: candidates, budget: &budget)
     }
 
     private static func vet(
         _ url: URL,
         root: URL,
+        candidates: XcodeWorkspaceCandidates,
         budget: inout ArtifactMeasurementBudget
     ) -> ReclaimableArtifact? {
-        guard let manifest = manifest(at: url, root: root),
+        guard let identity = identity(at: url, root: root),
               let measured = ArtifactScanner.measure(url, budget: &budget) else { return nil }
+
+        let workspacePath: String?
+        var lastAccessedDate: Date?
+        switch identity {
+        case .manifest(let manifest):
+            workspacePath = manifest.workspacePath
+            lastAccessedDate = manifest.lastAccessedDate
+        case .name(let hash):
+            workspacePath = candidates.byHash[hash]
+        }
+
         return ReclaimableArtifact(
             url: url,
             kind: .xcodeDerivedData,
             byteCount: measured.bytes,
-            modifiedAt: [measured.modifiedAt, manifest.lastAccessedDate].compactMap { $0 }.max(),
+            modifiedAt: [measured.modifiedAt, lastAccessedDate].compactMap { $0 }.max(),
             checkoutPath: root.path,
-            workspacePath: manifest.workspacePath
+            workspacePath: workspacePath
         )
     }
 
     /// Re-read both identity and use immediately before deleting. Cached age is only display
     /// data: a build may have started since the user opened the list. The process check is a
     /// conservative veto, never evidence that an arbitrary scratchpad is disposable.
+    ///
+    /// A folder found by its name has no manifest to re-read; its identity is the name and the
+    /// shape, and both are checked again. Its workspace attribution was the scan's inference
+    /// rather than Xcode's statement, so it is not what decides here — a manifest appearing does:
+    /// that is Xcode building into it again, and the identity no longer matches.
     static func isSafeToRemove(
         _ artifact: ReclaimableArtifact,
         root: URL = defaultRoot,
@@ -99,16 +124,56 @@ enum XcodeDerivedDataScanner {
         hasActiveProcess: (URL) -> Bool = XcodeDerivedDataScanner.hasActiveProcess
     ) -> Bool {
         guard artifact.kind == .xcodeDerivedData,
-              let initialManifest = manifest(at: artifact.url, root: root),
+              let initialIdentity = identity(at: artifact.url, root: root),
               !hasActiveProcess(artifact.url),
               let current = vet(artifact.url, root: root),
-              current.workspacePath == artifact.workspacePath,
+              !initialIdentity.isManifest || current.workspacePath == artifact.workspacePath,
               let modifiedAt = current.modifiedAt,
               now.timeIntervalSince(modifiedAt) >= ArtifactDefaults.inUseWindow else { return false }
-        // Measurement can be long. Check processes and the manifest again after walking.
+        // Measurement can be long. Check processes and the identity again after walking.
         return !hasActiveProcess(artifact.url)
-            && manifest(at: artifact.url, root: root) == initialManifest
+            && identity(at: artifact.url, root: root) == initialIdentity
     }
+
+    /// What Xcode wrote that makes a child its own: the manifest when there is one, else the
+    /// hashed name over nothing but Xcode's output directories.
+    private enum Identity: Equatable {
+        case manifest(DerivedDataManifest)
+        case name(hash: String)
+
+        var isManifest: Bool {
+            if case .manifest = self { return true }
+            return false
+        }
+    }
+
+    private static func identity(at url: URL, root: URL) -> Identity? {
+        if let manifest = manifest(at: url, root: root) { return .manifest(manifest) }
+        return nameIdentity(at: url, root: root).map { .name(hash: $0) }
+    }
+
+    /// The hash of a direct child Xcode named and filled but left without a manifest, or nil.
+    ///
+    /// Strict about contents, because the name alone is 28 letters anybody could type: every
+    /// entry must be one of Xcode's output directories, each a real directory, and an
+    /// `info.plist` of any kind — even an unreadable or symlinked one — sends the child back to
+    /// the manifest rule, which then refuses it. Measured on 2026-10-17, the 297 manifest-less
+    /// children held only `Build`, `Logs`, `SourcePackages`, `TestResults` and `Index.noindex`.
+    private static func nameIdentity(at url: URL, root: URL) -> String? {
+        guard isRealDirectory(root), isRealDirectory(url),
+              normalized(url.deletingLastPathComponent()) == normalized(root),
+              let hash = XcodeDerivedDataName.hash(inFolderName: url.lastPathComponent),
+              let entries = try? FileManager.default.contentsOfDirectory(atPath: url.path) else { return nil }
+
+        let outputs = entries.filter { $0 != finderMetadata }
+        guard !outputs.isEmpty,
+              !entries.contains(ScratchDefaults.derivedDataManifestName),
+              outputs.allSatisfy({ cacheDirectories.contains($0) && isRealDirectory(url.appendingPathComponent($0)) })
+        else { return nil }
+        return hash
+    }
+
+    private static let finderMetadata = ".DS_Store"
 
     private static func manifest(at url: URL, root: URL) -> DerivedDataManifest? {
         guard isRealDirectory(root), isRealDirectory(url),

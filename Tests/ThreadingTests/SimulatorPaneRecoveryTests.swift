@@ -7,6 +7,74 @@ import XCTest
 
 @MainActor
 final class SimulatorPaneRecoveryTests: XCTestCase {
+    func testAgentSnapshotReconnectsAfterFallbackWithoutRequestingControl() async throws {
+        let first = SimulatorRecoveryStreamSessionFake()
+        let second = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([.success(first), .success(second)])
+        let authorizer = SimulatorRecoveryInputAuthorizerFake(initialDecision: false)
+        let controller = makeController(control: SimulatorRecoveryControlFake(), coordinator: coordinator,
+                                        inputAuthorizer: authorizer)
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        first.emit(.failed("Connection dropped"))
+        try await eventually { if case .screenshotFallback = controller.liveBackendForTesting { return true }; return false }
+
+        let result: SimulatorPaneAgentResult<SimulatorPaneAccessibilitySnapshot> = await withCheckedContinuation { continuation in
+            controller.snapshotForAgent { continuation.resume(returning: $0) }
+        }
+        guard case .success(let snapshot) = result else { return XCTFail("Snapshot did not recover: \(result)") }
+        XCTAssertEqual(snapshot.device.id, simulatorRecoveryFirstDevice.id)
+        XCTAssertEqual(authorizer.authorizationCount, 0)
+        let opens = await coordinator.openCount
+        XCTAssertEqual(opens, 2)
+    }
+
+    func testAgentInputRefreshesAStaleLeaseAndSendsExactlyOnce() async throws {
+        let first = SimulatorRecoveryStreamSessionFake()
+        let second = SimulatorRecoveryStreamSessionFake()
+        let control = SimulatorRecoveryControlFake(screenshotFailures: 1)
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([.success(first), .success(second)])
+        let authorizer = SimulatorRecoveryInputAuthorizerFake(initialDecision: true)
+        let controller = makeController(control: control, coordinator: coordinator, inputAuthorizer: authorizer)
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        first.emit(.failed("Device lost"))
+        try await eventually { if case .failed = controller.presentationState { return true }; return false }
+
+        let result: SimulatorPaneAgentResult<Void> = await withCheckedContinuation { continuation in
+            controller.sendInputForAgent(.tap(x: 0.5, y: 0.5)) { continuation.resume(returning: $0) }
+        }
+        guard case .success = result else { return XCTFail("Input did not recover: \(result)") }
+        XCTAssertEqual(second.inputs, [.tap(x: 0.5, y: 0.5)])
+        XCTAssertTrue(first.inputs.isEmpty)
+        let prepares = await control.prepareCount
+        XCTAssertEqual(prepares, 2)
+        XCTAssertEqual(authorizer.resetCount, 0)
+    }
+
+    func testFailedRecoveryStopsAfterOneReconnectAndSendsNoInput() async throws {
+        let first = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([.success(first), .failure(.disconnected)])
+        let controller = makeController(control: SimulatorRecoveryControlFake(), coordinator: coordinator)
+        _ = controller.view
+        defer { controller.terminate() }
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        first.emit(.failed("Connection dropped"))
+        try await eventually { if case .screenshotFallback = controller.liveBackendForTesting { return true }; return false }
+        let result: SimulatorPaneAgentResult<Void> = await withCheckedContinuation { continuation in
+            controller.sendInputForAgent(.tap(x: 0.5, y: 0.5)) { continuation.resume(returning: $0) }
+        }
+        guard case .failure = result else { return XCTFail("A failed reconnect reported successful input.") }
+        let opens = await coordinator.openCount
+        XCTAssertEqual(opens, 2)
+        XCTAssertTrue(first.inputs.isEmpty)
+    }
+
     func testMouseWheelUsesAuthorizedDirectInputSession() async throws {
         let session = SimulatorRecoveryStreamSessionFake()
         let controller = makeController(
@@ -850,6 +918,10 @@ final class SimulatorRecoveryStreamSessionFake: SimulatorLiveStreamSession,
 
     func sendInput(_ input: SimulatorBridgeInput) async throws {
         lock.withLock { recordedInputs.append(input) }
+    }
+
+    func requestAccessibilitySnapshot() async throws -> SimulatorAccessibilityElement {
+        SimulatorAccessibilityElement(role: "AXApplication", frame: .init(x: 0, y: 0, width: 100, height: 200))
     }
 
     func stop() {

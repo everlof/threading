@@ -150,7 +150,9 @@ struct RemoteAttachmentGallery: View {
                         Image(systemName: "square.and.arrow.up")
                     }
                 }
-                .disabled(current == nil || isPreparingShare)
+                // A comparison's own bytes are only the record naming its two pictures, which is
+                // nothing to send anyone; each picture shares from its own page.
+                .disabled(current == nil || isPreparingShare || current?.kind == .comparison)
                 .accessibilityLabel(MobileL10n.string(
                     isPreparingShare ? "Preparing attachment" : "Share"
                 ))
@@ -175,6 +177,15 @@ struct RemoteAttachmentGallery: View {
     }
 
     private var pages: some View {
+        // Sized from the room the pages are actually given. `containerRelativeFrame` answered a
+        // height one top safe-area inset taller than that, so every page's bottom edge sat behind
+        // the ledger — invisible on a centred picture, but a comparison's controls were cut off.
+        GeometryReader { proxy in
+            pageScroller(pageSize: proxy.size)
+        }
+    }
+
+    private func pageScroller(pageSize: CGSize) -> some View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 0) {
                 ForEach(attachments) { attachment in
@@ -186,6 +197,7 @@ struct RemoteAttachmentGallery: View {
                         loadsRemotely: loadsRemotely,
                         offersVideoStreaming: offersVideoStreaming,
                         isCurrentPage: attachment.id == current?.id,
+                        siblingData: initialData,
                         onDecodedImageSize: { size in pixelSizes[attachment.id] = size },
                         onLoadedData: { data in
                             guard attachment.id == current?.id else { return }
@@ -195,7 +207,7 @@ struct RemoteAttachmentGallery: View {
                     )
                     // A page is the scroller's whole viewport, both ways: a preview sized to
                     // its content left the ledger standing in the middle of the screen.
-                    .containerRelativeFrame([.horizontal, .vertical])
+                    .frame(width: pageSize.width, height: pageSize.height)
                     .id(attachment.id)
                 }
             }
@@ -404,6 +416,8 @@ enum RemoteAttachmentGlyph {
         case .text: "doc.plaintext"
         case .document: "doc.text"
         case .diagram: "point.3.connected.trianglepath.dotted"
+        case .diff: "plus.forwardslash.minus"
+        case .comparison: "rectangle.split.2x1"
         case .media: "play.rectangle"
         case .video: "film"
         default: "photo"
