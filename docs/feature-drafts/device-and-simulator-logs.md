@@ -608,6 +608,17 @@ Retention is 500,000 rows, trimmed every 50,000 written rather than on every bat
 follows deletions through a trigger — an index row left behind would return an id whose row no
 longer exists, which is a test.
 
+That bounded each store, not the number of stores. One is named per owning session and none was
+ever removed: on 2026-10-17 the directory held **13,482 files in 6.2 GB**, growing by about 1,400
+files a day, and **6 of its 2,186 stores** belonged to a session that still existed. Most were made
+by hosted tests, whose panes carry a fresh session id each and wrote to the real Caches folder;
+`DeviceLogPaneViewController.storeDirectory` now answers a per-process temporary directory under
+XCTest. `DeviceLogStoreRetention` sweeps once per process, on the first recorder's queue before its
+store opens: a store whose database and WAL are older than 14 days goes with its sidecars, then the
+oldest until the directory fits 4 GB, never the store being opened. Age ignores `-shm`, which
+opening a store rewrites — every store there had one touched on the same afternoon over weeks-old
+data. Learned Bluetooth data is JSON beside the stores and is never touched.
+
 ## Focus, rather than filter
 
 The filter used to *remove* the rows that did not match, which meant the lines explaining a failure
@@ -684,6 +695,15 @@ still sends its full stream. Simulator readers also pass a safely quoted predica
 An unrelated decoded row still proves the structured transport is healthy, so a quiet selected app
 does not falsely trigger legacy fallback. Returning to All processes restores whole-device input.
 Previously recorded history remains searchable; process scope changes future collection.
+
+The level menu scopes the reader the same way (October 2026), but keeps the live ring: the same
+source read at another level is still the same source. `pymobiledevice3` gets `--no-debug` (and
+`--no-info` for Errors only), which clear the stream flags the phone is asked for; both exist in
+11.13.1. The simulator's `log stream` gets the matching `--level`. `idevicesyslog` has no level
+option, so its rows are dropped after decoding and before enqueueing. Only the level menu moves the
+capture level: an agent's focus changes what is shown, because clearing a focus selects every level
+and would otherwise switch the Debug stream back on. The cost evidence is in
+[`performance.md`](../architecture/performance.md#implementation-time-scaling-gate).
 
 Strict filtering scans only incoming rows during a drain. Changing the query scans the fixed
 50,000-row snapshot off-main, checks cancellation every 128 rows, and applies only the latest

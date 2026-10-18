@@ -130,12 +130,20 @@ final class UIEvidenceRenderTests: XCTestCase {
                 let sourceURL = repository.appendingPathComponent(source.path)
                 let sourceText = try String(contentsOf: sourceURL, encoding: .utf8)
                 for selector in source.selectors {
-                    let method = try XCTUnwrap(selector.split(separator: "/").last, selector)
-                    let declaration = "func \(method)("
-                    if sourceText.contains(declaration) { continue }
-                    let suite = try XCTUnwrap(selector.split(separator: "/").dropLast().last, selector)
+                    let parts = selector.split(separator: "/")
+                    XCTAssertTrue(parts.count == 2 || parts.count == 3, selector)
+                    let suite = try XCTUnwrap(parts.dropFirst().first, selector)
                     let suiteURL = sourceURL.deletingLastPathComponent()
                         .appendingPathComponent("\(suite).swift")
+                    if parts.count == 2 {
+                        let suiteText = try String(contentsOf: suiteURL, encoding: .utf8)
+                        XCTAssertTrue(suiteText.contains("class \(suite)"),
+                                      "\(context) references missing test suite \(selector)")
+                        continue
+                    }
+                    let method = try XCTUnwrap(parts.last, selector)
+                    let declaration = "func \(method)("
+                    if sourceText.contains(declaration) { continue }
                     let suiteText = try String(contentsOf: suiteURL, encoding: .utf8)
                     XCTAssertTrue(
                         suiteText.contains(declaration),

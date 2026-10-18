@@ -319,23 +319,23 @@ extension AgentToolCoordinator {
   }
 
   func displayCompareFiles(
-    _ arguments: DisplayCompareFilesArguments,
-    for sessionID: SessionID
-  ) -> MCPToolResult {
+    _ arguments: DisplayCompareFilesArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  ) {
     guard let oldPath = arguments.oldPath, !oldPath.isEmpty else {
-      return .failure("Missing required argument: old_path")
+      return completion(.failure("Missing required argument: old_path"))
     }
     guard let newPath = arguments.newPath, !newPath.isEmpty else {
-      return .failure("Missing required argument: new_path")
+      return completion(.failure("Missing required argument: new_path"))
     }
     guard let oldURL = resolve(path: oldPath, for: sessionID) else {
-      return .failure("No such file: \(oldPath)")
+      return completion(.failure("No such file: \(oldPath)"))
     }
     guard let newURL = resolve(path: newPath, for: sessionID) else {
-      return .failure("No such file: \(newPath)")
+      return completion(.failure("No such file: \(newPath)"))
     }
     guard oldURL.standardizedFileURL != newURL.standardizedFileURL else {
-      return .failure("old_path and new_path are the same file; nothing to compare.")
+      return completion(.failure("old_path and new_path are the same file; nothing to compare."))
     }
 
     // Classified from the bytes before a tab is spent on it, so a pair with no comparison
@@ -349,30 +349,19 @@ extension AgentToolCoordinator {
     case (.text, .text):
       comparison = "a diff"
     case (.tooLarge, _), (_, .tooLarge):
-      return .failure(
+      return completion(.failure(
         """
         One side is larger than the \
         \(byteDescription(CompareDefaults.maximumBytes)) the comparison reads.
-        """)
+        """))
     case (.image, .text), (.text, .image):
-      return .failure(
+      return completion(.failure(
         "One file is an image and the other is text; there is no comparison to draw."
-      )
+      ))
     default:
-      return .failure(
+      return completion(.failure(
         "These files are binary, and not images Threading can compare."
-      )
-    }
-
-    if oldKind == .image,
-      let project = dependencies.projects.executionProject(forSessionID: sessionID)
-    {
-      dependencies.attachments.record(
-        declared: [oldURL, newURL],
-        sessionID: sessionID,
-        projectRoot: URL(fileURLWithPath: project.folderPath, isDirectory: true),
-        origin: .agent
-      )
+      ))
     }
 
     displayPaneController.addCompareTab(
@@ -382,16 +371,23 @@ extension AgentToolCoordinator {
       oldTitle: arguments.oldTitle,
       newTitle: arguments.newTitle
     )
-    let isVisible = revealDisplayPane(for: sessionID)
-    let location =
-      isVisible
+    let location = revealDisplayPane(for: sessionID)
       ? "in the display panel"
       : "in this session's display panel, which opens when the user selects it"
-    return .success(
-      """
+    let shown = """
       Showing \(comparison) of \(oldURL.lastPathComponent) against \
       \(newURL.lastPathComponent) \(location).
-      """)
+      """
+    // Also kept in the session's attachments: the comparison's one way onto a paired phone.
+    guard let project = dependencies.projects.executionProject(forSessionID: sessionID) else {
+      return completion(.success(shown))
+    }
+    let pair = ComparisonKeepingService.Pair(
+      old: oldURL, new: newURL, oldTitle: arguments.oldTitle, newTitle: arguments.newTitle,
+      areImages: oldKind == .image, projectRoot: project.folderURL
+    )
+    let keeping = dependencies.comparisonKeeping
+    Task { completion(await keeping.keep(pair, shown: shown, for: sessionID)) }
   }
 
   // MARK: Presentation

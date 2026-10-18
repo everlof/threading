@@ -7,7 +7,7 @@ import XCTest
 final class CodexTranscriptBoundaryObserverTests: XCTestCase {
 
     @MainActor
-    func testTranscriptAppendEndsDeclaredTurnWithoutMoreTerminalOutput() throws {
+    func testTranscriptFileEventEndsDeclaredTurnWithoutMoreTerminalOutput() throws {
         let fixture = try makeFixture(boundary: .started(turnID: "turn-1"))
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
 
@@ -38,10 +38,12 @@ final class CodexTranscriptBoundaryObserverTests: XCTestCase {
 
         wait(for: [armed], timeout: 3)
         try append(.completed(turnID: "turn-1"), to: fixture.transcript)
+        observer.handle(
+            paths: [fixture.transcript.resolvingSymlinksInPath().path],
+            flags: [FSEventStreamEventFlags(kFSEventStreamEventFlagItemModified)]
+        )
 
-        // FSEvents delivery depends on host scheduling; this checks eventual append wake-up,
-        // not the latency of the terminal-output path. A passing loaded run took 2.26 seconds.
-        wait(for: [completed], timeout: 10)
+        wait(for: [completed], timeout: 3)
         XCTAssertEqual(tracker.activity, .needsAttention)
         XCTAssertFalse(tracker.runtimeSnapshot.hasOpenTurn)
     }

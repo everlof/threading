@@ -344,7 +344,7 @@ final class ProjectSidebarViewController: NSViewController {
     ///
     /// Nothing reaches here today: store events are delivered synchronously, but no path inside
     /// a reload edits the store. It is guarded anyway, for the reason the tree builder refuses a
-    /// cycle nothing can create (see `attachSideChats`). `reload` now opens an update block and
+    /// cycle nothing can create (see `attachChildChats`). `reload` now opens an update block and
     /// hands the outline indexes into the tree it is holding, so a second pass rebuilding that
     /// tree underneath is not a wrong-looking row but an AppKit exception — and this reload is
     /// reached from a dozen call sites, including a notification posted from anywhere in the app.
@@ -1553,7 +1553,7 @@ extension ProjectSidebarViewController {
               !session.isArchived,
               !session.isSnoozed(at: Date()),
               !session.isPinned,
-              session.forkedFrom == nil,
+              session.nestingParentID == nil,
               let projectNode = projectNodesByID[projectID],
               sessionNodesByID[sessionID] == nil,
               // An append at the end of a project the preview cuts lands past the page — or is

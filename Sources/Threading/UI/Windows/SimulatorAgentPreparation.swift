@@ -22,6 +22,30 @@ enum SimulatorAgentPreparation {
         let panes = coordinator.displayPaneController
         let android = request.preferAndroid ?? false
         let existing = panes.simulatorWorkspace(for: sessionID)
+        if let creation = request.creation {
+            if let existing, existing.simulators.count >= SimulatorWorkspaceState.maximumMembers,
+               request.beside || existing.heldDevices.allSatisfy({ $0.platform.isAndroid }) {
+                completion(.failure("The Simulator workspace is full. Remove a member before creating another beside it."))
+                return
+            }
+            Task { @MainActor in
+                do {
+                    let created = try await panes.createSimulatorForAgent(creation)
+                    let adoption = SimulatorPrepareArguments(
+                        deviceID: created.id.rawValue, beside: arguments.beside, layout: arguments.layout
+                    )
+                    run(adoption, sessionID, through: coordinator) { result in
+                        // Even a failed boot must return the new identity so an agent can recover
+                        // that device instead of creating another empty one on every attempt.
+                        guard result.isError else { completion(result); return }
+                        completion(.failure("Created \(created.name) (\(created.id.rawValue)) with control enabled, "
+                            + "but preparation failed: \(result.text) Retry simulator_prepare with device_id "
+                            + "\(created.id.rawValue) and leave out create_name."))
+                    }
+                } catch { completion(.failure(error.localizedDescription)) }
+            }
+            return
+        }
         let before = existing?.heldDevices ?? []
         let reveal = { [weak coordinator] (workspace: SimulatorWorkspaceViewController?) in
             if let layout = request.layout { workspace?.setLayout(layout) }

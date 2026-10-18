@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 import XCTest
 @testable import Threading
 
@@ -970,6 +971,97 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             descendants(of: pane.view).compactMap { $0 as? ThemedImagePreview }.isEmpty,
             "a diagram initialized the image preview"
         )
+    }
+
+    /// A kept comparison previews as a diff, drawn by the Compare tab's own renderer, parsed off
+    /// the main actor and held inside the pane's width.
+    func testADiffPreviewsAsADiffInsideThePane() throws {
+        let diff = root.appendingPathComponent("notes.md.diff")
+        try Data("""
+            diff --git a/tmp/notes.md b/repo/notes.md
+            --- a/tmp/notes.md
+            +++ b/repo/notes.md
+            @@ -1,3 +1,3 @@
+             one
+            -two
+            +a much longer second line that has to wrap inside a narrow attachments pane
+             three
+
+            """.utf8).write(to: diff)
+        let pane = try laidOutPane(showing: diff, size: NSSize(width: 353, height: 700))
+
+        waitUntil { pane.diffPreviewLineCountForTesting != nil }
+        XCTAssertEqual(pane.diffPreviewLineCountForTesting, 4)
+        pane.view.layoutSubtreeIfNeeded()
+        let rendered = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? DiffView }.first,
+            "the pane grew no diff preview"
+        )
+        let scroll = try XCTUnwrap(rendered.enclosingScrollView)
+        XCTAssertFalse(scroll.isHidden, "the diff preview is built but not shown")
+        XCTAssertLessThanOrEqual(
+            rendered.convert(rendered.bounds, to: scroll).maxX,
+            scroll.bounds.maxX + 0.5,
+            "the diff is wider than the pane holding it"
+        )
+        XCTAssertTrue(
+            descendants(of: pane.view).compactMap { $0 as? ThemedTextView }.allSatisfy {
+                $0.enclosingScrollView?.isHidden ?? true
+            },
+            "a diff also showed the plain source preview"
+        )
+
+        let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .map { URL(fileURLWithPath: $0) }
+            ?? URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("ThreadingRenders")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let bitmap = try XCTUnwrap(pane.view.bitmapImageRepForCachingDisplay(in: pane.view.bounds))
+        pane.view.cacheDisplay(in: pane.view.bounds, to: bitmap)
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            .write(to: output.appendingPathComponent("attachments-diff-preview.png"))
+    }
+
+    /// A kept picture comparison previews as the Compare tab's own surface, holding the two
+    /// picture rows it names under the captions the agent gave them.
+    func testAComparisonPreviewsItsTwoPicturesHeldAgainstEachOther() throws {
+        let old = try writePNG(named: "before.png", size: NSSize(width: 120, height: 80), color: .systemRed)
+        let new = try writePNG(named: "after.png", size: NSSize(width: 120, height: 80), color: .systemBlue)
+        let sessionID = SessionID()
+        let pictures = SessionAttachmentStore.shared.record(
+            urls: [old, new], sessionID: sessionID, projectRoot: root
+        )
+        XCTAssertEqual(pictures.count, 2)
+        let record = try JSONEncoder().encode(RemoteImageComparisonDTO(
+            old: .init(attachmentID: pictures[0].id, title: "Before"),
+            new: .init(attachmentID: pictures[1].id, title: "After")
+        ))
+        XCTAssertNotNil(SessionAttachmentStore.shared.recordImageComparison(
+            record, name: "before.png → after.png", old: pictures[0], new: pictures[1],
+            sessionID: sessionID
+        ))
+
+        let pane = SessionAttachmentsViewController(sessionID: sessionID)
+        pane.view.frame = NSRect(origin: .zero, size: NSSize(width: 353, height: 700))
+        pane.view.autoresizingMask = []
+        pane.view.layoutSubtreeIfNeeded()
+        waitUntil { pane.comparisonPreviewTitlesForTesting != nil }
+        XCTAssertEqual(pane.comparisonPreviewTitlesForTesting, ["Before", "After"])
+        pane.view.layoutSubtreeIfNeeded()
+        let compare = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? ImageCompareView }.first,
+            "the pane grew no comparison"
+        )
+        XCTAssertFalse(compare.isHidden, "the comparison is built but not shown")
+        XCTAssertGreaterThan(compare.bounds.height, 100, "the comparison was given no room")
+
+        let output = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .map { URL(fileURLWithPath: $0) }
+            ?? URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("ThreadingRenders")
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let bitmap = try XCTUnwrap(pane.view.bitmapImageRepForCachingDisplay(in: pane.view.bounds))
+        pane.view.cacheDisplay(in: pane.view.bounds, to: bitmap)
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            .write(to: output.appendingPathComponent("attachments-comparison-preview.png"))
     }
 
     private func items(in entries: [ThemedMenuEntry]) -> [ThemedMenuItem] {

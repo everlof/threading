@@ -59,11 +59,7 @@ enum NoticeAlert {
             settings.setShows(false, for: notice)
         }
 
-        if let window {
-            alert.beginSheetModal(for: window, completionHandler: finish)
-        } else {
-            finish(alert.runModal())
-        }
+        alert.begin(in: window, completionHandler: finish)
     }
 
     /// Whether the statement is put up at all. Split from `show` so the guard is assertable

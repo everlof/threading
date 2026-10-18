@@ -606,19 +606,36 @@ public final class SimulatorLogRowSource: BufferedDeviceLogSource {
     private let reader = DeviceLogLineReader(label: "simulator")
     private let udid: String
     private let predicate: String?
+    private let minimumSeverity: Int
 
-    public init(udid: String, predicate: String?) {
+    public init(udid: String, predicate: String?, minimumSeverity: Int = 0) {
         self.udid = udid
         self.predicate = predicate
+        self.minimumSeverity = minimumSeverity
     }
 
-    public override func start() {
+    var arguments: [String] {
         var arguments = [
-            "simctl", "spawn", udid, "log", "stream", "--style=ndjson", "--level=debug",
+            "simctl", "spawn", udid, "log", "stream", "--style=ndjson",
+            "--level=\(Self.streamLevel(atLeast: minimumSeverity))",
         ]
         if let predicate, !predicate.isEmpty {
             arguments.append(contentsOf: ["--predicate", predicate])
         }
+        return arguments
+    }
+
+    /// `log stream` produces Debug and Info only when asked, so a level the pane would hide is
+    /// never read — the same reason the predicate is pushed into the command.
+    static func streamLevel(atLeast severity: Int) -> String {
+        switch severity {
+        case ...0: return "debug"
+        case 1: return "info"
+        default: return "default"
+        }
+    }
+
+    public override func start() {
         reader.run(
             executable: "/usr/bin/xcrun",
             arguments: arguments,
@@ -661,6 +678,9 @@ private final class DeviceLogLifecycleGeneration: @unchecked Sendable {
 /// The tool is libimobiledevice's, never bundled, resolved on the user's `PATH`.
 public final class PairedDeviceLogRowSource: BufferedDeviceLogSource, @unchecked Sendable {
     private let processName: String?
+    /// The relay has no level option, so rows below the pane's level are dropped as they are
+    /// decoded rather than queued, kept in the ring and recorded only to be hidden.
+    private let minimumSeverity: Int
     private let reader = DeviceLogLineReader(label: "device")
     private let udid: String
     private let overNetwork: Bool
@@ -672,8 +692,9 @@ public final class PairedDeviceLogRowSource: BufferedDeviceLogSource, @unchecked
         DeviceRelayReclaim.reclaimOrphanedReaders(udid: device, toolPath: path)
     }
 
-    public init(udid: String, overNetwork: Bool, toolPath: String, processName: String? = nil) {
+    public init(udid: String, overNetwork: Bool, toolPath: String, processName: String? = nil, minimumSeverity: Int = 0) {
         self.processName = processName
+        self.minimumSeverity = minimumSeverity
         self.udid = udid
         self.overNetwork = overNetwork
         self.toolPath = toolPath
@@ -697,6 +718,7 @@ public final class PairedDeviceLogRowSource: BufferedDeviceLogSource, @unchecked
             arguments: arguments,
             onLine: { [weak self] line in
                 if let self, self.generation.contains(request), let row = DeviceLogDecoding.syslog(line),
+                   row.severity >= self.minimumSeverity,
                    self.processName == nil || row.process == self.processName { self.enqueue(row) }
             },
             onEnd: { [weak self] reason in
@@ -728,6 +750,7 @@ public final class PairedDeviceLogRowSource: BufferedDeviceLogSource, @unchecked
 /// than turning an installed optional tool into a regression.
 public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, @unchecked Sendable {
     private let processName: String?
+    private let minimumSeverity: Int
     private let structuredReader = DeviceLogLineReader(label: "device-structured")
     private let fallbackReader = DeviceLogLineReader(label: "device-fallback")
     private let lifecycle = DispatchQueue(label: "codes.threading.devicelog.device-lifecycle")
@@ -752,7 +775,8 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         toolPath: String,
         fallbackToolPath: String?,
         structuredStartupDeadline: TimeInterval = 6,
-        processName: String? = nil
+        processName: String? = nil,
+        minimumSeverity: Int = 0
     ) {
         self.udid = udid
         self.overNetwork = overNetwork
@@ -760,6 +784,20 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         self.fallbackToolPath = fallbackToolPath
         self.structuredStartupDeadline = structuredStartupDeadline
         self.processName = processName
+        self.minimumSeverity = minimumSeverity
+    }
+
+    var structuredArguments: [String] {
+        ["--no-color", "syslog", "live", "--native", "--format", "json"]
+            + Self.levelArguments(atLeast: minimumSeverity)
+    }
+
+    /// The phone's Debug stream is most of what it sends: about 78% of 2,237 rows/s from an
+    /// iPhone 16 Pro on 2026-10-18. These clear the stream flags the phone is asked for, so a level
+    /// the pane would hide is never produced, sent, decoded, queued or recorded. Both flags exist
+    /// in 11.13.1, the oldest version this route accepts.
+    static func levelArguments(atLeast severity: Int) -> [String] {
+        (severity >= 1 ? ["--no-debug"] : []) + (severity >= 2 ? ["--no-info"] : [])
     }
 
     public override func start() {
@@ -797,14 +835,14 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
     private func startStructuredReader(request: Int) {
         structuredReader.run(
             executable: toolPath,
-            arguments: [
-                "--no-color", "syslog", "live", "--native", "--format", "json",
-            ],
+            arguments: structuredArguments,
             environment: Self.environment(udid: udid),
             onLine: { [weak self] line in
                 guard let self, self.generation.contains(request), let row = DeviceLogDecoding.pymobiledevice3(line) else { return }
                 let isFirstStructuredRow = self.markDecodedStructuredRow()
-                if self.processName == nil || row.process == self.processName { self.enqueue(row) }
+                // Errors only still receives Notice rows: the tool can clear Debug and Info, not more.
+                if row.severity >= self.minimumSeverity,
+                   self.processName == nil || row.process == self.processName { self.enqueue(row) }
                 if isFirstStructuredRow {
                     self.lifecycle.async { [weak self] in
                         guard let self, self.generation.contains(request) else { return }
@@ -871,6 +909,7 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
             arguments: arguments,
             onLine: { [weak self] line in
                 if let self, self.generation.contains(request), let row = DeviceLogDecoding.syslog(line),
+                   row.severity >= self.minimumSeverity,
                    self.processName == nil || row.process == self.processName { self.enqueue(row) }
             },
             onEnd: { [weak self] fallbackReason in
@@ -1411,15 +1450,33 @@ public struct DeviceLogSourceOption: Equatable {
         }
     }
 
-    public func makeSource(predicate: String?, route: Route = .appLog, processName: String? = nil) -> DeviceLogRowSource? {
+    /// Whether this source leaves rows below the pane's level unread. The system logs are a
+    /// firehose at Debug; Bluetooth packets have no level and an app's own log is not a firehose.
+    public var readsAtLevel: Bool {
+        switch kind {
+        case .simulator, .device, .structuredDevice: return true
+        case .bluetooth, .app: return false
+        }
+    }
+
+    public func makeSource(
+        predicate: String?, route: Route = .appLog, processName: String? = nil, minimumSeverity: Int = 0
+    ) -> DeviceLogRowSource? {
+        let severity = readsAtLevel ? minimumSeverity : 0
         switch kind {
         case .simulator(let udid):
             let processPredicate = processName.map { NSPredicate(format: "process == %@", $0).predicateFormat }
             let clauses = [predicate, processPredicate].compactMap { $0 }.filter { !$0.isEmpty }
-            return SimulatorLogRowSource(udid: udid, predicate: clauses.isEmpty ? nil : clauses.map { "(\($0))" }.joined(separator: " AND "))
+            return SimulatorLogRowSource(
+                udid: udid,
+                predicate: clauses.isEmpty ? nil : clauses.map { "(\($0))" }.joined(separator: " AND "),
+                minimumSeverity: severity
+            )
         case .device(let udid, let overNetwork):
             guard let tool = DeviceLogSourceCatalog.syslogToolPath else { return nil }
-            return PairedDeviceLogRowSource(udid: udid, overNetwork: overNetwork, toolPath: tool, processName: processName)
+            return PairedDeviceLogRowSource(
+                udid: udid, overNetwork: overNetwork, toolPath: tool, processName: processName, minimumSeverity: severity
+            )
         case .bluetooth(let udid, let overNetwork, let toolPath):
             return BluetoothLogRowSource(udid: udid, overNetwork: overNetwork, toolPath: toolPath)
         case .structuredDevice(let udid, let overNetwork, let tool, let fallbackTool):
@@ -1428,7 +1485,8 @@ public struct DeviceLogSourceOption: Equatable {
                 overNetwork: overNetwork,
                 toolPath: tool,
                 fallbackToolPath: fallbackTool,
-                processName: processName
+                processName: processName,
+                minimumSeverity: severity
             )
         case .app(let deviceID, let bundleID, let appName):
             switch route {

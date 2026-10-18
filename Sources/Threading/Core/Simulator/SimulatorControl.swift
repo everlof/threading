@@ -4,6 +4,7 @@ import Foundation
 
 protocol SimulatorControlling: Sendable {
     func availableDevices() async throws -> [SimulatorDevice]
+    func createDevice(_ request: SimulatorDeviceCreationRequest) async throws -> SimulatorDevice
     func prepare(deviceID: SimulatorDeviceID?) async throws -> SimulatorDeviceLease
     func installAndLaunch(
         applicationURL: URL,
@@ -21,6 +22,9 @@ protocol SimulatorControlling: Sendable {
 }
 
 extension SimulatorControlling {
+    func createDevice(_ request: SimulatorDeviceCreationRequest) async throws -> SimulatorDevice {
+        throw SimulatorControlError.unsupportedPlatformRequest
+    }
     // Default no-op keeps test doubles that only exercise the lease/stream paths simple; the real
     // simctl control overrides it.
     func setAppearance(dark: Bool, on deviceID: SimulatorDeviceID) async throws {}
@@ -33,6 +37,26 @@ extension SimulatorControlling {
 
     func openAppLink(_ link: SimulatorAppLink, on deviceID: SimulatorDeviceID) async throws {
         throw SimulatorControlError.unsupportedPlatformRequest
+    }
+}
+
+/// A new, empty iOS device. The matching device supplies only its hardware type and runtime;
+/// neither its data nor its input authority is copied.
+struct SimulatorDeviceCreationRequest: Equatable, Sendable {
+    let name: String
+    let matchingDeviceID: SimulatorDeviceID?
+
+    init(name: String, matchingDeviceID: SimulatorDeviceID?) throws {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 80,
+              name.rangeOfCharacter(from: .controlCharacters) == nil else {
+            throw SimulatorControlError.invalidResponse("create_name must contain 1–80 characters without control characters.")
+        }
+        guard matchingDeviceID == nil || matchingDeviceID?.platform == .iOSSimulator else {
+            throw SimulatorControlError.unsupportedPlatformRequest
+        }
+        self.name = name
+        self.matchingDeviceID = matchingDeviceID
     }
 }
 
@@ -171,6 +195,41 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
         }
     }
 
+    func createDevice(_ request: SimulatorDeviceCreationRequest) async throws -> SimulatorDevice {
+        try await perform { runner, cancellation in
+            let devices = try Self.availableDevices(using: runner, cancellation: cancellation)
+            guard devices.count < SimulatorControlDefaults.maximumDeviceCount else {
+                throw SimulatorControlError.tooManyDevices(maximum: SimulatorControlDefaults.maximumDeviceCount)
+            }
+            let template: SimulatorDevice
+            if let id = request.matchingDeviceID {
+                guard let matching = devices.first(where: { $0.id == id }) else {
+                    throw SimulatorControlError.deviceNotFound(id)
+                }
+                template = matching
+            } else {
+                guard let first = devices.first else { throw SimulatorControlError.noAvailableIOSDevices }
+                template = first
+            }
+            let output = try Self.run(
+                ["create", request.name, template.deviceTypeIdentifier, template.runtimeIdentifier],
+                operation: "create", timeout: SimulatorControlDefaults.bootTimeout,
+                maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
+                capture: .standardOutput, using: runner, cancellation: cancellation
+            )
+            guard let rawID = String(data: output, encoding: .utf8),
+                  let id = SimulatorDeviceID(rawID.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  id.platform == .iOSSimulator, !devices.contains(where: { $0.id == id }) else {
+                throw SimulatorControlError.invalidResponse("CoreSimulator did not return a new iOS Simulator identity.")
+            }
+            return SimulatorDevice(
+                id: id, name: request.name, runtimeIdentifier: template.runtimeIdentifier,
+                runtimeName: template.runtimeName, deviceTypeIdentifier: template.deviceTypeIdentifier,
+                family: template.family, state: .shutdown, lastBootedAt: nil
+            )
+        }
+    }
+
     func prepare(deviceID: SimulatorDeviceID?) async throws -> SimulatorDeviceLease {
         try await perform { runner, cancellation in
             let devices = try Self.availableDevices(using: runner, cancellation: cancellation)
@@ -190,12 +249,16 @@ final class SimctlSimulatorControl: SimulatorControlling, @unchecked Sendable {
                 return SimulatorDeviceLease(device: device, bootOwnership: .user)
             }
 
+            // A fresh device still has to migrate its runtime's system apps and databases.
+            // Ordinary restarts keep the shorter bound; this never runs on the main actor.
+            let bootTimeout = device.lastBootedAt == nil
+                ? SimulatorControlDefaults.firstBootTimeout : SimulatorControlDefaults.bootTimeout
             do {
                 _ = try Self.run(
                     ["bootstatus", device.id.rawValue, "-b"],
                     operation: "boot",
                     deviceID: device.id,
-                    timeout: SimulatorControlDefaults.bootTimeout,
+                    timeout: bootTimeout,
                     maximumOutputBytes: SimulatorControlDefaults.maximumCommandOutputBytes,
                     capture: .combined,
                     using: runner,
@@ -602,6 +665,7 @@ enum SimulatorControlDefaults {
     static let maximumLaunchArgumentCharacters = 4_096
     static let listTimeout: TimeInterval = 15
     static let bootTimeout: TimeInterval = 120
+    static let firstBootTimeout: TimeInterval = 300
     static let installTimeout: TimeInterval = 120
     static let launchTimeout: TimeInterval = 30
     static let linkTimeout: TimeInterval = 15

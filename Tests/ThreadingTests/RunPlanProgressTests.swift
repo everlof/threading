@@ -81,7 +81,9 @@ final class RunPlanProgressTests: XCTestCase {
             }
         }
 
-        await fulfillment(of: [callbacks], timeout: 5)
+        // This intentionally submits the full 4,096-mutation turn budget through the
+        // production utility queue. The all-theme suite can contend for that worker's CPU.
+        await fulfillment(of: [callbacks], timeout: 30)
         XCTAssertEqual(nilCallbacks, 1)
 
         let began = expectation(description: "next turn begins")

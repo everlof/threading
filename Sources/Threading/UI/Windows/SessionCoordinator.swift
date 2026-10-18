@@ -400,6 +400,11 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 environment.projectStore.update(sessionID: sessionID) {
                     $0.managedWorkspace = completed
                 }
+                // The worktree is gone, so its Xcode caches just became orphans. Measure now,
+                // rather than whenever the passive pass next finds a quiet moment, so the Storage
+                // page and list_reclaimable_storage can offer them while the disk they hold is
+                // still the question.
+                if completed.state == .integrated { ArtifactScanService.shared.refreshScratch(force: true) }
 
             case .needsAttention(let failed):
                 let message = failed.lastError
@@ -432,7 +437,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         reason: String?,
         requestedByManagerID managerID: SessionID?
     ) {
-        archive(
+        // Recorded before archiving starts: the archive edge that closes the tenure can arrive
+        // before this archive's own completion.
+        if let managerID {
+            ControlGrantStore.shared.expectArchive(of: sessionID, by: managerID)
+        }
+        let started = archive(
             sessionID,
             receipt: { session, wasRunning, undo in
                 Self.agentArchiveToast(
@@ -443,9 +453,6 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 )
             },
             onArchived: {
-                if let managerID {
-                    _ = ControlGrantStore.shared.archive(childID: sessionID, by: managerID)
-                }
                 // The band is on screen for fourteen seconds and then the row is simply gone. A
                 // session filed away by something other than a click is exactly the change the
                 // durable journal exists to answer for afterwards.
@@ -455,9 +462,13 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 ])
             },
             onArchiveFailed: { [weak self] in
+                ControlGrantStore.shared.cancelExpectedArchive(of: sessionID)
                 self?.recoverManagedWorkspaceAfterArchiveFailure(sessionID)
             }
         )
+        if !started {
+            ControlGrantStore.shared.cancelExpectedArchive(of: sessionID)
+        }
     }
 
     /// Remote publication is the second opt-in, and therefore the only managed finish that may
@@ -803,7 +814,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     ///
     /// The rename gate's conditions, plus lineage: this is a side chat, its parent is still an
     /// unarchived row to deliver to, and the workspace tool group is on — with it off the agent
-    /// has no `send_to_session` to call, and the request would spend a turn on an instruction
+    /// has no `mail_send` to call, and the request would spend a turn on an instruction
     /// it cannot carry out. Readiness is `SessionMessageDelivery`'s own answer, so the item
     /// cannot offer a send the delivery would then refuse (a booting terminal, most narrowly).
     static func canAskForReportBack(
@@ -821,13 +832,14 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     }
 
     /// Asks the side chat's own agent to report its conclusion to its parent, by sending it
-    /// one line naming `send_to_session` and the parent's id.
+    /// one line naming `mail_send` and the parent's id.
     ///
     /// The same reasoning as `askAgentToRename`: the agent holding the conversation is the
     /// cheapest thing that can summarize it, and the request goes through the ordinary input
     /// path so it is echoed into the transcript as a user turn — visible, correctable, and
-    /// openly spending the user's usage. The delivery itself then carries Threading's
-    /// provenance header into the parent, exactly as any cross-session message does.
+    /// openly spending the user's usage. The conclusion then reaches the parent as mail: the
+    /// parent is told it is waiting and reads it under the header Threading vouches for, rather
+    /// than finding the side chat's words in its own conversation as a user turn.
     /// **The receipt form, and a receipt on screen when it fails.** The gate passed a moment
     /// ago, which is not the same as the request landing: a side chat mid-`/compact` swallows
     /// the paste and reports no turn, and the earlier shape — the synchronous overload, its
@@ -1424,7 +1436,11 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// 09:00 must not reach across whatever the user is reading and replace it. The launch is
     /// `container.launchInBackground`'s job, and the selected-session opening handoff is not
     /// involved at all.
-    func startSessionUnattended(plan: ScheduledSessionPlan, title: String) -> AgentSession? {
+    func startSessionUnattended(
+        plan: ScheduledSessionPlan,
+        title: String,
+        lineage: SessionLineage? = nil
+    ) -> AgentSession? {
         let targetProjectID = Self.targetProjectID(
             startingAt: plan.projectID,
             branch: plan.branch,
@@ -1489,6 +1505,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             title: sessionName,
             managedWorkspace: workspace,
             automationWorkspace: plan.automationWorkspace,
+            lineage: lineage,
             id: sessionID
         )
         if session == nil, let workspace {
@@ -1910,7 +1927,7 @@ enum SessionRenameRequest {
 enum SessionReportBackRequest {
     /// English source copy, and the key it is looked up by. `%@` is the parent's Threading id.
     static let promptKey = """
-        Call send_to_session with session_id %@ — the session this side chat was forked \
+        Call mail_send with to %@ — the session this side chat was forked \
         from — and report your conclusion: what was found or decided, in a few sentences, \
         not the transcript. Then reply here with one line saying what you sent.
         """

@@ -51,10 +51,6 @@ final class SupervisionSubscriptionCenter {
         observations.observe(SessionRuntimeDidChange.self) { [weak self] event in
             self?.runtimeChanged(event)
         }
-        observations.observe(SessionArchivedStateDidChange.self) { [weak self] event in
-            guard event.isArchived else { return }
-            self?.archived(event.sessionID)
-        }
         observations.observe(CustomLimitDidFire.self) { [weak self] event in
             self?.limitNearing(accountID: event.accountID)
         }
@@ -125,14 +121,14 @@ final class SupervisionSubscriptionCenter {
         }
     }
 
-    private func archived(_ childID: SessionID) {
-        let keys = subscriptions.filter { $0.childID == childID }
-        guard !keys.isEmpty, let supervision = dependencies.supervision(childID) else { return }
-        dependencies.appendEvent(.archived, nil, supervision)
-        for key in keys {
-            deliver(notice(.archived, childID: childID), to: key.managerID)
-            subscriptions.remove(key)
-        }
+    /// Called by `ControlGrantStore` as an archive closes the child's tenure, before the close
+    /// would drop the subscription. The store owns the closing `.archived` event; this only
+    /// tells the subscribed manager.
+    func childArchived(_ supervision: Supervision) {
+        let childID = supervision.childID
+        let key = Key(managerID: supervision.managerID, childID: childID)
+        guard subscriptions.contains(key) else { return }
+        deliver(notice(.archived, childID: childID), to: key.managerID)
         removeSubscriptions(for: childID)
     }
 

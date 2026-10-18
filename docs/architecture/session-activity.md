@@ -1454,6 +1454,16 @@ One bug worth keeping: every command reads stdin **before** its guard
 into a pipe nobody drains, and it is the *unrouted* runs — the user's own terminal sessions —
 that would pay for it. Found by a probe whose hook posted an empty body, and pinned by a test.
 
+## Answering disk-pressure hook
+
+Claude sessions with lifecycle reporting also get one answering `PostToolUseFailure` entry, no tool
+matcher, posting to `/disk-notice/<token>` (`DiskPressureNotice`). It is silent unless the home
+volume is short when a tool call fails, or the error states a full disk; then it adds one
+`additionalContext` paragraph pointing at the storage tools, at most once per session per ten
+minutes. Written beside the lifecycle entries rather than among them — the `PostToolUseFailure`
+entry that closes an ask stays first and silent. The reasoning and measurements are in
+[`storage-and-stats.md`](storage-and-stats.md).
+
 ## Answering mail hooks
 
 Every lifecycle hook above is silent, and stays so — their commands and the frozen-text test in

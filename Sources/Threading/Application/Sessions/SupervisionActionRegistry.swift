@@ -8,7 +8,7 @@ struct SupervisionActionFailure: Error, Equatable, Sendable {
     }
 }
 
-/// Window-owned lifecycle capabilities used by manager tools.
+/// Window-owned lifecycle capabilities used by manager tools and by `start_subagent`.
 ///
 /// The control plane decides whether an action is allowed. This registry only finds the
 /// window that owns the session surfaces and asks its `SessionCoordinator` to perform the
@@ -19,6 +19,10 @@ final class SupervisionActionRegistry {
     struct Actions {
         let spawn: (
             ScheduledSessionPlan, String, SessionID?, SessionID
+        ) -> Result<AgentSession, SupervisionActionFailure>
+        /// A chat's own subagent: plan, brief, parent.
+        let spawnSubagent: (
+            ScheduledSessionPlan, String, SessionID
         ) -> Result<AgentSession, SupervisionActionFailure>
         let resume: (SessionID) -> Bool
         let move: (SessionID, AgentAccount, SessionID) -> Result<String, SupervisionActionFailure>

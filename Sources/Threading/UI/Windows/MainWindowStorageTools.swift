@@ -24,23 +24,20 @@ import AppKit
 extension AgentToolCoordinator {
     // MARK: - Listing
 
-    /// What can be reclaimed, from the cache the scan service keeps.
+    /// What can be reclaimed, from the cache the scan service keeps, one bounded page at a time.
     ///
     /// Deliberately does not scan: a walk takes a minute, and an agent asking about disk space
     /// wants an answer now. A reading with nothing in it says so rather than pretending the
-    /// disk is clean.
-    func listReclaimableStorage() -> MCPToolResult {
+    /// disk is clean. The page itself — its bound, its order, what it says it left out — is
+    /// `ReclaimableStorageListing`'s.
+    func listReclaimableStorage(_ arguments: ListReclaimableStorageArguments) -> MCPToolResult {
         let projects = ProjectStore.shared.projects
         let service = ArtifactScanService.shared
 
-        let byProject = projects.map { ($0, service.artifacts(for: $0.id)) }
+        let byProject = projects.map { (project: $0, artifacts: service.artifacts(for: $0.id)) }
         let scratch = service.scratchArtifacts()
 
-        let lines = byProject.flatMap { project, artifacts in
-            artifacts.map { describe($0, in: project) }
-        } + scratch.map { Self.describeScratch($0) }
-
-        guard !lines.isEmpty else {
+        guard byProject.contains(where: { !$0.artifacts.isEmpty }) || !scratch.isEmpty else {
             // Sweeps the scratch scope too, so the nudge covers everything the answer did.
             ArtifactScanService.shared.refreshStaleProjects()
             return .success(
@@ -50,9 +47,6 @@ extension AgentToolCoordinator {
             )
         }
 
-        let total = (byProject.flatMap { $0.1 } + scratch)
-            .reduce(0) { $0 + $1.byteCount }
-
         // The oldest reading on show, across both scopes: a header claiming the freshness of the
         // project scan would be claiming it for scratch lines that can be an hour staler.
         let measured = [service.oldestScan(among: projects.map(\.id)), service.scratchScannedAt()]
@@ -61,15 +55,14 @@ extension AgentToolCoordinator {
             .map { StorageToolStrings.measured(Self.storageRelativeDate.localizedString(for: $0, relativeTo: Date())) }
             ?? ""
 
-        return .success(
-            StorageToolStrings.header(
-                total: Self.storageSize.string(fromByteCount: total),
-                count: lines.count,
-                measured: measured
-            )
-            + "\n" + lines.joined(separator: "\n")
-            + "\n\n" + StorageToolStrings.listingFooter
-        )
+        return .success(ReclaimableStorageListing.page(
+            groups: ReclaimableFindings.groups(checkoutArtifacts: byProject, scratchArtifacts: scratch, among: projects),
+            measured: measured,
+            options: ReclaimableStorageListing.Options(arguments)
+        ) { artifact, group in
+            guard case .checkout(let project) = group.attribution else { return Self.describeScratch(artifact) }
+            return describe(artifact, in: project)
+        })
     }
 
     /// One line per directory, carrying everything a proposal needs to be a good one: the exact

@@ -38,6 +38,14 @@ struct SessionAttachment: Equatable, Identifiable {
         /// source-preview ceiling, or an explicit "no preview extension is available". Removing
         /// the last contribution never closes the built-in surface or leaves blank chrome.
         case media
+        /// A unified diff: a `display_compare_files` text comparison frozen when it was shown, or
+        /// a `.diff`/`.patch` file handed over deliberately. Drawn as a diff on both the Mac and
+        /// the phone, since a comparison is the one panel surface a paired phone could not see.
+        case diff
+        /// Two of the session's pictures held against each other. The file is a
+        /// `RemoteImageComparisonDTO` naming both rows; the pair is also the row's source key,
+        /// so `comparedAttachmentIDs` answers without reading it.
+        case comparison
     }
 
     /// Which side of the conversation put the file in front of the other.
@@ -132,6 +140,27 @@ struct SessionAttachment: Equatable, Identifiable {
     }
 
     var name: String { url.lastPathComponent }
+
+    /// The two picture rows a `.comparison` holds against each other, read from its source key.
+    var comparedAttachmentIDs: (old: String, new: String)? {
+        guard kind == .comparison else { return nil }
+        return Self.comparedAttachmentIDs(inSourcePath: sourcePath)
+    }
+
+    /// One row per compared pair: the same two pictures compared again refresh this key's row
+    /// rather than stacking a copy of it.
+    static func comparisonSourcePath(old: String, new: String) -> String {
+        "\(comparisonSourcePrefix)\(old)|\(new)"
+    }
+
+    static func comparedAttachmentIDs(inSourcePath path: String) -> (old: String, new: String)? {
+        guard path.hasPrefix(comparisonSourcePrefix) else { return nil }
+        let ids = path.dropFirst(comparisonSourcePrefix.count).split(separator: "|")
+        guard ids.count == 2 else { return nil }
+        return (String(ids[0]), String(ids[1]))
+    }
+
+    private static let comparisonSourcePrefix = "comparison:"
 }
 
 /// A supported file the scan found outside the project and did **not** admit.
@@ -939,23 +968,107 @@ final class SessionAttachmentStore {
         sessionID: SessionID,
         origin: SessionAttachment.Origin = .agent
     ) -> SessionAttachment? {
+        recordGenerated(
+            Data(html.utf8),
+            title: title,
+            fallbackTitle: "Document",
+            fileExtension: "html",
+            kind: .html,
+            sessionID: sessionID,
+            origin: origin
+        )
+    }
+
+    /// Records a text comparison's unified diff, frozen as it was when the agent showed it.
+    ///
+    /// The Compare tab re-reads its two files and lives only in the Mac's panel; this is the same
+    /// comparison as a file in the session's chronology, which is what a paired phone and a
+    /// notification's `target_ref` can reach. A snapshot rather than a pair of references because
+    /// the "before" side is routinely a scratch copy in `$TMPDIR` that is gone by the next turn.
+    @discardableResult
+    func recordGeneratedDiff(
+        _ diff: Data,
+        title: String,
+        sessionID: SessionID,
+        origin: SessionAttachment.Origin = .agent
+    ) -> SessionAttachment? {
+        recordGenerated(
+            diff,
+            title: title,
+            fallbackTitle: "Comparison",
+            fileExtension: "diff",
+            kind: .diff,
+            sessionID: sessionID,
+            origin: origin
+        )
+    }
+
+    /// Records that two of this session's pictures were compared, as one row per pair.
+    ///
+    /// Unlike a kept diff this is *not* a snapshot: it names the two picture rows, which follow
+    /// their files exactly as the Compare tab does, so comparing the same pair again rewrites this
+    /// row in its slot and lifts it to the top instead of adding another. `manifest` is the
+    /// `RemoteImageComparisonDTO` a phone reads; the caller encodes it off the main actor.
+    @discardableResult
+    func recordImageComparison(
+        _ manifest: Data,
+        name: String,
+        old: SessionAttachment,
+        new: SessionAttachment,
+        sessionID: SessionID
+    ) -> SessionAttachment? {
+        loadIfNeeded(sessionID)
+        guard let root = copiesRoot(for: sessionID) else { return nil }
+
+        let sourcePath = SessionAttachment.comparisonSourcePath(old: old.id, new: new.id)
+        let existing = attachmentsBySession[sessionID]?.first { $0.sourcePath == sourcePath }
+        let relativePath = existing?.relativePath
+            ?? "\(UUID().uuidString)/\(Self.safeGeneratedName(name)).comparison"
+        let destination = root.appendingPathComponent(relativePath)
+        guard writeSnapshot(manifest, to: destination, sourceName: name) else { return nil }
+
+        let attachment = SessionAttachment(
+            sessionID: sessionID,
+            id: existing?.id ?? UUID().uuidString.lowercased(),
+            root: root,
+            url: destination,
+            relativePath: relativePath,
+            sourcePath: sourcePath,
+            kind: .comparison,
+            origin: .agent,
+            referencedAt: now()
+        )
+        return admit([attachment], for: sessionID).first
+    }
+
+    /// Writes bytes the app produced into custody as one immutable row. Never deduplicated: each
+    /// call is its own moment, so a notification opens the version it announced.
+    private func recordGenerated(
+        _ data: Data,
+        title: String?,
+        fallbackTitle: String,
+        fileExtension: String,
+        kind: SessionAttachment.Kind,
+        sessionID: SessionID,
+        origin: SessionAttachment.Origin
+    ) -> SessionAttachment? {
         loadIfNeeded(sessionID)
         guard let root = copiesRoot(for: sessionID) else { return nil }
 
         let id = UUID().uuidString.lowercased()
         let suppliedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let base = suppliedTitle.isEmpty ? "Document" : Self.safeGeneratedName(suppliedTitle)
-        let relativePath = "\(UUID().uuidString)/\(base).html"
+        let base = suppliedTitle.isEmpty ? fallbackTitle : Self.safeGeneratedName(suppliedTitle)
+        let relativePath = "\(UUID().uuidString)/\(base).\(fileExtension)"
         let destination = root.appendingPathComponent(relativePath)
         do {
             try fileManager.createDirectory(
                 at: destination.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try Data(html.utf8).write(to: destination, options: .atomic)
+            try data.write(to: destination, options: .atomic)
         } catch {
             ThreadingLogger.session.error(
-                "Failed to keep generated HTML: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                "Failed to keep generated \(kind.rawValue, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return nil
         }
@@ -966,8 +1079,8 @@ final class SessionAttachmentStore {
             root: root,
             url: destination,
             relativePath: relativePath,
-            sourcePath: "generated-html:\(id)",
-            kind: .html,
+            sourcePath: "generated-\(kind.rawValue):\(id)",
+            kind: kind,
             origin: origin,
             isImmutableSnapshot: true,
             referencedAt: now()
@@ -1878,6 +1991,12 @@ enum AttachmentReferenceDetector {
     private static let diagramExtensions: Set<String> = [
         "dot", "gv", "mmd", "mermaid"
     ]
+    /// Classified, but deliberately **not** in the scan below. A diff reaches the list as a
+    /// handoff — a frozen comparison, a patch dropped on the composer — while `git format-patch`
+    /// alone prints a column of `.patch` paths that nobody meant as attachments.
+    private static let diffExtensions: Set<String> = ["diff", "patch"]
+    /// The app's own record of a picture comparison; nothing outside it writes one.
+    private static let comparisonExtension = "comparison"
     /// Extensions a *registration* may claim, plus the ambiguous ones the host probes itself.
     ///
     /// Both are in the scan's alternation unconditionally, because the alternation is a compiled
@@ -2006,6 +2125,8 @@ enum AttachmentReferenceDetector {
         if archiveExtensions.contains(ext) { return .archive }
         if documentExtensions.contains(ext) { return .document }
         if diagramExtensions.contains(ext) { return .diagram }
+        if diffExtensions.contains(ext) { return .diff }
+        if ext == comparisonExtension { return .comparison }
         if AttachmentMediaTypeRegistry.shared.isRegistered(ext) { return .media }
         if MediaContentProbe.ambiguousExtensions.contains(ext) {
             return admissionHint(for: url) != nil ? .media : nil

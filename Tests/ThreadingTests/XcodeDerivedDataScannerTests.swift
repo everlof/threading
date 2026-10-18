@@ -156,4 +156,117 @@ final class XcodeDerivedDataScannerTests: XCTestCase {
         XCTAssertEqual(found.count, 1_000)
         XCTAssertTrue(XcodeDerivedDataScanner.scan(root: root, maximumEntries: 2).isEmpty)
     }
+
+    // MARK: - Xcode's naming rule
+
+    /// The one vector Xcode itself produced: a real folder and the `WorkspacePath` in its
+    /// manifest, read off the machine the rule was measured on.
+    func testTheNameRuleReproducesXcodesOwnFolderName() {
+        XCTAssertEqual(
+            XcodeDerivedDataName.hash(forWorkspace: "/Users/david/repo/Strom/apple/Strom.xcworkspace"),
+            "euwruxsrzfobriemxfltpdfuwceg"
+        )
+        XCTAssertEqual(
+            XcodeDerivedDataName.hash(inFolderName: "Strom-euwruxsrzfobriemxfltpdfuwceg"),
+            "euwruxsrzfobriemxfltpdfuwceg"
+        )
+        for name in ["Threading-StallVerification", "ModuleCache.noindex", "-euwruxsrzfobriemxfltpdfuwceg",
+                     "App-EUWRUXSRZFOBRIEMXFLTPDFUWCEG", "App_euwruxsrzfobriemxfltpdfuwceg"] {
+            XCTAssertNil(XcodeDerivedDataName.hash(inFolderName: name), name)
+        }
+    }
+
+    /// A child Xcode named and filled but left without `info.plist` — 297 of 315 on the measuring
+    /// machine. Its workspace is whichever candidate path hashes to its name, or nothing.
+    private func remnant(for workspace: String, contents: [String] = ["Logs", "SourcePackages"]) throws -> URL {
+        let url = root.appendingPathComponent("App-" + XcodeDerivedDataName.hash(forWorkspace: workspace))
+        for name in contents {
+            let output = url.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+            try Data(repeating: 1, count: 4096).write(to: output.appendingPathComponent("payload"))
+        }
+        return url
+    }
+
+    func testAManifestlessFolderIsOfferedByItsNameAndAttributedByItsHash() throws {
+        let workspace = "/gone/App-feature/App.xcodeproj"
+        let url = try remnant(for: workspace)
+
+        let unattributed = try XCTUnwrap(XcodeDerivedDataScanner.scan(root: root).first)
+        XCTAssertEqual(unattributed.url.lastPathComponent, url.lastPathComponent)
+        XCTAssertNil(unattributed.workspacePath, "no candidate, so no claim about what it was built for")
+
+        let candidates = XcodeWorkspaceCandidates(byHash: [XcodeDerivedDataName.hash(forWorkspace: workspace): workspace])
+        let attributed = try XCTUnwrap(XcodeDerivedDataScanner.scan(root: root, candidates: candidates).first)
+        XCTAssertEqual(attributed.workspacePath, workspace)
+        XCTAssertGreaterThanOrEqual(attributed.byteCount, 8192)
+    }
+
+    /// The name is 28 letters anybody could type; the contents are what make it Xcode's.
+    func testAManifestlessFolderHoldingAnythingElseIsRefused() throws {
+        let foreign = try remnant(for: "/a/App.xcodeproj")
+        try Data("mine".utf8).write(to: foreign.appendingPathComponent("notes.txt"))
+
+        let unreadable = try remnant(for: "/b/App.xcodeproj")
+        try writeManifest(unreadable, workspace: "relative/App.xcodeproj")
+
+        let empty = root.appendingPathComponent("App-" + XcodeDerivedDataName.hash(forWorkspace: "/c/App.xcodeproj"))
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+
+        let linked = try remnant(for: "/d/App.xcodeproj", contents: ["Logs"])
+        try FileManager.default.createSymbolicLink(
+            at: linked.appendingPathComponent("SourcePackages"),
+            withDestinationURL: directory
+        )
+
+        XCTAssertTrue(XcodeDerivedDataScanner.scan(root: root).isEmpty)
+    }
+
+    func testRemovingANameIdentifiedFolderRechecksItsIdentity() throws {
+        let url = try remnant(for: "/gone/App.xcodeproj")
+        try age(url)
+        let artifact = try XCTUnwrap(XcodeDerivedDataScanner.vet(url, root: root))
+        XCTAssertTrue(XcodeDerivedDataScanner.isSafeToRemove(artifact, root: root, hasActiveProcess: { _ in false }))
+        XCTAssertFalse(XcodeDerivedDataScanner.isSafeToRemove(artifact, root: root, hasActiveProcess: { _ in true }))
+
+        // Xcode building into it again writes a manifest: no longer the folder that was listed.
+        try FileManager.default.createDirectory(at: url.appendingPathComponent("Build"), withIntermediateDirectories: true)
+        try writeManifest(url, workspace: "/gone/App.xcodeproj")
+        try age(url)
+        XCTAssertFalse(XcodeDerivedDataScanner.isSafeToRemove(artifact, root: root, hasActiveProcess: { _ in false }))
+    }
+
+    // MARK: - Candidates
+
+    /// Candidates are every checkout on record joined to where the project keeps its Xcode
+    /// project: here a nested `ios/App.xcodeproj`, a session's managed worktree, and a worktree
+    /// git still records although its directory is gone.
+    func testCandidatesJoinEveryRecordedCheckoutToTheProjectsXcodeProject() throws {
+        let project = directory.appendingPathComponent("App")
+        try FileManager.default.createDirectory(
+            at: project.appendingPathComponent("ios/App.xcodeproj"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: project.appendingPathComponent("node_modules/dep/Vendored.xcodeproj"),
+            withIntermediateDirectories: true
+        )
+        let record = project.appendingPathComponent(".git/worktrees/feature")
+        try FileManager.default.createDirectory(at: record, withIntermediateDirectories: true)
+        try Data("/gone/App-feature/.git\n".utf8).write(to: record.appendingPathComponent("gitdir"))
+
+        let candidates = XcodeWorkspaceCandidates.gather([
+            .init(folder: project.path, checkouts: ["/gone/managed/App"])
+        ])
+
+        let expected = [
+            project.path + "/ios/App.xcodeproj",
+            "/gone/managed/App/ios/App.xcodeproj",
+            "/gone/App-feature/ios/App.xcodeproj"
+        ]
+        XCTAssertEqual(Set(candidates.byHash.values), Set(expected))
+        for path in expected {
+            XCTAssertEqual(candidates.byHash[XcodeDerivedDataName.hash(forWorkspace: path)], path)
+        }
+    }
 }

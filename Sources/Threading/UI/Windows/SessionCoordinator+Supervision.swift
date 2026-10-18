@@ -57,6 +57,54 @@ extension SessionCoordinator {
         return .success(session)
     }
 
+    /// Starts a subagent: a chat `parentID` starts for its own task, nested under it.
+    ///
+    /// The same three steps as a manager's child — create, record the tenure, launch — with
+    /// the lineage set at birth so the row first appears under its parent, and the brief framed
+    /// to say its reply goes back by mail. A failed step undoes the earlier ones.
+    func spawnSubagent(
+        plan: ScheduledSessionPlan,
+        brief: String,
+        parentID: SessionID
+    ) -> Result<AgentSession, SupervisionActionFailure> {
+        guard let parent = environment.projectStore.session(withID: parentID),
+              let session = startSessionUnattended(
+                plan: plan,
+                title: brief,
+                lineage: .subagent(of: parentID)
+              ) else {
+            return .failure(.init(L10n.string("The subagent could not be created.")))
+        }
+
+        switch ControlGrantStore.shared.adopt(childID: session.id, by: parentID, brief: brief) {
+        case .adopted, .alreadyManaged:
+            break
+        case .released, .refused:
+            discardUnlaunchedSupervisedSession(session)
+            return .failure(.init(L10n.string("The supervision record could not be saved.")))
+        }
+
+        let opening = WorkspaceControlPlane.subagentBriefPrefixed(brief, from: parent)
+        guard container.launchInBackground(sessionID: session.id, initialPrompt: opening) else {
+            _ = ControlGrantStore.shared.release(
+                childID: session.id,
+                by: parentID,
+                outcome: "Launch failed"
+            )
+            discardUnlaunchedSupervisedSession(session)
+            return .failure(.init(L10n.string("The subagent could not be launched.")))
+        }
+
+        sidebar.reload()
+        onPresentationChanged()
+        environment.eventLog.record(.session, "Chat started a subagent", [
+            "parent": parentID.uuidString,
+            "child": session.id.uuidString,
+            "kind": session.kind.rawValue,
+        ])
+        return .success(session)
+    }
+
     func resumeSupervisedSession(_ sessionID: SessionID) -> Bool {
         let launched = container.launchInBackground(sessionID: sessionID)
         if launched {

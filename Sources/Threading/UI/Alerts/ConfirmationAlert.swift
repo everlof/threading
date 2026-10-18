@@ -216,16 +216,14 @@ enum ConfirmationAlert {
         alert.buttons.last?.keyEquivalent = "\r"
     }
 
+    /// A completion-taking question is never a modal session, even with no window to attach to:
+    /// see `ThemedAlert.begin(in:completionHandler:)` for the main queue that one used to hold.
     private static func present(
         _ alert: ThemedAlert,
         in window: NSWindow?,
         completion: @escaping @MainActor (NSApplication.ModalResponse) -> Void
     ) {
-        if let window {
-            alert.beginSheetModal(for: window, completionHandler: completion)
-        } else {
-            completion(alert.runModal())
-        }
+        alert.begin(in: window, completionHandler: completion)
     }
 
     private static func chosen(

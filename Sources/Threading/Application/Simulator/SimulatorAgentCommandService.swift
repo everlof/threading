@@ -280,6 +280,7 @@ enum SimulatorAgentCommandService {
         let beside: Bool
         /// The whole workspace, when the agent named it.
         var devices: [SimulatorDeviceID]? = nil
+        var creation: SimulatorDeviceCreationRequest? = nil
     }
 
     static func preparationRequest(from arguments: SimulatorPrepareArguments) -> Request<PreparationRequest> {
@@ -303,8 +304,19 @@ enum SimulatorAgentCommandService {
         case .accepted(let value): devices = value
         case .rejected(let result): return .rejected(result)
         }
+        let creation: SimulatorDeviceCreationRequest?
+        if let name = arguments.createName {
+            guard preferAndroid != true, devices == nil else {
+                return .rejected(.failure("create_name creates an empty iOS Simulator; leave out devices and platform android."))
+            }
+            do { creation = try SimulatorDeviceCreationRequest(name: name, matchingDeviceID: deviceID) }
+            catch { return .rejected(.failure(error.localizedDescription)) }
+        } else {
+            creation = nil
+        }
         return .accepted(PreparationRequest(deviceID: deviceID, preferAndroid: preferAndroid,
-                                            layout: layout, beside: arguments.beside == true, devices: devices))
+                                            layout: layout, beside: arguments.beside == true,
+                                            devices: devices, creation: creation))
     }
 
     /// The whole workspace an agent named: one to four exact, distinct ids. It says everything

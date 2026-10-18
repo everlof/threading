@@ -29,6 +29,42 @@ final class WorkroomsSettingsRenderTests: XCTestCase {
     }
 
     @MainActor
+    func testTabMovesThroughThePersonFormAndBackToThePageAction() throws {
+        let controller = WorkroomsPreferencesViewController()
+        let host = laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
+        let window = NSWindow(contentRect: host.bounds, styleMask: [.borderless], backing: .buffered,
+                              defer: false)
+        window.contentView = host
+        window.layoutIfNeeded()
+        let fields = Self.fields(in: host)
+        let name = try XCTUnwrap(fields.first { Self.placeholder(in: $0) == L10n.string("Name") })
+        let handle = try XCTUnwrap(fields.first { Self.placeholder(in: $0) == L10n.string("handle") })
+        let language = try XCTUnwrap(fields.first { Self.placeholder(in: $0) == "sv" })
+        let add = try XCTUnwrap(Self.button(in: host, titled: "Add"))
+        let closeAll = try XCTUnwrap(Self.button(in: host, titled: "Close All Workrooms"))
+
+        XCTAssertTrue(name.nextKeyView === handle)
+        XCTAssertTrue(handle.nextKeyView === language)
+        XCTAssertTrue(language.nextKeyView === add)
+        XCTAssertTrue(add.nextKeyView === closeAll)
+    }
+
+    @MainActor
+    func testSettingRefreshKeepsTheSwitchMounted() throws {
+        let controller = WorkroomsPreferencesViewController()
+        let host = laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
+        let toggle = try XCTUnwrap(Self.toggle(in: host))
+        let row = try XCTUnwrap(toggle.superview)
+
+        NotificationCenter.default.post(AppSettingsDidChange(
+            changedSetting: AppSettingIdentity.workroomsEnabled.rawValue
+        ))
+
+        XCTAssertTrue(toggle.superview === row, "a setting change detached the animated switch")
+        XCTAssertTrue(toggle.isDescendant(of: controller.view))
+    }
+
+    @MainActor
     func testRendersWorkroomsSettingsToImages() throws {
         try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
         var written = 0
@@ -86,6 +122,29 @@ final class WorkroomsSettingsRenderTests: XCTestCase {
         if let button = view as? ThemedButton { found.insert(button.title) }
         for subview in view.subviews { found.formUnion(buttons(in: subview)) }
         return found
+    }
+
+    @MainActor
+    private static func fields(in view: NSView) -> [ThemedTextField] {
+        let current = (view as? ThemedTextField).map { [$0] } ?? []
+        return current + view.subviews.flatMap(fields(in:))
+    }
+
+    @MainActor
+    private static func placeholder(in field: ThemedTextField) -> String? {
+        field.placeholderAttributedString?.string ?? field.placeholderString
+    }
+
+    @MainActor
+    private static func button(in view: NSView, titled title: String) -> ThemedButton? {
+        if let button = view as? ThemedButton, button.title == L10n.string(title) { return button }
+        return view.subviews.lazy.compactMap { button(in: $0, titled: title) }.first
+    }
+
+    @MainActor
+    private static func toggle(in view: NSView) -> ThemedToggle? {
+        if let toggle = view as? ThemedToggle { return toggle }
+        return view.subviews.lazy.compactMap(toggle(in:)).first
     }
 
     @MainActor

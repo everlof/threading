@@ -149,9 +149,10 @@ and a **cycle** is refused outright, since the outline view asks for children la
 recurse forever.
 
 What fork does *not* give is a merge back. Transcripts do not merge; the honest operation is
-pasting a conclusion into the parent as a message, and both routes to it now exist. The agent's
-is `send_to_session`, which delivers a side chat's conclusion to its parent as an ordinary,
-provenance-prefixed turn (see [`control-plane.md`](control-plane.md)). The user's is the row's
+handing a conclusion to the parent, and both routes to it now exist. The agent's is
+`mail_send` to the parent. The parent is told mail is waiting and reads the conclusion under the
+header Threading vouches for, rather than finding the side chat's words in its own conversation
+as a user turn (see [`control-plane.md`](control-plane.md)). The user's is the row's
 **Send Result to Parent** — `SessionRenameRequest`'s twin (`SessionReportBackRequest`): one
 line sent into the side chat naming the tool and the parent's id outright, because an agent
 asked in prose to "tell your parent" answers in prose and the parent hears nothing. It is
@@ -159,6 +160,36 @@ absent rather than disabled unless the row is a side chat whose parent is still 
 row, the agent is between turns, delivery would land (`SessionMessageDelivery.isReadyForDelivery`),
 and the workspace tool group is on. And the first turn replays the
 whole copied context, so forking a large conversation costs real tokens.
+
+### Subagents nest the same way, under their own agent's mark
+
+A **subagent** is a chat another chat started for part of its task (`start_subagent`; authority
+and report-back in [`control-plane.md`](control-plane.md#subagents-delegation-without-a-grant)).
+It is not a fork: it may run another provider, and it opens on a brief rather than a copied
+transcript. Its lineage is provider-neutral, `AgentSession.lineage = .subagent(of:)` in the
+session's own JSON, outside the runtime configuration where `forkedFrom` lives.
+
+- **No migration.** `lineage` is a new optional key in the session JSON, and older builds
+  ignore it.
+- **Tolerant decoding.** A lineage this build cannot read, or one naming the row itself, is
+  dropped rather than failing the record.
+- **Set at birth.** `ProjectStore.addSession(lineage:)` sets it, so the row's first
+  appearance is already nested.
+
+The sidebar nests on one accessor, `nestingParentID = forkedFrom ?? subagentParentID`, with the
+same missing-parent and cycle rules. The fast append path requires "no nesting parent", so a
+subagent's insertion takes the project-structure path a side chat takes.
+
+A subagent keeps its **own agent mark**. The fork glyph's reason, "a fork necessarily runs its
+parent's agent", does not hold for a subagent, and the provider is the one thing about it that
+may differ from the row above. The lineage is spoken instead:
+
+- the accessibility label reads *…, subagent of …*;
+- the hover reads *Subagent of …* with the brief while the parent's tenure lasts;
+- `list_sessions` adds *(subagent of …)*.
+
+The extension fact *Parent Session* carries the nesting parent; *Side Chat* is now true only
+for a fork (`NativeSidebarSessionFacts.parentIsFork`).
 
 ## Shell Drawers and Standalone Terminals
 
@@ -2275,6 +2306,19 @@ ends. Targeted rename still protects a title the user wrote. Resume is native-ch
 terminal may open on a prompt that requires the user, so it cannot be woken unattended. Spawn
 reuses `ScheduledSessionPlan`, including managed-workspace delivery and permission-mode caps,
 rather than defining another launch vocabulary.
+
+**A choice the plan leaves out is inherited only on the manager's own runtime**
+(`SpawnChildChoices`). Model ids, effort levels, fast mode and logins each belong to one
+provider: a Claude manager spawning `kind: codex` once handed the child its own model, and the
+launcher passes a stored model through unchanged, so Codex launched with `--model` set to a
+Claude id. The child's account was resolved by the manager's login name against Codex's logins.
+A child on another runtime now starts on the login a new chat there would (the project's
+ordered logins, else the provider's preferred one) with that runtime's defaults. Permission mode
+is the shared vocabulary and the grant's ceiling, so it carries wherever the child's runtime has
+modes. A runtime without account routing (Grok, OpenCode, Cursor) starts on its standard login
+without a usage check. Before this, every spawn of one was refused, because `resolveAccount`
+found no discovered logins. Naming an account for one is refused, as is asking for a surface the
+runtime lacks. The native surface is the default only where the runtime has one.
 
 **Continuation lineage is a durable path, not a launch-mode bit.** A side chat's `forkedFrom`
 points at a provider-native child that can resume the same transcript semantics. A cross-provider

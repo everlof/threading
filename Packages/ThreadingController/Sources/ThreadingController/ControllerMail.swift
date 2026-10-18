@@ -582,7 +582,7 @@ extension ControllerStore {
     }
 
     /// Replying to someone who wrote to you needs no grant of your own: they opened the
-    /// conversation. Depth still bounds it.
+    /// conversation. The chain's message fuse still bounds it.
     private func isReplyToOwnMail(_ envelope: MailEnvelope) throws -> Bool {
         guard let replyTo = envelope.replyTo,
               let original: MailMessage = try optional("mail", replyTo.uuidString.lowercased()),

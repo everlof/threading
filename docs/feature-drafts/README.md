@@ -38,6 +38,11 @@ reshuffling it is a line move.
 
 ### Now — in active design
 
+- [Subagents](subagents.md) — any chat may start a helper chat on any provider, without the
+  Manager role. It is nested under its parent and reports back by mail in its own words. It is
+  bounded (4 live, one level deep, the parent's permission ceiling) and archived with its parent.
+  Mail is now how agents talk to each other. Phases 0–2 were **implemented** 2026-10-18. Next: the
+  parent's session card, iPhone nesting, the archive toast's count, and terminal subagents.
 - [Bundle diet](bundle-diet.md) — the app went from 54.5 to 129 MB (24.5 → 63 MB download) in
   eight weeks with no feature over ~10% of the binary. Step 0, a release-time size ratchet, is
   **implemented** 2026-10-17; step 1a, the proxy helper's source out of the bundle, 2026-10-18

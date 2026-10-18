@@ -432,6 +432,19 @@ enum GitChildEnvironment {
     }
 }
 
+extension GitProcess {
+    /// `git diff --no-index` of two arbitrary files, no repository required: what the Compare tab
+    /// parses, and what `display_compare_files` keeps as a `.diff` attachment. Exit 1 is git
+    /// saying the files differ, not a failure. Blocking, like every run.
+    static func compareFiles(oldPath: String, newPath: String) throws -> Data {
+        try run(
+            GitReviewCommands.compareFiles(oldPath: oldPath, newPath: newPath),
+            in: URL(fileURLWithPath: (oldPath as NSString).deletingLastPathComponent),
+            acceptedExitCodes: [0, 1]
+        )
+    }
+}
+
 private enum GitChildEnvironmentDefaults {
     static let loginPathTimeout: TimeInterval = 5
     static let maximumLoginPathBytes = 64 * 1024

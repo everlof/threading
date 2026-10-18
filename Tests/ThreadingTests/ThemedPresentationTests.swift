@@ -572,6 +572,91 @@ final class ThemedPresentationTests: XCTestCase {
         alert.dismiss()
     }
 
+    // MARK: - Window-less alerts
+
+    /// With no window to attach to, the dialog stands alone and opens no modal session: the
+    /// answer arrives through the completion, exactly once, and the dialog keeps the stacking a
+    /// modal panel had so it does not sink behind the window it is about.
+    func testAWindowlessAlertStandsAloneWithoutAModalSession() throws {
+        let alert = ThemedAlert()
+        alert.messageText = "Control iPhone 17 Pro?"
+        alert.addButton(withTitle: "Allow Control")
+        alert.addButton(withTitle: "Cancel")
+
+        let answers = WindowlessAnswerLog()
+        alert.begin(in: nil) { answers.responses.append($0) }
+
+        let panel = try XCTUnwrap(alert.presentedWindow)
+        defer { panel.orderOut(nil) }
+        XCTAssertNil(NSApp.modalWindow, "a window-less alert must not run a modal session")
+        XCTAssertNil(panel.parent)
+        XCTAssertEqual(panel.level, .modalPanel)
+        XCTAssertTrue(answers.responses.isEmpty)
+
+        panel.cancelOperation(nil)
+        XCTAssertEqual(answers.responses, [.abort])
+        XCTAssertNil(alert.presentedWindow)
+
+        alert.dismiss()
+        XCTAssertEqual(answers.responses, [.abort], "an ended presentation answers once")
+    }
+
+    /// The 2026-10-17 freeze, reduced to its shape: a completion-taking confirmation asked from
+    /// inside a main-actor job with no window to attach to — an agent's first tap on a Simulator
+    /// whose session was not on screen. `runModal()` kept that job open, and CoreFoundation does
+    /// not drain the main queue from a run loop nested in one of its own callouts, so nothing
+    /// queued behind it ran — not the paired iPhone's hello, not its catalogue request — until
+    /// somebody answered, 39 minutes later. The guard timer ends any modal session the old path
+    /// would open, so a regression fails here rather than hanging the suite.
+    func testAWindowlessConfirmationLeavesTheMainQueueServing() throws {
+        let suite = "ThemedPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        let request = ConfirmationRequest(
+            prompt: .controlSimulatorDevice,
+            title: "Control iPhone 17 Pro?",
+            message: "The agent will be able to tap this device.",
+            confirmTitle: "Allow Control"
+        )
+
+        let guardTimer = Timer(timeInterval: 2, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                if NSApp.modalWindow != nil { NSApp.abortModal() }
+            }
+        }
+        RunLoop.main.add(guardTimer, forMode: .common)
+        defer { guardTimer.invalidate() }
+
+        let earlierDialogs = Set(
+            NSApp.windows.filter(ThemedAlert.isPresentationWindow).map(ObjectIdentifier.init)
+        )
+        let log = WindowlessAnswerLog()
+        let served = expectation(description: "the main queue is served while the question is up")
+        Task { @MainActor in
+            ConfirmationAlert.ask(request, in: nil, settings: settings) { approved in
+                log.events.append("answered")
+                log.approvals.append(approved)
+            }
+            log.events.append("returned")
+            Task { @MainActor in
+                log.events.append("served")
+                served.fulfill()
+            }
+        }
+        wait(for: [served], timeout: 5)
+        XCTAssertEqual(log.events, ["returned", "served"])
+        XCTAssertNil(NSApp.modalWindow)
+
+        let panel = try XCTUnwrap(NSApp.windows.first {
+            ThemedAlert.isPresentationWindow($0) && !earlierDialogs.contains(ObjectIdentifier($0))
+        })
+        defer { panel.orderOut(nil) }
+        panel.cancelOperation(nil)
+        XCTAssertEqual(log.events, ["returned", "served", "answered"])
+        XCTAssertEqual(log.approvals, [false])
+    }
+
     // MARK: - Semantics and themes
 
     func testAlertTreeExposesTheDialogCopyButtonsAndSuppressionChoice() throws {
@@ -1123,4 +1208,12 @@ private final class PopoverPresentationObserver: NSView,
     func themedPopoverPresentationDidChange(isPresented: Bool) {
         changes.append(isPresented)
     }
+}
+
+/// What a window-less presentation answered, and in which order its caller saw things happen.
+@MainActor
+private final class WindowlessAnswerLog {
+    var responses: [NSApplication.ModalResponse] = []
+    var approvals: [Bool] = []
+    var events: [String] = []
 }

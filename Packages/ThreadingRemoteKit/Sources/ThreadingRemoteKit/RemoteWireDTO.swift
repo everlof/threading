@@ -2912,6 +2912,32 @@ public struct RemoteAttachmentDTO: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// What a `.comparison` attachment's bytes are: two of the same session's image attachments, in
+/// old/new order, with the captions the agent gave them.
+///
+/// The sides are attachment ids, not pixels, so a comparison costs the list a few hundred bytes
+/// and the phone fetches each picture through the ordinary bounded attachment route. A side
+/// whose row has since left the session is simply not found, and the phone says so.
+public struct RemoteImageComparisonDTO: Codable, Equatable, Sendable {
+    public struct Side: Codable, Equatable, Sendable {
+        public let attachmentID: String
+        public let title: String
+
+        public init(attachmentID: String, title: String) {
+            self.attachmentID = attachmentID
+            self.title = title
+        }
+    }
+
+    public let old: Side
+    public let new: Side
+
+    public init(old: Side, new: Side) {
+        self.old = old
+        self.new = new
+    }
+}
+
 /// The current bounded attachment list for a session.
 public struct RemoteAttachmentsDTO: Codable, Equatable, Sendable {
     public let attachments: [RemoteAttachmentDTO]

@@ -437,6 +437,8 @@ enum MobileAttachmentPreviewLog {
         case video
         case media
         case text
+        case diff
+        case cmp
         case unk
     }
 
@@ -467,6 +469,8 @@ enum MobileAttachmentPreviewLog {
         case .video: .video
         case .media: .media
         case .text: .text
+        case .diff: .diff
+        case .comparison: .cmp
         case .unknown: .unk
         }
     }

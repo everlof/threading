@@ -439,6 +439,7 @@ final class ProjectStore {
         handoff: ConversationHandoff? = nil,
         managedWorkspace: ManagedWorkspace? = nil,
         automationWorkspace: AutomationWorkspace? = nil,
+        lineage: SessionLineage? = nil,
         id: SessionID = SessionID()
     ) -> AgentSession? {
         // Starting a chat here is the user choosing this folder, whatever put the row on screen.
@@ -472,6 +473,8 @@ final class ProjectStore {
               )
         else { return nil }
         session.branch = session.branch ?? GitInfo.currentBranch(for: projects[index].folderPath)
+        // Set at birth, so the row's first appearance is already under its parent.
+        session.lineage = lineage
 
         // Preserve any coalesced title/turn observations before changing row positions. They are
         // exact row writes too, so this does not reintroduce the whole-graph creation pause.

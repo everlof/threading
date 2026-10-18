@@ -30,8 +30,11 @@ final class CodexTranscriptBoundaryObserver: @unchecked Sendable {
         url: URL,
         onChange: @escaping @MainActor @Sendable () -> Void
     ) {
-        transcriptPath = url.standardizedFileURL.path
-        watchedDirectory = url.deletingLastPathComponent().standardizedFileURL.path
+        // FSEvents reports the real path (for example /private/var), while callers may hold
+        // an alias (/var). Resolve the parent once so exact-file filtering compares one path.
+        let directory = url.deletingLastPathComponent().resolvingSymlinksInPath()
+        transcriptPath = directory.appendingPathComponent(url.lastPathComponent).path
+        watchedDirectory = directory.path
         self.onChange = onChange
     }
 
@@ -121,7 +124,9 @@ final class CodexTranscriptBoundaryObserver: @unchecked Sendable {
     // MARK: - Event Filtering
 
     /// Runs on the observer's utility queue and crosses actors only for a relevant batch.
-    private func handle(paths: [String], flags: [FSEventStreamEventFlags]) {
+    /// Internal so the completion path can be exercised with a recorded FSEvents batch when
+    /// the host daemon is too backlogged to deliver a test append on a bounded schedule.
+    func handle(paths: [String], flags: [FSEventStreamEventFlags]) {
         let relevant = paths.indices.contains { index in
             Self.isRelevant(
                 path: paths[index],

@@ -295,12 +295,10 @@ final class ClaudeRemoteControlTests: XCTestCase {
         )
     }
 
-    /// Reporting registers two `PreToolUse` observations: one says a question tool opened and
-    /// one carries structured plan changes. Neither may be mistaken for the permission broker.
-    /// Both name the tools they watch, point at observational endpoints, and discard their own
-    /// output, which keeps either one from answering a permission question a terminal session is
-    /// already asking the user itself.
-    func testLifecycleReportingAddsOnlyToolScopedObservationalPreToolUseHooks() throws {
+    /// Reporting registers two scoped observations and the Linked Workroom question guard.
+    /// The observations discard output; the guard can answer only AskUserQuestion for a tied
+    /// workroom. None may be mistaken for the unrestricted permission broker.
+    func testLifecycleReportingKeepsObservationsScopedAndQuestionGuardSeparate() throws {
         let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
             for: SessionID(),
             brokersPermissions: false,
@@ -313,7 +311,7 @@ final class ClaudeRemoteControlTests: XCTestCase {
         let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
         let preToolUse = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
 
-        XCTAssertEqual(preToolUse.count, 2)
+        XCTAssertEqual(preToolUse.count, 3)
         let lifecycle = try XCTUnwrap(preToolUse.first { group in
             commands(in: group).contains { $0.contains(MCPDefaults.lifecyclePathPrefix) }
         })
@@ -337,6 +335,17 @@ final class ClaudeRemoteControlTests: XCTestCase {
         let progressCommand = try XCTUnwrap(commands(in: progress).first)
         XCTAssertFalse(progressCommand.contains(MCPDefaults.permissionPathPrefix))
         XCTAssertTrue(progressCommand.hasSuffix(">/dev/null 2>&1 || true"))
+
+        let questionGuard = try XCTUnwrap(preToolUse.first { group in
+            commands(in: group).contains { $0.contains(MCPDefaults.questionGuardPathPrefix) }
+        })
+        XCTAssertEqual(
+            questionGuard[HookRegistrationDefaults.matcherKey] as? String,
+            WorkroomQuestionGuard.askToolName
+        )
+        let guardCommand = try XCTUnwrap(commands(in: questionGuard).first)
+        XCTAssertFalse(guardCommand.contains(MCPDefaults.permissionPathPrefix))
+        XCTAssertTrue(guardCommand.hasSuffix("2>/dev/null || true"))
     }
 
     /// A native session brokers permission on `PreToolUse` and reports asks on it too. They are
@@ -356,12 +365,13 @@ final class ClaudeRemoteControlTests: XCTestCase {
         let preToolUse = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
         let commands = preToolUse.flatMap(commands(in:))
 
-        XCTAssertEqual(preToolUse.count, 3)
+        XCTAssertEqual(preToolUse.count, 4)
         XCTAssertEqual(commands.filter { $0.contains(MCPDefaults.permissionPathPrefix) }.count, 1)
         XCTAssertEqual(commands.filter { $0.contains(MCPDefaults.lifecyclePathPrefix) }.count, 1)
         XCTAssertEqual(commands.filter { $0.contains(MCPDefaults.runProgressPathPrefix) }.count, 1)
+        XCTAssertEqual(commands.filter { $0.contains(MCPDefaults.questionGuardPathPrefix) }.count, 1)
 
-        // The broker offers every tool; only the observational entry is scoped.
+        // The broker offers every tool; both observations and the question guard are scoped.
         XCTAssertEqual(
             preToolUse.filter { $0[HookRegistrationDefaults.matcherKey] == nil }.count,
             1

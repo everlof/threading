@@ -313,6 +313,21 @@ final class ArtifactScanServiceTests: XCTestCase {
         XCTAssertEqual(service.scratchArtifacts().count, 1)
     }
 
+    /// The busy rule defers; it may not starve. On a machine where some agent is always working
+    /// the reading was a day old with the disk full, so an existing reading past the deferral
+    /// limit is measured anyway. A reading never taken still waits for a quiet moment.
+    func testTheBusyRuleDefersAnExistingReadingOnlyForSoLong() {
+        let now = Date()
+        let recent = now.addingTimeInterval(-60 * 60)
+        let overdue = now.addingTimeInterval(-(ArtifactScanDefaults.busyDeferralLimit + 1))
+
+        XCTAssertTrue(ArtifactScanService.mayScan(force: false, busy: false, lastScannedAt: nil, now: now))
+        XCTAssertTrue(ArtifactScanService.mayScan(force: true, busy: true, lastScannedAt: recent, now: now))
+        XCTAssertFalse(ArtifactScanService.mayScan(force: false, busy: true, lastScannedAt: recent, now: now))
+        XCTAssertFalse(ArtifactScanService.mayScan(force: false, busy: true, lastScannedAt: nil, now: now))
+        XCTAssertTrue(ArtifactScanService.mayScan(force: false, busy: true, lastScannedAt: overdue, now: now))
+    }
+
     func testAnUnforcedWalkRunsWhenNothingIsWorking() throws {
         try derivedData("dd")
 

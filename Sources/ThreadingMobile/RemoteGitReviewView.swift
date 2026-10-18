@@ -562,12 +562,15 @@ struct RemoteGitReviewView: View {
 /// The SwiftUI sheet remains responsible for navigation and loading, while every diff row is
 /// rendered by the reusable UIKit collection view. This keeps the hot scrolling path out of
 /// SwiftUI and makes large diffs proportional to the visible viewport rather than file size.
-private struct RemoteDiffCollectionView: UIViewControllerRepresentable {
+///
+/// Shared by Review and by a `.diff` attachment. The attachment is a frozen comparison with
+/// nothing newer to fetch, so it passes no `onRefresh` and the pull gesture simply lets go.
+struct RemoteDiffCollectionView: UIViewControllerRepresentable {
     let document: DiffDocument
     @Binding var expandedPaths: Set<String>
     let theme: RemoteThemePalette
     let isRefreshing: Bool
-    let onRefresh: () -> Void
+    let onRefresh: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(owner: self)
@@ -582,8 +585,22 @@ private struct RemoteDiffCollectionView: UIViewControllerRepresentable {
         controller.onExpansionChange = { paths in
             context.coordinator.owner.expandedPaths = paths
         }
-        controller.onRefresh = {
-            context.coordinator.owner.onRefresh()
+        controller.onRefresh = { [weak controller] in
+            let owner = context.coordinator.owner
+            if let onRefresh = owner.onRefresh {
+                onRefresh()
+                return
+            }
+            // The control is always installed. Ending it on the next turn rather than inside its
+            // own value-changed action is what lets the spinner settle instead of sticking.
+            Task { @MainActor in
+                controller?.update(
+                    document: owner.document,
+                    expandedPaths: owner.expandedPaths,
+                    theme: owner.theme.diffUIKitTheme,
+                    isRefreshing: false
+                )
+            }
         }
         return controller
     }
@@ -662,7 +679,7 @@ private extension RemoteGitDiffLineDTO {
     }
 }
 
-private extension RemoteThemePalette {
+extension RemoteThemePalette {
     var diffUIKitTheme: DiffUIKitTheme {
         let added = uiColor("diff_added", fallback: "#55B978")
         let removed = uiColor("diff_removed", fallback: "#D87878")

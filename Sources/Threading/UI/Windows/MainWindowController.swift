@@ -1361,6 +1361,18 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                     managerID: managerID
                 )
             },
+            spawnSubagent: { [weak self] plan, brief, parentID in
+                guard let self else {
+                    return .failure(.init(L10n.string(
+                        "The workspace window is no longer available."
+                    )))
+                }
+                return self.sessionCoordinator.spawnSubagent(
+                    plan: plan,
+                    brief: brief,
+                    parentID: parentID
+                )
+            },
             resume: { [weak self] sessionID in
                 self?.sessionCoordinator.resumeSupervisedSession(sessionID) ?? false
             },

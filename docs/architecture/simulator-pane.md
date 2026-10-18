@@ -307,6 +307,13 @@ The built-in **iOS Simulator** tool group is session-scoped. Its preferred seque
    With several members, every Simulator command requires `device_id`; omission is refused as
    ambiguous instead of following human focus. `panel_list_tabs` publishes the workspace's member
    UDIDs and selected member. Element refs remain scoped to the explicitly targeted device.
+   For a new empty iOS test device, `create_name` asks the host to run `simctl create` on its bounded
+   command worker. Optional `device_id` selects only an installed device's hardware/runtime profile;
+   no data is cloned. Each creation is a mutation, so agents reuse the returned ID without
+   `create_name` on subsequent calls. A failed preparation still reports the created ID for recovery.
+   The host grants control only to the new ID returned by successful creation, retaining that grant
+   across launches. Boot ownership, names, agent claims and shell-created devices are not proof of
+   creation. Existing simulators and physical devices retain their explicit consent requirement.
 2. The agent runs `xcodebuild` through its ordinary shell permission flow, using the returned UDID
    and a session-specific DerivedData directory.
 3. `simulator_install_launch` installs the resulting `.app` and launches it in that same device.
@@ -324,7 +331,11 @@ agents to prefer `simulator_prepare` over launching Simulator/Device Hub directl
 group removes both the tools and the preference guidance from discovery.
 
 Read-only screenshots are available while the built-in group is enabled and the session's exact
-lease is alive. Device HID requires one explicit user decision per exact device. **Approval is
+lease is alive. Device HID on an existing device requires one explicit user decision per exact device. The question
+attaches to the pane's window, or the presenter's; an agent tapping from a session that is not on
+screen has a pane in no window, so the consent stands alone and the tool call waits for the
+answer — without holding the main queue, which an app-modal prompt there did for 39 minutes on
+2026-10-17 ([`design-system.md`](design-system.md)). **Approval is
 durable across launches** — a granted UDID stays controllable without another sheet the next time
 the app runs, because re-asking every relaunch was the app's most-repeated permission prompt and
 taught nothing new each time; the grants are a bounded list of UDIDs in `PreferenceStore` (so a
@@ -344,6 +355,29 @@ front, so a returning pane taps on the first click instead of spending it to rec
 otherwise fails closed whenever the lease, consent, device identity or stream generation no longer
 matches. This control/recovery truth remains host-owned even though its button, status and screen
 invitation use shared Design components.
+
+An explicit input or element read performs one recovery before acting: refresh a known-stale lease
+through the shared lease manager, or reconnect a fallback transport on the same exact device.
+`simulator_prepare` also reconnects a fallback rather than returning only its cached lease.
+Inspection does not request input consent, and recovery never clears a denial or substitutes a
+different device. Input is never replayed after sending starts, because a failed acknowledgement
+does not prove the guest missed the action. Persistent failures return to the agent without a loop.
+This remains a host-only capability: extensions do not gain creation, input grants or recovery
+authority. Creation uses the existing serial worker, process deadlines and 512-device catalogue
+bound; a workspace holds at most four members and remembered grants stay bounded at 64 IDs.
+
+A device with no `lastBootedAt` gets a five-minute first-boot deadline for the runtime's initial
+data migration; ordinary restarts retain the two-minute deadline. The fresh-device integration
+lane exposed the distinction on iOS 26.5: the old deadline expired during migration. An isolated
+`bootstatus` probe progressed from LaunchServices to CoreLocation migration but exceeded five
+minutes on the heavily loaded host too; a longer deadline alone does not establish recovery.
+Waiting stays on the bounded command worker and does not change device identity or control consent.
+Run the real creation/hidden-pane/inspection/input lane with
+`TEST_RUNNER_THREADING_SIMULATOR_CREATION_INTEGRATION=1 scripts/test.sh fast -parallel-testing-enabled NO -only-testing:ThreadingTests/SimulatorCreationIntegrationTests`.
+The test creates and deletes only its own fresh device and fails if a control dialog is requested.
+On 2026-10-18 the 72 focused simulator tests passed. The opted-in real-device test reached the
+five-minute boot deadline too, so creation-to-input verification remains blocked by runtime
+startup on that host; its automatically granted device was removed successfully after the test.
 
 A notched mouse wheel over the framebuffer becomes a short touch drag through the authorized direct
 helper session. The pane bounds and coalesces wheel ticks while a drag or authorization is in

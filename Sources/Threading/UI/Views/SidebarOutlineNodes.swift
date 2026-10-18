@@ -746,7 +746,7 @@ enum SidebarTreeBuilder {
 
         // Side chats hang off the session they were forked from, so only what remains
         // at the project's own level is grouped by branch below.
-        let top = attachSideChats(sessions: activeSessions, nodes: node.sessionNodes)
+        let top = attachChildChats(sessions: activeSessions, nodes: node.sessionNodes)
         // The preview cuts before grouping, so a heading gathers only rows that are showing and
         // a hidden chat never becomes a row, a view or a constraint. Side chats travel with the
         // chat they were forked from. The snoozed scope is a list asked for on purpose, and shows
@@ -1058,25 +1058,25 @@ enum SidebarTreeBuilder {
         (node as? any SidebarOutlineNode)?.sidebarChildren ?? []
     }
 
-    /// Moves every side chat under the node it was forked from, returning what is left at the
-    /// project's own level — sessions and nodes still parallel, since the branch grouping
-    /// zips them.
+    /// Moves every side chat under the node it was forked from, and every subagent under the chat
+    /// that started it, returning what is left at the project's own level — sessions and nodes
+    /// still parallel, since the branch grouping zips them.
     ///
     /// Two records are deliberately tolerated rather than trusted, because this reads a file
     /// that outlives any one release:
     ///
-    /// - **A missing parent** (deleted, or archived out of this list) leaves the side chat at
-    ///   the project level. The lineage dangles; the row must not vanish with it.
+    /// - **A missing parent** (deleted, or archived out of this list) leaves the child at the
+    ///   project level. The lineage dangles; the row must not vanish with it.
     /// - **A cycle** is refused. Nothing in the app can create one, but the outline view asks
     ///   for children lazily and would happily recurse forever on a corrupt file.
-    private static func attachSideChats(
+    private static func attachChildChats(
         sessions: [AgentSession],
         nodes: [SessionNode]
     ) -> (sessions: [AgentSession], nodes: [SessionNode]) {
         var parentIDs: [SessionID: SessionID?] = [:]
         for session in sessions {
             let sessionID = NativeSidebarParity.host(.entityIdentity, session.id)
-            let parentID = NativeSidebarParity.fact(.sessionParent, session.forkedFrom)
+            let parentID = NativeSidebarParity.fact(.sessionParent, session.nestingParentID)
             parentIDs[sessionID] = parentID
         }
 
@@ -1090,7 +1090,7 @@ enum SidebarTreeBuilder {
 
         for (session, node) in zip(sessions, nodes) {
             let parentSessionID = NativeSidebarParity.host(.entityIdentity, session.id)
-            guard let parentID = NativeSidebarParity.fact(.sessionParent, session.forkedFrom),
+            guard let parentID = NativeSidebarParity.fact(.sessionParent, session.nestingParentID),
                   let parent = nodesByID[parentID],
                   !formsCycle(from: parentID, back: parentSessionID, parentIDs: parentIDs) else {
                 topSessions.append(session)

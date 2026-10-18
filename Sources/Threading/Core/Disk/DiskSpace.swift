@@ -66,6 +66,30 @@ enum DiskSpace {
     static func homeReading() -> Reading? {
         reading(forPath: NSHomeDirectory())
     }
+
+    /// The home volume as a write that just failed saw it: the smaller of the important-usage
+    /// figure and the plain free count.
+    ///
+    /// Important usage includes purgeable space the system would free for an app that asks
+    /// first, which is right for the Storage page's "how much room is there". A build writing as
+    /// fast as it can meets ENOSPC on the plain count. Measured on 2026-10-17 at 99% full: `df`
+    /// reported 16 GiB available while the container counted 52 GB free including purgeable.
+    static func immediateHomeReading() -> Reading? {
+        let keys: Set<URLResourceKey> = [
+            .volumeAvailableCapacityKey,
+            .volumeAvailableCapacityForImportantUsageKey,
+            .volumeTotalCapacityKey
+        ]
+
+        guard let values = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: keys),
+              let capacity = values.volumeTotalCapacity else { return nil }
+
+        let counts = [values.volumeAvailableCapacity.map(Int64.init), values.volumeAvailableCapacityForImportantUsage]
+            .compactMap { $0 }
+        guard let available = counts.min() else { return nil }
+
+        return Reading(available: available, capacity: Int64(capacity))
+    }
 }
 
 // MARK: - Disk Space Defaults

@@ -58,6 +58,8 @@ public final class DeviceLogPaneViewController: NSViewController {
         /// How long a source may produce nothing before the pane says so rather than showing a
         /// bare zero. Long enough that an ordinarily quiet moment does not read as a fault.
         static let silenceGrace: TimeInterval = 6
+        /// Info and above, the level menu's second item.
+        static let initialSeverity = 1
         static let maximumProcessChoices = 512
         static let maximumSynchronousMatches = 2_048
         static let maximumProcessControlWidth: CGFloat = 200
@@ -213,7 +215,14 @@ public final class DeviceLogPaneViewController: NSViewController {
     private var filter = ""
     /// Whole-device Debug output is thousands of rows per second on a paired iPhone. Start at
     /// Info so the pane opens as a useful console; Debug remains one explicit menu choice away.
-    private var minimumSeverity = 1
+    private var minimumSeverity = Metrics.initialSeverity
+    /// The level the reader is asked for, which only the level menu moves.
+    ///
+    /// Rows below it are never read, so they are not decoded, kept in the ring or recorded. An
+    /// agent's focus changes what is shown, not what is read: clearing a focus sets the view to
+    /// every level, and following it here would quietly turn a phone's Debug firehose back on.
+    private var captureSeverity = Metrics.initialSeverity
+    private var runningCaptureSeverity: Int?
     private var selectedProcess: String?
     private(set) var packetFilter = BluetoothPacketFilter.all
     private var processChoices: [String] = []
@@ -286,8 +295,16 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     /// Under Caches rather than Application Support: a log history is reconstructible by watching
     /// again, and the system may reclaim it when the disk is tight without losing anything the
-    /// user authored.
+    /// user authored. `DeviceLogStoreRetention` bounds it.
+    ///
+    /// A test process gets a per-process temporary directory instead. Panes built by tests carry a
+    /// fresh session id each, and every one used to leave a store in the user's real Caches folder:
+    /// on 2026-10-17, 2,180 of 2,186 stores there belonged to no session that existed.
     static var storeDirectory: URL {
+        if NSClassFromString("XCTestCase") != nil {
+            return FileManager.default.temporaryDirectory
+                .appendingPathComponent("Threading-TestDeviceLogs-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        }
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         return caches
             .appendingPathComponent("codes.threading", isDirectory: true)
@@ -1046,14 +1063,18 @@ public final class DeviceLogPaneViewController: NSViewController {
         // staying put, and the pane would never restart the reader.
         let identity = "\(option.machine.id)/\(option.title)" + (isApp ? "#\(route.rawValue)" : "")
             + (selectedProcess.map { "#process=\($0)" } ?? "")
+        let severity = option.readsAtLevel ? captureSeverity : 0
         // Already reading this one: restarting would throw away every row read so far.
-        guard identity != runningSourceTitle || source == nil || endedReason != nil else { return }
+        guard identity != runningSourceTitle || severity != runningCaptureSeverity
+                || source == nil || endedReason != nil else { return }
         // Resuming the same source after the pane was hidden keeps what is on screen. Only a
         // genuine change of source discards it, because those rows are no longer about the thing
         // being read. Resuming does leave a gap where the pane was not listening, which is honest
-        // for a live tail and better than an empty pane.
+        // for a live tail and better than an empty pane. A new level is the same source read
+        // differently, so it keeps its rows too.
         let isSameSource = identity == runningSourceTitle
         runningSourceTitle = identity
+        runningCaptureSeverity = severity
         runningSourceTitleWithinMachine = option.title
         Recents.rememberMachine(option.machine.id)
         Recents.rememberSource(option.title, forMachine: recentMachineKey(option.machine.id))
@@ -1071,7 +1092,9 @@ public final class DeviceLogPaneViewController: NSViewController {
         endedReason = nil
         let reader: DeviceLogRowSource?
         if let sourceFactory { reader = sourceFactory(option, route, selectedProcess) }
-        else { reader = option.makeSource(predicate: nil, route: route, processName: selectedProcess) }
+        else {
+            reader = option.makeSource(predicate: nil, route: route, processName: selectedProcess, minimumSeverity: severity)
+        }
         guard let started = reader else {
             source = nil
             endedReason = L10n.string("this source has no reader on this Mac")
@@ -1132,9 +1155,12 @@ public final class DeviceLogPaneViewController: NSViewController {
         minimumSeverity = Self.levelThresholds.indices.contains(index)
             ? Self.levelThresholds[index]
             : 0
+        captureSeverity = minimumSeverity
         recomputeVisible()
         table.reloadData()
         updateStatus()
+        // Lowering the level has to ask the reader for rows it was told to leave unread.
+        if source != nil { startSelectedSource() }
     }
 
     @objc private func packetFilterChanged() {
@@ -1290,6 +1316,13 @@ public final class DeviceLogPaneViewController: NSViewController {
         processPopUp.selectItem(at: process.flatMap { processChoices.firstIndex(of: $0).map { $0 + 1 } } ?? 0)
         processChanged()
     }
+    /// Chooses a level menu item by position: all levels, Info and above, errors only.
+    public func selectLevelForTesting(_ index: Int) {
+        levelPopUp.selectItem(at: index)
+        levelChanged()
+    }
+    /// The level the running reader was asked for; nil before one has started.
+    public var captureSeverityForTesting: Int? { runningCaptureSeverity }
 
     /// Drives the same path a keystroke in the filter field takes.
     public func simulateUserFilterEditForTesting(_ text: String) {
@@ -1468,6 +1501,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         if !showingContext {
             // Strict mode tests new rows only. Old matches shift with the ring; a whole-ring
             // text scan at every 100 ms tick would make a quieter view cost more CPU.
+            let shownBefore = entries.count
             entries = entries.compactMap { entry in
                 guard case .row(let index) = entry, index >= removedCount else { return nil }
                 return .row(index - removedCount)
@@ -1476,13 +1510,13 @@ public final class DeviceLogPaneViewController: NSViewController {
             for index in max(0, previousCount - removedCount)..<rows.count where selectedFocus.matches(rows[index]) {
                 entries.append(.row(index))
             }
+            streamRows(removing: removedEntries, appending: entries.count - (shownBefore - removedEntries))
         } else {
             entries = rows.indices.map { .row($0) }
+            // Strict/unfiltered streams only remove entries at the head. Keep the reader's
+            // selected lines and paused viewport attached to those surviving entries.
+            refreshStreamingTable(removing: removedEntries)
         }
-
-        // Strict/unfiltered streams only remove entries at the head. Keep the reader's
-        // selected lines and paused viewport attached to those surviving entries.
-        refreshStreamingTable(removing: removedEntries)
     }
 
     private func entryStart(_ entry: LogDisplayEntry) -> Int {
@@ -1507,6 +1541,55 @@ public final class DeviceLogPaneViewController: NSViewController {
         case .row(let index): return index == row ? position : nil
         case .gap(let range): return range.contains(row) ? position : nil
         }
+    }
+
+    /// Tells the table exactly what a strict stream did: entries left at the head and arrived at
+    /// the tail. Rows still on screen keep their views, text and drawn layers, and the table moves
+    /// the selection with its lines; only arriving rows are configured and drawn.
+    ///
+    /// The tail used to re-bind every visible cell to whatever its row number now held. Under a
+    /// level filter the matched count changes on nearly every tick, so the visible row numbers
+    /// moved too and AppKit built fresh row views for them — 30 new cells a tick that were never
+    /// reused. Replaying an iPhone's 2,614 rows/s, that held the main thread at 54% of a core even
+    /// while the reader was scrolled up and nothing they could see was changing.
+    private func streamRows(removing removedEntries: Int, appending appendedEntries: Int) {
+        guard table.numberOfRows == entries.count - appendedEntries + removedEntries else {
+            // The table was last told about some other list; only a full refresh is honest.
+            return refreshStreamingTable(removing: removedEntries)
+        }
+        // A tail that brings a whole viewport of new lines leaves nothing on screen to keep, and
+        // re-binding the cells already there costs less than inserting and building fresh rows.
+        if isFollowing, appendedEntries >= table.rows(in: table.visibleRect).length {
+            return refreshStreamingTable(removing: removedEntries)
+        }
+        updatingTable = true
+        defer { updatingTable = false }
+        guard let scroll else { return }
+        let pitch = table.rowHeight + table.intercellSpacing.height
+        let origin = scroll.contentView.bounds.origin
+        // The frame carries the table's own padding beyond its rows, so the new bottom is measured
+        // from it rather than rebuilt from a row count.
+        let bottom = max(0, table.frame.height + CGFloat(appendedEntries - removedEntries) * pitch
+            - scroll.contentView.bounds.height)
+        table.beginUpdates()
+        if removedEntries > 0 {
+            table.removeRows(at: IndexSet(integersIn: 0..<removedEntries), withAnimation: [])
+        }
+        if appendedEntries > 0 {
+            table.insertRows(at: IndexSet(integersIn: (entries.count - appendedEntries)..<entries.count), withAnimation: [])
+        }
+        // The viewport moves inside the same update. Moved after it, the table would first build
+        // rows for wherever the shifted lines left it — a whole fresh viewport each tick — and then
+        // tear them down again when the scroll arrived.
+        let target = isFollowing ? bottom : min(bottom, max(0, origin.y - CGFloat(removedEntries) * pitch))
+        if target != origin.y {
+            scroll.contentView.setBoundsOrigin(NSPoint(x: origin.x, y: target))
+        }
+        table.endUpdates()
+        // Settles the follow exactly; with the viewport already at the tail this does nothing.
+        if isFollowing, !entries.isEmpty { table.scrollRowToVisible(entries.count - 1) }
+        scroll.reflectScrolledClipView(scroll.contentView)
+        updateFollowAffordance()
     }
 
     private func refreshStreamingTable(removing removedEntries: Int = 0,

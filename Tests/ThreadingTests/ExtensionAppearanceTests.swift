@@ -1,4 +1,5 @@
 import AppKit
+import os
 import XCTest
 @testable import Threading
 import ThreadingExtensionKit
@@ -542,34 +543,29 @@ final class ExtensionAppearanceTests: XCTestCase {
         )
     }
 
-    /// The watcher is deliberately dumb — any write under the package, one coalesced report
-    /// after the quiet — so this asserts exactly that: a burst of writes lands as one change.
-    func testTheThemeWatcherCoalescesABurstOfWritesIntoOneReport() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ThreadingThemeWatch-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-
+    /// The native stream has its own integration test. Here a controlled event burst proves
+    /// the theme watcher's all-events policy and one report after the quiet period.
+    func testTheThemeWatcherCoalescesABurstOfWritesIntoOneReport() {
+        let backend = ThemeWatchBackend()
+        let armed = expectation(description: "initial read after registration")
         let reported = expectation(description: "one coalesced change")
         var reports = 0
-        let watcher = ExtensionThemeWatcher(root: root) {
+        let watcher = ExtensionThemeWatcher(root: URL(fileURLWithPath: "/fixture"), backend: backend) {
             reports += 1
-            if reports == 1 { reported.fulfill() }
+            if reports == 1 { armed.fulfill() }
+            if reports == 2 { reported.fulfill() }
         }
         watcher.start()
         defer { watcher.stop() }
+        wait(for: [armed], timeout: 5)
 
-        for index in 0..<3 {
-            try Data("{\"edit\": \(index)}".utf8).write(
-                to: root.appendingPathComponent("storm.json")
-            )
-        }
+        for _ in 0..<3 { backend.emit() }
 
         wait(for: [reported], timeout: 5)
         // The trailing edge already fired; a second report would have to arrive inside the
         // same coalesce window it just closed.
         RunLoop.main.run(until: Date().addingTimeInterval(ExtensionThemeWatchDefaults.coalesce))
-        XCTAssertEqual(reports, 1, "three writes in one burst reported more than once")
+        XCTAssertEqual(reports, 2, "three writes in one burst reported more than once")
     }
 
     func testAContributedThemeJoinsTheLibraryAndLeavesWithItsExtension() {
@@ -730,5 +726,33 @@ final class ExtensionAppearanceTests: XCTestCase {
             message.contains("stay there while the extension is disabled"),
             "the disclosure states the installed-content rule: disabling code keeps its themes"
         )
+    }
+}
+
+private final class ThemeWatchBackend: FileSystemEventStreamBackend, @unchecked Sendable {
+    private struct Registration: Sendable {
+        let queue: DispatchQueue
+        let receive: @Sendable ([String], [FSEventStreamEventFlags]) -> Void
+    }
+
+    private let registration = OSAllocatedUnfairLock<Registration?>(initialState: nil)
+
+    func start(
+        deliveryQueue: DispatchQueue,
+        onEvent: @escaping @Sendable ([String], [FSEventStreamEventFlags]) -> Void
+    ) -> Bool {
+        registration.withLock { $0 = Registration(queue: deliveryQueue, receive: onEvent) }
+        return true
+    }
+
+    func stop() {
+        registration.withLock { $0 = nil }
+    }
+
+    func emit() {
+        guard let current = registration.withLock({ $0 }) else { return }
+        current.queue.async {
+            current.receive(["/fixture/storm.json"], [0])
+        }
     }
 }

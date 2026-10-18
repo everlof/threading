@@ -44,7 +44,9 @@ Only a **direct, non-symlink child** with a regular, non-symlink `info.plist`, a
 without a workspace manifest, nested directories, and unidentified leftovers are refused. The
 temporary recognizer still requires its original Build and local ModuleCache evidence. The same
 standard-location recognizer serves discovery, explicit path suggestions, and removal; a failed
-standard-location check cannot fall through to temporary recognition.
+standard-location check cannot fall through to temporary recognition. A child with no manifest at
+all is the one exception, recognised by Xcode's hashed folder name instead — see "Xcode's folder
+name is the second manifest" below.
 
 The expected inventory is hundreds of children; the stress fixture has 1,000. Discovery examines
 at most 4,096 root entries, measures at most one million entries across the entire pass and uses
@@ -74,6 +76,40 @@ is added: presentation remains host-only, and Threading retains recognition, act
 exact-path approval and deletion. `/tmp` session recognition remains limited to known dormant
 Claude sessions; arbitrary files, unknown sessions and Codex scratch layouts are not inferred
 safe from their age or name.
+
+### Xcode's folder name is the second manifest
+
+**A manifest-less child is offered when Xcode's own name and contents say it is Xcode's.** The
+manifest rule above refused every child without `info.plist`, and on 2026-10-17 that was **297 of
+315 children, 15.2 GB** — `Logs`, `SourcePackages`, `TestResults` and a stub `Build`, 216 of them
+`Ordus-…`, about five new ones a day. `xcodebuild` runs agents make against throwaway copies leave
+them; none ever gains a manifest. They were invisible to the page and to the agent tool, while
+the disk they sat on was 99% full.
+
+Xcode names each child `<name>-<28 letters>`, the letters an MD5 of the workspace path in base 26
+(`XcodeDerivedDataName`). Recomputing it from `WorkspacePath` reproduced **16 of 16** hashed
+manifest-bearing folder names on that machine — the other two were custom `-derivedDataPath`
+names with no hash. So `XcodeDerivedDataScanner` accepts a second identity: a direct child in that
+hashed shape whose entries are *all* Xcode output directories, each a real directory, with no
+`info.plist` of any kind (one that fails to parse still refuses). A name alone is 28 letters anyone
+could type; the contents are what make it Xcode's, and one foreign file refuses the folder.
+
+**The hash attributes it, and only a record can make it an orphan.** `XcodeWorkspaceCandidates`
+joins every checkout Threading has a record of — each project folder, every session's working
+directory (a removed managed worktree's included), and every worktree git records in
+`.git/worktrees/*/gitdir`, those deleted without a prune included — to where the project keeps its
+`.xcodeproj` or `.xcworkspace`, learned from the live project folder (depth 2, build and dependency
+folders skipped, every step bounded). A candidate that hashes to the folder's name sets its
+`workspacePath`, and the read-time tiers do the rest: gone means ORPHANED, alive means attributed.
+No match leaves it unattributed, in the "other" tier — never an orphan, since nothing proved the
+workspace is gone. Measured after the 2026-10-17 cleanup, 1 of the 14 remaining folders matched (a
+live worktree); the other 13 were built from verification copies Threading never recorded. That is
+the honest ceiling of attribution; recognition is what made them reclaimable.
+
+Removal re-reads the identity rather than the attribution, which was the scan's inference, not
+Xcode's statement: the name and shape must still hold, and a manifest appearing — Xcode building
+into it again — is a different identity and refuses. The age window and process census are the
+same as for a manifest-bearing cache.
 
 The list reports verified cleanup candidates, not a complete disk-usage inventory. Swap,
 simulator/device state, app containers, backups, Trash and profiling traces have different
@@ -196,6 +232,15 @@ working, because `/private/tmp` holds every session's scratchpad. And the readin
 project's does not: during a five-minute measurement one session directory fell from **21 GB to
 92 KB** with nobody acting, so `scratchArtifacts()` re-filters what has vanished at read time.
 
+**The busy rule defers; it may not starve.** On a machine where some agent is always working, "skip
+while any session works" became "never": on 2026-10-17, with agents running continuously in four
+projects and the disk at 99%, the external reading was a day old and three live Xcode caches
+holding 26 GB were not in it at all. `ArtifactScanService.mayScan` therefore lets an *existing*
+reading older than `busyDeferralLimit` (six hours) be measured anyway, at the same `.background`
+priority, for both a project's scope and the external one. A reading never taken still waits for a
+quiet moment. A managed worktree's merge-and-clean also forces the external pass, since its Xcode
+caches became orphans at that moment and the disk they hold is the question being asked.
+
 **Agents can see the listing and propose a cleanup, never perform one.** `list_reclaimable_storage`
 returns the cache; `propose_storage_cleanup` puts named paths to the user as a sheet and removes
 only what they approve. Both scopes appear there, and a scratch line names the workspace its cache
@@ -204,6 +249,16 @@ that keeps this from being an arbitrary-delete primitive is that **a proposal ca
 already in the findings** — everything there has passed the pair of gates its kind answers to, and
 is asked again at the moment of deletion. The tool answers only once the user has decided, so the
 agent's next turn knows the outcome rather than assuming it.
+
+**The listing is a page.** It used to print every finding on its own line in project order —
+on 2026-10-17, **501 lines and 95,647 characters**, more than an agent's tool result holds, so the
+agent that had just hit ENOSPC could not read the answer written for it; 211 of the lines were
+Python bytecode weighing under 0.1 GB together. `ReclaimableStorageListing` now answers with the
+header, **where it is** (totals per checkout or tier, at most eight, each with the path `under`
+takes), then at most 40 directories by default (200 on request) — ORPHANED first whatever their
+size, then largest — and says what it left out and how to page (`offset`) or narrow (`under`). The
+page is pure over `ReclaimableFindings.groups`, so the bound and the order are tested without a
+scan, and the line shapes are unchanged.
 
 **An agent can also nominate a path, and nominating is not vouching.** The listing is measured on
 a passive timer over roots the app already knows — the right economy for a chore nobody is waiting
@@ -284,6 +339,25 @@ That instruction now names both scopes and tells the agent to **lead with the li
 `ORPHANED`** — the tier with no plausible way to be wrong, and 13.4 GiB of it on a machine with
 31 GiB free. The tool description states what was checked in the same two-scope terms: everything
 listed is *ignored by git or identified as a build cache by Xcode's own manifest*.
+
+**The failing write often does not say it was the disk.** With the data volume full, Xcode reports
+a module cache "modified since the module file was built", a wall of "unexpected incomplete target"
+ending in "database or disk is full", or a linker/`lipo` failure with "No space left on device"
+buried in its log ("Where did my disk go?", skarol.dev, 2026-10-12; reproduced here). And `df -h /`
+reads the sealed system volume, which looked 43% used on this machine while the data volume was
+99%. The instruction now names those disguises and `df -h /System/Volumes/Data`. For Claude the
+failure itself also answers: `DiskPressureNotice` is a `PostToolUseFailure` answering hook (beside
+the question guard, `/disk-notice/<token>`) that adds one paragraph naming the free space and the
+storage tools when the home volume is under pressure *at that moment*, or when the error states a
+full disk in so many words; Xcode's disguises count only beside a short disk, since a module file
+modified mid-build also happens with plenty of room. The reading is the smaller of the
+important-usage and plain free counts (`DiskSpace.immediateHomeReading`): `df` said 16 GiB while
+the container counted 52 GB including purgeable space, and a build writing flat out meets ENOSPC on
+the plain count. One notice per session per ten minutes, never on an interrupt, never for a session
+on a remote host, silent with the Disk space tools off. This is the same rule as above — keyed on
+the failure, never stated in advance — with the reading taken when it means something. Codex has
+no failure hook whose reply reaches the model, and a new entry in its shared `hooks.json` would
+cost the user's trust decision, so it relies on the instruction.
 
 The page groups **by checkout, not by project**, because six of one project's checkouts hold a
 `web/node_modules` and a row reading `web/node_modules` under a heading reading `sonda` names

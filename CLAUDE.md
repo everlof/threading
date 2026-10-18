@@ -210,7 +210,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | A session refused over a rate limit: the transcript signal, the limit chooser, recovery policies, the parked state, the scheduled continuation | [`limit-recovery.md`](docs/architecture/limit-recovery.md) |
 | A scheduled end for a session: the deadline and its three moments, the wind-down message, the hold at every seam, bounded interrupts and the stop-agent escalation, quiet hours, receipts | [`curfew.md`](docs/architecture/curfew.md) |
 | An agent that would not start: the captured failure record, the launch-failure surface, the transcript preflight, and repairing a broken conversation with an agent | [`launch-failure.md`](docs/architecture/launch-failure.md) |
-| The typed session control plane: actor/scope/refusal contract, cross-session messaging (`list_sessions`/`send_to_session`), delivery per surface, provenance | [`control-plane.md`](docs/architecture/control-plane.md) |
+| The typed session control plane: actor/scope/refusal contract, cross-session messaging (`list_sessions`/`mail_send`/`send_to_session`), subagents (`start_subagent`), delivery per surface, provenance | [`control-plane.md`](docs/architecture/control-plane.md) |
 | Autonomous host work, durable questions/continuations, delivery receipts, worker memory and the portable owner CLI | [`autonomous-controller.md`](docs/architecture/autonomous-controller.md) |
 | Linked Workrooms: structured questions to people outside this Mac, the local-only person mailbox, the participant portal, its tunnel and the opening approval | [`linked-workrooms.md`](docs/architecture/linked-workrooms.md) |
 | The first-launch walkthrough: window deferral and the terminate trap, the completed flag, the global conversation scan, the notifications opt-in | [`onboarding.md`](docs/architecture/onboarding.md) |
@@ -604,6 +604,10 @@ the following cases genuinely need to be visible, and they are skipped by name i
   afterwards. They were flashing a window three
   times per `fast` run, which is the lane an agent re-runs all day; they still run in `all`, so
   the push gate is unchanged.
+- `ThemedPresentationTests/testAWindowlessAlertStandsAloneWithoutAModalSession()` and
+  `testAWindowlessConfirmationLeavesTheMainQueueServing()` — a dialog with no window to attach
+  to is centred on screen at modal-panel level by design, and the second proves the main queue
+  keeps serving while it is up, which only a presented dialog can show.
 - `UpdateSheetRenderTests/testRealInstallingSheetKeepsSquareThemedBorder()` — captures the
   assembled update dialog through WindowServer and checks the square border at all four corners.
   Its titled parent must be on screen to exercise real child-window attachment, so it runs in

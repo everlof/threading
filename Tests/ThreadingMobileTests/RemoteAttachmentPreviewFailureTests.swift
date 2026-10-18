@@ -1,5 +1,6 @@
 import Foundation
 import ThreadingRemoteKit
+import UIKit
 import XCTest
 @testable import ThreadingMobile
 
@@ -126,7 +127,7 @@ final class RemoteAttachmentPreviewLoadTests: XCTestCase {
     }
 
     func testHoldingTheBytesEndsTheAskingForEveryDrawableKind() {
-        for kind in [RemoteAttachmentKind.image, .pdf, .html, .text] {
+        for kind in [RemoteAttachmentKind.image, .pdf, .html, .text, .diff] {
             XCTAssertFalse(
                 RemoteAttachmentPreviewLoad.shouldRequestBytes(
                     kind: kind,
@@ -152,7 +153,7 @@ final class RemoteAttachmentPreviewLoadTests: XCTestCase {
             )
         }
 
-        for kind in [RemoteAttachmentKind.image, .pdf, .html, .text] {
+        for kind in [RemoteAttachmentKind.image, .pdf, .html, .text, .diff] {
             XCTAssertTrue(RemoteAttachmentPreviewLoad.shouldRequestBytes(
                 kind: kind,
                 hasData: false,
@@ -202,6 +203,156 @@ final class RemoteAttachmentPreviewLoadTests: XCTestCase {
             ),
             .previewUnavailable
         )
+    }
+}
+
+/// A kept comparison is `git diff --no-index` of two absolute paths. The phone draws it with
+/// Review's renderer, whose header shows the file's own name over the folder it lives in.
+final class RemoteDiffAttachmentTests: XCTestCase {
+    func testAKeptComparisonParsesIntoOneNamedFile() async {
+        let diff = """
+        diff --git a/var/folders/p5/T/brain-diff/design-system.md b/Users/me/repo/docs/design-system.md
+        index 3f1c2aa..8d04e71 100644
+        --- a/var/folders/p5/T/brain-diff/design-system.md
+        +++ b/Users/me/repo/docs/design-system.md
+        @@ -1,3 +1,3 @@
+         # Icons
+        -Brains are drawn in outline.
+        +Brains are drawn filled, with thought bubbles.
+         End.
+
+        """
+
+        let document = await RemoteDiffAttachmentView.document(from: Data(diff.utf8))
+
+        XCTAssertEqual(document.files.count, 1)
+        XCTAssertEqual(document.files.first?.fileName, "design-system.md")
+        XCTAssertEqual(document.files.first?.added, 1)
+        XCTAssertEqual(document.files.first?.removed, 1)
+        XCTAssertEqual(document.summary.files, 1)
+    }
+
+    func testBytesThatAreNotADiffParseToNothingRatherThanFailing() async {
+        let document = await RemoteDiffAttachmentView.document(from: Data([0xFF, 0xFE, 0x00]))
+        XCTAssertTrue(document.files.isEmpty)
+    }
+
+    func testTheKindHasItsOwnGlyphAndDiagnosticToken() async {
+        XCTAssertEqual(RemoteAttachmentGlyph.name(for: .diff), "plus.forwardslash.minus")
+        let token = await MainActor.run { MobileAttachmentPreviewLog.kindToken(for: .diff) }
+        XCTAssertEqual(token, .diff)
+    }
+}
+
+/// The phone's picture comparison: the Mac's shared-scale rule, and the record naming both sides.
+final class RemoteImageComparisonTests: XCTestCase {
+    func testBothSidesDrawAtOneSharedScaleSoAResizedPictureLooksResized() {
+        let layout = MobileImageCompareLayout.layout(
+            oldSize: CGSize(width: 100, height: 100),
+            newSize: CGSize(width: 200, height: 200),
+            in: CGRect(x: 0, y: 0, width: 400, height: 400),
+            mode: .wipeHorizontal,
+            gap: 8
+        )
+        XCTAssertEqual(layout.newRect.width, 400)
+        XCTAssertEqual(layout.oldRect.width, 200, "fitting each side alone would hide the resize")
+        XCTAssertEqual(layout.oldRect.midX, layout.newRect.midX)
+        XCTAssertNil(layout.secondaryCanvas)
+    }
+
+    func testSideBySideSplitsWhicheverWayGivesThePicturesMoreRoom() {
+        let landscape = CGSize(width: 1600, height: 900)
+        let portraitScreen = MobileImageCompareLayout.layout(
+            oldSize: landscape, newSize: landscape,
+            in: CGRect(x: 0, y: 0, width: 360, height: 600),
+            mode: .sideBySide, gap: 8
+        )
+        XCTAssertTrue(portraitScreen.placesNewBelow, "wide pictures stack on a tall screen")
+
+        let tall = CGSize(width: 1179, height: 2556)
+        let beside = MobileImageCompareLayout.layout(
+            oldSize: tall, newSize: tall,
+            in: CGRect(x: 0, y: 0, width: 360, height: 600),
+            mode: .sideBySide, gap: 8
+        )
+        XCTAssertFalse(beside.placesNewBelow, "tall screenshots stand beside each other")
+        XCTAssertEqual(beside.oldRect.width, beside.newRect.width)
+    }
+
+    func testTheSeamAndTheFractionAreOneAnother() {
+        let layout = MobileImageCompareLayout.layout(
+            oldSize: CGSize(width: 100, height: 50),
+            newSize: CGSize(width: 100, height: 50),
+            in: CGRect(x: 0, y: 0, width: 200, height: 400),
+            mode: .wipeHorizontal,
+            gap: 8
+        )
+        let seam = layout.seam(for: .wipeHorizontal, at: 0.25)
+        XCTAssertEqual(seam, layout.canvas.minX + layout.canvas.width * 0.25)
+        XCTAssertEqual(
+            layout.fraction(at: CGPoint(x: seam, y: layout.canvas.midY), for: .wipeHorizontal),
+            0.25,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(layout.fraction(at: CGPoint(x: -50, y: 0), for: .wipeHorizontal), 0)
+        XCTAssertEqual(layout.fraction(at: CGPoint(x: 0, y: 10_000), for: .wipeVertical), 1)
+    }
+
+    func testARecordThatIsNotOneSaysSoRatherThanDrawingHalf() throws {
+        let record = RemoteImageComparisonDTO(
+            old: .init(attachmentID: "a", title: "Before"),
+            new: .init(attachmentID: "b", title: "After")
+        )
+        XCTAssertEqual(
+            try RemoteImageComparisonLoad.decodeManifest(JSONEncoder().encode(record)),
+            record
+        )
+        XCTAssertThrowsError(try RemoteImageComparisonLoad.decodeManifest(Data("{}".utf8))) {
+            XCTAssertEqual($0 as? RemoteImageComparisonLoad.Failure, .unreadable)
+        }
+    }
+
+    func testASideKeepsItsTruePixelSizeWhenDecodedSmaller() throws {
+        let wide = try Self.png(width: 3_000, height: 12)
+        let side = try RemoteImageComparisonLoad.side(from: wide, title: "Wide")
+        XCTAssertEqual(side.pixelSize, CGSize(width: 3_000, height: 12))
+        let decoded = try XCTUnwrap(side.image.cgImage)
+        XCTAssertLessThanOrEqual(
+            max(decoded.width, decoded.height),
+            RemoteImageComparisonLoad.maximumDecodedPixelDimension
+        )
+        XCTAssertThrowsError(try RemoteImageComparisonLoad.side(from: Data("no".utf8), title: "x"))
+    }
+
+    func testBothSidesAreFetchedByTheirAttachmentIDs() async throws {
+        let before = try Self.png(width: 4, height: 4)
+        let after = try Self.png(width: 6, height: 4)
+        let record = try JSONEncoder().encode(RemoteImageComparisonDTO(
+            old: .init(attachmentID: "before-id", title: "Before"),
+            new: .init(attachmentID: "after-id", title: "After")
+        ))
+        let sides = try await RemoteImageComparisonLoad.load(manifestData: record) { id in
+            switch id {
+            case "before-id": return before
+            case "after-id": return after
+            default: throw URLError(.fileDoesNotExist)
+            }
+        }
+        XCTAssertEqual(sides.old.title, "Before")
+        XCTAssertEqual(sides.new.pixelSize, CGSize(width: 6, height: 4))
+    }
+
+    private static func png(width: Int, height: Int) throws -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(
+            size: CGSize(width: width, height: height),
+            format: format
+        ).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        return try XCTUnwrap(image.pngData())
     }
 }
 

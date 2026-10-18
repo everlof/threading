@@ -737,6 +737,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             // with remote hosts' controllers while they are connected (`agent-mail.md`).
             MacMailDelivery.shared.start()
             MailboxHandover.shared.start()
+            // A subagent's reply goes back to the chat that started it as that subagent's mail,
+            // and it is archived and restored with that chat.
+            SubagentReportBack.shared.start()
+            SubagentLifecycle.shared.start()
             Task { await MacMailSync.shared.start(endpoints: { MacMailSync.liveEndpoints() }) }
             // Linked Workrooms: the portal and its tunnel run only while a room is open to someone.
             WorkroomHost.shared.start()

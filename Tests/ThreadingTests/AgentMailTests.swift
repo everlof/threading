@@ -26,10 +26,24 @@ final class MacMailboxTests: XCTestCase {
     func testHostedTestsResolveTheMailboxIntoTheScratchDirectory() {
         let url = MacMailbox.liveDatabaseURL()
         XCTAssertTrue(
-            url.path.hasPrefix(StateManager.hostedTestDirectory().path),
+            url.path.hasPrefix(MacMailbox.hostedTestDirectory().path),
             "a hosted test must never open the developer's mailbox: \(url.path)"
         )
+        XCTAssertFalse(url.path.hasPrefix(StateManager.hostedTestDirectory().path),
+                       "project fixture teardown must not unlink the open mailbox")
         XCTAssertEqual(url.lastPathComponent, MacMailDefaults.databaseFileName)
+    }
+
+    func testProjectFixtureCleanupKeepsTheSharedMailboxOpen() async throws {
+        let mailbox = MacMailbox.shared
+        _ = try await mailbox.register(SessionID(), name: "Before project cleanup")
+
+        let erased = await MainActor.run { StateManager.eraseHostedTestState() }
+        XCTAssertTrue(erased)
+
+        let address = try await mailbox.register(SessionID(), name: "After project cleanup")
+        XCTAssertEqual(address.kind, .session)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: MacMailbox.liveDatabaseURL().path))
     }
 
     func testSessionsAreRegisteredLazilyUnderThisMacsHost() async throws {

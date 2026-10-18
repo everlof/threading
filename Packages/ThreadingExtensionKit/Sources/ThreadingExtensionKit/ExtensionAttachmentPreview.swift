@@ -35,6 +35,8 @@ public struct ExtensionPreviewableFileType: Codable, Equatable, Sendable {
         "zip", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "7z", "rar",
         // Diagram sources.
         "dot", "gv", "mmd", "mermaid",
+        // Unified diffs, and the record of two pictures compared.
+        "diff", "patch", "comparison",
         // Host-probed ambiguities.
         "json", "yaml", "yml"
     ]

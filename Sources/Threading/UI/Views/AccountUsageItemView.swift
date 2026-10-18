@@ -72,6 +72,19 @@ final class AccountUsageItemView: BackdropThemedControl {
     var summaryForTesting: NSAttributedString { summaryLabel.attributedSummary }
     var contentGroundsForTesting: [NSColor] { contentInk(from: ink).grounds }
 
+    /// A loose toolbar measures the whole reading. The label may give up windows when the
+    /// header narrows, but its low compression priority must not make the pill's preferred
+    /// width collapse to the ring before the header has assigned any width.
+    override var intrinsicContentSize: NSSize {
+        let readingWidth = summaryLabel.intrinsicContentSize.width
+        let gap = readingWidth > 0 ? Design.Spacing.tight : 0
+        return NSSize(
+            width: 2 * AccountUsageItemDefaults.horizontalPadding
+                + AccountUsageItemDefaults.ringSize + gap + readingWidth,
+            height: AccountUsageItemDefaults.height
+        )
+    }
+
     private let customizationLookup: ComponentCustomizationHost.Lookup
     private let usagePopoverContentProvider: UsagePopoverContentProvider
 
@@ -148,6 +161,7 @@ final class AccountUsageItemView: BackdropThemedControl {
         ringView.translatesAutoresizingMaskIntoConstraints = false
         // The ring and its popover remain available at narrow widths. The summary is optional
         // inline detail, not a minimum width for the entire conversation pane.
+        setContentCompressionResistancePriority(.init(1), for: .horizontal)
         summaryLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
 
         let stack = NSStackView(views: [ringView, summaryLabel])
@@ -310,6 +324,7 @@ final class AccountUsageItemView: BackdropThemedControl {
                 ]
             )
         )
+        invalidateIntrinsicContentSize()
         setAccessibilityValue(summaryLabel.attributedSummary.string)
     }
 

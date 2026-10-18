@@ -1902,6 +1902,17 @@
         }
       }
     },
+    "%@, subagent of %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@, underagent till %@"
+          }
+        }
+      }
+    },
     "%@, then stops the agent" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4963,6 +4974,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ett foto från Finder är ofta en HEIC-fil och en skanning en TIFF-fil. Agenterna kan inte läsa något av formaten, så filen skrivs först ut som PNG med samma namn och den versionen skickas till agenten. Stäng av detta om agenten ska få originalfilen, till exempel när du arbetar med själva formatet. Skallådan konverterar aldrig filer."
+          }
+        }
+      }
+    },
+    "A picture in this comparison could not be decoded." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En bild i jämförelsen kunde inte avkodas."
+          }
+        }
+      }
+    },
+    "A picture in this comparison is no longer in this session." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En bild i jämförelsen finns inte längre i den här sessionen."
           }
         }
       }
@@ -12491,13 +12524,13 @@
         }
       }
     },
-    "Call send_to_session with session_id %@ — the session this side chat was forked from — and report your conclusion: what was found or decided, in a few sentences, not the transcript. Then reply here with one line saying what you sent." : {
+    "Call mail_send with to %@ — the session this side chat was forked from — and report your conclusion: what was found or decided, in a few sentences, not the transcript. Then reply here with one line saying what you sent." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Anropa send_to_session med session_id %@ — sessionen som den här sidokonversationen förgrenades från — och rapportera din slutsats: vad som hittades eller beslutades, i några meningar, inte transkriptet. Svara sedan här med en rad om vad du skickade."
+            "value" : "Anropa mail_send med to %@ — sessionen som den här sidokonversationen förgrenades från — och rapportera din slutsats: vad som hittades eller beslutades, i några meningar, inte transkriptet. Svara sedan här med en rad om vad du skickade."
           }
         }
       }
@@ -31456,6 +31489,17 @@
         }
       }
     },
+    "Let a chat start helper chats on any provider, nested under it, that report back by mail." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låt en chatt starta hjälpchattar hos valfri leverantör, placerade under den, som rapporterar tillbaka med post."
+          }
+        }
+      }
+    },
     "Let a new provider read the frozen history that created its session." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31467,13 +31511,13 @@
         }
       }
     },
-    "Let a session list the project’s other sessions and send them messages." : {
+    "Let a session list the project’s other sessions and send them mail." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Låt en session lista projektets övriga sessioner och skicka meddelanden till dem."
+            "value" : "Låt en session lista projektets övriga sessioner och skicka post till dem."
           }
         }
       }
@@ -53911,6 +53955,17 @@
         }
       }
     },
+    "Showing the first %lld diff lines." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar de första %lld diff-raderna."
+          }
+        }
+      }
+    },
     "Showing the first %lld diff lines. Export the comparison for the complete diff." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56987,6 +57042,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Underagent"
+          }
+        }
+      }
+    },
+    "Subagent of %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Underagent till %@"
           }
         }
       }
@@ -63364,6 +63430,28 @@
         }
       }
     },
+    "The subagent could not be created." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Underagenten kunde inte skapas."
+          }
+        }
+      }
+    },
+    "The subagent could not be launched." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Underagenten kunde inte startas."
+          }
+        }
+      }
+    },
     "The supervision record could not be saved." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -65559,6 +65647,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Diagrammet är för stort för att rendera. Visar källan."
+          }
+        }
+      }
+    },
+    "This diff has no text changes to show." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här diffen har inga textändringar att visa."
           }
         }
       }

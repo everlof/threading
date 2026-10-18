@@ -74,6 +74,11 @@ enum MCPDefaults {
     /// A notice is a hint on the agent's hot path: an unreachable app or a busy store costs this
     /// much and prints nothing.
     static let mailNoticeTimeout: TimeInterval = 2
+    /// The disk-pressure answering hook (`DiskPressureNotice`): `PostToolUseFailure` only.
+    static let diskNoticePathPrefix = "/disk-notice/"
+    /// A failed tool call is already the slow path, but the hint is still on the agent's turn:
+    /// an unreachable app costs this much and prints nothing.
+    static let diskNoticeTimeout: TimeInterval = 2
     /// The workroom question guard's answering hook (`WorkroomQuestionGuard`).
     static let questionGuardPathPrefix = "/question-guard/"
     static let questionGuardEventParameter = "event"

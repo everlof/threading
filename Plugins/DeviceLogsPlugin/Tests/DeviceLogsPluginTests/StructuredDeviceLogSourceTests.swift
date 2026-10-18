@@ -104,6 +104,65 @@ final class StructuredDeviceLogSourceTests: XCTestCase {
         XCTAssertFalse(source.didDecodeStructuredRow)
     }
 
+    /// Errors only: the phone is asked for neither Debug nor Info, and the Notice rows the tool
+    /// still sends are dropped before buffering. A phone that is quiet at that level has still
+    /// produced structured rows, so it must not fall back to the relay.
+    func testTheStructuredRouteAsksThePhoneForTheLevelAndQuietIsNotAFailure() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-level-log-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let structured = directory.appendingPathComponent("pymobiledevice3")
+        let fallback = directory.appendingPathComponent("idevicesyslog")
+        let asked = directory.appendingPathComponent("arguments")
+        try makeExecutable(at: structured, script: """
+        #!/bin/sh
+        echo "$@" > '\(asked.path)'
+        echo '{"timestamp":"2026-10-18T12:47:28.047435","level":"NOTICE","filename":"/kernel","message":"notice"}'
+        echo '{"timestamp":"2026-10-18T12:47:28.047510","level":"ERROR","filename":"/kernel","message":"error"}'
+        """)
+        try makeExecutable(at: fallback, script: "#!/bin/sh\necho 'Oct 18 12:47:28.047435 Relay[1] <Error>: wrong fallback'\n")
+
+        let source = StructuredPairedDeviceLogRowSource(
+            udid: "PHONE", overNetwork: false, toolPath: structured.path,
+            fallbackToolPath: fallback.path, minimumSeverity: 3
+        )
+        let ended = expectation(description: "levelled stream ended")
+        source.onStreamEnded = { _ in ended.fulfill() }
+        source.start()
+        wait(for: [ended], timeout: 5)
+        source.stop()
+        XCTAssertEqual(source.drain().map(\.message), ["error"])
+        XCTAssertTrue(source.didDecodeStructuredRow)
+        let arguments = try String(contentsOf: asked, encoding: .utf8).split(whereSeparator: \.isWhitespace).map(String.init)
+        XCTAssertTrue(arguments.contains("--no-debug"))
+        XCTAssertTrue(arguments.contains("--no-info"))
+    }
+
+    /// The relay has no level option, so the level is applied as each line is decoded: a Debug
+    /// row never reaches the ring or the recorder only to be hidden there.
+    func testTheLegacyRelayDropsRowsBelowTheLevelBeforeBuffering() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-relay-level-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let tool = directory.appendingPathComponent("idevicesyslog")
+        try makeExecutable(at: tool, script: """
+        #!/bin/sh
+        echo 'Oct 18 12:47:28.047435 remoted[42] <Debug>: debug'
+        echo 'Oct 18 12:47:28.047510 locationd[43] <Info>: info'
+        echo 'Oct 18 12:47:28.047525 kernel[0] <Notice>: notice'
+        """)
+        let source = PairedDeviceLogRowSource(udid: "PHONE", overNetwork: false, toolPath: tool.path, minimumSeverity: 1)
+        source.reclaimRelay = { _, _ in }
+        let ended = expectation(description: "relay ended")
+        source.onStreamEnded = { _ in ended.fulfill() }
+        source.start()
+        wait(for: [ended], timeout: 5)
+        source.stop()
+        XCTAssertEqual(source.drain().map(\.message), ["info", "notice"])
+    }
+
     private func makeExecutable(at url: URL, script: String) throws {
         try Data(script.utf8).write(to: url)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)

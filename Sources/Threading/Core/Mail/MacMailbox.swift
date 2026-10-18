@@ -57,13 +57,13 @@ actor MacMailbox {
         self.databaseURL = databaseURL
     }
 
-    /// `~/Library/Application Support/Threading/Mail/mailbox.db`, or the hosted-test scratch
-    /// directory when this process is a test bundle hosted in the app — the same redirect
-    /// `StateManager` applies, so a test never opens the developer's mailbox.
+    /// `~/Library/Application Support/Threading/Mail/mailbox.db`, or a hosted-test scratch
+    /// directory separate from `StateManager`'s. Project test teardown erases that directory
+    /// after every case; the shared mailbox stays open across cases and must not be unlinked.
     nonisolated static func liveDatabaseURL(fileManager: FileManager = .default) -> URL {
         let base: URL
         if StateManager.isHostedTest {
-            base = StateManager.hostedTestDirectory(fileManager: fileManager)
+            base = hostedTestDirectory(fileManager: fileManager)
         } else {
             let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
                 ?? fileManager.homeDirectoryForCurrentUser
@@ -73,6 +73,13 @@ actor MacMailbox {
         return base
             .appendingPathComponent(MacMailDefaults.directoryName, isDirectory: true)
             .appendingPathComponent(MacMailDefaults.databaseFileName)
+    }
+
+    nonisolated static func hostedTestDirectory(fileManager: FileManager = .default) -> URL {
+        fileManager.temporaryDirectory.appendingPathComponent(
+            "Threading-HostedTestMailbox-\(ProcessInfo.processInfo.processIdentifier)",
+            isDirectory: true
+        )
     }
 
     // MARK: - Identity

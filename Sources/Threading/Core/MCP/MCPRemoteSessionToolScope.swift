@@ -78,6 +78,10 @@ enum MCPRemoteSessionToolScope {
              .finishWorkspace, .adoptSession, .releaseSession, .subscribeToChildren, .respondToPermission:
             return false
 
+        // A subagent is launched on this Mac, beside a parent whose process is elsewhere.
+        case .startSubagent:
+            return false
+
         case .listReclaimableStorage, .suggestReclaimableLocation, .proposeStorageCleanup,
              .proposeConversationRepair:
             return false

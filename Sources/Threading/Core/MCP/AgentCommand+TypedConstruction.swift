@@ -196,6 +196,7 @@ extension AgentCommand {
   static func sessionCost(_ value: SessionCostArguments) -> Self { builtIn(.sessionCost, value) }
   static func resumeSession(_ value: ResumeSessionArguments) -> Self { builtIn(.resumeSession, value) }
   static func spawnSession(_ value: SpawnSessionArguments) -> Self { builtIn(.spawnSession, value) }
+  static func startSubagent(_ value: StartSubagentArguments) -> Self { builtIn(.startSubagent, value) }
   static func moveSessionToAccount(_ value: MoveSessionToAccountArguments) -> Self {
     builtIn(.moveSessionToAccount, value)
   }
@@ -212,7 +213,7 @@ extension AgentCommand {
   static func respondToPermission(_ value: RespondToPermissionArguments) -> Self {
     builtIn(.respondToPermission, value)
   }
-  static func listReclaimableStorage(_ value: EmptyToolArguments) -> Self {
+  static func listReclaimableStorage(_ value: ListReclaimableStorageArguments) -> Self {
     builtIn(.listReclaimableStorage, value)
   }
   static func suggestReclaimableLocation(_ value: SuggestReclaimableLocationArguments) -> Self {

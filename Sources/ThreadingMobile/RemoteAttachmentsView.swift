@@ -363,6 +363,9 @@ struct RemoteAttachmentPreviewContent: View {
     /// same file twice. The gallery retains one `Data` value, never a cache proportional to the
     /// attachment list.
     private let onLoadedData: ((Data) -> Void)?
+    /// Bytes the gallery already holds for other attachments — a demo's fixtures — which a
+    /// comparison reads its two pictures from before asking the Mac.
+    private let siblingData: [String: Data]
 
     private var loadTaskIdentity: RemoteAttachmentPreviewTaskIdentity {
         RemoteAttachmentPreviewTaskIdentity(client: client, isCurrentPage: isCurrentPage)
@@ -376,6 +379,7 @@ struct RemoteAttachmentPreviewContent: View {
         loadsRemotely: Bool = true,
         offersVideoStreaming: Bool = false,
         isCurrentPage: Bool = true,
+        siblingData: [String: Data] = [:],
         onDecodedImageSize: ((CGSize) -> Void)? = nil,
         onLoadedData: ((Data) -> Void)? = nil
     ) {
@@ -385,9 +389,25 @@ struct RemoteAttachmentPreviewContent: View {
         self.loadsRemotely = loadsRemotely
         self.offersVideoStreaming = offersVideoStreaming
         self.isCurrentPage = isCurrentPage
+        self.siblingData = siblingData
         self.onDecodedImageSize = onDecodedImageSize
         self.onLoadedData = onLoadedData
         _data = State(initialValue: initialData)
+    }
+
+    /// Fetches one side of a comparison through the same bounded queue as every preview page.
+    private var comparisonSideLoader: @Sendable (String) async throws -> Data {
+        let siblings = siblingData
+        let loadsRemotely = loadsRemotely
+        let client = client
+        let sessionID = sessionID
+        return { id in
+            if let data = siblings[id] { return data }
+            guard loadsRemotely else { throw RemoteImageComparisonLoad.Failure.unreadable }
+            return try await MobileMediaDownloadLimiter.previews.run {
+                try await client.attachmentData(sessionID: sessionID, id: id)
+            }
+        }
     }
 
     var body: some View {
@@ -429,6 +449,10 @@ struct RemoteAttachmentPreviewContent: View {
                         data: data,
                         backgroundColor: theme.uiColor("ground", fallback: "#16181D")
                     )
+                } else if attachment.kind == .diff {
+                    RemoteDiffAttachmentView(data: data)
+                } else if attachment.kind == .comparison {
+                    RemoteImageComparisonView(manifestData: data, loadSide: comparisonSideLoader)
                 } else if attachment.kind == .text {
                     ScrollView {
                         Text(String(decoding: data, as: UTF8.self))
@@ -833,7 +857,7 @@ struct RemoteAttachmentPreviewDemo: View {
     /// Every kind the demo knows, in the order the ledger shows them; the one asked for is
     /// the page on screen, so a capture of any kind also shows its neighbours.
     static let kinds: [RemoteAttachmentKind] = [
-        .image, .pdf, .html, .text, .archive, .media, .video
+        .image, .pdf, .html, .text, .diff, .comparison, .archive, .media, .video
     ]
 
     var body: some View {
@@ -849,7 +873,7 @@ struct RemoteAttachmentPreviewDemo: View {
             offersVideoStreaming: false,
             initialData: Dictionary(uniqueKeysWithValues: Self.kinds.compactMap { kind in
                 Self.previewData(for: kind).map { (Self.attachment(for: kind).id, $0) }
-            }),
+            }).merging(Self.comparisonSides) { listed, _ in listed },
             // The Mac draws thumbnails; the demo has no Mac, so the image's own bytes stand in
             // for its thumbnail and every other cell shows its glyph.
             seedThumbnails: Dictionary(uniqueKeysWithValues: [RemoteAttachmentKind.image].compactMap { kind in
@@ -875,6 +899,10 @@ struct RemoteAttachmentPreviewDemo: View {
             .init(path: "recordings/keyboard-lifecycle.mp4", name: "keyboard-lifecycle.mp4", kind: .video, byteCount: 18_204_517, origin: .agent)
         case .text:
             .init(path: "artifacts/keyboard-lifecycle.txt", name: "keyboard-lifecycle.txt", kind: .text, byteCount: 1_284, origin: .agent)
+        case .diff:
+            .init(path: "comparisons/KeyboardLifecycle.swift.diff", name: "KeyboardLifecycle.swift.diff", kind: .diff, byteCount: 712, origin: .agent)
+        case .comparison:
+            .init(path: "comparisons/composer.png.comparison", name: "composer.png.comparison", kind: .comparison, byteCount: 186, origin: .agent)
         default:
             .init(path: "screenshots/keyboard-dismissed.png", name: "keyboard-dismissed.png", kind: .image, byteCount: 184_320, origin: .user)
         }
@@ -905,9 +933,77 @@ struct RemoteAttachmentPreviewDemo: View {
 
             Tested on the compact and regular iPhone layouts.
             """.utf8)
+        case .diff:
+            return Data("""
+            diff --git a/before/KeyboardLifecycle.swift b/Sources/KeyboardLifecycle.swift
+            index 3f1c2aa..8d04e71 100644
+            --- a/before/KeyboardLifecycle.swift
+            +++ b/Sources/KeyboardLifecycle.swift
+            @@ -12,7 +12,9 @@ final class KeyboardLifecycle {
+                 func composerDidAppear() {
+            -        focus()
+            +        // Focus only once the keyboard has finished arriving.
+            +        awaitKeyboard(.didShow) { [weak self] in self?.focus() }
+                 }
+                 func composerWillDisappear() {
+            -        resignFocus()
+            +        awaitKeyboard(.didHide) { [weak self] in self?.restoreAnchor() }
+            +        resignFocus()
+                 }
+             }
+            """.utf8)
+        case .comparison:
+            return try? JSONEncoder().encode(RemoteImageComparisonDTO(
+                old: .init(attachmentID: comparisonBeforeID, title: "Before"),
+                new: .init(attachmentID: comparisonAfterID, title: "After")
+            ))
         case .archive: return nil
         default: return UIImage(named: "AppIconPreviewDefault")?.pngData()
         }
+    }
+
+    private static let comparisonBeforeID = "comparisons/composer-before.png"
+    private static let comparisonAfterID = "comparisons/composer-after.png"
+
+    /// The two pictures the demo comparison names: a composer whose send button moved and
+    /// changed colour, which is what the modes exist to find.
+    private static var comparisonSides: [String: Data] {
+        [
+            comparisonBeforeID: composerPicture(
+                buttonColor: UIColor(red: 0.04, green: 0.52, blue: 1, alpha: 1),
+                buttonInset: 24
+            ),
+            comparisonAfterID: composerPicture(
+                buttonColor: UIColor(red: 0.19, green: 0.82, blue: 0.35, alpha: 1),
+                buttonInset: 40
+            ),
+        ].compactMapValues { $0 }
+    }
+
+    private static func composerPicture(buttonColor: UIColor, buttonInset: CGFloat) -> Data? {
+        let bounds = CGRect(x: 0, y: 0, width: 390, height: 520)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        return UIGraphicsImageRenderer(bounds: bounds, format: format).image { context in
+            UIColor(red: 0.07, green: 0.08, blue: 0.11, alpha: 1).setFill()
+            context.fill(bounds)
+            UIColor(red: 0.16, green: 0.18, blue: 0.23, alpha: 1).setFill()
+            for row in 0..<4 {
+                UIBezierPath(
+                    roundedRect: CGRect(x: 24, y: 40 + CGFloat(row) * 76, width: 300 - CGFloat(row) * 40, height: 52),
+                    cornerRadius: 14
+                ).fill()
+            }
+            UIColor(red: 0.12, green: 0.13, blue: 0.17, alpha: 1).setFill()
+            UIBezierPath(
+                roundedRect: CGRect(x: 16, y: 420, width: 358, height: 72),
+                cornerRadius: 20
+            ).fill()
+            buttonColor.setFill()
+            UIBezierPath(ovalIn: CGRect(
+                x: bounds.width - buttonInset - 52, y: 430, width: 52, height: 52
+            )).fill()
+        }.pngData()
     }
 
     private static func pdfData() -> Data {

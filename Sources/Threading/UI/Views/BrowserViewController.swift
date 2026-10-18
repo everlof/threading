@@ -1378,29 +1378,58 @@ final class BrowserViewController: NSViewController {
                 ofTypes: dataTypes,
                 modifiedSince: .distantPast
             ) {
-                completion(BrowserSiteDataClearReport(recordsRemoved: nil, context: .private))
+                Self.removeCookies(in: store, matchingHost: nil) {
+                    completion(BrowserSiteDataClearReport(recordsRemoved: nil, context: .private))
+                }
             }
             return
         }
 
-        store.fetchDataRecords(ofTypes: dataTypes) { [weak self] records in
-            guard self != nil else {
-                completion(BrowserSiteDataClearReport(recordsRemoved: 0, context: .shared))
-                return
-            }
+        store.fetchDataRecords(ofTypes: dataTypes) { records in
             let matching = records.filter {
                 Self.websiteDataRecord($0, belongsToHost: origin.host)
             }
+            let finish = {
+                // A just-written cookie may not yet appear in WebKit's website data records.
+                // Delete it from the captured store before reporting that clearing finished.
+                Self.removeCookies(in: store, matchingHost: origin.host) {
+                    completion(BrowserSiteDataClearReport(
+                        recordsRemoved: matching.count,
+                        context: .shared
+                    ))
+                }
+            }
             guard !matching.isEmpty else {
-                completion(BrowserSiteDataClearReport(recordsRemoved: 0, context: .shared))
+                finish()
                 return
             }
-            store.removeData(ofTypes: dataTypes, for: matching) {
-                completion(BrowserSiteDataClearReport(
-                    recordsRemoved: matching.count,
-                    context: .shared
-                ))
+            store.removeData(ofTypes: dataTypes, for: matching, completionHandler: finish)
+        }
+    }
+
+    private static func removeCookies(
+        in store: WKWebsiteDataStore,
+        matchingHost host: String?,
+        completion: @escaping () -> Void
+    ) {
+        store.httpCookieStore.getAllCookies { cookies in
+            let normalizedHost = host?
+                .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                .lowercased()
+            let matching = cookies.filter { cookie in
+                guard let normalizedHost else { return true }
+                let domain = cookie.domain
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                    .lowercased()
+                return normalizedHost == domain
+                    || ((domain.contains(".") || domain == "localhost")
+                        && normalizedHost.hasSuffix("." + domain))
             }
+            func remove(at index: Int) {
+                guard index < matching.count else { completion(); return }
+                store.httpCookieStore.delete(matching[index]) { remove(at: index + 1) }
+            }
+            remove(at: 0)
         }
     }
 

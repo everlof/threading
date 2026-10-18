@@ -261,6 +261,39 @@ the conversation stays. **Settings ▸ Tools ▸ Supervision** is the global mas
 remain stored but inert while it is off — and **Settings ▸ Advanced ▸ Revoke All…** removes every
 manager grant and releases all supervised chats.
 
+Archiving a managed chat yourself, from the sidebar, the iPhone or anywhere else, ends the
+manager's responsibility for it. It no longer counts toward the manager's chats or shows in its
+**Chats** tab. Archiving a manager releases the chats it managed; restoring it brings back the role
+but not those chats.
+
+### Subagents
+
+Any chat can hand part of its task to another agent, on any provider: Claude can ask Codex for a
+second opinion, or start a Cursor chat on a piece of work while it carries on. The agent does this
+itself with `start_subagent`. No Manager role is needed; that role is for coordinating *other*
+chats, and a subagent belongs to the chat that started it.
+
+A subagent is an ordinary chat **nested under the one that started it** in the sidebar. It keeps
+its own agent's icon, since it may run a different provider; the hover card says **Subagent of
+…** with its brief. You can open it, read along, type into it or stop it like any chat. It runs
+on its own login and counts against that login's usage.
+
+When a turn its parent started finishes, Threading sends the subagent's final reply back to the
+parent as **mail from the subagent**. The parent is told mail is waiting and reads it when it can,
+so the reply never appears in the parent's conversation as if you had typed it. A turn *you* type
+into the subagent is between you and it, and is not sent back.
+
+Threading keeps this bounded, whatever the agent's prompt says:
+- **Limits:** a chat may have at most four live subagents and start at most six in ten minutes.
+- **One level:** a subagent cannot start subagents of its own.
+- **Permissions:** a subagent may never be more permissive than the chat that started it.
+- **Your limits still apply:** your account limits and the parent's curfew hold for subagents too.
+
+Archiving a chat archives its subagents with it, and **Undo** brings them all back. The parent may
+archive its own subagents once they have settled. Subagents run in Threading's native chat, so a
+runtime that only has a terminal here (OpenCode) cannot be one. **Settings ▸ Tools ▸ Subagents**
+switches the whole feature off.
+
 ## Projects
 
 ### Adding
@@ -1721,7 +1754,7 @@ a reference written for the agent reading it, in whichever form that input takes
 
 - Dropped on a **terminal**, it is pasted as one bracketed line — `[Threading session
   “Fix parser crash” — Claude Code, Threading id …, in this project. Reach it with the
-  Threading MCP tools: … send_to_session with session_id "…" …]` — and you type your sentence
+  Threading MCP tools: … mail_send to "…" …]` — and you type your sentence
   after it. The bracket is where the reference stops and your words begin, the same way the
   CLI's own `[Image #1]` token works.
 - Dropped on a native **Chat** composer, it becomes a receipt chip named after the row, beside
@@ -1729,9 +1762,9 @@ a reference written for the agent reading it, in whichever form that input takes
   chip's menu to see the id or to remove it.
 
 The words change with where the row lands. Dropped on a session in the same project, the
-reference tells the agent that `list_sessions` reports the session's state, that
-`send_to_session` with the Threading id hands it a message, and that `watch_session` waits for
-it. Dropped on a session in *another* project it says so, because those tools see only their
+reference tells the agent that `list_sessions` reports the session's state, that `mail_send`
+to the Threading id leaves it a message, that `send_to_session` hands it a turn when that is what
+you asked for, and that `watch_session` waits for it. Dropped on a session in *another* project it says so, because those tools see only their
 own project. Dropped on a runtime whose surface has no Threading tools (an OpenCode or Grok
 TUI, or with **Settings ▸ Tools ▸ Other sessions** switched off) it says that too. Dropped on
 its own session it says "it is you". In every case the agent's own session id and the
@@ -3587,7 +3620,11 @@ as you pull it, leaving a sliver of the chat visible at the left edge; drag the 
 right, tap that sliver, or use its close button to put it away. An attachment opens in a gallery
 — swipe left and right between the session's attachments, read "3 of 27 · 1219 × 874 · 188 KB"
 under the name, and use the ledger of thumbnails along the bottom to jump to any of them (the
-Mac draws the thumbnails for images, PDFs and movies; other kinds show their glyph). Movies play
+Mac draws the thumbnails for images, PDFs and movies; other kinds show their glyph). A comparison
+the agent showed on the Mac is here too: text as a `.diff` in the same diff view as **Review**, and
+two pictures as an interactive comparison — pick **Wipe ↔**, **Wipe ↕**, **Fade**, **Difference** or
+**Side by Side** from the mode control, drag the seam's handle or tap where it should go, or use
+the slider. A swipe anywhere else still moves to the next attachment. Movies play
 in this gallery, streamed from the Mac in small authenticated pieces, so even a recording larger
 than the ordinary attachment download limit remains visible without loading the whole file. Tap
 the Share button to send or save the attachment currently on screen through the standard iOS share
@@ -3903,8 +3940,12 @@ uses a slower screenshot preview if that live connection is unavailable.
 Agents are told to prefer this route. They choose the device in the panel, build for the exact
 destination Threading returns, install and launch the resulting app there, and inspect it in the
 same place. With several devices, agents pass the exact device ID to each operation; they cannot
-silently follow your selection. Input asks for permission per exact device, and an allowed grant
-is remembered across launches. Hiding the workspace pauses live capture and releases unwatched
+silently follow your selection. Input on an existing device asks for permission per exact device,
+and an allowed grant is remembered across launches. An agent can instead create a new empty iOS
+test device through `simulator_prepare` with `create_name`; control of that new device is enabled
+automatically. It reuses the returned device ID afterwards. Starting an existing device does not
+grant control, and devices created separately in a shell still ask.
+Hiding the workspace pauses live capture and releases unwatched
 connections, while an open presenter or recording keeps its own device live; returning reconnects. An agent can
 keep using a tab in a session you are not looking at, which reconnects for as long as it needs to.
 An agent's screenshot of a visible tab is read from the live picture, so it does not interrupt the
@@ -4058,6 +4099,9 @@ treated the same way: a visible tab that goes a few seconds without a new pictur
 to the screenshot preview and offers retry, rather than keeping a stale frame under a live label.
 The public screenshot fallback is view-only, so actual device input waits until the direct
 connection has recovered.
+Agent input and element inspection attempt one recovery on the same device before acting;
+`simulator_prepare` can also reconnect it. A failed connection does not erase its permission,
+and an action already sent is not automatically repeated.
 If a device cannot start or becomes unavailable, its picture is replaced by a recovery panel.
 **Retry** checks the same device again; **Choose Simulator** refreshes Xcode's available devices
 and lets you choose a replacement, including in a workspace with several devices. Choosing a
@@ -4233,6 +4277,12 @@ Use **Settings → Advanced → iPhone Tooling → Install Latest** if a recent 
 tunnel. Rows include process, severity, message, and the real `subsystem / category` label, so the
 existing filter, level chooser, folds and recorded-history tools work on physical-device logs too.
 Private unified-log values remain `<private>`.
+
+The level chooser decides what is read, not only what is shown. At **Info and above** (the default)
+the phone or Simulator is asked not to send Debug rows at all, which is most of what a phone produces,
+so the pane, its recorded history and the reader stay much lighter. Choose **All levels** to read
+Debug too; the reader restarts at the new level and keeps the rows already on screen. Debug rows from
+before that choice were never read, so the recorded history does not contain them.
 
 To read an app's own logs in full, as Xcode's console shows them, choose **‹App› — full app logs
 (restarts the app)** in the same source menu. It is listed for each app you build and install
@@ -4543,7 +4593,11 @@ Five kinds of content:
   flagged rather than silently normalised. The button beside the mode chip **opens the same
   comparison at the window's size**, where the seam has room to be dragged and the modes are
   the same chip; Escape or the × closes it, and the mode and the position you left it at are
-  the ones the panel comes back to. Two text files render as a native diff instead.
+  the ones the panel comes back to. Two text files render as a native diff instead. Either kind
+  of comparison is also kept in **Attachments** — a text diff as it was when the agent showed it,
+  two pictures as one entry beside the pictures themselves — which is how you see it on a paired
+  iPhone. Selecting a picture comparison in **Attachments** shows it inline; **Open** puts it back
+  in a Compare tab, and Finder, copy and Add to Chat act on its two pictures.
   Agents open comparisons with a before and an after; you can open your own with the panel's
   **+ ▸ Compare Files…**, which asks for exactly two files (first chosen is the old side).
   The mode chip and both buttons sit in a row at the top of the tab, so they stay put while a
@@ -4577,6 +4631,10 @@ archives that went in either direction, newest first. Two things land there:
   document (ODT, ODS, ODP, DOCX, XLSX, PPTX, RTF), or diagram source (DOT, GV, MMD, Mermaid), in
   the terminal or in a native Chat reply, and any image it shows deliberately through the display
   tool. Code files are ignored because Git Review already covers them.
+- **Comparisons the agent showed you.** A text comparison is kept as a `.diff` named after the
+  file and previews as a diff; a picture comparison is one entry that previews interactively and
+  is refreshed, not duplicated, when the agent compares the same pair again. A `.diff` or `.patch` file you drop into a composer does the same; one an
+  agent merely prints in the terminal is not picked up.
 - **Animations, when Threading recognises one.** A Lottie animation is a `.json` file, and the
   pane will not list every `.json` in your session to catch it — so Threading looks inside the
   first part of the file and lists it only when what it finds is actually an animation. A
@@ -5152,7 +5210,9 @@ Beyond colours, an app theme an agent builds for you can:
 
 The **Other sessions** tool group lets a session see and message its project siblings —
 nothing beyond its own project. `list_sessions` names them (id, agent, whether they are
-working); `send_to_session` delivers a message to one of them by id.
+working); `mail_send` leaves one of them a message by id, which it reads when it can. Agents
+are taught to reach for mail. `send_to_session`, which puts the words straight into the other
+chat as its next turn, is for when you asked one chat to hand another a turn now.
 
 Nothing about it is invisible. A delivered message lands in the receiving conversation as an
 ordinary turn, prefixed with which session sent it; if the receiver is mid-turn it queues in
@@ -6679,9 +6739,11 @@ now. Every one of these rows names the workspace it was built for, so two caches
 project are told apart.
 
 The standard DerivedData scan recognizes individual caches using Xcode's workspace manifest,
-including caches that share a module cache and those retaining only logs or test results. It
-does not offer the whole DerivedData folder, shared caches without manifests, or unidentified
-folders. Before removing a standard cache, Threading checks its identity and age again. It keeps
+including caches that share a module cache and those retaining only logs or test results. A
+folder that lost its manifest is still found when it has Xcode's own hashed name and holds nothing
+but Xcode's output folders; Threading ties it to a workspace by recomputing that name from the
+checkouts it knows, and marks it left over when that workspace is gone. It does not offer the
+whole DerivedData folder, shared caches without manifests, or unidentified folders. Before removing a standard cache, Threading checks its identity and age again. It keeps
 caches written or accessed in the last fifteen minutes, and refuses removal while Xcode or its
 build services run, or while a program runs from that cache. Close Xcode and let builds finish
 before reclaiming these caches.
@@ -6702,7 +6764,9 @@ priority, and never while a session in that project is working — and remembers
 between launches. Opening Storage shows what is already known, with a line saying when it was
 measured, and refreshes anything stale behind you. **Rescan** re-reads everything now. Temporary
 locations ride the same schedule, and are skipped while a session is working *anywhere*: they
-belong to no project, so any build in flight may be writing into the tree being measured. That
+belong to no project, so any build in flight may be writing into the tree being measured. Neither
+waits more than six hours for a quiet moment, so a Mac where some agent is always working still
+gets a fresh reading. That
 reading also ages faster than a project's — agents and macOS both clean in `/tmp` — which is part
 of why the measured line is there.
 
@@ -6711,7 +6775,9 @@ notices the disk is filling can read this same listing and *propose* a cleanup �
 worktree build directories are 60 GB and rebuild with `cargo build`". You get a sheet with
 exactly what it proposes and why, and nothing happens until you approve. An agent can only
 propose paths that already appear in the listing, so it cannot use this to delete anything else,
-and it is told to propose rather than reach for `rm` itself.
+and it is told to propose rather than reach for `rm` itself. When a Claude session's command fails
+while the disk is short, Threading tells that agent so at once — a full disk often shows up as an
+unrelated-looking build error — at most once every ten minutes per chat.
 
 This is a list of verified cleanup candidates, not a full disk-usage report. Swap, simulator
 data, application containers, backups, Trash and profiling traces can explain space outside

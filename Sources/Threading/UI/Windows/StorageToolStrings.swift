@@ -139,7 +139,7 @@ enum StorageToolStrings {
     }
 
     static func header(total: String, count: Int, measured: String) -> String {
-        "\(total) reclaimable across \(count) directories\(measured):"
+        "\(total) reclaimable across \(count) directories\(measured)."
     }
 
     static func unknownPaths(_ paths: [String]) -> String {

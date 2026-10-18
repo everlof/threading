@@ -28,6 +28,18 @@ extension ControlRefusal {
             "That terminal is dormant and may need a user answer before it can safely resume."
         case .planExceedsGrant(let field):
             "The requested \(field) exceeds this manager's grant."
+        case .planExceedsParent(let field):
+            "The requested \(field) exceeds what this session itself may do, which caps its subagents."
+        case .subagentCannotDelegate:
+            "A subagent cannot start subagents of its own. Do the work here, or report back and let the parent delegate."
+        case .subagentNeedsNativeChat(let kind):
+            kind.supportsNativeUI
+                ? "Subagents run in Threading's native chat; omit uses_native_ui or set it to true."
+                : "\(kind.displayName) runs only in its terminal here, so it cannot report back as a subagent. Choose claude, codex, grok or cursor."
+        case .subagentsAtCapacity(let limit):
+            "This session already has its maximum of \(limit) live subagents. Archive a settled one first."
+        case .subagentStartRateReached(let limit, let minutes):
+            "This session has started \(limit) subagents in the last \(minutes) minutes. Wait before starting another."
         case .childrenAtCapacity(let limit):
             "This manager already has its maximum of \(limit) active child sessions."
         case .ceilingReached(let reason):

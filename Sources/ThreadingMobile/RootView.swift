@@ -329,6 +329,8 @@ enum MobileDemoFixture: String, CaseIterable {
     case attachmentDetailImage = "attachment-detail-image"
     case attachmentDetailPDF = "attachment-detail-pdf"
     case attachmentDetailText = "attachment-detail-text"
+    case attachmentDetailDiff = "attachment-detail-diff"
+    case attachmentDetailComparison = "attachment-detail-comparison"
 
     // Ids that deliberately resolve to no root scene: the shipping app is the
     // fixture, and the surface below is reached from inside it.

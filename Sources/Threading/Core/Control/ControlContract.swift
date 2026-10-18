@@ -31,6 +31,7 @@ struct ControlSessionOverview: Equatable, Sendable {
     let surface: Surface
     let isCaller: Bool
     let forkedFrom: SessionID?
+    var subagentParentID: SessionID? = nil
     let supervision: ControlSupervisionOverview
 }
 
@@ -112,7 +113,17 @@ enum ControlRefusal: Error, Equatable, Sendable {
     /// answer that only the user can provide.
     case terminalCannotBeWoken
     case planExceedsGrant(field: String)
+    /// A subagent's plan asked for more than the chat starting it has: there is no grant to
+    /// read a ceiling from, so the parent's own posture is the ceiling.
+    case planExceedsParent(field: String)
     case childrenAtCapacity(limit: Int)
+    /// A subagent may not start subagents of its own: one level deep, so a delegation cannot
+    /// fan out unseen below the row the user is watching.
+    case subagentCannotDelegate
+    /// A subagent reports back from the reply its native chat captures, so it runs there.
+    case subagentNeedsNativeChat(AgentKind)
+    case subagentsAtCapacity(limit: Int)
+    case subagentStartRateReached(limit: Int, minutes: Int)
     case ceilingReached(reason: String)
     case sendRateReached(limit: Int)
     case messageIsRelay

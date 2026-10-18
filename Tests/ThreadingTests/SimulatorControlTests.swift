@@ -2,6 +2,45 @@ import XCTest
 @testable import Threading
 
 final class SimulatorControlTests: XCTestCase {
+    func testCreateMakesAnEmptyDeviceUsingOnlyTheRequestedProfile() async throws {
+        let createdID = SimulatorDeviceID(UUID().uuidString)!
+        let runner = RecordingSimulatorCommandRunner(outputs: [
+            Data(Self.deviceFixture.utf8), Data("\(createdID.rawValue)\n".utf8)
+        ])
+        let control = SimctlSimulatorControl(runner: runner)
+        let request = try SimulatorDeviceCreationRequest(name: "Agent Test", matchingDeviceID: Self.workPhoneID)
+        let created = try await control.createDevice(request)
+
+        XCTAssertEqual(created.id, createdID)
+        XCTAssertEqual(created.name, "Agent Test")
+        XCTAssertEqual(created.state, .shutdown)
+        XCTAssertEqual(runner.recordedArguments, [
+            ["list", "devices", "available", "--json"],
+            ["create", "Agent Test", created.deviceTypeIdentifier, created.runtimeIdentifier]
+        ])
+    }
+
+    func testCreateRejectsAnExistingIdentityInsteadOfGrantingAuthorityToIt() async throws {
+        let runner = RecordingSimulatorCommandRunner(outputs: [
+            Data(Self.deviceFixture.utf8), Data(Self.workPhoneID.rawValue.utf8)
+        ])
+        do {
+            _ = try await SimctlSimulatorControl(runner: runner).createDevice(
+                SimulatorDeviceCreationRequest(name: "Agent Test", matchingDeviceID: nil))
+            XCTFail("An existing device must never be reported as newly created.")
+        } catch let error as SimulatorControlError {
+            guard case .invalidResponse = error else { return XCTFail("Unexpected failure: \(error)") }
+        }
+    }
+
+    func testCreationRejectsInvalidNamesAndPhysicalDevices() {
+        for name in ["", "  ", "Test\nPhone", String(repeating: "x", count: 81)] {
+            XCTAssertThrowsError(try SimulatorDeviceCreationRequest(name: name, matchingDeviceID: nil))
+        }
+        XCTAssertThrowsError(try SimulatorDeviceCreationRequest(
+            name: "Agent Test", matchingDeviceID: SimulatorDeviceID("android-usb:phone")!))
+    }
+
     func testInvalidDeviceScreenshotHasReadableFailureAndRetainsDiagnostic() async throws {
         let detail = "Invalid device: \(Self.workPhoneID.rawValue)"
         let runner = RecordingSimulatorCommandRunner(outputs: [Data(detail.utf8)], exitStatuses: [1])
@@ -81,11 +120,20 @@ final class SimulatorControlTests: XCTestCase {
         XCTAssertEqual(runner.recordedArguments[1], [
             "bootstatus", Self.recentPhoneID.rawValue, "-b"
         ])
+        XCTAssertEqual(runner.recordedTimeouts[1], SimulatorControlDefaults.bootTimeout)
 
         try await control.release(lease)
         XCTAssertEqual(runner.recordedArguments.last, [
             "shutdown", Self.recentPhoneID.rawValue
         ])
+    }
+
+    func testFirstBootAllowsRuntimeMigrationWithoutExtendingOrdinaryRestarts() async throws {
+        let freshDeviceFixture = Self.deviceFixture.replacingOccurrences(
+            of: #""lastBootedAt": "2026-08-18T19:52:12Z""#, with: #""lastBootedAt": null"#)
+        let runner = RecordingSimulatorCommandRunner(outputs: [Data(freshDeviceFixture.utf8), Data()])
+        _ = try await SimctlSimulatorControl(runner: runner).prepare(deviceID: Self.recentPhoneID)
+        XCTAssertEqual(runner.recordedTimeouts[1], SimulatorControlDefaults.firstBootTimeout)
     }
 
     func testBootFailureNamesTheDeviceAndKeepsSimctlDetailForDiagnosis() async throws {
@@ -365,6 +413,7 @@ private final class RecordingSimulatorCommandRunner: SimulatorCommandRunning, @u
     private var arguments: [[String]] = []
     private var captures: [SimulatorCommandCapture] = []
     private var maximumOutputBytes: [Int] = []
+    private var timeouts: [TimeInterval] = []
 
     init(
         outputs: [Data],
@@ -394,6 +443,8 @@ private final class RecordingSimulatorCommandRunner: SimulatorCommandRunning, @u
         return maximumOutputBytes
     }
 
+    var recordedTimeouts: [TimeInterval] { lock.withLock { timeouts } }
+
     func run(
         _ arguments: [String],
         timeout: TimeInterval,
@@ -406,6 +457,7 @@ private final class RecordingSimulatorCommandRunner: SimulatorCommandRunning, @u
         self.arguments.append(arguments)
         captures.append(capture)
         self.maximumOutputBytes.append(maximumOutputBytes)
+        timeouts.append(timeout)
         guard !outputs.isEmpty else {
             return SimulatorCommandResult(
                 output: Data("No fixture response".utf8),
