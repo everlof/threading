@@ -4764,8 +4764,8 @@ viewport you selected. They change dimensions when you ask or for a specific res
 test, then restore the prior sizing after a temporary test.
 
 It has an address bar, history controls, persistent cookies, responsive viewport testing, and the
-Web Inspector. Its overflow menu includes find in page, print, visible-page screenshots, 50–200%
-zoom, recent downloads, current-site data clearing, and browser settings. The responsive toolbar
+Web Inspector. Its overflow menu includes find in page, print, visible-page screenshots (saved to a
+file, or copied to the clipboard with **Copy Screenshot**), 50–200% zoom, recent downloads, current-site data clearing, and browser settings. The responsive toolbar
 provides editable CSS-pixel dimensions, rotation, and desktop, tablet, foldable, and phone presets;
 hiding it returns the page to its host's natural size. When the agent sets an exact responsive
 viewport, the toolbar opens too, keeping the fixed dimensions and the way back to a filling page
