@@ -1413,6 +1413,57 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         XCTAssertNil(composer.selectedCurfew, "the end outlived the draft that chose it")
     }
 
+    /// A double ⌘Return starts one session, not a second one with no brief.
+    ///
+    /// The first press starts the session and empties the box, but the session only takes the
+    /// pane a main-queue hop later, so the second press arrives at the same box, now empty. The
+    /// button is already disabled by then; the chord goes to the text view and skips the button
+    /// entirely, which is why it is pressed here rather than the button clicked.
+    func testASecondCommandReturnOnTheEmptiedBoxStartsNothing() throws {
+        let composer = SessionComposerViewController()
+        _ = composer.view
+        let recorder = StartRecorder()
+        composer.delegate = recorder
+
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
+        defer {
+            store.removeProject(id: project.id)
+            DraftStore.shared.setDraft("", for: project.id)
+        }
+        composer.show(projectID: project.id)
+
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        let textView = try XCTUnwrap(
+            descendants(of: prompt).first { $0 is ThemedTextView } as? ThemedTextView,
+            "the box has to hold the text view the chord is delivered to"
+        )
+        let commandReturn = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: 0,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: PromptViewDefaults.returnKeyCode
+        ))
+
+        prompt.stringValue = "Assess the newest ticket"
+        textView.keyDown(with: commandReturn)
+        XCTAssertEqual(recorder.prompts, ["Assess the newest ticket"])
+        XCTAssertEqual(prompt.stringValue, "", "a started brief stayed in the box")
+
+        textView.keyDown(with: commandReturn)
+        XCTAssertEqual(
+            recorder.prompts,
+            ["Assess the newest ticket"],
+            "the second press started a session with an empty brief"
+        )
+    }
+
     func testWordsTypedBeforeChoosingAProjectFollowIntoIt() throws {
         let composer = SessionComposerViewController()
         _ = composer.view

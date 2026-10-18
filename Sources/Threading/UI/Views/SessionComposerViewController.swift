@@ -2862,6 +2862,13 @@ final class SessionComposerViewController: NSViewController {
             return
         }
         guard let projectID else { return }
+        // The button's own rule, restated for the keyboard: ⌘Return reaches the box without
+        // going near the button, and the box hands an empty brief through because some owners
+        // want to answer one. This owner never does. The empty box it guards is the second
+        // press of a double ⌘Return — the first start emptied the box, but the new session only
+        // takes the pane a main-queue hop later, so the second press still lands here and
+        // started a second session with nothing in it.
+        guard promptView.isSubmissionAvailable else { return }
 
         // Read before the start, because starting is what empties the strip. The paths are
         // already inside `prompt` — a CLI is handed a path, never pixels — but a path in a
