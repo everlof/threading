@@ -181,29 +181,42 @@ jobs:
           # runs `git push` (see CLAUDE.md on why local pushes are never scripted), and a
           # failure at any step leaves yesterday's nightly serving rather than a 404.
           sha="$(git rev-parse HEAD)"
+          # GPLv3 §6(d): directions to the source sit beside the download (releasing.md). The
+          # release page only — the appcast's copy of the notes is what the update sheet shows.
+          {
+            cat "$RUNNER_TEMP/nightly-notes.md"
+            echo
+            echo "Source: Threading is GPL-3.0-only and built from \`$sha\`. The complete corresponding"
+            echo "source of its bundled proxy helper, including the upstream archives it is built from,"
+            echo "is attached as \`threading-proxyd-source-$THREADING_VERSION.tar.gz\`."
+          } > "$RUNNER_TEMP/nightly-release-notes.md"
           if gh release view nightly >/dev/null 2>&1; then
-            gh release upload nightly "build/release/Threading-$THREADING_VERSION.zip" --clobber
+            gh release upload nightly "build/release/Threading-$THREADING_VERSION.zip" \
+              "build/release/threading-proxyd-source-$THREADING_VERSION.tar.gz" --clobber
             gh release upload nightly "build/release/appcast.xml" --clobber
             gh api "repos/${{ github.repository }}/git/refs/tags/nightly" \
               -X PATCH -f sha="$sha" -F force=true
             gh release edit nightly \
               --title "Nightly $THREADING_VERSION" \
-              --notes-file "$RUNNER_TEMP/nightly-notes.md"
-            # Date-named zips accumulate on a rolling release; keep only the one the feed names.
+              --notes-file "$RUNNER_TEMP/nightly-release-notes.md"
+            # Date-named zips and their sources accumulate on a rolling release; keep only the
+            # pair the feed names.
             gh release view nightly --json assets -q '.assets[].name' \
-              | grep -E '^Threading-.*\.zip$' \
-              | grep -v "^Threading-$THREADING_VERSION.zip$" \
+              | grep -E '^(Threading-.*\.zip|threading-proxyd-source-.*\.tar\.gz)$' \
+              | grep -v -e "^Threading-$THREADING_VERSION.zip$" \
+                  -e "^threading-proxyd-source-$THREADING_VERSION.tar.gz$" \
               | while IFS= read -r asset; do
                   gh release delete-asset nightly "$asset" --yes || true
                 done
           else
             gh release create nightly \
               "build/release/Threading-$THREADING_VERSION.zip" \
+              "build/release/threading-proxyd-source-$THREADING_VERSION.tar.gz" \
               "build/release/appcast.xml" \
               --prerelease \
               --target "$sha" \
               --title "Nightly $THREADING_VERSION" \
-              --notes-file "$RUNNER_TEMP/nightly-notes.md"
+              --notes-file "$RUNNER_TEMP/nightly-release-notes.md"
           fi
           scripts/sentry-release.sh deploy \
             --release-file build/release/sentry-release.txt \

@@ -72,7 +72,7 @@ final class ProxyProcess: @unchecked Sendable {
             let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
             return Self(
                 executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/threading-proxyd"),
-                setupScript: resources.appendingPathComponent("ProxySource/tools/apple_certificate.py"),
+                setupScript: resources.appendingPathComponent("ProxyTools/apple_certificate.py"),
                 temporaryRoot: FileManager.default.temporaryDirectory,
                 authority: { try ProxyCertificateAuthority.loadOrCreate() }
             )

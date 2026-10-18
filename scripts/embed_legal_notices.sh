@@ -66,6 +66,12 @@ copy_notice "$font_root/Topaz/Topaz-SOURCE.md" "Topaz-SOURCE.md"
 
 if [[ "$profile" == "macos" ]]; then
     copy_notice "$repository_root/Targets/ProxyHost/THIRD_PARTY_NOTICES.md" "ProxyHost-THIRD_PARTY_NOTICES.md"
+    # The helper's corresponding source is not bundled (see that file), so the original upstream
+    # texts it names have to be: MIT, BSD, Apache-2.0 and Zlib each travel with the binary.
+    /bin/mkdir -p "$legal_directory/ProxyHost"
+    for proxy_notice in "$repository_root/Targets/ProxyHost/third_party/licenses/"*; do
+        copy_notice "$proxy_notice" "ProxyHost/$(basename "$proxy_notice")"
+    done
     copy_notice "$repository_root/ThirdParty/scc/LICENSE" "scc-MIT.txt"
     copy_notice "$repository_root/Packages/Vendor/BorderBeamKit/LICENSE" "BorderBeamKit-MIT.txt"
     copy_notice "$repository_root/Packages/Vendor/LabelMorph/LICENSE" "LabelMorph-MIT.txt"

@@ -40,8 +40,15 @@ present and non-empty in the finished application resources.
 
 ## Threading proxy helper (macOS)
 
-`Contents/Helpers/threading-proxyd` is GPL-3.0-only. Its complete corresponding source,
-hash-pinned upstream source archives, original license notices and CMake rebuild instructions
-are bundled in `Contents/Resources/ProxySource`. See `Legal/ProxyHost-THIRD_PARTY_NOTICES.md`.
-It statically links libuv (MIT/BSD-2-Clause/ISC), llhttp (MIT), cJSON (MIT), Mbed TLS and
-TF-PSA-Crypto (Apache-2.0 selected from the dual license), and zlib (Zlib).
+`Contents/Helpers/threading-proxyd` is GPL-3.0-only. It statically links libuv
+(MIT/BSD-2-Clause/ISC), llhttp (MIT), cJSON (MIT), Mbed TLS and TF-PSA-Crypto (Apache-2.0 selected
+from the dual license), and zlib (Zlib). See `Legal/ProxyHost-THIRD_PARTY_NOTICES.md`; the
+original upstream license texts it names are in `Legal/ProxyHost/`.
+
+Its complete corresponding source — the helper's own code, the hash-pinned upstream source
+archives it is built from, their original notices and the CMake rebuild instructions — is offered
+from the same place as Threading itself. Every release at
+<https://github.com/everlof/threading/releases> carries `threading-proxyd-source-<version>.tar.gz`
+beside `Threading-<version>.zip`, where `<version>` is the one shown in About Threading. The same
+tree is `Targets/ProxyHost` in the public repository at that release's commit,
+<https://github.com/everlof/threading>, which holds the rest of Threading's GPL-3.0 source.

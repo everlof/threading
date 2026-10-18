@@ -15,7 +15,7 @@ keeps its own terms:
 | cJSON | 1.7.19 | MIT | `cJSON-MIT.txt` |
 
 In the source tree these files live in `third_party/licenses/`; an installed helper places them
-in `share/threading-proxyd/licenses/`. The file-level libuv notice collection includes all leading
+in `share/threading-proxyd/licenses/`, and Threading.app in `Contents/Resources/Legal/ProxyHost/`. The file-level libuv notice collection includes all leading
 copyright/license blocks in `src/` and `include/`, including the BSD tree, ISC address conversion,
 IDNA, queue and heap code. Do not replace this with just the top-level MIT text.
 The Mbed TLS collection preserves leading C/header/assembly notices throughout the complete
@@ -35,8 +35,11 @@ and [license compatibility guidance](https://www.gnu.org/licenses/license-compat
 Retaining these notices does not remove the helper's own GPL source-distribution obligations.
 `cmake --install` therefore installs the complete helper source and retained dependency archives
 beside the executable's notices, under `share/threading-proxyd/source/`. Distribute that tree with
-the helper; do not distribute the executable alone. This target is not currently bundled in the
-Threading application, whose existing legal-resource manifest remains separate.
+the helper; do not distribute the executable alone. Threading.app carries the executable and these
+notices but not the source: it offers the source from the place the app is downloaded (GPLv3
+§6(d)). `scripts/release.sh` archives this directory at the released commit as
+`threading-proxyd-source-<version>.tar.gz`, every publisher attaches it to the GitHub release beside
+`Threading-<version>.zip`, and the app's `Legal/THIRD_PARTY_NOTICES.md` says so.
 
 OpenSSL, nghttp2, mitmproxy, Proxyman and Atlantis are **not linked or redistributed dependencies**.
 Tests invoke an already-installed OpenSSL CLI to manufacture ephemeral fixtures. Proxyman's

@@ -129,12 +129,16 @@ final class ProxyCaptureTests: XCTestCase {
         let path = try XCTUnwrap(cert["certificate_path"] as? String)
         let directory = URL(fileURLWithPath: path).deletingLastPathComponent()
         let profile = try XCTUnwrap(cert["profile_path"] as? String)
+        // The trust command handed to the agent runs a script the bundle has to carry.
+        let setupScript = try XCTUnwrap((cert["macos_setup_argv"] as? [String])?.dropFirst().first)
         let inspection = try await Task.detached {
             (try FileManager.default.contentsOfDirectory(atPath: directory.path),
-             (try PropertyListSerialization.propertyList(from: Data(contentsOf: URL(fileURLWithPath: profile)), format: nil) as? [String: Any])?["PayloadType"] as? String)
+             (try PropertyListSerialization.propertyList(from: Data(contentsOf: URL(fileURLWithPath: profile)), format: nil) as? [String: Any])?["PayloadType"] as? String,
+             FileManager.default.isReadableFile(atPath: setupScript))
         }.value
         XCTAssertFalse(inspection.0.contains { $0.hasSuffix(".key") })
         XCTAssertEqual(inspection.1, "Configuration")
+        XCTAssertTrue(inspection.2, "\(setupScript) is not in the bundle")
         center.post(SessionArchivedStateDidChange(sessionID: owner, isArchived: true))
         let status = try Self.object(await service.call(.status, for: owner))
         XCTAssertEqual(status["capture"] as? String, "not_started")

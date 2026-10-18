@@ -720,7 +720,9 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   `Targets/ProxyHost` links libuv 1.53.0, llhttp 9.4.3, Mbed TLS/TF-PSA-Crypto 4.1.1,
   cJSON 1.7.19 and zlib 1.3.2. Their exact pins, origins, unmodified archives and notices live in
   `third_party/manifest.json`; offline provenance tests check them against the build. The Xcode
-  phase `scripts/embed_proxy_helper.sh` builds/signs the helper and bundles its complete source in
-  `Resources/ProxySource`. Legal notices point to that source rather than promising a later offer.
+  phase `scripts/embed_proxy_helper.sh` builds/signs the helper; the bundle carries its notices and
+  upstream license texts, and every release publishes its complete source beside the zip
+  ([releasing.md](releasing.md#the-proxy-helpers-source)). Legal notices point to that published
+  source rather than promising a later offer.
   Our code remains GPL-3.0-only; Mbed TLS uses its Apache-2.0 option. See
   [proxy-engine.md](proxy-engine.md) for the host/C/OS boundaries and memory limits.

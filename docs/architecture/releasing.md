@@ -190,6 +190,11 @@ incapable installed profile also fails the round. Archive and
 export are separate actions because a profile specifier on a plain `build` action applies to
 Swift packages and helper targets that cannot accept one. The exported product is still a local
 development build: it carries `THREADING_INTERNAL` and the source revision, and is not notarized.
+It is thinned to `arm64` between archive and export, exactly as `release.sh` does — until
+2026-10-17 it was not, and the installed copy carried 16.8 MB of WebRTC and Sparkle `x86_64`
+slices that no release ships, which made `/Applications` look 141 MB when the product was 129.
+Each successful build is measured by the [bundle-size ratchet](#the-bundle-size-ratchet) in
+report-only mode, and the verdict is appended to that commit's `history.log` line.
 
 **Without that profile, a build action *can* be Developer ID signed** — this is the "switch every
 target to manual signing" alternative the section above names, taken from the command line where
@@ -566,6 +571,38 @@ latest, pointing the repository's human-facing Latest at an XML file. Clobbering
 release's appcast asset is already how a second stable release works, and the feed is signed, so
 a tampered one is rejected rather than installed.
 
+### The proxy helper's source
+
+`threading-proxyd` is GPL-3.0-only, and Threading.app carries it without its source. Until
+2026-10-18 the bundle held the whole `Targets/ProxyHost` tree as `Resources/ProxySource`: 16.8 MB
+of a 63.1 MB download, nearly all of it the five upstream archives the helper is built from,
+carried by every download and every update. GPLv3 §6(d) allows offering the corresponding source
+from the same place as the object code instead, with clear directions beside it, for as long as
+the object code is offered there. Every build is offered from a GitHub release, so the source
+goes on the same release:
+
+- `release.sh` runs `scripts/archive_proxy_source.sh` after packaging, which writes
+  `threading-proxyd-source-<version>.tar.gz` beside `Threading-<version>.zip`. It is the committed
+  `Targets/ProxyHost` tree of the commit being built — a notarized build has already proved the
+  tree clean — extracted again and checked by the helper's own offline provenance test, so an
+  archive missing a dependency is refused rather than published.
+- `publish_release.sh` creates or updates a release with the zip and the archive together, and
+  the nightly workflow does the same on its rolling release, pruning the pair it replaces. Each
+  release page's notes say where the source is. The appcast's copy of the notes does not, because
+  that copy is what the update sheet shows.
+- Inside the app, `Legal/THIRD_PARTY_NOTICES.md` names the asset and the repository. The
+  upstream license texts the binary needs (MIT, BSD, ISC, Apache-2.0, Zlib) travel in
+  `Legal/ProxyHost/`: `embed_legal_notices.sh` copies them, and `check_bundled_licenses.sh`
+  compares them byte for byte with `Targets/ProxyHost/third_party/licenses`.
+- The one file of that tree the app needs at run time, `tools/apple_certificate.py` — the trust
+  command `traffic_certificate` hands an agent — is copied to `Resources/ProxyTools/` by
+  `embed_proxy_helper.sh`.
+
+The rest of Threading's GPL-3.0 source has always been offered this way: from the public
+repository, never from the bundle. `scripts/tests/test_proxy_source_distribution.py`, run by
+`ci.sh`, archives `HEAD` and a stub that fails provenance, and checks that every publisher
+attaches the archive and that the notice names it.
+
 ## Apple silicon only
 
 **The CI runner has to be Apple silicon too, and this cost the project every green build it never
@@ -624,6 +661,47 @@ The bundled `scc` is the official arm64 3.7.0 executable byte for byte rather th
 What else was measured on the way — and why stripping, `-Osize`, on-demand resources and a
 slimmer WebRTC are not the next step — is in
 [`docs/decisions/bundle-size-levers.md`](../decisions/bundle-size-levers.md).
+
+## The bundle-size ratchet
+
+`scripts/check_bundle_size.py` measures the exported app component by component and compares it
+with `scripts/bundle_size_baseline.json`. `release.sh` runs it after the signing sweep below and
+before packaging, and a failure stops the release. It exists because a written rule did not hold:
+the decision record has said since 2026-08-22 that any new embedded payload over ~5 MB is added to
+its table before it is accepted, and between then and 2026-10-17 the bundle went from 54.5 MB to
+129 MB — `ProxySource` (17 MB) and two native plugins (11 MB each) among it — with no row added,
+because nothing measured.
+
+- **Components come from the bundle, not from a list.** Each top-level entry of `MacOS`,
+  `Frameworks`, `PlugIns`, `Helpers` and `Resources` of 1 MiB or more is a component; smaller
+  siblings are one bucket per directory; the rest of `Contents` is one more. Every regular file
+  belongs to exactly one, and symlinks are not followed — a framework's `Versions/Current` would
+  otherwise count its binary twice. A new payload over 1 MiB is therefore a component the baseline
+  has never seen, and that alone fails.
+- **Two measures each.** On disk, and as raw deflate at zlib's default level, which is what
+  `ditto -c -k` writes for each member of the zip Sparkle serves. On 2026-10-17 the gate's
+  compressed total was 63.07 MB against the real zip's 63.30 MB; the difference is zip headers.
+  Both are judged because they diverge exactly where it matters: the proxy's source tarballs were
+  17.2 MB on disk and 16.8 MB compressed, while `Threading` is 53.8 MB and 22.9 MB.
+- **Growth past max(128 KiB, 1%) of a component's baseline fails**, on either measure — the
+  allowance absorbs the bytes that differ between two builds of identical source. Shrinking never
+  fails; it prints a reminder to lock the saving in so it cannot be spent silently.
+- **Raising the baseline is the review.** `--write-baseline "<what was measured>"` rewrites it
+  from a bundle and stores that description as `measuredFrom`, so a later reader can reproduce
+  the number. The diff is what somebody commits. An intended addition of 5 MB or more also gets its
+  row in [`bundle-size-levers.md`](../decisions/bundle-size-levers.md) §2.
+
+It is a release gate rather than a CI one because the size that matters is the thinned, stripped,
+signed export, and `ci.sh` never archives. The auto-installer runs the same measurement with
+`--report` on every master build instead and appends the verdict to the commit's `history.log`
+line, so a release-time failure is diagnosed by reading which commits moved the number rather than
+by bisecting builds. `--report` and `--summary` never fail and work on any bundle.
+
+The first baseline was seeded from the auto-installer's profiled export of `884de6e3e`, thinned,
+and on 2026-10-18 re-measured from that bundle with the proxy-source layout applied (its
+`measuredFrom` says exactly how); the first `release.sh` export should replace it. The tests are
+`scripts/tests/test_bundle_size.py`, run by `ci.sh`. What is being done about the size itself is
+the [bundle diet plan](../feature-drafts/bundle-diet.md).
 
 ## The export is verified before it is uploaded
 

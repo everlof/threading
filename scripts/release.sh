@@ -122,6 +122,14 @@ if [[ $NOTARIZE -eq 1 && -n "$(git -C "$ROOT" status --porcelain)" ]]; then
     fail "notarized releases require a clean worktree"
 fi
 
+# The proxy helper's corresponding source is archived from this commit ("Corresponding source"
+# below). A notarized build has just proved the tree clean, so that is exactly what gets built; a
+# dry run publishes nothing, but says so when its proxy source and its archive differ.
+readonly SOURCE_COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
+if [[ -n "$(git -C "$ROOT" status --porcelain -- Targets/ProxyHost)" ]]; then
+    echo "warning: Targets/ProxyHost has uncommitted changes; its source archive is cut from HEAD" >&2
+fi
+
 if [[ "${THREADING_SKIP_RELEASE_CHECKS:-0}" != "1" ]]; then
     say "Running the Mac release quality gate"
     "$ROOT/scripts/ci.sh" --mac-release
@@ -395,6 +403,16 @@ done < <(find "$APP" -type f -perm +111)
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
 "$ROOT/scripts/check_bundled_scc.sh" "$APP/Contents/Helpers/scc"
 
+# MARK: - Size
+#
+# After every signing check, so a size failure never stands in front of a problem that would stop
+# the release anyway; before packaging, so nothing that grew without a reviewed baseline reaches a
+# zip. The export is the measured artefact because it is the one Sparkle serves — thinned,
+# stripped and signed. See docs/architecture/releasing.md, "The bundle-size ratchet".
+say "Checking the bundle-size ratchet"
+python3 "$ROOT/scripts/check_bundle_size.py" "$APP" \
+    || fail "the bundle grew past its reviewed baseline — see above"
+
 # MARK: - Package
 
 say "Packaging"
@@ -434,6 +452,16 @@ zip="$BUILD_DIR/$SCHEME-$version.zip"
 # and extended attributes inside a signed bundle. A `zip`-ed app fails its signature check.
 ditto -c -k --keepParent --sequesterRsrc "$APP" "$zip"
 echo "  $zip"
+
+# MARK: - Corresponding source
+#
+# threading-proxyd is GPL-3.0-only and the bundle does not carry its source; every publisher
+# attaches this archive beside the zip instead. See scripts/archive_proxy_source.sh.
+
+say "Archiving the proxy helper's corresponding source"
+proxy_source="$("$ROOT/scripts/archive_proxy_source.sh" "$SOURCE_COMMIT" "$version" "$BUILD_DIR")" \
+    || fail "the proxy helper's source archive does not verify — see above"
+echo "  $proxy_source"
 
 # MARK: - Install
 #
@@ -500,5 +528,6 @@ simulator_matrix_if_asked
 say "Ready: $SCHEME $version ($build, $channel)"
 echo "  app: $APP"
 echo "  zip: $zip"
+echo "  source: $proxy_source"
 
 install_if_asked

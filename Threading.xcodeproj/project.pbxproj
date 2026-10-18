@@ -1589,7 +1589,7 @@
             files = ();
             inputPaths = ("$(SRCROOT)/Targets/ProxyHost", "$(SRCROOT)/scripts/embed_proxy_helper.sh");
             name = "Build and Embed Proxy";
-            outputPaths = ("$(DERIVED_FILE_DIR)/ProxyHost", "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/threading-proxyd", "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ProxySource");
+            outputPaths = ("$(DERIVED_FILE_DIR)/ProxyHost", "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/threading-proxyd", "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ProxyTools/apple_certificate.py");
             runOnlyForDeploymentPostprocessing = 0;
             shellPath = /bin/bash;
             shellScript = "\"${SRCROOT}/scripts/embed_proxy_helper.sh\"";

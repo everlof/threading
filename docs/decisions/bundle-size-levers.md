@@ -5,7 +5,12 @@
 > on-demand resources and any further stripping. **Wait for evidence** on `-Osize`. **Wait for
 > demand** on a slimmer or on-demand WebRTC, and on Sparkle delta updates. **Added 2026-10-08**:
 > the Mermaid attachment reader ships the official tiny build, not the full one, and is not
-> downloaded on demand (§2, §3).
+> downloaded on demand (§2, §3). **Re-measured 2026-10-17**: 54.5 → 129.0 MB on disk and
+> 24.5 → 63.1 MB compressed, none of the large additions recorded here first; a release-time
+> [size ratchet](../architecture/releasing.md#the-bundle-size-ratchet) now enforces §4's 5 MB
+> line, and the [bundle diet plan](../feature-drafts/bundle-diet.md) **reopens on-demand
+> delivery** for first-party native plugins (§2, §3). **2026-10-18**: the proxy helper's source
+> moved from the bundle to each release, 63.1 → 46.4 MB compressed (§3).
 
 Part of the [decisions index](README.md). Read alongside
 [`releasing.md`](../architecture/releasing.md) (the archive, export and the gates),
@@ -55,6 +60,34 @@ which has not been re-measured since.
 | `mermaid` 12.1.0, `mermaid.min.js` (shipped first) | 5.49 MB (≈10%) | 1.57 MB (≈6.4%) |
 | `@mermaid-js/tiny` 12.1.0, `mermaid.tiny.js` (shipped) | 2.81 MB (≈5.2%) | 0.75 MB (≈3.0%) |
 
+**Re-measured 2026-10-17 (`884de6e3e`).** The auto-installer's profiled archive and Developer ID
+export, thinned to `arm64`, measured by `scripts/check_bundle_size.py` — the numbers are its
+baseline. Compressed is raw deflate per file, within 0.4% of the real `ditto` zip (63.07 vs
+63.30 MB).
+
+| Component | 2026-08-22 on disk | 2026-10-17 on disk | compressed |
+|---|---|---|---|
+| `Threading` | 28.4 MB | 53.8 MB | 22.9 MB |
+| `Resources/ProxySource` (unmodified upstream tarballs of the proxy's five dependencies) | — | 17.2 MB | 16.8 MB |
+| `WebRTC.framework` | 11.8 MB | 11.9 MB | 5.7 MB |
+| `PlugIns/DeviceLogsPlugin.bundle` | — | 11.8 MB | 4.9 MB |
+| `PlugIns/T3NavigatorPlugin.bundle` | — | 10.6 MB | 4.3 MB |
+| `Helpers` (nine now) | 5.3 MB | 8.6 MB | 3.3 MB |
+| other `Resources` | 7.4 MB (all of them) | 12.9 MB | 4.6 MB |
+| `Sparkle.framework` and the rest | 1.6 MB | 2.2 MB | 0.7 MB |
+| **Bundle** | **54.5 MB** | **129.0 MB** | **63.1 MB** |
+
+Three things in it were not true in August, and each changes a lever:
+
+- **The two native plugins are almost entirely copies.** Each links `ThreadingDesignKit`
+  statically and with it SwiftTerm, ThreadingRemoteKit, ThreadingExtensionKit and five smaller
+  packages the host has already; T3Navigator's own code is ~130 KB of a 7.2 MB `__text`. A
+  feature moved into a plugin under this linking costs ~10 MB more than it did in the host.
+- **`ProxySource` is 27% of the download** and incompressible.
+- **The main binary is still flat.** A Release link map attributes no area of the `Threading`
+  module above ~10% (themes); remote access ~9%, the extension host ~7%, usage, conversation and
+  browser ~6% each. 1,637 commits added ~240k net lines since August.
+
 **Stripping is already complete.** `STRIP_INSTALLED_PRODUCT=YES`, `STRIP_STYLE=all`,
 `STRIP_SWIFT_SYMBOLS=YES`, dead-stripping and whole-module `-O` are all in effect for the
 archive; the shipped main binary has 3.4k symbols left (the exports dyld needs) and a 1.1 MB
@@ -92,6 +125,10 @@ is under 30 KB. There is no fat spot; the binary shrinks by writing less code, n
 | **Mermaid on demand** | Would save the remaining 0.75 MB of download | **Reject**: the resources-on-demand row's costs, plus it is executable code — a hash-verified download into a location the page's `script-src` must be widened to, a cache pinned to the exact version `viewer.js` was written against, and a reader that no longer renders offline the first time |
 | **`scc` on demand** | Official build is already `-s -w`; 4.4 MB `arm64` | **Reject**: the on-demand cost is WebRTC's for a smaller prize |
 | **`SWIFT_REFLECTION_METADATA_LEVEL=none`** | `__swift5_fieldmd` + `__swift5_reflstr` ≈ 0.5 MB per slice; three `Mirror(` call sites to audit | **Reject**: not worth the audit |
+| **A release-time size ratchet** (2026-10-17) | The 5 MB rule in §4 held for nothing it applied to: Mermaid was recorded after it landed, and the 74.5 MB since arrived unrecorded | **Done** — [`releasing.md`](../architecture/releasing.md#the-bundle-size-ratchet) |
+| **`ProxySource` outside the bundle** (2026-10-17) | −16.8 MB of a 63.1 MB download (129.0 → 112.0 MB on disk, 63.1 → 46.4 MB compressed); reverses the retained-source choice in [`dependencies.md`](../architecture/dependencies.md). Adds 0.25 MB of upstream license texts to `Legal/`, which the bundle must carry once the source does not | **Done** 2026-10-18, by the owner's call: the source is attached to every release beside the zip (GPLv3 §6(d)) — [`releasing.md`](../architecture/releasing.md#the-proxy-helpers-source) |
+| **One shared plugin runtime** (2026-10-17) | ~−10 MB on disk today and ~−10 MB per future plugin; the kit as a dynamic framework linked by plugins only, never by the app | **Accept** — step 1b, the prerequisite for moving any feature |
+| **First-party plugins on demand** (2026-10-17) | The "second Sparkle" cost of the WebRTC row, paid once for every movable feature | **Reopened** — step 2; this row supersedes "wait for demand" on WebRTC, which moves with the iPhone companion in step 3 |
 
 ## 4. Evidence that should reopen this
 
@@ -100,4 +137,6 @@ is under 30 KB. There is no fat spot; the binary shrinks by writing less code, n
 - Remote-access adoption numbers, or a maintained data-channel-only WebRTC build — then the
   WebRTC row.
 - A full profile sweep at `-Osize` that shows no regression on the interaction workloads.
-- Any new embedded binary over ~5 MB: add it to the table in §2 before accepting it.
+- Any new embedded binary over ~5 MB: add it to the table in §2 before accepting it. Since
+  2026-10-17 `release.sh` refuses an unseen component over 1 MiB until the baseline is
+  regenerated, so the rule is enforced at the release rather than remembered.

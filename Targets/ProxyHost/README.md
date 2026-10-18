@@ -265,5 +265,6 @@ every archive and retained notice offline. The CI matrix runs macOS, Linux and W
 also instrument the helper and dependencies with address/undefined-behavior sanitizers.
 
 Install output includes the executable, notices and complete retained source tree. Keep those
-together when distributing it. Threading's Xcode build embeds the signed helper, its complete
-source tree and third-party notices in the application bundle.
+together when distributing it. Threading's Xcode build embeds the signed helper and its
+third-party notices in the application bundle; the source tree is published beside each release
+instead (see `THIRD_PARTY_NOTICES.md`).

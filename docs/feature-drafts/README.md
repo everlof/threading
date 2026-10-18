@@ -38,6 +38,12 @@ reshuffling it is a line move.
 
 ### Now — in active design
 
+- [Bundle diet](bundle-diet.md) — the app went from 54.5 to 129 MB (24.5 → 63 MB download) in
+  eight weeks with no feature over ~10% of the binary. Step 0, a release-time size ratchet, is
+  **implemented** 2026-10-17; step 1a, the proxy helper's source out of the bundle, 2026-10-18
+  (63.1 → 46.4 MB download). Next: one shared plugin runtime so a plugin stops costing ~10 MB of
+  copies, then a single on-demand install path for first-party native plugins, piloted with the
+  device panes.
 - [Bluetooth protocol understanding](bluetooth-protocol-understanding.md) — reading Bluetooth
   traffic across packets: request/response transactions, streams and transfers with CRC checks,
   bit fields and conditional fields, built-in SIG/Nordic profiles, per-firmware learned enums with

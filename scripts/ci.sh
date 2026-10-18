@@ -143,6 +143,12 @@ python3 "${repository_directory}/scripts/tests/test_swift_warning_ratchet.py"
 say "Testing bundle entitlement verification"
 python3 "${repository_directory}/scripts/tests/test_bundle_entitlements.py"
 
+say "Testing the bundle-size ratchet"
+python3 "${repository_directory}/scripts/tests/test_bundle_size.py"
+
+say "Testing that the proxy helper's source is published beside it"
+python3 "${repository_directory}/scripts/tests/test_proxy_source_distribution.py"
+
 say "Testing agent feedback audit"
 python3 "${repository_directory}/scripts/tests/test_agent_feedback_audit.py"
 

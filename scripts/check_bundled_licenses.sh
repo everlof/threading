@@ -67,10 +67,23 @@ for notice in "${required_notices[@]}"; do
     fi
 done
 
+# The proxy helper's upstream texts are named by its own source tree rather than listed here, and
+# compared byte for byte: Targets/ProxyHost/tests/provenance.py proves those are upstream's.
+if [[ "$profile" == "macos" ]]; then
+    repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    for source_notice in "$repository_root/Targets/ProxyHost/third_party/licenses/"*; do
+        notice="ProxyHost/$(basename "$source_notice")"
+        required_notices+=("$notice")
+        if ! cmp -s "$source_notice" "$legal_directory/$notice"; then
+            missing_notices+=("$notice")
+        fi
+    done
+fi
+
 if (( ${#missing_notices[@]} > 0 )); then
     echo "error: incomplete legal-notice bundle at $legal_directory" >&2
     for notice in "${missing_notices[@]}"; do
-        echo "error: missing or empty Legal/$notice" >&2
+        echo "error: missing, empty or altered Legal/$notice" >&2
     done
     exit 1
 fi

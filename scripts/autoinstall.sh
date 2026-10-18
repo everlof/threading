@@ -81,6 +81,7 @@ readonly PROFILE_BUILD="$HOME_DIR/profiled"
 readonly PROFILE_ARCHIVE="$PROFILE_BUILD/$SCHEME.xcarchive"
 readonly PROFILE_EXPORT="$PROFILE_BUILD/export"
 PRODUCT="$LOCAL_PRODUCT"
+BUILT_SIZE=""
 SELECTED_PROFILE=""
 TARGET_CREDENTIAL_REALM=""
 
@@ -492,7 +493,25 @@ build_the_checkout() {
         >>"$BUILD_LOG" 2>&1; then
         status=1
     fi
+    if [[ $status -eq 0 ]]; then
+        measure_the_build
+    fi
     return "$status"
+}
+
+# Report-only: a commit on master is not a release, so growth here is information rather than a
+# failure — release.sh is where the baseline is enforced. The verdict line rides into the history
+# entry, which makes `history.log` the per-commit size trail a release-time failure is diagnosed
+# from. The profile-less lane is not thinned, so it reports WebRTC and Sparkle over baseline.
+measure_the_build() {
+    local report="$STATE/bundle-size.txt"
+    BUILT_SIZE=""
+    if python3 "$SOURCE_REPO/scripts/check_bundle_size.py" --report "$PRODUCT" \
+        >"$report" 2>&1; then
+        BUILT_SIZE="$(tail -1 "$report" | sed 's/^bundle-size: //')"
+    fi
+    cat "$report" >>"$BUILD_LOG"
+    rm -f "$report"
 }
 
 verify_protected_credential_store() {
@@ -557,6 +576,12 @@ build_profiled_checkout() {
         THREADING_SOURCE_REVISION="$sha" \
         ENABLE_HARDENED_RUNTIME=YES \
         >>"$BUILD_LOG" 2>&1
+    # Thinned before export for release.sh's reason: the export re-signs every nested binary, so
+    # the seals thinning breaks come back for free. Without it the installed copy carried WebRTC's
+    # and Sparkle's x86_64 slices — 16.8 MB on 2026-10-17 that no release ships — and measured as
+    # a different app from the one released.
+    "$SOURCE_REPO/scripts/thin_app_architectures.sh" \
+        "$PROFILE_ARCHIVE/Products/Applications/$SCHEME.app" arm64 >>"$BUILD_LOG" 2>&1
 
     python3 - "$PROFILE_BUILD/ExportOptions.plist" "$TEAM_ID" "$BUNDLE_ID" \
         "$SELECTED_PROFILE" <<'PYTHON'
@@ -728,7 +753,7 @@ run_builder() {
 
         echo "$sha" > "$INSTALLED_SHA_FILE"
         log_line "installed $(short "$sha") $subject"
-        record "installed $(short "$sha") $subject"
+        record "installed $(short "$sha") $subject${BUILT_SIZE:+ — $BUILT_SIZE}"
         notify "Threading updated in /Applications" "$subject"
 
         if [[ "$(source_tip)" == "$sha" ]]; then

@@ -140,12 +140,22 @@ env "${appcast_env[@]}" "$ROOT/scripts/generate_appcast.sh" "${appcast_args[@]}"
 
 readonly ZIP="$BUILD_DIR/Threading-$VERSION.zip"
 readonly APPCAST="$BUILD_DIR/appcast.xml"
-[[ -f "$ZIP" && -f "$APPCAST" ]] || fail "expected artefacts are missing from $BUILD_DIR"
+# The GPL helper's corresponding source travels beside the zip, never without it (release.sh,
+# "Corresponding source").
+readonly PROXY_SOURCE="$BUILD_DIR/threading-proxyd-source-$VERSION.tar.gz"
+[[ -f "$ZIP" && -f "$APPCAST" && -f "$PROXY_SOURCE" ]] \
+    || fail "expected artefacts are missing from $BUILD_DIR"
 
 # MARK: - Release notes
 
 NOTES="$(release_notes_for_version "$VERSION" "$ROOT/CHANGELOG.md")"
 [[ -n "${NOTES//[[:space:]]/}" ]] || fail "CHANGELOG.md has no section for $VERSION"
+
+# GPLv3 §6(d) asks for clear directions next to the object code, and this page is where it is
+# downloaded from.
+SOURCE_NOTE="Source: Threading is GPL-3.0-only and built from this tag. The complete corresponding
+source of its bundled proxy helper, including the upstream archives it is built from, is attached
+as \`threading-proxyd-source-$VERSION.tar.gz\`."
 
 # The appcast is not an asset of every release, so the notes must not say it is: a beta's zip
 # lives on its own prerelease while the feed that describes it lives on the newest stable.
@@ -154,14 +164,18 @@ if [[ "$CHANNEL" == "release" ]]; then
 
 Direct download: \`Threading-$VERSION.zip\` — Developer ID signed, notarized by Apple, and
 stapled. Installed copies update themselves through Sparkle from the feed published with this
-release."
+release.
+
+$SOURCE_NOTE"
 else
     NOTES="$NOTES
 
 This is a **$CHANNEL** build. Direct download: \`Threading-$VERSION.zip\` — Developer ID signed,
 notarized by Apple, and stapled. It updates itself like any other copy; a build downloaded from
 here starts out receiving $CHANNEL builds, and Settings ▸ General ▸ Software Updates switches
-that back to stable releases at any time."
+that back to stable releases at any time.
+
+$SOURCE_NOTE"
 fi
 
 # MARK: - Publish
@@ -177,11 +191,11 @@ fi
 
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
     say "Updating the existing GitHub release $TAG"
-    gh release upload "$TAG" "$ZIP" --repo "$REPO" --clobber
+    gh release upload "$TAG" "$ZIP" "$PROXY_SOURCE" --repo "$REPO" --clobber
     gh release edit "$TAG" --repo "$REPO" --notes "$NOTES" "${release_kind_args[@]}"
 else
     say "Creating the GitHub release $TAG"
-    gh release create "$TAG" "$ZIP" \
+    gh release create "$TAG" "$ZIP" "$PROXY_SOURCE" \
         --repo "$REPO" \
         --title "Threading $VERSION" \
         --notes "$NOTES" \
@@ -221,5 +235,6 @@ say "Recording the Sentry deploy"
 say "Published"
 echo "  release:  https://github.com/$REPO/releases/tag/$TAG"
 echo "  download: https://github.com/$REPO/releases/download/$TAG/Threading-$VERSION.zip"
+echo "  source:   https://github.com/$REPO/releases/download/$TAG/threading-proxyd-source-$VERSION.tar.gz"
 echo "  feed:     $FEED_URL"
 echo "  sha256:   $(shasum -a 256 "$ZIP" | awk '{print $1}')"

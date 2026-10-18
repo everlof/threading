@@ -161,8 +161,10 @@ Archives also retain the separately licensed documentation.
 The authoritative inventory and obligations are
 [`Targets/ProxyHost/THIRD_PARTY_NOTICES.md`](../../Targets/ProxyHost/THIRD_PARTY_NOTICES.md).
 The provenance test verifies archive hashes, build pins and exact notice contents. Installation
-includes the helper, notices and corresponding source tree. The Xcode app bundle includes
-`ProxySource` and its legal index; release signing covers both the helper and retained resources.
+includes the helper, notices and corresponding source tree. The Xcode app bundle includes the
+helper, its legal index and the upstream license texts (`Legal/ProxyHost/`) but not the source,
+which every release publishes beside the zip ([releasing.md](releasing.md#the-proxy-helpers-source));
+release signing covers the helper and those resources.
 
 ## Apple onboarding
 
@@ -174,8 +176,9 @@ targets one explicit already-booted UDID and never resets all devices. Its
 [physical-device guide](https://docs.proxyman.com/debug-devices/ios-device) distinguishes routing,
 profile installation, full trust and per-host inspection.
 
-`Targets/ProxyHost/tools/apple_certificate.py` is a development shortcut: default output is a
-reviewable command plan. `--apply` checks the expected fingerprint, stages those exact public DER
+`Targets/ProxyHost/tools/apple_certificate.py` is a development shortcut, bundled as
+`Resources/ProxyTools/apple_certificate.py`, the path `traffic_certificate`'s setup argv names.
+Default output is a reviewable command plan. `--apply` checks the expected fingerprint, stages those exact public DER
 bytes and invokes user-domain SSL trust on macOS or `simctl keychain <UDID> add-root-cert` on one
 available booted simulator. Removal supports user-domain Mac trust only. `simctl` has no targeted
 root-removal action, so this tool does not offer a destructive keychain reset as cleanup. The
