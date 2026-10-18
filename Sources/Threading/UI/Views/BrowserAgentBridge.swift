@@ -1085,6 +1085,24 @@ enum BrowserAgentScripts {
         """#
 
     private static let targetPrelude = #"""
+        function browserDelay(milliseconds) {
+          const pending = globalThis.__threadingAgentDelays ||= new Map();
+          if (pending.size >= 64) return Promise.reject(new Error('Too many pending browser delays.'));
+          const token = Array.from(crypto.getRandomValues(new Uint32Array(4)), value =>
+            value.toString(16).padStart(8, '0')).join('');
+          return new Promise((resolve, reject) => {
+            pending.set(token, resolve);
+            try {
+              globalThis.webkit.messageHandlers.threadingAgentDelay.postMessage({ token, milliseconds })
+                .catch(error => {
+                  if (pending.delete(token)) reject(error);
+                });
+            } catch (error) {
+              pending.delete(token);
+              reject(error);
+            }
+          });
+        }
         let state = globalThis.__threadingAgentState;
         if (!state || state.document !== document) {
           state = {
@@ -1479,8 +1497,8 @@ enum BrowserAgentScripts {
           }
           const first = options.stable ? rectSample(element) : null;
           if (options.stable) {
-            // A timer works when WebKit pauses animation frames for an occluded display-panel tab.
-            await new Promise(resolve => setTimeout(resolve, 50));
+            // Both animation frames and DOM timers can stop in an idle hidden tab.
+            await browserDelay(50);
           }
           const finalVisibility = visibilityIssue(element);
           if (finalVisibility) return finalVisibility;
@@ -2072,8 +2090,8 @@ enum BrowserAgentScripts {
         if (initialVisibility) return result(false, initialVisibility);
         scrollIntoViewAcrossFrames(element);
         const first = rectSample(element);
-        // A timer keeps this reliable while an occluded display-panel tab has paused frames.
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // The host clock keeps this wait independent of hidden-page timer throttling.
+        await browserDelay(50);
         const finalVisibility = visibilityIssue(element);
         if (finalVisibility) return result(false, finalVisibility);
         if (rectSamplesDiffer(first, rectSample(element))) {
@@ -2488,7 +2506,7 @@ enum BrowserAgentScripts {
         mouse('mouseup', target, targetPoint, 0);
         drag('dragend', source, targetPoint);
 
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await browserDelay(50);
         const sourceName = nameOf(source);
         const targetName = nameOf(target);
         return JSON.stringify({
@@ -2551,7 +2569,7 @@ enum BrowserAgentScripts {
             element.dispatchEvent(new view.KeyboardEvent('keyup', {
               key: character, bubbles: true, composed: true
             }));
-            await new Promise(resolve => setTimeout(resolve, 35));
+            await browserDelay(35);
           }
         } else {
           setValue(value);
@@ -2768,7 +2786,7 @@ enum BrowserAgentScripts {
             } else if (currentState() !== field.checked) {
               element.click();
             }
-            await new Promise(resolve => setTimeout(resolve, 50));
+            await browserDelay(50);
             if (currentState() !== field.checked) {
               return failure(
                 index,
@@ -2916,8 +2934,7 @@ enum BrowserAgentScripts {
           // occluded, each nominal 50 ms step may be throttled to seconds and can outlive the
           // native bridge's complete 15-second budget. Page changes are the event being waited
           // for, so observe them directly and keep one deadline only for the no-change case.
-          return await new Promise(resolve => {
-            let timer;
+          return await new Promise((resolve, reject) => {
             let finished = false;
             const observer = new view.MutationObserver(() => {
               const resolution = resolveCurrentOptions();
@@ -2929,7 +2946,6 @@ enum BrowserAgentScripts {
               if (finished) return;
               finished = true;
               observer.disconnect();
-              if (timer !== undefined) clearTimeout(timer);
               resolve(resolution);
             };
             try {
@@ -2937,7 +2953,14 @@ enum BrowserAgentScripts {
                 childList: true, subtree: true, attributes: true
               });
             } catch (_) {}
-            timer = setTimeout(() => finish(resolveCurrentOptions()), 1000);
+            browserDelay(1000).then(() => {
+              if (!finished) finish(resolveCurrentOptions());
+            }, error => {
+              if (finished) return;
+              finished = true;
+              observer.disconnect();
+              reject(error);
+            });
           });
         }
 
@@ -2978,7 +3001,7 @@ enum BrowserAgentScripts {
         option.focus?.({ preventScroll: true });
         if (typeof option.click === 'function') option.click();
         else option.dispatchEvent(new view.MouseEvent('click', { bubbles: true, composed: true }));
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await browserDelay(50);
         const label = optionLabel(option) || '(unnamed)';
         const value = optionValue(option);
         return JSON.stringify({
@@ -3041,7 +3064,7 @@ enum BrowserAgentScripts {
         } else {
           element.click();
         }
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await browserDelay(50);
         if (currentState() !== desired) {
           return JSON.stringify({
             ok: false,
@@ -3328,9 +3351,8 @@ enum BrowserAgentScripts {
         const scroller = element || window;
         if (element) element.scrollBy({ left: delta[0], top: delta[1], behavior: 'instant' });
         else window.scrollBy({ left: delta[0], top: delta[1], behavior: 'instant' });
-        // requestAnimationFrame may pause for a background display-panel tab. A bounded timer
-        // works in both visible and agent-driven off-screen browsers.
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // The host clock keeps this wait bounded even when WebKit throttles hidden-page timers.
+        await browserDelay(50);
         return JSON.stringify({
           ok: true,
           message: `Scrolled ${String(direction || 'down').toLowerCase()}`

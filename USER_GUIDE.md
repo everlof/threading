@@ -4762,6 +4762,11 @@ creates the tab.
 Agents use the current pane or window size for browsing and ordinary screenshots, keeping any
 viewport you selected. They change dimensions when you ask or for a specific responsive or visual
 test, then restore the prior sizing after a temporary test.
+A tab created before its pane has been laid out starts with a 1024 × 768 viewport; it fits the pane
+when shown. Agent actions and screenshots can run while the browser is hidden. Website-owned
+animations and timers may still pause or slow down in the background. If a browser operation times
+out, its error includes the viewport size and window visibility; a click may still complete, so
+the agent should inspect the page before retrying.
 
 It has an address bar, history controls, persistent cookies, responsive viewport testing, and the
 Web Inspector. Its overflow menu includes find in page, print, visible-page screenshots (saved to a

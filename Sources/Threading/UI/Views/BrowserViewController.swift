@@ -648,6 +648,7 @@ final class BrowserViewController: NSViewController {
     var agentTraceDroppedEvents = 0
     var agentTraceNextSequence = 1
     private let agentNavigationPolicy = BrowserAgentNavigationPolicy()
+    private let executionActivity = BrowserExecutionActivity()
 
     /// Fired when the page's title or address changes, so a host (the display pane's tab strip and
     /// header) can re-label the tab without polling. Not fired for progress, which ticks constantly.
@@ -793,6 +794,11 @@ final class BrowserViewController: NSViewController {
         scriptMessageProxy = proxy
         contentController.add(proxy, name: BrowserDefaults.consoleMessageHandler)
         contentController.add(proxy, name: BrowserDefaults.networkMessageHandler)
+        contentController.addScriptMessageHandler(
+            BrowserAgentDelayHandler(),
+            contentWorld: .defaultClient,
+            name: BrowserAgentDelayHandler.name
+        )
         contentController.add(
             proxy,
             contentWorld: .defaultClient,
@@ -1071,7 +1077,12 @@ final class BrowserViewController: NSViewController {
     }
 
     private func makeWebView(configuration: WKWebViewConfiguration) -> WKWebView {
-        let candidate = WKWebView(frame: .zero, configuration: configuration)
+        // An agent can create and navigate a tab before its host receives any layout pass.
+        // Start with a real viewport; ordinary host layout replaces it as soon as available.
+        let candidate = WKWebView(
+            frame: CGRect(origin: .zero, size: BrowserDefaults.initialViewportSize),
+            configuration: configuration
+        )
         documentSequences[ObjectIdentifier(candidate)] = 0
         passwordFocusedFrameTokens[ObjectIdentifier(candidate)] = []
         candidate.translatesAutoresizingMaskIntoConstraints = true
@@ -2281,12 +2292,15 @@ final class BrowserViewController: NSViewController {
         onLateCompletion: (@MainActor () -> Void)? = nil
     ) async throws -> Value {
         let startedAt = Date()
+        let page = webView
+        let finishActivity = executionActivity.begin(for: page)
+        defer { finishActivity() }
         let result: Any = try await withCheckedThrowingContinuation { continuation in
             let completion = BrowserBridgeCallCompletion(
                 continuation,
                 onLateCompletion: onLateCompletion
             )
-            webView.callAsyncJavaScript(
+            page.callAsyncJavaScript(
                 script,
                 arguments: arguments,
                 in: nil,
@@ -2314,15 +2328,18 @@ final class BrowserViewController: NSViewController {
                 }
             }
             if let timeout {
-                DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self, weak page] in
                     guard completion.timeout(
-                        BrowserBridgeError.timedOut(seconds: timeout)
+                        BrowserBridgeError.timedOut(
+                            seconds: timeout,
+                            presentation: Self.presentationDescription(of: page)
+                        )
                     ) else { return }
                     self?.recordAgentBridgePhase(
                         "javascript.dispatch",
                         startedAt: startedAt,
                         outcome: "timeout",
-                        detail: "limit \(Int(timeout))s"
+                        detail: "limit \(Int(timeout))s; \(Self.presentationDescription(of: page))"
                     )
                 }
             }
@@ -2536,6 +2553,9 @@ final class BrowserViewController: NSViewController {
         captureSize: CGSize
     ) async throws -> BrowserScreenshotCapture {
         let startedAt = Date()
+        let page = webView
+        let finishActivity = executionActivity.begin(for: page)
+        defer { finishActivity() }
         let config = WKSnapshotConfiguration()
         config.afterScreenUpdates = true
         if let rect {
@@ -2545,7 +2565,7 @@ final class BrowserViewController: NSViewController {
         let pixelHeight = max(1, Int(captureSize.height.rounded()))
         return try await withCheckedThrowingContinuation { continuation in
             let completion = BrowserScreenshotCompletion(continuation)
-            webView.takeSnapshot(with: config) { [weak self] image, error in
+            page.takeSnapshot(with: config) { [weak self] image, error in
                 Task { @MainActor in
                     if let error {
                         if completion.finish(.failure(
@@ -2598,17 +2618,34 @@ final class BrowserViewController: NSViewController {
             }
             DispatchQueue.main.asyncAfter(
                 deadline: .now() + BrowserDefaults.snapshotTimeout
-            ) { [weak self] in
-                if completion.finish(.failure(BrowserScreenshotError.timedOut)) {
+            ) { [weak self, weak page] in
+                let presentation = Self.presentationDescription(of: page)
+                if completion.finish(.failure(BrowserScreenshotError.timedOut(presentation: presentation))) {
                     self?.recordAgentBridgePhase(
                         "screenshot.render",
                         startedAt: startedAt,
                         outcome: "timeout",
-                        detail: "limit \(Int(BrowserDefaults.snapshotTimeout))s"
+                        detail: "limit \(Int(BrowserDefaults.snapshotTimeout))s; \(presentation)"
                     )
                 }
             }
         }
+    }
+
+    /// Native facts only: no URLs, document text or assumptions about why WebKit stalled.
+    private static func presentationDescription(of page: WKWebView?) -> String {
+        guard let page else { return "The browser view was closed." }
+        let host: String
+        if let window = page.window {
+            if window.isMiniaturized { host = "window minimized" }
+            else if !window.isVisible { host = "window not shown" }
+            else if page.isHiddenOrHasHiddenAncestor { host = "browser view hidden" }
+            else if !window.occlusionState.contains(.visible) { host = "window occluded" }
+            else { host = "window visible" }
+        } else {
+            host = "browser not attached to a window"
+        }
+        return "Viewport \(Int(page.bounds.width))×\(Int(page.bounds.height)); \(host)."
     }
 
     /// Console messages captured since the page was opened or the buffer was last cleared.
@@ -4646,6 +4683,7 @@ enum BrowserDefaults {
     static let maximumViewportHeight = 2_560
     static let defaultResponsiveViewportWidth = 390
     static let defaultResponsiveViewportHeight = 844
+    static let initialViewportSize = CGSize(width: 1_024, height: 768)
     static let minimumPageZoom = 0.5
     static let maximumPageZoom = 2.0
     static let pageZoomStep = 0.1
@@ -4834,34 +4872,34 @@ private final class WeakBrowserScriptMessageHandler: NSObject, WKScriptMessageHa
 
 private enum BrowserBridgeError: LocalizedError {
     case invalidResult
-    case timedOut(seconds: TimeInterval)
+    case timedOut(seconds: TimeInterval, presentation: String)
 
     var errorDescription: String? {
         switch self {
         case .invalidResult:
             return "The page returned an invalid browser-bridge result."
-        case .timedOut(let seconds):
+        case .timedOut(let seconds, let presentation):
             return """
                 WebKit did not answer the browser JavaScript bridge within \(Int(seconds)) \
-                seconds. The page remains open; wait for it to settle or stop/reload it, then retry.
+                seconds. \(presentation) The action may still complete; inspect the page before retrying.
                 """
         }
     }
 }
 
 private enum BrowserScreenshotError: LocalizedError {
-    case timedOut
+    case timedOut(presentation: String)
     case webKit(NSError)
     case missingImage
     case encodingFailed
 
     var errorDescription: String? {
         switch self {
-        case .timedOut:
+        case .timedOut(let presentation):
             return """
                 WebKit did not finish rendering the screenshot within \
-                \(Int(BrowserDefaults.snapshotTimeout)) seconds. The page is still available; \
-                wait for it to settle or stop/reload it, then retry.
+                \(Int(BrowserDefaults.snapshotTimeout)) seconds. \(presentation) \
+                The page remains open; no screenshot was captured.
                 """
         case .webKit(let error):
             return "WebKit snapshot failed (\(error.domain) \(error.code))."

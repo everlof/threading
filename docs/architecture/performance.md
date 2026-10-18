@@ -1156,6 +1156,26 @@ THREADING_AUTOMATION_STRESS=1 scripts/test.sh fast \
 
 ## Implementation-time scaling gate
 
+Browser operations use one native delay at a time in the ordinary case, stress-tested with 64
+pending timers and refusal of the 65th. Timers accept at most 1,000 ms, carry no page content,
+and retire before calling WebKit. Operation activity uses O(1) begin/end bookkeeping per active
+preferences object, coalesces overlapping requests, restores page scheduling, and releases its host
+App Nap assertion when the final operation ends. Hidden tabs have no new periodic work.
+
+The 2026-10-18 background-browser probe used macOS 26.5 and a 500 × 300 WebKit page detached
+for 70 seconds before a 50 ms wait, a button activation changing red to green, and a screenshot.
+DOM-timer runs exceeded the 25-second operation observation window, including a run with
+`inactiveSchedulingPolicy = .none`. A native reply timer alone was inconsistent; instrumentation
+showed its reply being sent while the JavaScript call still failed to resume. With the native
+clock, operation-scoped WebKit scheduling, and `.userInitiatedAllowingIdleSystemSleep` host
+activity together, two matched runs of the final continuation path completed click plus fresh
+screenshot in 79.6 and 78.2 ms (median 78.9 ms, maximum 79.6 ms). A separate long-idle file-input
+probe opened its native chooser and captured in 81.9 ms. These are small framework probes, not
+loaded-page performance claims. The shipping regression lives in `BrowserOffScreenCaptureTests`
+(the `mac-all` plan), including a deterministic case that disables isolated-world DOM timers, and
+`BrowserExecutionActivityTests` covers overlapping work and restoration. Screen lock and real
+Space switches were not exercised.
+
 USB Device Logs must sustain roughly 5,800 rows/s with a 50,000-row ring while the table is
 onscreen. The regression workload uses 1,000-row batches, long messages and a full ring, and
 measures drain, AppKit layout and display together; the earlier dual-stream benchmark excluded

@@ -6,6 +6,15 @@ import XCTest
 final class BrowserViewportLayoutTests: XCTestCase {
 
     @MainActor
+    func testBrowserCreatedBeforeItsHostHasLayoutStartsWithAUsableViewport() {
+        let browser = BrowserViewController(contextKind: .private)
+        _ = browser.view
+        XCTAssertGreaterThan(browser.webView.bounds.width, 0)
+        XCTAssertGreaterThan(browser.webView.bounds.height, 0)
+        XCTAssertNil(browser.responsiveViewport, "background sizing must not enable device emulation")
+    }
+
+    @MainActor
     func testAutomaticViewportRejectsNativeScrollBursts() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["THREADING_BROWSER_VIEWPORT_STRESS"] == "1")
         let (browser, window, scroll) = try browserWindow()

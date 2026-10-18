@@ -1324,10 +1324,11 @@ would wait until the user happened to click that session.
 on the same two switches that decide how much of the workspace returns at all. That scan is
 cheap and reads no conversation: a layout is a small JSON document in its own table,
 deliberately not foreign-keyed to `session`, and building a browser needs a session id and
-nothing else. Ordering the window in is not cosmetic either — WebKit renders nothing for a view
-in a window that was never shown, so a restored-but-unshown window would hand an agent blank
-captures forever (`BrowserOffScreenCaptureTests`). It is ordered *front*, never made key:
-restoring a workspace is not a request to type into a browser.
+nothing else. Ordering the window in restores the workspace the user left. Agent operations also work
+without a shown window: the browser owns its initial viewport and uses native action delays
+rather than throttled DOM timers (`BrowserOffScreenCaptureTests`, `agent-browser.md`). The
+restored window is ordered *front*, never made key: restoring a workspace is not a request to
+type into a browser.
 
 **A move keys off the tab's session, not the selection.** Both panes follow what is on screen,
 so the two agreed until a host could be pinned: dragging a tab back from a window bound to
