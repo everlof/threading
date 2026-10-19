@@ -485,15 +485,30 @@ profile from [Profiles and Logs](https://developer.apple.com/bug-reporting/profi
 The **Set Up…** disclosure offers the primary **Send certificate to this iPhone** action: choose
 a downloaded Bluetooth logging profile and send it directly to the selected hardware UDID through
 the ordinary interactive installation service. **Install from Apple…** opens the exact Apple
-profile download endpoint in a dedicated ephemeral `WKWebView`;
+profile download endpoint in a dedicated `WKWebView`, presented through `ThemedPopover` independently
+of the log pane's height. Its preferred 640×740 content is capped to the current screen with room
+for themed chrome; WebKit fills the remaining height between the origin/Cancel bar and the
+sign-in-storage footer, and the page retains native scrolling. The old 360-point inline view
+could clip the bottom of Apple's form in a short log pane.
 Apple's authentication redirect returns to the download automatically. Navigation/download
 redirects admit HTTPS Apple domains only, with the current origin shown above the page. This
 view has no agent bridge, injected scripts, credential export, diagnostics or network capture.
-It is deliberately separate from the shared Browser and its project website data store.
+On macOS 14+, a stable, named `WKWebsiteDataStore` retains Apple's cookies and website data across
+reopening and app restarts, separately from the shared Browser and every project website store.
+On macOS 13, one shared nonpersistent store retains sign-in only until Threading quits. WebKit
+owns the data; Threading does not serialize or export cookies. **Forget Sign-In** clears that
+store through WebKit and reloads Apple's sign-in flow. Apple still decides session expiry and
+reauthentication. Tests inject temporary stores and never clear or read the production store.
 `WKDownload` takes the authenticated response directly into a private temporary directory;
 there is no cookie transfer into URLSession, Save panel or Downloads-folder watcher. Only a
 successful response for `iOSBluetoothLogging.mobileconfig` is admitted. Closing/hiding setup,
 switching phones and Cancel retire its generation, cancel WebKit, then remove partial files.
+WebKit reports `WebKitErrorDomain` 102 when navigation becomes a download. Ignore that specific
+navigation interruption only after choosing download policy or attaching the download; its own
+delegate now owns success/failure. A policy interruption without that handoff remains a failure.
+HTTP refusals, unexpected files, transfer limits, network failures and web-process termination
+settle explicitly. User-facing details contain only known error categories/status codes, never
+authentication URLs, NSError user info or server-supplied descriptions.
 
 `BluetoothProfileInstaller` reads at most 1 MiB from a regular file on a worker, decodes CMS or
 plain plist metadata, checks `com.apple.bluetooth.logging` and an absolute removal date, and
@@ -664,9 +679,12 @@ Temporary files are removed after normal success/failure/cancellation; a process
 a private OS-temporary directory for normal system cleanup.
 
 `BluetoothProfileTests` covers download policy, profile identity/expiry/size, optional local signed
-Apple input, exact-device staging and cleanup, CLI errors/deadlines, ephemeral WebKit and cancel
-settlement. Product-shell evidence includes expanded setup in three themes and the blank real
-WebKit surface in System Dark. Apple sign-in and actual on-phone installation remain a separate
+Apple input, exact-device staging and cleanup, CLI errors/deadlines, isolated WebKit and cancel
+settlement. `BluetoothProfileDownloadTests` uses a loopback HTTP server and real `WKDownload` to
+cover the successful navigation handoff, HTTP refusal and unexpected filename; random named stores
+verify cookie reuse and forgetting without using an Apple account. Product-shell evidence includes
+expanded setup and the real sign-in presentation in three themes, with a tall synthetic form whose
+bottom action must be visible. Apple sign-in and actual on-phone installation remain a separate
 interactive hardware check; fixtures never contain Apple profile bytes or account details.
 
 `BluetoothPacketTests` covers split frames, endianness, ATT boundaries, malformed lengths, EOF,

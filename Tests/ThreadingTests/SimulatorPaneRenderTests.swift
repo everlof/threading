@@ -1,6 +1,7 @@
 import AppKit
 import ThreadingRemoteKit
 import ThreadingSimulatorKit
+import WebKit
 import XCTest
 @testable import Threading
 
@@ -878,22 +879,57 @@ final class SimulatorPaneRenderTests: XCTestCase {
             try XCTUnwrap(NSBitmapImageRep(cgImage: bluetoothImage).representation(using: .png, properties: [:])).write(
                 to: Render.directory.appendingPathComponent("device-log-shell-bluetooth-\(name).png")
             )
-            if name == "system-dark" {
-                // The dedicated production WebKit surface, left blank so no sign-in details or
-                // changing Apple page content enter deterministic UI evidence.
+            do {
+                // The production presentation with a synthetic tall sign-in form. No Apple
+                // page or account details enter deterministic evidence.
                 plugin.perform(NSSelectorFromString("showBluetoothProfileBrowserForTesting"))
+                let dialog = try XCTUnwrap(fixture.window.childWindows?.first {
+                    $0.contentView.flatMap { find("bluetooth-profile-browser", in: $0) } != nil
+                })
+                // Like the borderless product host, this rendering-only child stays off-screen.
+                dialog.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
                 settle(fixture.window)
-                let browser = try XCTUnwrap(find("bluetooth-profile-browser", in: logs.view))
-                XCTAssertTrue(logs.view.bounds.contains(browser.convert(browser.bounds, to: logs.view)))
+                let dialogContent = try XCTUnwrap(dialog.contentView)
+                let browser = try XCTUnwrap(find("bluetooth-profile-browser", in: dialogContent))
+                func findWeb(_ view: NSView) -> WKWebView? {
+                    if let web = view as? WKWebView { return web }
+                    return view.subviews.lazy.compactMap(findWeb).first
+                }
+                let web = try XCTUnwrap(findWeb(browser))
+                eventually { !web.isLoading }
+                dialogContent.layoutSubtreeIfNeeded()
+                XCTAssertGreaterThan(web.bounds.height, 570, "the bottom-of-form sign-in action must fit")
+                XCTAssertTrue(dialogContent.bounds.contains(web.convert(web.bounds, to: dialogContent)))
+                for id in ["bluetooth-profile-cancel", "bluetooth-profile-forget-sign-in"] {
+                    let button = try XCTUnwrap(find(id, in: browser))
+                    XCTAssertTrue(dialogContent.bounds.contains(button.convert(button.bounds, to: dialogContent)))
+                }
+                // This script reads only the synthetic fixture above, never a live auth page.
+                var signInVisible = false
+                web.evaluateJavaScript("document.getElementById('sign-in').getBoundingClientRect().bottom <= innerHeight") { value, error in
+                    XCTAssertNil(error)
+                    signInVisible = value as? Bool == true
+                }
+                eventually { signInVisible }
                 let download = try XCTUnwrap(find("bluetooth-profile-download", in: logs.view))
                 XCTAssertFalse(download.isAccessibilityEnabled())
+                dialog.displayIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.2))
                 let browserImage = try XCTUnwrap(CGWindowListCreateImage(
-                    .null, .optionIncludingWindow, CGWindowID(fixture.window.windowNumber),
+                    .null, .optionIncludingWindow, CGWindowID(dialog.windowNumber),
                     [.boundsIgnoreFraming, .nominalResolution]
                 ))
-                try XCTUnwrap(NSBitmapImageRep(cgImage: browserImage).representation(using: .png, properties: [:])).write(
-                    to: Render.directory.appendingPathComponent("device-log-shell-bluetooth-browser.png")
+                let browserBitmap = NSBitmapImageRep(cgImage: browserImage)
+                let middle = try XCTUnwrap(browserBitmap.colorAt(x: browserBitmap.pixelsWide / 2,
+                                                               y: browserBitmap.pixelsHigh / 2))
+                XCTAssertGreaterThan(middle.alphaComponent, 0.9, "offscreen fade-in must not yield a blank capture")
+                try XCTUnwrap(browserBitmap.representation(using: .png, properties: [:])).write(
+                    to: Render.directory.appendingPathComponent("device-log-shell-bluetooth-browser-\(name).png")
                 )
+                let cancel = try XCTUnwrap(find("bluetooth-profile-cancel", in: browser))
+                XCTAssertTrue(cancel.accessibilityPerformPress())
+                XCTAssertTrue(download.isAccessibilityEnabled())
+                XCTAssertFalse(dialog.isVisible)
             }
         }
     }

@@ -4326,8 +4326,13 @@ restart the iPhone, then press **Rescan** and generate Bluetooth activity. Sendi
 requires **iPhone Tooling** from Threading's **Settings → Advanced**, or a local `pymobiledevice3`.
 The primary **Send certificate to this iPhone** button lets you choose Apple's downloaded
 Bluetooth logging `.mobileconfig` file and sends it directly to the selected iPhone, which shows
-its installation prompt. The sign-in browser
-uses temporary website storage and is separate from the agent-controlled Browser. Closing setup,
+its installation prompt. Apple sign-in opens in a separate, larger dialog so it remains usable
+even when the logs pane is short. On macOS 14 and later, its dedicated website storage remembers
+Apple sign-in across app restarts; on macOS 13, it remembers sign-in until Threading quits.
+Apple may still ask you to sign in again. **Forget Sign-In** in that dialog clears the remembered
+Apple session and reloads the sign-in page. This storage is separate from the agent-controlled
+Browser. Download errors explain network failures, Apple HTTP responses or unexpected files
+without displaying sign-in URLs or account details. Closing setup,
 hiding the pane or choosing another phone cancels a pending download. Once a transfer to the phone
 has started, it finishes for that phone. Threading removes its temporary profile copies afterward.
 PacketLogger itself is not required. Follow Apple's profile instructions for expiry and removal.
