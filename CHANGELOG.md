@@ -16,6 +16,13 @@ it for the tester: what to try, and what is known to be rough. When the stable r
 own section describes the whole change, not the difference since the last beta; nobody on stable
 saw the betas.
 
+## [0.8.0]
+
+### Fixed
+
+- Add Login finds installed agent tools even when the login shell prints a startup greeting or
+  defines an alias for the tool.
+
 ## [0.7.0]
 
 ### Added

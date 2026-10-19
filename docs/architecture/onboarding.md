@@ -81,9 +81,11 @@ Cursor names `agent login` and the one Mac login it keeps in the Keychain; OpenC
 not disabled setup buttons that imply an unavailable action will eventually wake up.
 
 The page also presents `AgentAccountDiscovery`'s existing scan and adds the one check nothing
-else does: `AgentCLIProbe` resolves `claude`/`codex`/`grok`/`opencode`/`agent` against the same login shell
-`AgentLauncher` uses (`command -v`, the `ExternalAppLauncher.locate` shape), so the probe and
-the launch cannot disagree about PATH. A missing CLI is a sentence and an install command
+else does: `AgentCLIProbe` resolves `claude`/`codex`/`grok`/`opencode`/`agent` against the PATH exported by
+the same login shell `AgentLauncher` uses, so the probe and launch share the executable search order.
+The environment is framed after profile startup output; Add Login and external-editor lookup use
+that reader too, so a greeting or alias cannot make those checks disagree with onboarding.
+A missing CLI is a sentence and an install command
 here, instead of `command not found` inside the first session's terminal. Each login also
 carries the Agents & Accounts settings page's enable switch (`AccountPreferencesStore.setEnabled`,
 same dimming, same `ProjectsDidChange` signal), so an unwanted login is dealt with where it
