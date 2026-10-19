@@ -1,48 +1,246 @@
-# Threading
+<p align="center">
+  <img src="Brand/ThreadingMark-1024.png" width="112" alt="Threading">
+</p>
 
-A native macOS app for working with coding agents — Claude Code, Codex, Grok, and OpenCode —
-in one window: a project sidebar, real terminals, and an experimental native chat surface that
-renders conversations, tool calls, diffs, and permission requests as first-class UI. Sessions
-outlive their processes, so a conversation can be closed and resumed later, moved between
-accounts, or continued with another provider.
+<h1 align="center">Threading</h1>
 
-An iOS companion pairs with your Mac by QR code and drives the same sessions from your phone:
-live conversations, the terminal, git review, and permission approvals, over your own tunnel
-or tailnet. Nothing goes through a third-party server.
+<p align="center">
+  <strong>Keep every coding session in one place.</strong><br>
+  A native Mac app for running Claude Code, Codex, Grok, OpenCode and Cursor side by side.
+</p>
+
+<p align="center">
+  <a href="https://github.com/everlof/threading/releases/latest">Download for Mac</a> ·
+  <a href="https://threading.codes">threading.codes</a> ·
+  <a href="USER_GUIDE.md">User guide</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
+<p align="center">
+  Apple silicon · macOS 13 or later · Free and open source under GPLv3
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme/mac-threading-claude-review.png" alt="The Threading window: projects and chats in the sidebar, a Claude Code terminal in the middle, and Git Review of its changes on the right">
+</p>
+
+---
+
+Threading is not a coding agent. The agents you already use do the coding; Threading runs their
+command-line tools in your project folders, keeps their sessions together, shows you which one
+needs you, and puts the diff next to the agent that wrote it. It uses your existing provider
+accounts and sells no model access.
+
+It is a native AppKit app built on [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm), so
+each provider's own terminal interface — its keys, slash commands and plan mode — behaves exactly
+as it does anywhere else.
+
+## What it does
+
+### Sessions and attention
+
+- **One sidebar for every project and chat.** Each row carries one mark — working, needs you,
+  finished, dormant — so a glance tells you where to go next. Notifications for blocked and
+  finished turns are taken back once they stop being true.
+- **Sessions outlive their terminals.** When an agent exits, the conversation stays and resumes
+  by the provider's own session id. Continue a conversation with another provider, move it to
+  another account with its full history, or follow it into another checkout.
+- **Side chats, a shell drawer per session, standalone terminals, pinned and snoozed chats**, and
+  one search field over projects, chats, transcripts and files — on the Mac and on the iPhone.
+- **Sessions can talk to each other.** A manager session can list the project's other chats and
+  send them work.
+- **Chat (experimental)** draws the conversation natively for Claude Code, Codex, Grok and Cursor:
+  tool calls, diffs and permission requests as real UI rather than terminal text.
+
+### Review beside the agent
+
+- **Git Review** (<kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd>) on uncommitted changes, the last turn,
+  the branch or the commit graph. Stage a file or a hunk, comment on a line for the agent, and
+  commit.
+- **Pull and merge requests** — open or create the branch's PR on GitHub or MR on GitLab.
+- **Managed workspaces** — give a session its own Git worktree, then merge it, keep it for
+  review, or open a pull request.
+- **Execution Audit** — a local, hash-linked record of every tool call and permission answer.
+
+<p align="center">
+  <img src="docs/assets/readme/mac-git-review.png" width="600" alt="Git Review showing an uncommitted diff with per-file Stage File buttons">
+</p>
+
+### Tools for agents
+
+Threading registers its own MCP server with each session; you choose which tool groups an agent
+sees.
+
+- **A live browser** per session with per-site grants, responsive presets, Web Inspector, visual
+  baselines, page annotations, stored test accounts and, if you allow it, your signed-in Chrome.
+- **iOS Simulators and Android devices** adopted into the side panel, which agents can tap, swipe
+  and type into — and which you can record with the touches drawn on screen.
+- **Your paired iPhone's screen** in the panel, controllable only by you, plus **live device
+  logs** from a Simulator or iPhone, including formats Threading has never seen.
+- **HTTP and HTTPS traffic capture** through a session-owned proxy.
+- **A display panel** where agents put images, charts, web pages and file comparisons beside the
+  chat, grouped by the turn that made them.
+
+### Long-running work
+
+- **Scheduled messages** — write the next prompt now and send it at a set time, when a usage
+  limit resets, or when another session finishes its turn.
+- **Limit recovery** — when an agent is refused over a limit, the row shows the reset time and
+  can continue on its own when it arrives.
+- **Curfews** — end a session at a time, at a usage-window reset, during quiet hours, or when an
+  account reaches a usage percentage you choose.
+- **Automations** — saved tasks that run on a schedule or an event. They are created paused, run
+  only the exact revision you approved, and cannot push, deploy or write back to their source.
+
+### Accounts and usage
+
+Add several Claude Code or Codex logins and pick one per session. Usage readings sit in the
+session header and the account picker, and the **Usage** page shows cost and tokens over 7, 30
+or 90 days by provider, project, account and model — computed locally from your transcripts.
+
+### iPhone (TestFlight beta)
+
+The iPhone app pairs with your Mac by QR code. Read a chat, type into the provider's terminal,
+approve a permission request, look through the changed files and start a new chat — while every
+session keeps running on the Mac. Connect over your own network or VPN, your Tailscale tailnet,
+or Threading Direct from anywhere (new Macs currently need a pilot invitation). Remote Access is
+off until you turn it on, and Direct verifies your Mac's paired certificate before sending
+anything, so the hosted service never sees a transcript, prompt or terminal byte. The app is not
+on the App Store yet; it can also be built from this repository.
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/assets/readme/ios-session-list.png" width="240" alt="The iPhone session list for a paired Mac, with each chat's status"></td>
+    <td align="center"><img src="docs/assets/readme/ios-claude-tui.png" width="240" alt="A Claude Code terminal on iPhone, with its task strip and terminal key bar"></td>
+    <td align="center"><img src="docs/assets/readme/ios-codex-tui.png" width="240" alt="A Codex terminal on iPhone showing a diff"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Every chat on your Mac, at a glance</sub></td>
+    <td align="center"><sub>Claude Code's own terminal</sub></td>
+    <td align="center"><sub>Codex, with its diff</sub></td>
+  </tr>
+</table>
+
+### Beyond the Mac (in development)
+
+Threading's window stays a Mac app, but more of the work underneath it is moving to other
+machines. This is not switched on in public releases yet; builds from source have it.
+
+- **Chats on a Linux host.** Choose an SSH host for a project and its Claude Code terminal chats
+  run there, with hooks, Threading's tools, transcripts, usage and Git Review carried back to the
+  Mac. The host installs verified, version-matched components from GitHub Releases, so it needs
+  no build of its own. Claude and Codex native chats on a host are next.
+- **Windows through WSL.** A Windows PC joins as a Linux host running under WSL, with a startup
+  task that keeps it reachable after a reboot. This is landing now.
+- **A portable core.** The daemon that keeps a session's terminal alive (`threading-ptyd`) ships
+  as a single static Linux binary. The experimental `threading-controller` runs queued agent work
+  on a macOS or Linux machine, such as a VPS, and agents on different hosts can mail each other.
+  The traffic-capture proxy is a portable C program built for macOS, Linux and Windows.
+- **A native Linux app** is at the research stage:
+  [`docs/feature-drafts/linux-host-runtime.md`](docs/feature-drafts/linux-host-runtime.md).
+
+### Make it yours
+
+- **More than two dozen built-in themes**, from Swiss Minimalist to Windows 98, applied to the
+  app, one project or one session — and agents can design new ones for you.
+- **Extensions** are WebAssembly modules that declare their permissions up front; Threading draws
+  their interface with its own controls and your theme. **Signed native plugins** can go further,
+  like the Device Logs pane that ships with the app.
+- **Command palette and editable shortcuts** for every action, and a standalone **Markdown
+  editor** with Finder Quick Look.
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/assets/readme/theme-tui-swiss.png" width="400" alt="A Codex terminal and Git Review in the light Swiss Minimalist theme"></td>
+    <td align="center"><img src="docs/assets/readme/theme-tui-cyberpunk.png" width="400" alt="The same Codex terminal and Git Review in the dark Cyberpunk theme"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Swiss Minimalist</sub></td>
+    <td align="center"><sub>Cyberpunk</sub></td>
+  </tr>
+</table>
+
+The [user guide](USER_GUIDE.md) covers every feature and shortcut in detail.
+
+## How it fits together
+
+Everything runs on your Mac unless you add another machine. The iPhone and any Linux host
+connect *to* the Mac and are driven from it; nothing needs to be installed in the cloud.
+
+```mermaid
+flowchart TB
+    subgraph PHONE["📱 iPhone"]
+        IOS["<b>Threading for iPhone</b><br/>chats · terminal · review · approvals"]
+    end
+
+    CLOUD["☁️ <b>Threading service</b><br/>pairing · signalling · push<br/>never sees terminal content"]
+
+    subgraph MAC["💻 Your Mac"]
+        APP["<b>Threading.app</b><br/>sidebar · terminals · Git Review · browser<br/>agent tools (MCP) · Remote Access<br/><i>+ proxy, Simulator and extension helpers</i>"]
+        DAEMONS["<b>launchd daemons</b><br/>threading-ptyd · optional, keeps chats alive after quit<br/>threading-triggerd · wakes automations"]
+        AGENTS["<b>Agent CLIs</b> · one per chat<br/>claude · codex · grok · opencode · cursor-agent"]
+        APP <-->|"starts · tools + hooks"| AGENTS
+        APP <--> DAEMONS
+        DAEMONS -.->|"or hosts"| AGENTS
+    end
+
+    subgraph HOST["🐧 Linux or WSL host, over SSH · in development"]
+        CTRL["<b>threading-controller</b><br/>runs queued agent work"]
+        HPTYD["<b>threading-ptyd</b>"]
+        HAGENT["<b>claude</b> + MCP bridge"]
+        CTRL --> HPTYD --> HAGENT
+    end
+
+    PROVIDERS["<b>Model providers</b><br/>Anthropic · OpenAI · xAI and more<br/>with your own accounts"]
+
+    CLOUD -.->|"push"| PHONE
+    PHONE <-->|"Wi-Fi · VPN · Tailscale<br/>or Threading Direct (WebRTC)"| MAC
+    CLOUD -.- MAC
+    MAC ==> HOST
+    AGENTS -->|"HTTPS"| PROVIDERS
+    HAGENT -->|"HTTPS"| PROVIDERS
+```
+
+- **Agents are the provider's own command-line tools.** Threading launches each one through
+  your login shell in the project folder, so it finds the same `PATH` and sign-ins as your
+  terminal, and it talks to its provider directly. Threading sells no model access and sits in
+  no model traffic.
+- **Agents call back into Threading** through a local MCP server for its tools — browser,
+  Simulator, display panel, notifications, other sessions — and, for Claude Code and Codex,
+  through lifecycle hooks that report when a turn starts, stops or needs you. For a chat on the
+  Mac, both stay on the Mac.
+- **Two small launchd daemons.** `threading-ptyd` is optional: with it on, chats run under it
+  instead of the app, so quitting Threading hands them over rather than ending them, and the next
+  launch takes them back. `threading-triggerd` watches automation event sources and wakes
+  Threading when one fires.
+- **The iPhone connects to the Mac**, never to a server holding your work. Threading Direct uses
+  the hosted service to introduce the two devices and send push notifications; the connection
+  itself is end-to-end encrypted WebRTC, peer-to-peer when possible and relayed through TURN
+  when not.
+- **A Linux host is driven over SSH.** One tunnel carries the chat's terminal to the Mac and
+  Threading's tools and hooks back to the agent, and the transcript is mirrored back to the
+  Mac. `threading-controller` can also run queued agent work there on its own, driven from the
+  Mac over SSH. See [Beyond the Mac](#beyond-the-mac-in-development).
 
 ## Install
 
-**macOS** — download the latest `Threading-x.y.z.zip` from
-[Releases](https://github.com/everlof/threading/releases). The app is Developer ID signed,
-notarized, and updates itself through Sparkle.
+Download the latest `Threading-x.y.z.zip` from
+[Releases](https://github.com/everlof/threading/releases/latest). The app is Developer ID signed
+and notarized, and updates itself through Sparkle. To get betas as well, choose **Betas and
+stable releases** under **Settings ▸ General ▸ Software Updates**.
 
-**iOS** — the companion is a paid app on the App Store. It is also fully buildable from this
-repository (see below): the price buys the convenience of a signed, updating build, not the
-code. Buying it is what funds this project.
-
-### Which builds you get
-
-Three kinds of build, and you are on the first one unless you went looking.
-
-| | What it is | How to get it | How to leave |
-|---|---|---|---|
-| **Stable** | The finished release. | Nothing to do; this is the default. | — |
-| **Beta** | The next release, earlier and rougher. | Settings ▸ General ▸ Software Updates ▸ *Updates you receive* ▸ **Betas and stable releases**. | The same pop-up, back to **Stable releases**. The next stable release replaces the beta you are running. |
-| **Nightly** | Built from every change as it lands. Expect breakage. | Install a nightly build from the rolling [`nightly`](https://github.com/everlof/threading/releases/tag/nightly) prerelease. | Download a stable build yourself and replace the app. |
-
-Betas are ordinary updates that arrive in the same sheet; nothing else changes, and switching
-back is one pop-up.
-
-Nightly is the one that does not switch back on its own, and it is worth knowing why before you
-install one. A nightly is versioned by its date (`2026.8.26`), which is a higher number than any
-release will ever carry, so an installed nightly always looks newer than the newest stable
-release and never offers to replace itself with one. That is also why nightly is not in the
-pop-up: choosing it would work, and choosing Stable again would leave you waiting for an update
-that cannot arrive.
+Bring the agent command-line tools you already use. The first-launch walkthrough checks which
+ones your login shell can find and offers the official install command for any that are missing.
 
 ## Build from source
 
-The project is Xcode-only — one `Threading.xcodeproj`, no root SwiftPM manifest.
+The project is Xcode-only — one `Threading.xcodeproj`, no root SwiftPM manifest. Clone with
+submodules:
+
+```bash
+git clone --recurse-submodules https://github.com/everlof/threading.git
+cd threading
+```
 
 For the complete cloud-free development environment, run:
 
@@ -50,20 +248,19 @@ For the complete cloud-free development environment, run:
 ./dev
 ```
 
-That starts the loopback control plane, builds and opens an isolated Debug Mac app, then builds,
-installs and opens the iOS app in an available iPhone Simulator. It installs the control-plane
-Node dependencies when needed. Use `./dev --no-ios` for Mac-only work or `./dev --backend-only`
-for the service alone. `./dev --fresh --no-ios` launches the Mac app as a first-time user in a
-new empty home, without touching the normal development home or installed-app state.
-`./dev --help` lists the remaining options. Ctrl-C stops the backend but leaves the apps open so
-an active local agent session is never terminated implicitly.
+That builds and opens an isolated Debug Mac app, starts the loopback control plane, and builds
+and opens the iOS app in an available iPhone Simulator. `./dev --no-ios` is Mac-only,
+`./dev --fresh --no-ios` launches as a first-time user in an empty home, and `./dev --help`
+lists the rest.
+
+Or build directly:
 
 ```bash
 # The Mac app
 xcodebuild -project Threading.xcodeproj -scheme Threading -configuration Debug build
 open "$(ls -dt ~/Library/Developer/Xcode/DerivedData/Threading-*/Build/Products/Debug/Threading.app | head -1)"
 
-# The iOS companion (simulator; a device needs your own signing team)
+# The iPhone app (Simulator; a device needs your own signing team)
 xcodebuild -project Threading.xcodeproj -scheme ThreadingMobile \
   -destination 'generic/platform=iOS Simulator' build
 
@@ -72,19 +269,29 @@ scripts/test.sh          # fast: everything that keeps windows off screen
 scripts/test.sh all      # the whole suite
 ```
 
-Targets macOS 13+ on Apple silicon (arm64 only). The submodules under `Packages/Vendor/` (`ThinkingOrbs`, `LabelMorph`, and
-`BorderBeamKit`) are cloned with `git clone --recurse-submodules`; SwiftTerm is vendored beside
-them. First-party Swift packages live directly under `Packages/`, and auxiliary executables live
-under `Targets/`.
+### Repository layout
+
+| Path | What lives there |
+|---|---|
+| `Sources/Threading/` | The Mac app (Swift, AppKit) |
+| `Sources/ThreadingMobile/` | The iPhone app |
+| `Packages/` | First-party Swift packages — remote wire protocol, PTY host, extension and plugin kits, simulator and Android support, usage, Markdown |
+| `Packages/Vendor/` | SwiftTerm (vendored) and the ThinkingOrbs, LabelMorph and BorderBeamKit submodules |
+| `Targets/` | Helper executables — the PTY host, controller, MCP bridge, proxy, trigger daemon, Simulator helper, Quick Look preview |
+| `Plugins/` | Native plugins that ship with the app, such as Device Logs |
+| `Service/` | The hosted rendezvous control plane and supporting services |
+| `docs/` | Architecture notes, extension authoring, feature drafts and decisions |
 
 ## Documentation
 
 - [`USER_GUIDE.md`](USER_GUIDE.md) — every user-facing feature and shortcut.
 - [`docs/architecture/`](docs/architecture/) — one file per subsystem, recording the decisions
-  and measurements behind it. Read the relevant file before changing a subsystem; the index is
+  and measurements behind it. Read the relevant one before changing a subsystem; the index is
   [`CLAUDE.md`](CLAUDE.md).
-- [`docs/feature-drafts/`](docs/feature-drafts/) — researched proposals that are not committed
-  product behavior yet; its README is the single priority index for those drafts.
+- [`docs/extensions/AGENT_AUTHORING.md`](docs/extensions/AGENT_AUTHORING.md) — writing an
+  extension.
+- [`docs/feature-drafts/`](docs/feature-drafts/) and [`docs/decisions/`](docs/decisions/) —
+  researched proposals, and ideas investigated to a recommendation.
 
 ## Licensing
 
@@ -94,26 +301,25 @@ carve-outs, each under its own terms:
 - `Service/ThreadingControlPlane/` — the hosted rendezvous service, under the
   [Functional Source License](https://fsl.software) (FSL-1.1-ALv2, its own `LICENSE`). Read it,
   modify it, run it for your own Macs; you may not offer it as a competing service. Each version
-  becomes Apache-2.0 two years after it is made available.
-- `Packages/Vendor/SwiftTerm/` — a vendored fork of [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm),
-  MIT (its `LICENSE` file governs that tree).
-- `Packages/Vendor/ThinkingOrbs/`, `Packages/Vendor/LabelMorph/`, and
-  `Packages/Vendor/BorderBeamKit/` — submodule forks, each MIT under its own
-  `LICENSE`.
+  becomes Apache-2.0 two years after it is made available. It stays readable on purpose: the
+  claim that no transcript, prompt or terminal byte reaches the server is only worth something
+  if you can check it.
+- `Packages/Vendor/SwiftTerm/` — a vendored fork of
+  [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm), MIT.
+- `Packages/Vendor/ThinkingOrbs/`, `Packages/Vendor/LabelMorph/` and
+  `Packages/Vendor/BorderBeamKit/` — submodule forks, each MIT under its own `LICENSE`.
 - `Sources/Threading/Resources/Fonts/` — open-licensed fallback fonts; provenance and license
   per family in its `*-SOURCE.md`.
 
-The App Store build of the iOS companion is distributed by the copyright holder under the App
-Store's terms rather than the GPL — which is why contributions require the lightweight
-agreement described in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Other bundled third-party components are listed in
+[`Legal/THIRD_PARTY_NOTICES.md`](Legal/THIRD_PARTY_NOTICES.md).
 
-The control plane is the one component with a running cost and an operator, so it is the one
-component under a license that prevents a competing hosted instance. It stays readable on
-purpose: the claim that no transcript, prompt, or terminal byte reaches the server is only worth
-something if you can check it.
+An App Store build of the iPhone app would be distributed by the copyright holder under the App
+Store's terms rather than the GPL, which is why contributions require the lightweight agreement
+described in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) — including the build gates (the repository enforces
-its architecture, theme, and localization boundaries at build time), the test levels, and the
-contributor license agreement.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) — the build gates (architecture, theme and localization
+boundaries are enforced at build time), the test levels, and the contributor license agreement.
+Bugs and ideas go to [Issues](https://github.com/everlof/threading/issues).
