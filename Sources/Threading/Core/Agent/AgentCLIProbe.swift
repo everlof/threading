@@ -2,11 +2,9 @@ import Foundation
 
 /// Answers whether the agent CLIs are actually reachable from the shell that will launch them.
 ///
-/// Nothing else checks this: `AgentLauncher` trusts the login shell's PATH, so a machine
-/// without `claude` on it launches a session whose first output is `command not found` inside
-/// a terminal pane — a shell error where a sentence belongs. This probe asks the same login
-/// shell the launcher uses (`AgentLauncher.loginShellPath`, the same `command -v` shape as
-/// `ExternalAppLauncher.locate`), so its answer and the launch cannot disagree about PATH.
+/// Availability, account setup, updates and external-editor discovery all resolve executables
+/// against the PATH exported by the launcher's login shell. Startup prose and aliases are not
+/// executable paths; the shared framed environment reader keeps them out of every lookup.
 enum AgentCLIProbe {
 
     /// Marks the beginning of the environment emitted by the login-shell probe. Shell profiles
@@ -40,24 +38,12 @@ enum AgentCLIProbe {
         }
     }
 
-    /// Shared by external-editor discovery so every login-shell lookup has the same quoting,
-    /// deadline, size bound, and executable validation.
+    /// Account setup and external-editor discovery use the same framed PATH read as shared
+    /// availability. Parsing raw `command -v` output rejected installed tools whenever a login
+    /// profile printed a greeting or defined an alias for the command.
     nonisolated static func locate(_ executable: String, shell: String) -> String? {
-        var command = ShellCommand(word: "command")
-        command.append(word: "-v")
-        command.append(word: executable)
-        guard let result = try? BoundedChildProcess.run(
-            executable: shell,
-            arguments: ["-l", "-c", command.source],
-            timeout: AgentCLIProbeDefaults.timeout,
-            maximumOutputBytes: AgentCLIProbeDefaults.maximumOutputBytes,
-            output: .standardOutput
-        ), result.termination == .exited(0), !result.outputWasTruncated else { return nil }
-
-        return path(
-            fromShellOutput: String(decoding: result.output, as: UTF8.self),
-            isExecutable: { FileManager.default.isExecutableFile(atPath: $0) }
-        )
+        guard let path = loginShellPATH(shell: shell) else { return nil }
+        return locate(executable, on: path)
     }
 
     /// Reads the PATH exported by the same login shell that launches agents.
@@ -125,17 +111,6 @@ enum AgentCLIProbe {
             return value.isEmpty ? nil : value
         }
         return nil
-    }
-
-    /// The pure half: turns raw `command -v` output into a validated absolute path. A shell
-    /// that prints an alias definition, an error, or nothing at all answers nil.
-    nonisolated static func path(
-        fromShellOutput output: String,
-        isExecutable: (String) -> Bool
-    ) -> String? {
-        let path = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard path.hasPrefix("/"), !path.contains("\n"), isExecutable(path) else { return nil }
-        return path
     }
 }
 
