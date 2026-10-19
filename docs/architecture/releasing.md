@@ -702,8 +702,10 @@ line, so a release-time failure is diagnosed by reading which commits moved the 
 by bisecting builds. `--report` and `--summary` never fail and work on any bundle.
 
 The first baseline was seeded from the auto-installer's profiled export of `884de6e3e`, thinned,
-and on 2026-10-18 re-measured from that bundle with the proxy-source layout applied (its
-`measuredFrom` says exactly how); the first `release.sh` export should replace it. The tests are
+and on 2026-10-18 re-measured from that bundle with the proxy-source layout applied. The first
+0.8.0 `release.sh` export replaced that seed on 2026-10-20 after passing every existing component
+limit: 112.29 MB on disk and 46.50 MB compressed, with no new component. `measuredFrom` names the
+exact source commit and signing configuration. The tests are
 `scripts/tests/test_bundle_size.py`, run by `ci.sh`. What is being done about the size itself is
 the [bundle diet plan](../feature-drafts/bundle-diet.md).
 
