@@ -552,11 +552,12 @@ long way ahead of it — 203 commits on 2026-09-06 — so a bare `git push` publ
 backlog too, and the submodules with it. Use `git fetch --prune --no-recurse-submodules origin`
 when you need to know what is already published. To exercise the hook, pipe fabricated ref lines
 into `scripts/pre_push.sh` directly. The sole scripted publication exception is
-`scripts/publish_local_release.sh`: it names the tested commit's outer `master` and one annotated
-tag as explicit refspecs and disables recursion in both configuration and the push option. Do not generalize its
-push primitive into a convenience command. Before either ref moves it runs both `scripts/test.sh
-all` and `scripts/ci.sh`, then proves the clean checkout still points at the commit those gates
-tested; the locally invoked publisher skips only that duplicate quality-gate run.
+`scripts/publish_local_release.sh`: it names the tested commit's outer branch (`master` or the
+tag's matching `release/<version>`) and one annotated tag as explicit refspecs and disables
+recursion in both configuration and the push option. Do not generalize its push primitive into
+a convenience command. Before either ref moves it runs the complete Mac release quality gate
+(`scripts/ci.sh --mac-release`), then proves the clean checkout still points at the commit that
+gate tested; the locally invoked publisher skips only that duplicate quality-gate run.
 
 **Fast is defined by "orders a window on screen", not by "is UI".** Almost every UI test here —
 all the `*RenderTests`, the themed component tests, the pane header/footer tests — builds an

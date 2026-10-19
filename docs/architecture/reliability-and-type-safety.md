@@ -107,6 +107,8 @@ Hosted UI tests use XCTest's async `setUp()` and `tearDown()` hooks for main-act
 The synchronous hooks remain nonisolated even when the test class is `@MainActor`; capturing
 the test instance in `MainActor.assumeIsolated` does not repair that ownership. Async hooks
 let XCTest await the fixture's actor, including cleanup of themed global state between cases.
+`HostedStoreTestCase` declares its async cleanup hook `@MainActor` too, so subclass cleanup
+stays on that owner when awaiting `super.tearDown()`.
 
 ## Bounded work and observable failure
 

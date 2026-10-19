@@ -626,10 +626,12 @@ final class ThemedTabStripView: NSView {
         }
         guard autoscrollTimer == nil else { return }
         let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
-            MainActor.assumeIsolated {
-                guard let self else { timer.invalidate(); return }
+            let hasOwner = MainActor.assumeIsolated {
+                guard let self else { return false }
                 self.advanceDragAutoscroll()
+                return true
             }
+            if !hasOwner { timer.invalidate() }
         }
         autoscrollTimer = timer
         RunLoop.main.add(timer, forMode: .common)

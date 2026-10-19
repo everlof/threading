@@ -18,10 +18,39 @@ saw the betas.
 
 ## [0.8.0]
 
+### Added
+
+- **Bluetooth diagnostics.** Capture iPhone Bluetooth packets, inspect protocols, transactions
+  and streams, and follow firmware updates across device address changes.
+- **WebExtension workbench.** Develop and debug browser extensions with worker, relay and
+  lifecycle tracing.
+- Open project-declared app states on devices in the Simulator workspace. Agents can prepare
+  an existing simulator without creating another one.
+- Compare image attachments on Mac and iPhone, and keep comparison results with the chat.
+- Agents can start supervised child chats and report their results back. Linked workrooms
+  let agents ask people outside the Mac for input.
+- Reclaim unused Xcode DerivedData from storage tools, with notices when disk space runs low.
+
+### Changed
+
+- Nest workspace panes and keep regular device logs and Bluetooth captures in separate tabs.
+  Device logs continue recording while hidden and support reading complete app logs.
+- Browser tools support direct file uploads, suggested download destinations and copying a
+  screenshot to the clipboard. Command-T opens a browser tab while the browser has focus.
+- The Mac download is smaller: the proxy helper's rebuildable source is now provided beside
+  the app on the release page.
+
 ### Fixed
 
 - Add Login finds installed agent tools even when the login shell prints a startup greeting or
   defines an alias for the tool.
+- Browser automation continues working while Threading is hidden, and conversation resizing
+  stays responsive beside the browser.
+- A repeated Command-Return no longer starts an extra empty chat. Copy, Paste and Select All
+  work in modal prompts.
+- Bluetooth profile downloads work reliably, and the Apple account choice is remembered.
+- Remote chats reuse logins and recover their agent tools. iPhone terminal input supports held
+  Delete and clearing the current input from the key bar.
 
 ## [0.7.0]
 

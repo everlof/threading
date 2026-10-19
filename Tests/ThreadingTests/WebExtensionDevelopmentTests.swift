@@ -172,7 +172,7 @@ final class WebExtensionDevelopmentTests: XCTestCase {
         let received = root.appendingPathComponent("received")
         let proceed = root.appendingPathComponent("continue")
         let inspect = Task { await service.call(.init(action: .inspect), sessionID: id, project: root) }
-        try await awaitFile(received)
+        try await Self.awaitFile(received)
         var entered = false
         let scaffold = Task {
             entered = true
@@ -186,7 +186,7 @@ final class WebExtensionDevelopmentTests: XCTestCase {
         try FileManager.default.removeItem(at: received)
 
         let read = Task { await service.call(.init(action: .inspect), sessionID: id, project: root) }
-        try await awaitFile(received)
+        try await Self.awaitFile(received)
         entered = false
         let pending = Task {
             entered = true
@@ -212,7 +212,7 @@ final class WebExtensionDevelopmentTests: XCTestCase {
         })
         defer { service.release(id) }
         let poll = Task { await service.call(.init(action: .inspect), sessionID: id, project: root) }
-        try await awaitFile(root.appendingPathComponent("received"))
+        try await Self.awaitFile(root.appendingPathComponent("received"))
         var entered = false
         let agentRead = Task {
             entered = true
@@ -355,7 +355,7 @@ final class WebExtensionDevelopmentTests: XCTestCase {
         return script
     }
 
-    private func awaitFile(_ url: URL) async throws {
+    private static func awaitFile(_ url: URL) async throws {
         let deadline = Date().addingTimeInterval(10)
         while !FileManager.default.fileExists(atPath: url.path), Date() < deadline {
             try await Task.sleep(nanoseconds: 20_000_000)

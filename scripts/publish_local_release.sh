@@ -10,7 +10,7 @@
 #
 # This is intentionally the whole outer-repository choreography: validate the local signing
 # material and remote allocation, run the complete Mac shipping test level and release-quality gate,
-# prove that the clean commit which passed them is still checked out, push only `master`,
+# prove that the clean commit which passed them is still checked out, push only that branch,
 # create/push one annotated tag, then hand the build/notarize/appcast/release work to the same
 # publish_release.sh used by CI. It is safe to rerun after a partial publication.
 
@@ -18,7 +18,6 @@ set -euo pipefail
 
 readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPO="${THREADING_REPO:-everlof/threading}"
-readonly RELEASE_BRANCH="master"
 readonly RELEASE_WORKFLOW="release.yml"
 readonly NOTARY_PROFILE="${NOTARY_PROFILE:-mjukis-notary}"
 
@@ -34,6 +33,7 @@ DESCRIPTION="$(release_tag_describe "$TAG")" \
     || fail "'$TAG' is not a publishable release tag"
 read -r CHANNEL VERSION <<< "$DESCRIPTION"
 [[ -n "$CHANNEL" && -n "$VERSION" ]] || fail "could not resolve '$TAG'"
+readonly RELEASE_BRANCH="$(git -C "$ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
 
 push_outer_ref() {
     # The repository explicitly enables submodule recursion. Both controls are named because
@@ -64,6 +64,8 @@ assert_release_snapshot() {
     current_commit="$(git -C "$ROOT" rev-parse HEAD)"
     [[ "$current_commit" == "$HEAD_COMMIT" ]] \
         || fail "HEAD moved from tested commit $HEAD_COMMIT to $current_commit"
+    [[ "$(git -C "$ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)" == "$RELEASE_BRANCH" ]] \
+        || fail "the release branch changed after validation"
     [[ -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ]] \
         || fail "the worktree changed after release validation; commit and rerun"
 }
@@ -99,8 +101,10 @@ trap 'restore_release_workflow || true' EXIT
 # MARK: - Local and remote preflight
 
 say "Checking the release checkout"
-[[ "$(git -C "$ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)" == "$RELEASE_BRANCH" ]] \
-    || fail "releases must be cut from the $RELEASE_BRANCH branch"
+case "$RELEASE_BRANCH" in
+    master|"release/$VERSION") ;;
+    *) fail "releases must be cut from master or release/$VERSION" ;;
+esac
 [[ -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ]] \
     || fail "the worktree must be completely clean, including untracked files and submodules"
 
@@ -115,13 +119,16 @@ command -v gh >/dev/null || fail "the gh CLI is required"
 gh auth status >/dev/null 2>&1 || fail "gh is not signed in — run: gh auth login"
 gh repo view "$REPO" >/dev/null 2>&1 || fail "cannot reach github.com/$REPO"
 
-git -C "$ROOT" -c submodule.recurse=false fetch --no-recurse-submodules --no-tags \
-    origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
 readonly HEAD_COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
 remote_branch_commit="$(remote_ref_commit --heads origin "refs/heads/$RELEASE_BRANCH")"
-[[ -n "$remote_branch_commit" ]] || fail "origin has no $RELEASE_BRANCH branch"
-git -C "$ROOT" merge-base --is-ancestor "$remote_branch_commit" "$HEAD_COMMIT" \
-    || fail "local $RELEASE_BRANCH is not a fast-forward of origin/$RELEASE_BRANCH"
+if [[ -n "$remote_branch_commit" ]]; then
+    git -C "$ROOT" -c submodule.recurse=false fetch --no-recurse-submodules --no-tags \
+        origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
+    git -C "$ROOT" merge-base --is-ancestor "$remote_branch_commit" "$HEAD_COMMIT" \
+        || fail "local $RELEASE_BRANCH is not a fast-forward of origin/$RELEASE_BRANCH"
+elif [[ "$RELEASE_BRANCH" == "master" ]]; then
+    fail "origin has no master branch"
+fi
 
 # More than one release tag on the same commit makes `git describe --exact-match` ambiguous,
 # and publish_release.sh must never guess which audience or version it is building for.

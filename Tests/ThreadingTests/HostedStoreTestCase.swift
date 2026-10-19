@@ -24,14 +24,13 @@ class HostedStoreTestCase: XCTestCase {
     private var mainWindowFixtureOwners: [MainWindowTestFixtureOwner] = []
 
     /// Overrides the async hook rather than `tearDown()` so subclasses keep their own sync
-    /// teardown, and so the main-actor work can be awaited instead of asserted into place —
+    /// teardown, and so XCTest awaits the fixture's main actor instead of asserting isolation —
     /// `MainActor.assumeIsolated` would trap here for an async test case.
+    @MainActor
     override func tearDown() async throws {
         try await super.tearDown()
-        await MainActor.run {
-            tearDownMainWindowFixtures()
-            Self.eraseHostedStore()
-        }
+        tearDownMainWindowFixtures()
+        Self.eraseHostedStore()
     }
 
     /// Retains the explicit owner of a main-window fixture until XCTest has run the subclass's

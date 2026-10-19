@@ -102,7 +102,8 @@ final class BluetoothProfileDownloadView: NSView, WKNavigationDelegate, WKUIDele
         Task { @MainActor in
             active?.delegate = nil
             if let active {
-                active.cancel { _ in if let partial { Self.removeDownload(partial) } }
+                _ = await active.cancel()
+                if let partial { Self.removeDownload(partial) }
             } else if let partial { Self.removeDownload(partial) }
         }
     }

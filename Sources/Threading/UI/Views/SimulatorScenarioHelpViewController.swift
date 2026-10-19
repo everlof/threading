@@ -70,7 +70,7 @@ final class SimulatorScenarioHelpViewController: NSViewController {
         title.textColor = Design.Text.label
 
         let explanation = Self.wrapping(SimulatorScenarioGuide.explanation, width: Metrics.contentWidth)
-        statusLabel.font = Design.Typography.caption()
+        statusLabel.applyFont(.caption)
         // The popover sizes itself from `fittingSize` before the panel exists; a wrapping label
         // without a layout width measures as one line and the panel comes out short.
         statusLabel.preferredMaxLayoutWidth = Metrics.contentWidth
@@ -82,16 +82,22 @@ final class SimulatorScenarioHelpViewController: NSViewController {
             term.textColor = Design.Text.tertiary
             return term
         }
-        let termWidth = ceil(terms.map(\.intrinsicContentSize.width).max() ?? 0)
-        let detailWidth = Metrics.contentWidth - termWidth - Design.Spacing.medium
-        let reference = NSGridView(views: zip(terms, SimulatorScenarioGuide.reference).map { term, line in
-            [term, Self.wrapping(line.detail, width: detailWidth)]
-        })
+        let details = SimulatorScenarioGuide.reference.map {
+            Self.wrapping($0.detail, width: Metrics.contentWidth)
+        }
+        let reference = NSGridView(views: zip(terms, details).map { term, detail in [term, detail] })
         reference.rowSpacing = Design.Spacing.tight
         reference.columnSpacing = Design.Spacing.medium
-        reference.column(at: 0).width = termWidth
         reference.column(at: 0).xPlacement = .leading
         reference.rowAlignment = .firstBaseline
+        root.onThemeChange = { [weak self] in
+            Self.fitReference(reference, terms: terms, details: details)
+            guard let self else { return }
+            self.statusLabel.reapplyRecordedFont()
+            self.feedback.reapplyRecordedFont()
+            self.apply(self.status)
+            self.feedback.textColor = Design.Text.secondary
+        }
 
         let exampleTitle = NSTextField(labelWithString: L10n.format("Example: %@", SimulatorScenarioDefaults.relativePath))
         exampleTitle.applyFont(.subheading)
@@ -99,7 +105,7 @@ final class SimulatorScenarioHelpViewController: NSViewController {
         let example = ThemedTextView.scrolling()
         example.textView.isEditable = false
         example.textView.isSelectable = true
-        example.textView.font = Design.Typography.compactCode()
+        example.textView.applyFont(.compactCode)
         example.textView.textColor = Design.Text.label
         example.textView.string = SimulatorScenarioGuide.example
         // A well, so the example reads as a file rather than more of the panel's prose.
@@ -112,7 +118,7 @@ final class SimulatorScenarioHelpViewController: NSViewController {
         primaryButton.setAccessibilityIdentifier(Identifiers.primary)
         copyExampleButton.setAccessibilityIdentifier(Identifiers.copyExample)
         copyPromptButton.setAccessibilityIdentifier(Identifiers.copyPrompt)
-        feedback.font = Design.Typography.caption()
+        feedback.applyFont(.caption)
         feedback.textColor = Design.Text.secondary
         let actions = NSStackView(views: [primaryButton, copyExampleButton, copyPromptButton, feedback])
         actions.spacing = Design.Spacing.small
@@ -141,7 +147,7 @@ final class SimulatorScenarioHelpViewController: NSViewController {
         root.setAccessibilityRole(.group)
         root.setAccessibilityLabel(L10n.string("Scenarios"))
         root.setAccessibilityIdentifier(Identifiers.content)
-        apply(status)
+        root.rederiveThemedContent()
     }
 
     func apply(_ status: Status) {
@@ -253,9 +259,31 @@ final class SimulatorScenarioHelpViewController: NSViewController {
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return label
     }
+
+    private static func fitReference(_ grid: NSGridView, terms: [NSTextField], details: [NSTextField]) {
+        terms.forEach { $0.reapplyRecordedFont() }
+        let termWidth = ceil(terms.map(\.intrinsicContentSize.width).max() ?? 0)
+        let detailWidth = Metrics.contentWidth - termWidth - Design.Spacing.medium
+        grid.column(at: 0).width = termWidth
+        for detail in details {
+            detail.preferredMaxLayoutWidth = detailWidth
+            detail.invalidateIntrinsicContentSize()
+        }
+    }
 }
 
 /// Takes the keyboard so Escape has somewhere to arrive from and focus can return.
-private final class ScenarioHelpRootView: NSView {
+private final class ScenarioHelpRootView: NSView, ThemeDerivedContent {
+    var onThemeChange: (@MainActor () -> Void)?
     override var acceptsFirstResponder: Bool { true }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        rederiveThemedContent()
+    }
+
+    func rederiveThemedContent() {
+        effectiveAppearance.performAsCurrentDrawingAppearance { onThemeChange?() }
+        invalidateIntrinsicContentSize()
+    }
 }

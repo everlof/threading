@@ -37,14 +37,14 @@ final class DiskPressureNoticeTests: XCTestCase {
         (reply?["hookSpecificOutput"] as? [String: Any])?["additionalContext"] as? String
     }
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         DiskPressureNotice.reset()
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         DiskPressureNotice.reset()
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Deciding

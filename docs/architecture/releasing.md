@@ -16,7 +16,7 @@ builds and tests ThreadingMobile. Because the tests are long enough for Keychain
 it rechecks
 the Developer ID identity, notary profile, and matching Sparkle key immediately before the first
 ref moves, then proves the checkout remained unchanged during that check. Only then does it push
-the outer repository and annotated tag, temporarily prevent the tag workflow from racing a second
+the checked-out outer branch and annotated tag, temporarily prevent the tag workflow from racing a second
 signed build, and invoke the same publisher locally.
 The gate's `--mac-release` mode runs `Threading-All` once in fresh DerivedData with complete
 concurrency checking and the warning ratchet. This includes the tests formerly run by the
@@ -398,9 +398,13 @@ Nothing shipped before Sparkle existed, so the release line starts wherever it l
 a reasonable first tag. The only rule from the first Sparkle-carrying build onward is that the
 number goes up.
 
-The local driver creates the annotated tag only after the complete shipping test level passes and
-the outer `master` push succeeds. It is resumable: a local or remote tag already at the same HEAD
-is reused, and the publisher ignores only its own existing GitHub release when re-checking version
+The local driver accepts `master` or `release/<version>` matching the requested tag. It pushes
+only the checked-out branch, so a release checkout can ship while other work continues on master.
+A new release branch is created remotely only after the quality gate; an existing remote branch
+must be an ancestor of the tested commit, and no ref is forced. Snapshot checks also verify the
+branch has not changed. The driver creates the annotated tag only after the complete shipping
+test level passes and the outer branch push succeeds. It is resumable: a local or remote tag
+already at the same HEAD is reused, and the publisher ignores only its own existing GitHub release when re-checking version
 allocation. That matters because release creation and the `appcast.xml` upload are separate remote
 writes. A different, lightweight, moved or version-colliding tag fails closed.
 

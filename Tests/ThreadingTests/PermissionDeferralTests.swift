@@ -16,8 +16,8 @@ final class PermissionDeferralTests: HostedStoreTestCase {
     private var originalGrantStatus: ((SystemPrivacyPermission) -> SystemPrivacyStatus?)!
     private var sessions: [SessionID] = []
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         // Real user state in a hosted test: an inherited mode would decide these assertions.
         defaultMode = AppSettings.shared.defaultPermissionMode
         AppSettings.shared.defaultPermissionMode = nil
@@ -26,7 +26,7 @@ final class PermissionDeferralTests: HostedStoreTestCase {
         PermissionBroker.discardSystemGrantBriefings()
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         AppSettings.shared.defaultPermissionMode = defaultMode
         PermissionBroker.present = nil
         PermissionBroker.explainSystemGrant = nil
@@ -36,7 +36,7 @@ final class PermissionDeferralTests: HostedStoreTestCase {
             UnattendedRunPermissions.unregister(session)
             PermissionBroker.discard(sessionID: session)
         }
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - The policy

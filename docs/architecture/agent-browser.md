@@ -857,6 +857,16 @@ loop, window activation or system-sleep prevention. On macOS 13 the host activit
 and initial viewport still apply, but the WebKit scheduling API is unavailable. Changing only
 the WebKit scheduling policy does not cure hidden-page stalls.
 
+After a detached page has fully idled, changing that policy is not by itself a readiness
+acknowledgement. On macOS 26.5 a click could complete in 0.25 seconds while the next async
+metadata read timed out after 15 seconds. `BrowserExecutionActivity.prepare` evaluates one
+constant through WebKit's synchronous JavaScript API before dispatching a detached page's
+async bridge request or snapshot. That callback acknowledges a runnable WebKit process. The
+existing activity spans both phases and the original deadline covers both; a wake-up arriving
+after the deadline cannot start a mutation. Attached pages skip this extra evaluation. There
+is no retry, window movement, timer loop or idle keepalive, and the original policy is still
+restored at the end of each operation.
+
 A new web view starts at 1024 × 768 until its host supplies a nonzero layout. This is host-owned
 initial geometry, not responsive emulation: an explicit viewport still wins, and ordinary
 visible layout replaces the initial size. This matters for a tab created in a background session,

@@ -1389,7 +1389,7 @@ final class BrowserViewController: NSViewController {
             let matching = records.filter {
                 Self.websiteDataRecord($0, belongsToHost: origin.host)
             }
-            let finish = {
+            let finish: @MainActor @Sendable () -> Void = {
                 // A just-written cookie may not yet appear in WebKit's website data records.
                 // Delete it from the captured store before reporting that clearing finished.
                 Self.removeCookies(in: store, matchingHost: origin.host) {
@@ -1410,7 +1410,7 @@ final class BrowserViewController: NSViewController {
     private static func removeCookies(
         in store: WKWebsiteDataStore,
         matchingHost host: String?,
-        completion: @escaping () -> Void
+        completion: @escaping @MainActor @Sendable () -> Void
     ) {
         store.httpCookieStore.getAllCookies { cookies in
             let normalizedHost = host?
@@ -1425,7 +1425,7 @@ final class BrowserViewController: NSViewController {
                     || ((domain.contains(".") || domain == "localhost")
                         && normalizedHost.hasSuffix("." + domain))
             }
-            func remove(at index: Int) {
+            @MainActor func remove(at index: Int) {
                 guard index < matching.count else { completion(); return }
                 store.httpCookieStore.delete(matching[index]) { remove(at: index + 1) }
             }
@@ -2324,36 +2324,51 @@ final class BrowserViewController: NSViewController {
         let page = webView
         let finishActivity = executionActivity.begin(for: page)
         defer { finishActivity() }
-        let result: Any = try await withCheckedThrowingContinuation { continuation in
+        let json: String? = try await withCheckedThrowingContinuation { continuation in
             let completion = BrowserBridgeCallCompletion(
                 continuation,
                 onLateCompletion: onLateCompletion
             )
-            page.callAsyncJavaScript(
-                script,
-                arguments: arguments,
-                in: nil,
-                in: .defaultClient
-            ) { [weak self] result in
-                Task { @MainActor in
-                    let accepted = completion.finish(result)
-                    let outcome: String
-                    let detail: String?
-                    switch result {
-                    case .success:
-                        outcome = accepted ? "success" : "late-success"
-                        detail = nil
-                    case .failure(let error):
-                        outcome = accepted ? "webkit-error" : "late-webkit-error"
-                        let nsError = error as NSError
-                        detail = "\(nsError.domain) \(nsError.code)"
+            let receive: @MainActor @Sendable (Result<Any, Error>) -> Void = { [weak self] result in
+                let accepted = completion.finish(result)
+                let outcome: String
+                let detail: String?
+                switch result {
+                case .success:
+                    outcome = accepted ? "success" : "late-success"
+                    detail = nil
+                case .failure(let error):
+                    outcome = accepted ? "webkit-error" : "late-webkit-error"
+                    let nsError = error as NSError
+                    detail = "\(nsError.domain) \(nsError.code)"
+                }
+                self?.recordAgentBridgePhase(
+                    "javascript.dispatch",
+                    startedAt: startedAt,
+                    outcome: outcome,
+                    detail: detail
+                )
+            }
+            executionActivity.prepare(for: page) { [weak page] readiness in
+                guard completion.isPending else {
+                    // A late wake-up must not dispatch a mutation after its tool timed out.
+                    completion.finish(readiness.map { _ in NSNull() as Any })
+                    return
+                }
+                switch readiness {
+                case .success:
+                    guard let page else {
+                        receive(.failure(NSError(
+                            domain: WKError.errorDomain, code: WKError.Code.webViewInvalidated.rawValue
+                        )))
+                        return
                     }
-                    self?.recordAgentBridgePhase(
-                        "javascript.dispatch",
-                        startedAt: startedAt,
-                        outcome: outcome,
-                        detail: detail
+                    page.callAsyncJavaScript(
+                        script, arguments: arguments, in: nil, in: .defaultClient,
+                        completionHandler: receive
                     )
+                case .failure(let error):
+                    receive(.failure(error))
                 }
             }
             if let timeout {
@@ -2373,7 +2388,7 @@ final class BrowserViewController: NSViewController {
                 }
             }
         }
-        guard let json = result as? String, let data = json.data(using: .utf8) else {
+        guard let json, let data = json.data(using: .utf8) else {
             recordAgentBridgePhase(
                 "javascript.decode",
                 startedAt: startedAt,
@@ -2594,7 +2609,7 @@ final class BrowserViewController: NSViewController {
         let pixelHeight = max(1, Int(captureSize.height.rounded()))
         return try await withCheckedThrowingContinuation { continuation in
             let completion = BrowserScreenshotCompletion(continuation)
-            page.takeSnapshot(with: config) { [weak self] image, error in
+            let receive: @MainActor @Sendable (NSImage?, Error?) -> Void = { [weak self] image, error in
                 Task { @MainActor in
                     if let error {
                         if completion.finish(.failure(
@@ -2644,6 +2659,18 @@ final class BrowserViewController: NSViewController {
                         )
                     }
                 }
+            }
+            executionActivity.prepare(for: page) { [weak page] readiness in
+                guard completion.isPending else { return }
+                if case .failure(let error) = readiness {
+                    receive(nil, error)
+                    return
+                }
+                guard let page else {
+                    receive(nil, NSError(domain: WKError.errorDomain, code: WKError.Code.webViewInvalidated.rawValue))
+                    return
+                }
+                page.takeSnapshot(with: config, completionHandler: receive)
             }
             DispatchQueue.main.asyncAfter(
                 deadline: .now() + BrowserDefaults.snapshotTimeout
@@ -4953,12 +4980,13 @@ private enum BrowserConsoleLevel {
 
 @MainActor
 private final class BrowserBridgeCallCompletion {
-    private var continuation: CheckedContinuation<Any, Error>?
+    private var continuation: CheckedContinuation<String?, Error>?
+    var isPending: Bool { continuation != nil }
     private var timedOut = false
     private var onLateCompletion: (@MainActor () -> Void)?
 
     init(
-        _ continuation: CheckedContinuation<Any, Error>,
+        _ continuation: CheckedContinuation<String?, Error>,
         onLateCompletion: (@MainActor () -> Void)?
     ) {
         self.continuation = continuation
@@ -4977,7 +5005,7 @@ private final class BrowserBridgeCallCompletion {
         }
         self.continuation = nil
         onLateCompletion = nil
-        continuation.resume(with: result)
+        continuation.resume(with: result.map { $0 as? String })
         return true
     }
 
@@ -4994,6 +5022,7 @@ private final class BrowserBridgeCallCompletion {
 @MainActor
 private final class BrowserScreenshotCompletion {
     private var continuation: CheckedContinuation<BrowserScreenshotCapture, Error>?
+    var isPending: Bool { continuation != nil }
 
     init(_ continuation: CheckedContinuation<BrowserScreenshotCapture, Error>) {
         self.continuation = continuation

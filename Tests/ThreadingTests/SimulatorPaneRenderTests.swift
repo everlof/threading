@@ -13,6 +13,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
     private enum Render {
         static let size = NSSize(width: 1_280, height: 760)
         static let panelWidth: CGFloat = 420
+        static let minimumReadableStatusPixels = 10
 
         static var directory: URL {
             if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
@@ -255,6 +256,9 @@ final class SimulatorPaneRenderTests: XCTestCase {
     /// The Scenarios button, the band on a step and after a refusal, and the setup help, where they
     /// ship: in the right panel beside a conversation, light and dark, and at the narrowest pane.
     func testRendersScenariosInTheWorkspace() throws {
+        try FileManager.default.createDirectory(at: Render.directory, withIntermediateDirectories: true)
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
         let checkout = FileManager.default.temporaryDirectory
             .appendingPathComponent("scenario-render-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: checkout.appendingPathComponent(".threading"), withIntermediateDirectories: true)
@@ -330,11 +334,18 @@ final class SimulatorPaneRenderTests: XCTestCase {
             }
         }
 
-        for (name, appearance) in Render.appearances {
+        let helpThemes: [(String, AppTheme, NSAppearance.Name)] = [
+            ("light", .system, .aqua), ("dark", .system, .darkAqua),
+            ("cyberpunk", try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Cyberpunk" }), .darkAqua),
+            ("swiss", try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Swiss Minimalist" }), .aqua)
+        ]
+        let helpFile = URL(fileURLWithPath: "/Users/developer/Projects/Example-App-With-A-Long-Checkout-Name/.threading/scenarios.json")
+        for (name, theme, appearance) in helpThemes {
             for (state, status) in [
-                ("missing", SimulatorScenarioHelpViewController.Status.missing(checkout.appendingPathComponent(".threading/scenarios.json"))),
-                ("loaded", .loaded(checkout.appendingPathComponent(".threading/scenarios.json"), scenarios: 3, problems: 0)),
+                ("missing", SimulatorScenarioHelpViewController.Status.missing(helpFile)),
+                ("loaded", .loaded(helpFile, scenarios: 3, problems: 0)),
             ] {
+                AppThemePalette.set(.system)
                 let help = SimulatorScenarioHelpViewController(status: status)
                 let drawing = try XCTUnwrap(NSAppearance(named: appearance))
                 help.view.appearance = drawing
@@ -346,17 +357,79 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 let ground = NSView(frame: help.view.bounds)
                 ground.wantsLayer = true
                 ground.appearance = drawing
+                ground.addSubview(help.view)
+                // Themed controls bind their geometry updates when attached to a window.
+                // Keep the same lifecycle as the popover without showing a test window.
+                let window = NSWindow(contentRect: ground.bounds, styleMask: [.borderless],
+                                      backing: .buffered, defer: false)
+                window.appearance = drawing
+                window.contentView = ground
+                defer { withExtendedLifetime(window) {} }
+                // Switch after construction: a frozen font otherwise looks correct on first load.
+                AppThemePalette.set(theme)
+                AppThemeRefresh.repaint(help.view)
+                // Match ThemedPopover.reposition after a live font/material change.
+                help.view.layoutSubtreeIfNeeded()
+                help.view.setFrameSize(help.view.fittingSize)
+                help.view.layoutSubtreeIfNeeded()
+                ground.setFrameSize(help.view.bounds.size)
+                window.setContentSize(help.view.bounds.size)
                 drawing.performAsCurrentDrawingAppearance {
                     ground.layer?.backgroundColor = Design.Surface.floating.cgColor
                 }
-                ground.addSubview(help.view)
-                AppThemeRefresh.repaint(help.view)
+                let statusLabel = try XCTUnwrap(firstSubview(of: help.view,
+                    identifier: SimulatorScenarioHelpViewController.Identifiers.status) as? NSTextField)
+                XCTAssertEqual(statusLabel.font, Design.Typography.caption())
+                let example = try XCTUnwrap(findView(ThemedTextView.self, in: help.view))
+                XCTAssertEqual(example.font, Design.Typography.compactCode())
+                let reference = try XCTUnwrap(findView(NSGridView.self, in: help.view))
+                for row in 0..<reference.numberOfRows {
+                    let term = try XCTUnwrap(reference.cell(atColumnIndex: 0, rowIndex: row).contentView as? NSTextField)
+                    XCTAssertGreaterThanOrEqual(term.bounds.width + 0.5, term.intrinsicContentSize.width,
+                                                "Reference term clipped after switching to \(name): \(term.stringValue)")
+                }
+                for identifier in [SimulatorScenarioHelpViewController.Identifiers.primary,
+                                   SimulatorScenarioHelpViewController.Identifiers.copyExample,
+                                   SimulatorScenarioHelpViewController.Identifiers.copyPrompt] {
+                    let button = try XCTUnwrap(firstSubview(of: help.view, identifier: identifier) as? ThemedButton)
+                    XCTAssertGreaterThanOrEqual(button.bounds.width + 0.5, button.intrinsicContentSize.width,
+                                                "Scenario action clipped after switching to \(name): \(button.title)")
+                }
                 let bitmap = try XCTUnwrap(ground.bitmapImageRepForCachingDisplay(in: ground.bounds))
                 ground.cacheDisplay(in: ground.bounds, to: bitmap)
+                assertReadableStatus(statusLabel, in: ground, bitmap: bitmap)
                 try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
                     to: Render.directory.appendingPathComponent("simulator-scenarios-help-\(state)-\(name).png"))
             }
         }
+    }
+
+    private func assertReadableStatus(_ label: NSTextField, in ground: NSView, bitmap: NSBitmapImageRep) {
+        let rect = label.convert(label.bounds, to: ground)
+        let scaleX = CGFloat(bitmap.pixelsWide) / ground.bounds.width
+        let scaleY = CGFloat(bitmap.pixelsHigh) / ground.bounds.height
+        let left = max(0, Int(rect.minX * scaleX))
+        let right = min(bitmap.pixelsWide, Int(rect.maxX * scaleX))
+        let top = max(0, Int((ground.bounds.maxY - rect.maxY) * scaleY))
+        let bottom = min(bitmap.pixelsHigh, Int((ground.bounds.maxY - rect.minY) * scaleY))
+        guard left < right, top < bottom else {
+            XCTFail("The scenario status escaped the rendered panel")
+            return
+        }
+        var readablePixels = 0
+        ground.effectiveAppearance.performAsCurrentDrawingAppearance {
+            let background = Design.Surface.floating
+            for y in top..<bottom {
+                for x in left..<right {
+                    guard let ink = bitmap.colorAt(x: x, y: y),
+                          ThemeContrast.ratio(ink, background) >= LabelLegibility.Defaults.readingRatio else { continue }
+                    readablePixels += 1
+                    if readablePixels >= Render.minimumReadableStatusPixels { return }
+                }
+            }
+        }
+        XCTAssertGreaterThanOrEqual(readablePixels, Render.minimumReadableStatusPixels,
+                                    "The scenario status has no readable foreground after the theme switch")
     }
 
     /// Runs async work to completion while the run loop turns, as the rest of these synchronous

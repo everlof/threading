@@ -107,6 +107,11 @@ Copy Agent Prompt. With a file it reads it again and opens a menu: groups as sub
 more than one, variants as a row's submenu, the open scenario checked, problems listed by message,
 and Scenario Help at the bottom.
 
+Scenario Help rederives its status and feedback ink and remeasures the fixed reference columns
+when the theme or appearance changes. The popover then fits the current typography. The live
+theme-switch render check covers readable status pixels and unclipped reference terms and action
+labels under System, Cyberpunk and Swiss Minimalist.
+
 A scenario with steps shows a `PaneNoticeView` band between the header and the devices, pushing
 them down: the scenario's title, “Step 2 of 4: Payment accepted”, and Back, Next and Play (Pause
 while playing; Play at the last step starts over), with ✕ to close the scenario, which leaves the

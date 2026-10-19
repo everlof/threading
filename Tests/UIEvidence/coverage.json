@@ -598,6 +598,27 @@
       }
     },
     {
+      "id": "simulator-scenarios",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Simulator scenarios and setup help",
+      "description": "Project-declared scenario steps in the production workspace, with setup help that follows live theme font changes.",
+      "states": ["Scenario step", "Failed launch", "Narrow pane", "Missing file help", "Loaded file help", "Live theme switch"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["420-point right panel", "260-point narrow panel", "540-point help panel"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SimulatorPaneRenderTests.swift",
+        "test": "ThreadingTests/SimulatorPaneRenderTests/testRendersScenariosInTheWorkspace"
+      },
+      "capture": {
+        "glob": "simulator-scenarios-*.png"
+      }
+    },
+    {
       "id": "device-log-filters",
       "kind": "surface",
       "status": "implemented",

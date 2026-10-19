@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,6 +15,94 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[2]
 DRIVER = REPOSITORY / "scripts/publish_local_release.sh"
 PUBLISHER = REPOSITORY / "scripts/publish_release.sh"
+
+
+class ReleaseBranchPreflightTests(unittest.TestCase):
+    """Run the driver up to credential checking, with no network or publication authority."""
+
+    def preflight(self, branch: str, remote: str = "", ancestor: bool = True):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            for name in ("publish_local_release.sh", "release_tag_policy.sh"):
+                shutil.copy(REPOSITORY / "scripts" / name, scripts / name)
+            info = root / "Sources/Threading/Resources/Info.plist"
+            info.parent.mkdir(parents=True)
+            info.write_text('<plist version="1.0"><dict><key>SUPublicEDKey</key><string>test</string></dict></plist>')
+            binaries = root / "bin"
+            binaries.mkdir()
+            git = binaries / "git"
+            git.write_text(f"#!{sys.executable}\n" + '''
+import json, os, sys
+args = sys.argv[1:]
+with open(os.environ["GIT_LOG"], "a") as log:
+    log.write(json.dumps(args) + "\\n")
+while args and args[0] in ("-C", "-c"):
+    args = args[2:]
+command = args[0]
+if command == "symbolic-ref":
+    print(os.environ["FAKE_BRANCH"])
+elif command == "status" or command == "tag":
+    pass
+elif command == "remote":
+    print("git@github.com:everlof/threading.git")
+elif command == "rev-parse":
+    if "--verify" in args:
+        sys.exit(1)
+    print("a" * 40)
+elif command == "ls-remote":
+    if "--heads" in args and os.environ["FAKE_REMOTE"]:
+        print(os.environ["FAKE_REMOTE"], args[-1], sep="\\t")
+elif command == "fetch":
+    pass
+elif command == "merge-base":
+    sys.exit(0 if os.environ["FAKE_ANCESTOR"] == "1" else 1)
+else:
+    sys.exit("Unexpected git command: " + repr(args))
+''')
+            git.chmod(0o755)
+            for name, status in (("gh", 0), ("security", 1), ("generate_keys", 1)):
+                executable = binaries / name
+                executable.write_text(f"#!/bin/sh\nexit {status}\n")
+                executable.chmod(0o755)
+            log = root / "git.log"
+            environment = dict(os.environ, PATH=f"{binaries}:{os.environ['PATH']}",
+                               THREADING_SPARKLE_BIN=str(binaries), GIT_LOG=str(log),
+                               FAKE_BRANCH=branch, FAKE_REMOTE=remote,
+                               FAKE_ANCESTOR="1" if ancestor else "0")
+            result = subprocess.run(["bash", str(scripts / DRIVER.name), "v0.8.0"],
+                                    env=environment, capture_output=True, text=True, check=False)
+            return result, log.read_text()
+
+    def test_new_matching_release_branch_reaches_credentials_without_fetching_master(self):
+        result, calls = self.preflight("release/0.8.0")
+        self.assertIn("no Developer ID Application certificate", result.stderr)
+        self.assertNotIn('"fetch"', calls)
+        self.assertNotIn("refs/heads/master", calls)
+        self.assertNotIn('"push"', calls)
+
+    def test_existing_release_branch_requires_fast_forward(self):
+        result, calls = self.preflight("release/0.8.0", "b" * 40)
+        self.assertIn("no Developer ID Application certificate", result.stderr)
+        self.assertIn("+refs/heads/release/0.8.0:refs/remotes/origin/release/0.8.0", calls)
+        self.assertIn('"merge-base", "--is-ancestor"', calls)
+        result, calls = self.preflight("release/0.8.0", "b" * 40, ancestor=False)
+        self.assertIn("not a fast-forward", result.stderr)
+        self.assertNotIn('"push"', calls)
+
+    def test_other_versions_feature_branches_and_detached_head_are_refused(self):
+        for branch in ("release/0.9.0", "feature/test", ""):
+            with self.subTest(branch=branch):
+                result, calls = self.preflight(branch)
+                self.assertIn("releases must be cut from master or release/0.8.0", result.stderr)
+                self.assertNotIn('"ls-remote"', calls)
+
+    def test_master_still_requires_an_existing_remote(self):
+        result, _ = self.preflight("master")
+        self.assertIn("origin has no master branch", result.stderr)
+        result, _ = self.preflight("master", "b" * 40)
+        self.assertIn("no Developer ID Application certificate", result.stderr)
 
 
 class LocalReleaseDriverTests(unittest.TestCase):

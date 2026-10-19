@@ -6930,3 +6930,28 @@ same `DYLD_LIBRARY_PATH`, `DYLD_FRAMEWORK_PATH` and `xcrun xctest` setup used by
 case. `RealDevicePaneTests` checks actual snapshot/movie output, immediate stop, rotation,
 disconnect, hidden recording demand and presenter/input revocation. The physical-iPhone evidence
 entry renders the toolbar, device menu and recording state in the product shell.
+
+## Cold detached browser operations — 2026-10-20
+
+The release gate's `BrowserOffScreenCaptureTests/testDetachedIdlePageCanClickAndCaptureFreshPixels`
+removes the shipping browser from its window, orders the window out, waits 70 seconds for
+WebKit's idle policy, clicks a button that changes the page from red to green, reads context,
+and checks fresh screenshot pixels. Before this fix the click completed in 0.250 seconds, but
+the following context call reached the existing 15-second native deadline. A standalone
+WebKit probe reproduced the stalled async reply despite the operation's temporary `.none`
+scheduling policy; a synchronous evaluation acknowledgement before async dispatch removed
+the stall. Keeping the activity through a short native delay did not.
+
+The shipping path now acknowledges detached WebKit readiness with one constant synchronous
+evaluation before dispatching an async script or snapshot. The existing activity and original
+deadline cover both phases; an acknowledgement arriving after timeout cannot dispatch a
+mutation. Attached pages skip the acknowledgement, and the final operation restores idle
+scheduling. Work is O(1) per request: one acknowledgement, no polling, idle keepalive, extra
+queue or repeating timer. Existing action-delay limits remain 64 pending requests and one
+second per delay.
+
+The matched hosted Debug regression on macOS 26.5 / Xcode 26.5 completed the click in
+0.231 seconds, context in 0.053 seconds and screenshot in 0.0035 seconds, with fresh green
+pixels. Its five-second per-operation assertion is unchanged. All eight visibility/delay
+cases and the broader 87-case browser/scenario selection passed. These are local Debug
+observations of the real app path, not Release latency or a hardware-independent benchmark.

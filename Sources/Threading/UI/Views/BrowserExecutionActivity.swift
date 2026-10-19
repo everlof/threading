@@ -4,6 +4,8 @@ import WebKit
 /// when the final overlapping operation finishes, including failures and native deadlines.
 @MainActor
 final class BrowserExecutionActivity {
+    private static let readinessProbe = "0"
+
     private struct Entry {
         var count: Int
         let restore: () -> Void
@@ -11,6 +13,22 @@ final class BrowserExecutionActivity {
 
     private var entries: [ObjectIdentifier: Entry] = [:]
     private var processActivity: (any NSObjectProtocol)?
+
+    /// A cold detached page can stall async replies despite the temporary scheduling policy.
+    /// The synchronous evaluation API acknowledges that WebKit is runnable before dispatching
+    /// the operation. Its caller retains the activity and owns one deadline for both phases.
+    func prepare(
+        for page: WKWebView,
+        completion: @escaping @MainActor @Sendable (Result<Void, Error>) -> Void
+    ) {
+        guard page.window == nil else {
+            completion(.success(()))
+            return
+        }
+        page.evaluateJavaScript(Self.readinessProbe, in: nil, in: .defaultClient) { result in
+            completion(result.map { _ in () })
+        }
+    }
 
     func begin(for page: WKWebView) -> () -> Void {
         let preferences = page.configuration.preferences
@@ -53,7 +71,7 @@ final class BrowserExecutionActivity {
         }
     }
 
-    deinit {
+    isolated deinit {
         if let processActivity { ProcessInfo.processInfo.endActivity(processActivity) }
     }
 }
