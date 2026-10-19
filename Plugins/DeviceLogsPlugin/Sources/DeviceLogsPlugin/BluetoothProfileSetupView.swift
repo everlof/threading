@@ -1,6 +1,7 @@
 import AppKit
 import ThreadingDesignKit
 import UniformTypeIdentifiers
+import WebKit
 
 /// Host-owned setup for the selected phone. Install from Apple / file selection authorize sending; iOS
 /// retains profile consent. No agent tool exposes installation or changes the selected target.
@@ -16,6 +17,7 @@ final class BluetoothProfileSetupView: NSView {
     private var sendingTo: Target?
     private var completion: (Target, String)?
     private var browser: BluetoothProfileDownloadView?
+    private var browserPopover: ThemedPopover?
     private let content = NSStackView()
     private let explanation = NSTextField(wrappingLabelWithString: "")
     private let status = NSTextField(wrappingLabelWithString: "")
@@ -92,13 +94,15 @@ final class BluetoothProfileSetupView: NSView {
     }
 
     private func beginDownload(loadApplePage: Bool) {
-        guard let target, sendingTo == nil, browser == nil else { return }
-        let browser = BluetoothProfileDownloadView { [weak self] result in
+        guard let target, sendingTo == nil, browser == nil, let window else { return }
+        let browser = BluetoothProfileDownloadView(dataStore: loadApplePage ? nil : .nonPersistent()) { [weak self] result in
             guard let self else {
                 if case .success(let url) = result { BluetoothProfileDownloadView.removeDownload(url) }
                 return
             }
-            self.browser?.removeFromSuperview()
+            self.browserPopover?.onClose = nil
+            self.browserPopover?.close()
+            self.browserPopover = nil
             self.browser = nil
             self.window?.makeFirstResponder(self.download)
             switch result {
@@ -110,23 +114,55 @@ final class BluetoothProfileSetupView: NSView {
                 }
                 self.send(profileURL: url, to: target, removeDownload: true)
             case .failure(let error):
-                let cancelled = (error as NSError).code == NSURLErrorCancelled
-                self.completion = (target, cancelled ? L10n.string("Profile download cancelled.") : L10n.string("The Apple profile download failed. Try again, or download Bluetooth for iOS/iPadOS from Apple's Profiles and Logs page and choose the file here."))
+                self.completion = (target, BluetoothProfileDownloadFailure.message(for: error))
                 self.refresh()
             }
         }
         self.browser = browser
-        content.addArrangedSubview(browser)
-        browser.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+        let controller = NSViewController()
+        controller.view = browser
+        let preferred = BluetoothProfileDownloadView.Metrics.preferredSize
+        let available = (window.screen ?? NSScreen.main)?.visibleFrame.size ?? preferred
+        let margin = BluetoothProfileDownloadView.Metrics.screenMargin
+        controller.preferredContentSize = NSSize(
+            width: min(preferred.width, available.width - margin),
+            height: min(preferred.height, available.height - margin)
+        )
+        let popover = ThemedPopover()
+        popover.animates = loadApplePage
+        popover.behavior = .applicationDefined
+        popover.contentViewController = controller
+        popover.initialFirstResponder = browser.webView
+        popover.onClose = { [weak browser] in browser?.cancel() }
+        browserPopover = popover
         completion = nil
         refresh()
+        popover.show(relativeTo: download.bounds, of: download, preferredEdge: .maxY)
+        guard popover.isShown else { browser.cancel(); return }
         if loadApplePage { browser.start() }
     }
 
     func cancelBrowser() { browser?.cancel() }
 
     #if DEBUG
-    func showBrowserForTesting() { beginDownload(loadApplePage: false) }
+    func showBrowserForTesting() {
+        beginDownload(loadApplePage: false)
+        // Synthetic content only: prove a bottom-of-form action fits without storing an Apple
+        // page or credentials in evidence. Production authentication never injects/inspects DOM.
+        browser?.webView.loadHTMLString("""
+            <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>html { color-scheme: light; font: 17px -apple-system; background: white; color: #222; }
+            body { margin: 0; } main { box-sizing: border-box; min-height: 570px; padding: 48px;
+            display: flex; flex-direction: column; align-items: center; text-align: center; }
+            h1 { font-size: 28px; } p { line-height: 1.5; } label { margin-top: 40px; }
+            input { padding: 14px; width: 280px; margin-top: 12px; border: 1px solid #888; border-radius: 8px; }
+            button { margin-top: auto; padding: 12px 36px; font: inherit; border-radius: 8px; }
+            </style></head><body><main><h1>Sign-in layout check</h1>
+            <p>Synthetic form for layout verification.<br>No account details or Apple page content.</p>
+            <label>Email address<br><input disabled placeholder="Layout fixture"></label>
+            <button id="sign-in">Sign in</button></main></body></html>
+            """, baseURL: nil)
+    }
     #endif
 
     @objc private func chooseProfile() {

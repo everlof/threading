@@ -96,9 +96,9 @@ final class BluetoothProfileTests: XCTestCase {
     }
 
     @MainActor
-    func testAuthBrowserIsEphemeralHasNoInjectedScriptsAndCancellationSettlesOnce() throws {
+    func testAuthBrowserUsesInjectedStoreHasNoScriptsAndCancellationSettlesOnce() throws {
         var completions = 0
-        let browser = BluetoothProfileDownloadView { result in
+        let browser = BluetoothProfileDownloadView(dataStore: .nonPersistent()) { result in
             completions += 1
             guard case .failure = result else { return XCTFail("cancel must never hand off a file") }
         }
@@ -125,7 +125,7 @@ final class BluetoothProfileTests: XCTestCase {
             throw XCTSkip("Opt in to contact Apple's real sign-in page without entering credentials.")
         }
         var failure: Error?
-        let browser = BluetoothProfileDownloadView { result in
+        let browser = BluetoothProfileDownloadView(dataStore: .nonPersistent()) { result in
             if case .failure(let error) = result { failure = error }
         }
         defer { browser.cancel() }

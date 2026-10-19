@@ -610,7 +610,7 @@
         "Workspace tab drag landing marker",
         "Bluetooth HCI and ATT packets",
         "Bluetooth profile setup",
-        "Dedicated Apple sign-in browser chrome (blank WebKit fixture)"
+        "Dedicated Apple sign-in dialog with a tall synthetic form and reachable sign-in action"
       ],
       "matrix": {
         "themes": [

@@ -9195,6 +9195,50 @@
         }
       }
     },
+    "Apple did not return the expected Bluetooth profile. Try again, or choose a profile downloaded from Apple's Profiles and Logs page." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple skickade inte den förväntade Bluetooth-profilen. Försök igen eller välj en profil som hämtats från Apples sida Profiles and Logs."
+          }
+        }
+      }
+    },
+    "Apple returned HTTP %lld. Try downloading the profile again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple svarade med HTTP %lld. Försök hämta profilen igen."
+          }
+        }
+      }
+    },
+    "Apple sign-in is remembered on this Mac, separately from the Browser." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple-inloggningen sparas på den här Macen, separat från webbläsaren."
+          }
+        }
+      }
+    },
+    "Apple sign-in is remembered until Threading quits, separately from the Browser." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple-inloggningen sparas tills Threading avslutas, separat från webbläsaren."
+          }
+        }
+      }
+    },
     "Apple's system-authored sign-in workflow, contained by the design boundary." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18646,6 +18690,17 @@
         }
       }
     },
+    "Could not connect to Apple. Check your internet connection and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte ansluta till Apple. Kontrollera internetanslutningen och försök igen."
+          }
+        }
+      }
+    },
     "Could not copy the screenshot" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18859,6 +18914,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte spara inspelningen"
+          }
+        }
+      }
+    },
+    "Could not save the Apple profile temporarily. Check available disk space and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte spara Apple-profilen tillfälligt. Kontrollera ledigt diskutrymme och försök igen."
           }
         }
       }
@@ -26307,6 +26373,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Glöm sparade IP-adresser"
+          }
+        }
+      }
+    },
+    "Forget Sign-In" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Glöm inloggning"
           }
         }
       }
@@ -58657,6 +58734,28 @@
         }
       }
     },
+    "The Apple profile download failed (browser error %lld). Reopen Install from Apple to try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämtningen av Apple-profilen misslyckades (webbläsarfel %lld). Öppna Installera från Apple igen för att försöka på nytt."
+          }
+        }
+      }
+    },
+    "The Apple profile download failed (network error %lld). Try again, or download the profile in your browser and choose the file here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämtningen av Apple-profilen misslyckades (nätverksfel %lld). Försök igen eller hämta profilen i webbläsaren och välj filen här."
+          }
+        }
+      }
+    },
     "The Apple profile download failed. Try again, or download Bluetooth for iOS/iPadOS from Apple's Profiles and Logs page and choose the file here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -58664,6 +58763,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det gick inte att hämta profilen från Apple. Försök igen, eller hämta Bluetooth för iOS/iPadOS från Apples sida Profiles and Logs och välj filen här."
+          }
+        }
+      }
+    },
+    "The Apple profile download timed out. Check your connection and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämtningen av Apple-profilen tog för lång tid. Kontrollera anslutningen och försök igen."
+          }
+        }
+      }
+    },
+    "The Apple sign-in page stopped unexpectedly. Reopen Install from Apple to try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apples inloggningssida stannade oväntat. Öppna Installera från Apple igen för att försöka på nytt."
           }
         }
       }
@@ -60455,6 +60576,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "De nedladdade Linux-komponenterna är inte de som den här versionen förväntar sig."
+          }
+        }
+      }
+    },
+    "The downloaded profile exceeds the 1 MiB size limit. Choose the Bluetooth profile from Apple's Profiles and Logs page." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den hämtade profilen överskrider storleksgränsen på 1 MiB. Välj Bluetooth-profilen från Apples sida Profiles and Logs."
           }
         }
       }
@@ -63140,6 +63272,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inloggningskoden hann gå ut innan den angavs."
+          }
+        }
+      }
+    },
+    "The sign-in page tried to leave Apple's secure website. Reopen Install from Apple to try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inloggningssidan försökte lämna Apples säkra webbplats. Öppna Installera från Apple igen för att försöka på nytt."
           }
         }
       }
