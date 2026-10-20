@@ -12,6 +12,7 @@ enum NavigatorActions {
         case newManager = "linux.project.new-manager"
         case openShell = "linux.project.open-shell"
         case newShell = "linux.project.new-shell"
+        case newWorktree = "linux.repository.new-worktree"
         case newCodex = "linux.session.new-codex"
         case codexAccount = "linux.account.choose-codex"
         case newClaude = "linux.session.new-claude"
@@ -28,6 +29,7 @@ enum NavigatorActions {
             case .newManager: return "New Manager…"
             case .openShell: return "Open shell"
             case .newShell: return "New shell"
+            case .newWorktree: return "New Worktree…"
             case .newCodex: return "New Codex session"
             case .codexAccount: return "Choose Codex account…"
             case .newClaude: return "New Claude session"
@@ -46,6 +48,7 @@ enum NavigatorActions {
             case .newManager: return 35
             case .openShell: return 8
             case .newShell: return 9
+            case .newWorktree: return 61
             case .newCodex: return 13
             case .codexAccount: return 20
             case .newClaude: return 21
@@ -62,6 +65,7 @@ enum NavigatorActions {
         let canCreateShell: Bool
         let shellMayBeRunning: Bool
         let canCreateAgent: Bool
+        let canCreateWorktree: Bool
         let hasCodex: Bool
         let hasClaude: Bool
         let hasAgents: Bool
@@ -69,10 +73,11 @@ enum NavigatorActions {
     }
 
     struct Presentation {
-        enum Kind { case projectActions, addProject, projectCreate, chatProviders }
+        enum Kind { case projectActions, addProject, projectCreate, repositoryCreate, chatProviders }
         let kind: Kind
         let projectID: ProjectID?
         let returnToSidebar: Bool
+        var returnsToRepositoryCreate = false
         var selected = 0
         var first = 0
         var commands: [HostCommandDescriptor]
@@ -91,6 +96,7 @@ enum NavigatorActions {
                         ? "Configure a chat provider first."
                         : state.canCreateAgent ? nil : "limit of 8 open terminals"
                 case .newManager: reason = "Managers are not available in the Linux preview."
+                case .newWorktree: reason = state.canCreateWorktree ? nil : "Select a live checkout first."
                 case .openShell: reason = state.canOpenShell ? nil : "limit of 8 open terminals"
                 case .newShell: reason = state.canCreateShell ? nil : state.shellMayBeRunning
                     ? "terminal may still be running" : "limit of 8 open terminals"
@@ -116,7 +122,8 @@ enum NavigatorActions {
         commands(state).filter { $0.id != Command.newProject.rawValue &&
             $0.id != Command.newScratchpad.rawValue &&
             $0.id != Command.newChat.rawValue &&
-            $0.id != Command.newManager.rawValue }
+            $0.id != Command.newManager.rawValue &&
+            $0.id != Command.newWorktree.rawValue }
     }
 
     static func projectCreateCommands(_ state: State) -> [HostCommandDescriptor] {
@@ -136,6 +143,11 @@ enum NavigatorActions {
     static func chatProviderCommands(_ state: State) -> [HostCommandDescriptor] {
         commands(state).filter { $0.id == Command.newCodex.rawValue ||
             $0.id == Command.newClaude.rawValue }
+    }
+
+    static func repositoryCreateCommands(_ state: State) -> [HostCommandDescriptor] {
+        let worktree = commands(state).first { $0.id == Command.newWorktree.rawValue }!
+        return projectCreateCommands(state) + [worktree]
     }
 
     static func addProjectMenuCommands() -> [HostCommandDescriptor] {

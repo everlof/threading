@@ -30,6 +30,12 @@ func projectDirectory(_ path: String) throws -> URL {
     return folder
 }
 
+func newProject(in folder: URL) -> Project {
+    var project = Project(name: folder.lastPathComponent, folderURL: folder)
+    project.lastKnownRepositoryIdentity = LinuxGitCheckout.read(at: folder.path)?.repositoryIdentity
+    return project
+}
+
 func run() throws -> Int32 {
     let args = Array(CommandLine.arguments.dropFirst())
     let addingProject = args.first == "--add-project"
@@ -63,9 +69,15 @@ func run() throws -> Int32 {
     }
     if let folder = importFolder {
         let projects = try database.projectRecords()
-        if !projects.contains(where: { $0.project.folderPath == folder.path }) {
-            try database.addProject(Project(name: folder.lastPathComponent, folderURL: folder),
-                                    position: projects.count)
+        if let existing = projects.first(where: { $0.project.folderPath == folder.path }) {
+            if existing.project.lastKnownRepositoryIdentity == nil,
+               let identity = LinuxGitCheckout.read(at: folder.path)?.repositoryIdentity {
+                var project = existing.project
+                project.lastKnownRepositoryIdentity = identity
+                try database.saveProject(project, position: existing.position)
+            }
+        } else {
+            try database.addProject(newProject(in: folder), position: projects.count)
         }
         print(folder.path)
         return 0
@@ -144,7 +156,7 @@ func run() throws -> Int32 {
             try database.addSession(session, to: project.id, position: project.sessions.count,
                                     selectNewSession: true)
         } else {
-            let project = Project(name: folder.lastPathComponent, folderURL: folder)
+            let project = newProject(in: folder)
             try database.addProjectAndSession(project, session: session, position: state.projects.count,
                                               selectNewSession: true)
         }
@@ -229,7 +241,7 @@ func run() throws -> Int32 {
         }
         let records = try database.projectRecords()
         let existing = records.first { $0.project.folderPath == folder.path }
-        var project = existing?.project ?? Project(name: folder.lastPathComponent, folderURL: folder)
+        var project = existing?.project ?? newProject(in: folder)
         let position = existing?.position ?? records.count
         let terminal = ProjectTerminal(id: TerminalID(), title: URL(fileURLWithPath: args[executableIndex]).lastPathComponent,
             customTitle: nil, currentDirectory: folder.path, branch: nil, themeID: nil,

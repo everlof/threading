@@ -248,6 +248,7 @@ final class ClaudeStreamSession:
     var canSend: Bool {
         isRunning && acceptsInput && !isTurnInFlight && pendingPrompt == nil
     }
+    var hasActiveTurn: Bool { isRunning && isTurnInFlight }
 
     /// The control channel accepts a request while a turn is active; it applies to the next
     /// model round-trip without restarting the persistent process. So this asks only that the

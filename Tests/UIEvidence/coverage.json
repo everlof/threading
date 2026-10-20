@@ -4,6 +4,48 @@
   "platform": "macOS",
   "entries": [
     {
+      "id": "worktree-creation-prompt",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "New Worktree prompt",
+      "description": "The shared branch-name question in its shipping themed dialog, attached to the main window.",
+      "states": ["Empty branch name"],
+      "matrix": {
+        "themes": ["Threading"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Shipping host dialog"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/WorktreeCreationPromptRenderTests.swift",
+        "test": "ThreadingTests/WorktreeCreationPromptRenderTests/testRendersNewWorktreePromptInTheShippingHostDialog"
+      },
+      "capture": {
+        "glob": "worktree-creation-prompt-*.png"
+      }
+    },
+    {
+      "id": "session-close-confirmation",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Close Session confirmation",
+      "description": "The shipping warning dialog for a running session, including its recoverable Don't ask again choice.",
+      "states": ["Running resumable session", "Suppression unchecked"],
+      "matrix": {
+        "themes": ["Threading"],
+        "appearances": ["Light"],
+        "sizes": ["Shipping host dialog"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SessionRenamePromptRenderTests.swift",
+        "test": "ThreadingTests/SessionRenamePromptRenderTests/testRendersCloseConfirmationInTheShippingMacDialog"
+      },
+      "capture": {
+        "glob": "session-close-prompt-mac.png"
+      }
+    },
+    {
       "id": "remote-host-availability",
       "kind": "surface",
       "status": "implemented",

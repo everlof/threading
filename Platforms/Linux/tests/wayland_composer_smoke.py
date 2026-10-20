@@ -1,4 +1,5 @@
 """Enter and launch an opening brief through the installed Wayland window."""
+import base64
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import struct
 import subprocess
 import sys
 import time
+import zlib
 
 import gi
 gi.require_version('Atspi', '2.0')
@@ -150,6 +152,17 @@ def valid_bitmap(path):
     return bitmap
 
 
+def sample_png():
+    def chunk(kind, payload):
+        body = kind + payload
+        return struct.pack('>I', len(payload)) + body + struct.pack('>I', zlib.crc32(body))
+    pixels = b'\x00' + bytes([219, 73, 63, 255] * 2)
+    pixels += b'\x00' + bytes([219, 73, 63, 255] * 2)
+    return (b'\x89PNG\r\n\x1a\n'
+            + chunk(b'IHDR', struct.pack('>IIBBBBB', 2, 2, 8, 6, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b''))
+
+
 process = None
 try:
     with log_path.open('w') as log:
@@ -224,13 +237,54 @@ try:
                                     if (capture / 'open.bmp').is_file() else None,
                                     'composer compositor capture')
         assert idle_image != composer_image, 'composer did not change rendered pixels'
+        png = sample_png()
+        local_image = evidence / 'wayland clipboard image.png'
+        local_image.write_bytes(png)
+        tiff = base64.b64decode(
+            'SUkqABQAAADbST/bST/bST/bST8PAAABAwABAAAAAgAAAAEBAwABAAAAAgAAAAIBAwADAAAAzgAAAAMBAwABAAAAAQAAAAYBAwABAAAAAgAAAAoBAwABAAAAAQAAABEBBAABAAAACAAAABIBAwABAAAAAQAAABUBAwABAAAAAwAAABYBAwABAAAAAgAAABcBBAABAAAADAAAABwBAwABAAAAAQAAACkBAwACAAAAAAABAD4BBQACAAAAAQEAAD8BBQAGAAAA1AAAAAAAAAAIAAgACACF61EAAACAAMP1qAAAAAACzcxMAAAAAAHNzEwAAACAAM3MTAAAAAACj8L1AAAAABA3GqAAAAAAAiuHCgAAACAA')
+        for mime, payload, expected_suffix in [
+            ('text/uri-list', (local_image.as_uri() + '\r\n').encode(), local_image.name),
+            ('image/tiff', tiff, '.png'),
+            ('image/png', png, '.png')
+        ]:
+            subprocess.run(['wl-copy', '--type', mime], input=payload,
+                           check=True, timeout=5)
+            eventually(lambda: mime in subprocess.check_output(
+                ['wl-paste', '--list-types'], text=True, timeout=5),
+                f'Wayland {mime} clipboard')
+            click(editor)
+            inject('key 29 down')  # Ctrl+V through the real Wayland keyboard route.
+            inject('key 47 down')
+            inject('key 47 up')
+            inject('key 29 up')
+            rail = eventually(lambda: control('linux.composer.attachments'),
+                              f'Wayland {mime} preview')
+            preview = rail.get_child_at_index(0)
+            assert preview.get_role_name() == 'image'
+            assert preview.get_name().endswith(expected_suffix), preview.get_name()
+            assert Atspi.Text.get_text(text, 0, -1) == prompt
+            if mime != 'image/png':
+                remove = control('linux.composer.attachment.remove.0')
+                assert remove is not None and remove.get_action_iface().do_action(0)
+                eventually(lambda: control('linux.composer.attachments') is None,
+                           f'Wayland {mime} preview removed')
+        (capture / 'trigger').write_text('pasted\n')
+        move_to(rail)
+        eventually(lambda: valid_bitmap(capture / 'pasted.bmp')
+                   if (capture / 'pasted.bmp').is_file() else None,
+                   'Wayland pasted preview pixels')
         click(action)
 
         marker = project / 'wayland-agent.json'
         report = eventually(lambda: json.loads(marker.read_text()) if marker.exists() else None,
                             'exact project agent launch')
         assert report['cwd'] == str(project), report
-        assert report['argv'][-2:] == ['--', prompt], report
+        assert report['argv'][-2] == '--', report
+        submitted = report['argv'][-1]
+        assert submitted.startswith(prompt + ' '), report
+        pasted_path = Path(submitted[len(prompt) + 1:])
+        assert pasted_path.name.startswith('threading-attachment-')
+        assert pasted_path.read_bytes() == png
         with sqlite3.connect(data / 'store' / 'threading.db') as database:
             count = database.execute('SELECT COUNT(*) FROM session JOIN project '
                                      'ON session.project_id = project.id '
@@ -248,7 +302,7 @@ try:
         assert '.axis(' in protocol and '.axis_source(' in protocol and '.axis_stop(' in protocol, (
             'no compositor scroll/stop delivery')
         print('PASS installed Wayland Unicode composer, wheel and smooth scrolling, '
-              'exact project launch and PTY isolation',
+              'URI/TIFF/PNG clipboard previews, exact PNG agent bytes and PTY isolation',
               flush=True)
 finally:
     if process is not None and process.poll() is None:

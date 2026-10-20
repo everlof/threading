@@ -3,6 +3,7 @@ from saved_catalog_menu import open_saved_agents, selected_outline_row
 import json
 import os
 from pathlib import Path
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -14,6 +15,8 @@ binary, host, daemon, endpoint, fixture, evidence, *selected = sys.argv[1:]
 theme = json.loads((Path(binary).parent / 'LinuxAppKitSpike_WindowHarness.resources/Theme/threading.json').read_text())
 provider = selected[0] if selected else 'codex'
 assert provider in ('codex', 'claude', 'grok', 'cursor'), provider
+context_replay = os.environ.get('THREADING_TEST_CONTEXT_REPLAY') == '1'
+assert not context_replay or provider == 'codex'
 # The ACP providers are seeded as Codex records and re-kinded below; LinuxHost seeds only the
 # two providers it can launch as terminal agents.
 seed = provider if provider in ('codex', 'claude') else 'codex'
@@ -75,6 +78,12 @@ for line in sys.stdin:
         answer = f'## Native reply {turn}\n\nUnicode 日本語 café 👩🏽‍🚀 is intact.\n\nYou said: {text}'
         record({'type': 'event_msg', 'payload': {'type': 'user_message', 'message': text}})
         record({'type': 'event_msg', 'payload': {'type': 'agent_message', 'message': answer}})
+        if os.environ.get('THREADING_TEST_CONTEXT_REPLAY') == '1' and turn == 1:
+            record({'type': 'event_msg', 'payload': {'type': 'token_count', 'info': {
+                'last_token_usage': {'total_tokens': 950}, 'model_context_window': 1000}}})
+            note('thread/tokenUsage/updated', {'threadId': thread, 'turnId': tid,
+                'tokenUsage': {'last': {'totalTokens': 950, 'outputTokens': 25},
+                    'total': {}, 'modelContextWindow': 1000}})
         note('item/agentMessage/delta', {'threadId': thread, 'turnId': tid, 'delta': answer})
         note('item/completed', {'threadId': thread, 'turnId': tid,
             'item': {'type': 'agentMessage', 'id': 'answer-' + str(turn), 'text': answer}})
@@ -251,6 +260,28 @@ def turns():
     return [json.loads(line) for line in (project / 'native-turns.jsonl').read_text().splitlines()]
 
 
+def context_title():
+    import gi
+    gi.require_version('Atspi', '2.0')
+    from gi.repository import Atspi
+    Atspi.init()
+
+    def walk(node):
+        if node.get_accessible_id() == 'linux.conversation.context':
+            return node.get_name()
+        for index in range(node.get_child_count()):
+            if title := walk(node.get_child_at_index(index)):
+                return title
+        return None
+
+    desktop = Atspi.get_desktop(0)
+    for index in range(desktop.get_child_count()):
+        app = desktop.get_child_at_index(index)
+        if app.get_process_id() == process.pid:
+            return walk(app)
+    return None
+
+
 def ready(turn=0, dark=None):
     # Judge one frame from one read. Combining a prepared frame from one read with a theme
     # from another accepted the light frame before a switch as the dark frame after it.
@@ -327,8 +358,12 @@ try:
     capture('native-ready.png')
     assert_sidebar_pane_chrome(output / 'native-ready.png', sidebar_width, scale)
     assert_sidebar_region_colors(output / 'native-ready.png', theme['light'], scale)
-    resting_height = int(composer_frame()['height'])
-    assert composer_frame()['enabled'] == 'false', 'empty draft can submit'
+    frame = composer_frame()
+    expected_width = min(752 * scale, 1120 - sidebar_width - 24 * scale)
+    expected_x = sidebar_width + (1120 - sidebar_width - expected_width) // 2
+    assert (int(frame['x']), int(frame['width'])) == (expected_x, expected_width), frame
+    resting_height = int(frame['height'])
+    assert frame['enabled'] == 'false', 'empty draft can submit'
     paste('\n'.join(f'Composer growth line {index}' for index in range(12)))
     eventually(lambda: composer_frame().get('scrolls') == 'true', 'long draft reaches scrolling ceiling')
     assert int(composer_frame()['height']) == 180 * scale > resting_height, composer_frame()
@@ -349,6 +384,8 @@ try:
     click(*map(int, composer_frame()['send'].split(',')))
     eventually(lambda: len(turns()) == 1, 'first prompt received')
     eventually(lambda: ready(1), 'first native reply')
+    if context_replay:
+        eventually(lambda: context_title() == '95% context', 'live context reading')
     assert turns()[0]['text'] == first, turns()
     pid = turns()[0]['pid']
     capture('native-first-reply.png')
@@ -368,10 +405,10 @@ try:
     capture('native-dark.png')
     assert_sidebar_pane_chrome(output / 'native-dark.png', sidebar_width, scale)
     assert_sidebar_region_colors(output / 'native-dark.png', theme['dark'], scale)
-    # Sample the navigator and the status strip below the measured composer.
+    # Sample the navigator and the status strip above the measured composer.
     assert brightness(output / 'native-dark.png', 20, 200, sidebar_width - 40, 100, 'mean') < .2, 'sidebar stayed light'
     frame = composer_frame()
-    status_top = int(frame['y']) + int(frame['height']) + 6 * scale
+    status_top = int(frame['y']) - 36 * scale
     assert brightness(output / 'native-dark.png', int(frame['x']), status_top,
                       int(frame['width']), 22 * scale, 'maxima') > .5, 'status ink stayed dark'
 
@@ -416,6 +453,8 @@ try:
     window = eventually(lambda: xdo('search', '--onlyvisible', '--name', '^Threading').splitlines()[0], 'reopened window')
     xdo('windowsize', window, '1120', '900')
     eventually(ready, 'replayed native conversation after restart')
+    if context_replay:
+        eventually(lambda: context_title() == '95% context', 'replayed context reading')
     resize_native()
     eventually(lambda: selected_outline_row(process.pid, identifier), 'restored conversation selected in ordinary outline')
     eventually(lambda: 'OUTLINE_EXPANSION_SAVED ' in log_path.read_text(), 'restored conversation parent expansion persisted')
@@ -428,10 +467,19 @@ try:
     key('Return')
     eventually(lambda: len(turns()) == 4, 'resumed provider turn')
     eventually(lambda: ready(1), 'resumed native reply')
+    if context_replay:
+        assert context_title() == '95% context', 'later turn erased replayed context'
     assert turns()[3]['thread'] == turns()[0]['thread'] and turns()[3]['pid'] != pid, turns()
     capture('native-resumed.png')
+    active_row = eventually(lambda: selected_outline_row(process.pid, identifier), 'active native row')
+    assert 'retained' in active_row.get_name(), active_row.get_name()
+    os.kill(turns()[3]['pid'], signal.SIGTERM)
+    eventually(lambda: (row := selected_outline_row(process.pid, identifier)) is not None
+               and 'retained' not in row.get_name(),
+               'native exit repaints the saved row')
+    capture('native-exited.png')
     wire = {'codex': 'Codex app-server', 'claude': 'Claude stream-json'}.get(provider, provider.capitalize() + ' ACP')
-    print(f'PASS ordinary saved native UI: production {wire}, composer growth/scroll ceiling/reset, rendered focus border, pointer send, Unicode/multiline input, three turns on one daemon child, retained draft/pane, terminal switch, dark theme, durable provider identity, restart replay and same-thread resume')
+    print(f'PASS ordinary saved native UI: production {wire}, composer growth/scroll ceiling/reset, rendered focus border, pointer send, Unicode/multiline input, three turns on one daemon child, retained draft/pane, terminal switch, dark theme, durable provider identity, restart replay, same-thread resume and exit repaint')
 finally:
     subprocess.run(['xdotool', 'key', 'alt+F4'], check=False)
     try: process.wait(timeout=8)

@@ -138,7 +138,7 @@ try:
                     eventually(lambda: control('linux.composer.provider').get_name() == 'Identity: Claude Code',
                                'selected provider')
                 chip = eventually(lambda: control('linux.composer.permissions'), 'permission chip')
-                assert chip.get_name() == 'Permissions: Manual'
+                assert chip.get_name() == "Permissions: Agent's Setting"
                 if mode is None:
                     bounds = chip.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
                     xdo('mousemove', bounds.x + bounds.width // 2, bounds.y + bounds.height // 2)
@@ -150,7 +150,7 @@ try:
                     eventually(lambda: control('linux.composer.choices'), 'accessible reopen')
                     xdo('key', 'Escape')
                     eventually(lambda: control('linux.composer.choices') is None, 'Escape dismisses permissions')
-                    assert chip.get_name() == 'Permissions: Manual'
+                    assert chip.get_name() == "Permissions: Agent's Setting"
                 assert chip.get_action_iface().do_action(0)
                 menu = eventually(lambda: control('linux.composer.choices'), 'permission menu')
                 assert 1 <= menu.get_child_count() <= 6

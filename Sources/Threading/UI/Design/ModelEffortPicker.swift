@@ -120,14 +120,16 @@ final class ModelEffortPickerContentView: NSView {
         addSubview(title)
         addSubview(scrollView)
         if let footer { addSubview(footer) }
-        #if !os(Linux)
-        // AppKit constraints use text alignment rectangles and pixel-align legacy theme
-        // controls. Keep that native sizing contract; the Linux host lays out these same
-        // children explicitly until its constraint engine supports those semantics.
         for child in [title, scrollView] + (footer.map { [$0] } ?? []) {
             child.translatesAutoresizingMaskIntoConstraints = false
         }
         let natural = matrixView.intrinsicContentSize
+        let matrixWidth = min(Layout.maximumWidth, natural.width)
+        let matrixHeight = min(Layout.maximumMatrixHeight, natural.height)
+        let preferredWidth = scrollView.widthAnchor.constraint(equalToConstant: matrixWidth)
+        let preferredHeight = scrollView.heightAnchor.constraint(equalToConstant: matrixHeight)
+        preferredWidth.priority = .defaultHigh
+        preferredHeight.priority = .defaultHigh
         var constraints = [
             title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.inset),
             title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Layout.inset),
@@ -136,8 +138,10 @@ final class ModelEffortPickerContentView: NSView {
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Layout.inset),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.inset),
             scrollView.topAnchor.constraint(equalTo: title.bottomAnchor, constant: Layout.gap),
-            scrollView.widthAnchor.constraint(equalToConstant: min(Layout.maximumWidth, natural.width)),
-            scrollView.heightAnchor.constraint(equalToConstant: min(Layout.maximumMatrixHeight, natural.height))
+            scrollView.widthAnchor.constraint(lessThanOrEqualToConstant: matrixWidth),
+            scrollView.heightAnchor.constraint(lessThanOrEqualToConstant: matrixHeight),
+            preferredWidth,
+            preferredHeight
         ]
         if let footer {
             constraints += [
@@ -149,7 +153,6 @@ final class ModelEffortPickerContentView: NSView {
             constraints.append(scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Layout.inset))
         }
         NSLayoutConstraint.activate(constraints)
-        #endif
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -160,23 +163,6 @@ final class ModelEffortPickerContentView: NSView {
             height: Layout.inset * 2 + Layout.titleHeight + Layout.gap
                 + min(Layout.maximumMatrixHeight, natural.height)
                 + (footer.map { Layout.gap + $0.intrinsicContentSize.height } ?? 0))
-    }
-
-    override func layout() {
-        super.layout()
-        #if os(Linux)
-        let width = max(1, bounds.width - Layout.inset * 2)
-        let footerHeight = footer?.intrinsicContentSize.height ?? 0
-        let footerAllowance = footer == nil ? 0 : footerHeight + Layout.gap
-        let matrixHeight = max(1, bounds.height - Layout.inset * 2
-            - Layout.titleHeight - Layout.gap - footerAllowance)
-        title.frame = NSRect(x: Layout.inset, y: bounds.height - Layout.inset - Layout.titleHeight,
-                            width: width, height: Layout.titleHeight)
-        scrollView.frame = NSRect(x: Layout.inset, y: Layout.inset + footerAllowance,
-                                 width: width, height: matrixHeight)
-        matrixView.frame = NSRect(origin: .zero, size: matrixView.intrinsicContentSize)
-        footer?.frame = NSRect(x: Layout.inset, y: Layout.inset, width: width, height: footerHeight)
-        #endif
     }
 }
 

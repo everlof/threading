@@ -29,8 +29,14 @@ enum TerminalRowLayoutFixture {
             guard let row = root.mountedRow(at: 0),
                   let content = row.subviews.compactMap({ $0 as? ThemedTerminalRowContentView }).first
             else { preconditionFailure("shared terminal content was not mounted") }
-            precondition(content.frame.height == row.frame.height && content.frame.width > 90,
-                         "shared terminal content lost its host frame")
+            guard let slot = row.subviews.first(where: {
+                $0.accessibilityIdentifier() == "sidebar.terminal.trailing"
+            }) else { preconditionFailure("terminal trailing slot was not mounted") }
+            precondition(abs(content.frame.midY - row.bounds.midY) < 0.5 &&
+                         content.frame.minX == SidebarRowDefaults.leadingInset &&
+                         content.frame.maxX <= slot.frame.minX - SidebarRowDefaults.horizontalSpacing &&
+                         slot.frame.maxX == row.bounds.maxX - SidebarRowDefaults.trailingInset,
+                         "shared terminal content lost its Mac row constraints")
             precondition(content.iconView.frame.width == SidebarRowDefaults.iconSlotWidth &&
                          content.iconView.image === icon,
                          "shared terminal icon was not laid out")

@@ -20,6 +20,7 @@ int tw_accessibility_session_menu_row_identity(int row, char *identity, int capa
 int tw_accessibility_composer_chip_identity(int kind, char *identity, int capacity);
 int tw_accessibility_composer_menu_row_identity(int row, int *kind, int *optionIndex,
                                                  char *id, int capacity);
+int tw_accessibility_attachment_identity(int row, int *scope, char *id, int capacity);
 void tw_accessibility_actions_button(TWWindow *, const char *label, int enabled,
                                      int x, int y, int width, int height);
 void tw_accessibility_add_project_button(TWWindow *, int enabled,

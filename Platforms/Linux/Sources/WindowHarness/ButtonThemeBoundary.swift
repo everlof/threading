@@ -24,7 +24,7 @@ extension AppTheme.Material {
 
         var textTransform: TextTransform = .none
         var titleRendering: TitleRendering = .font
-        var fontWeight: NSFont.Weight = .medium
+        var fontWeight: NSFont.Weight = .semibold
         var tracking: CGFloat = 0
         var fontScale: CGFloat = 1
         var minimumWidth: CGFloat?

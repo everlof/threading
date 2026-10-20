@@ -85,6 +85,10 @@ extension Design {
 
     enum Typography {
         static func body() -> NSFont { NSFont.systemFont(ofSize: 13, weight: .regular) }
+        static func heading() -> NSFont { NSFont.systemFont(ofSize: 20, weight: .semibold) }
+        static func subheading() -> NSFont { NSFont.systemFont(ofSize: 12, weight: .regular) }
+        static func numericBody() -> NSFont { NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular) }
+        static func informationalMark() -> NSFont { NSFont.systemFont(ofSize: 20, weight: .bold) }
 
         static func control(weight: NSFont.Weight = .medium) -> NSFont {
             NSFont.systemFont(ofSize: 12, weight: weight)

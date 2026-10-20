@@ -329,27 +329,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // `PaneFooterView` places a trailing button — see `OpticalInsetProviding`. Pinned by
         // frame instead, the status dot stops short of the margin a project row's count reaches,
         // and the list's trailing edge reads as two edges.
-        let leading = rowContentStack.leadingAnchor.constraint(
-            equalTo: leadingAnchor,
-            constant: SidebarRowDefaults.leadingInset
-        )
-        let trailing = trailingSlot.trailingAnchor.constraint(
-            equalTo: trailingAnchor,
-            constant: -trailingSlotInset(for: SidebarRowDefaults.trailingInset)
-        )
-        contentLeadingConstraint = leading
-        trailingSlotConstraint = trailing
-
-        NSLayoutConstraint.activate([
-            leading,
-            rowContentStack.trailingAnchor.constraint(
-                lessThanOrEqualTo: trailingSlot.leadingAnchor,
-                constant: -SidebarRowDefaults.horizontalSpacing
-            ),
-            rowContentStack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            trailing,
-            trailingSlot.centerYAnchor.constraint(equalTo: centerYAnchor)
-        ])
+        let edges = SidebarRowDefaults.constrainContent(
+            rowContentStack, trailingSlot: trailingSlot, in: self,
+            leadingInset: SidebarRowDefaults.leadingInset,
+            trailingInset: trailingSlotInset(for: SidebarRowDefaults.trailingInset))
+        contentLeadingConstraint = edges.leading
+        trailingSlotConstraint = edges.trailing
     }
 
     /// How far inside the row's trailing edge the slot is pinned, for a given gutter.
@@ -375,10 +360,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // came to rest against the title — mid-row on some rows and at the edge on others, for a
         // reason nothing in the row could show. Pinned to the row it is always where the eye
         // looks for it, whatever the row is made of.
-        rowContentStack.orientation = .horizontal
-        rowContentStack.alignment = .centerY
-        rowContentStack.spacing = SidebarRowDefaults.horizontalSpacing
-        rowContentStack.translatesAutoresizingMaskIntoConstraints = false
+        SidebarRowDefaults.configureSessionContentStack(rowContentStack)
         addSubview(rowContentStack)
         addSubview(trailingSlot)
 
@@ -449,10 +431,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         if let attentionOverlayLabel { return attentionOverlayLabel }
 
         let label = NSTextField(labelWithString: "")
-        label.applyFont(.caption)
-        label.setAccessibilityIdentifier("sidebar.session.attention-overlay")
-        label.setContentHuggingPriority(.required, for: .horizontal)
-        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        SidebarRowDefaults.configureAttentionLabel(label)
         label.isHidden = true
         let insertionIndex = afterTitleSlotIsMaterialized
             ? max(0, rowContentStack.arrangedSubviews.count - 1)
@@ -671,6 +650,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         hoverControls.setAccessibilityIdentifier("sidebar.session.hover-controls")
         trailingSlot.addSubview(statusSlot)
         trailingSlot.addSubview(hoverControls)
+        SidebarRowDefaults.constrainSessionStatus(statusSlot, in: trailingSlot)
 
         let width = trailingSlot.widthAnchor.constraint(
             equalToConstant: SidebarRowDefaults.trailingSlotSize
@@ -678,21 +658,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         trailingSlotWidthConstraint = width
         NSLayoutConstraint.activate([
             width,
-            trailingSlot.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize),
-
-            // The status and the archive button share the row's outer column and trade
-            // visibility there — see `setActionVisible`. Both are pinned to the slot's trailing
-            // edge rather than to each other, so neither one's absence moves the other.
-            statusSlot.centerXAnchor.constraint(
-                equalTo: trailingSlot.trailingAnchor,
-                constant: -SidebarRowDefaults.trailingSlotSize / 2
-            ),
-            statusSlot.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
-            statusSlot.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
-            statusSlot.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.size),
-            hoverControls.trailingAnchor.constraint(equalTo: trailingSlot.trailingAnchor),
-            hoverControls.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
+            trailingSlot.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize)
         ])
+        SidebarRowDefaults.constrainSessionHoverControls(hoverControls, in: trailingSlot)
     }
 
     /// Applies status without making an invisible `SessionStatusIndicator` part of every cold
@@ -711,12 +679,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             materialized.translatesAutoresizingMaskIntoConstraints = false
             materialized.hostGround = backgroundStyle == .emphasized ? .selection : nil
             statusSlot.addSubview(materialized)
-            NSLayoutConstraint.activate([
-                materialized.leadingAnchor.constraint(equalTo: statusSlot.leadingAnchor),
-                materialized.trailingAnchor.constraint(equalTo: statusSlot.trailingAnchor),
-                materialized.topAnchor.constraint(equalTo: statusSlot.topAnchor),
-                materialized.bottomAnchor.constraint(equalTo: statusSlot.bottomAnchor)
-            ])
+            SidebarRowDefaults.constrainSessionStatusContent(materialized, in: statusSlot)
             statusIndicator = materialized
             indicator = materialized
         }

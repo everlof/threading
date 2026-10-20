@@ -25,6 +25,14 @@ int tw_external_app_launch(const char *appID, const char *directory,
 // GIO discovery; named hints are resolved through bounded XDG icon-theme candidate paths.
 int tw_external_app_icon(const char *hint, uint8_t *rgba, int capacity,
                          int *width, int *height);
+// Worker-only composer preview. Reads a regular file of at most 32 MiB, rejects source
+// dimensions above 8192 or 40 million pixels, and returns straight RGBA at most 128x128.
+int tw_attachment_thumbnail(const char *path, uint8_t *rgba, int capacity,
+                            int *width, int *height);
+// Converts a bounded TIFF clipboard image to the PNG path spelling used by the Mac composer.
+// Successful bytes are freed with tw_clipboard_free.
+int tw_attachment_tiff_to_png(const uint8_t *tiff, int length,
+                              uint8_t **png, int *pngLength);
 
 typedef struct TWWindow TWWindow;
 // Immutable wake identity contains no window pointer. Capture it on the owning UI thread;
@@ -63,8 +71,9 @@ int tw_worker_wake(uint64_t identity);
 // Kind53/54 are physical Right/Left keys in host navigation. The outline owns their
 // branch semantics; saved-catalog commands retain kinds10/11 and come from the project menu.
 // Kind36 toggles the selected project's inline saved-runtime disclosure on Space.
-// Kind55 carries one native file-drop path. action=1 rejects an empty/oversized payload;
-// no truncated path is delivered. The host validates directories on its import worker.
+// Kind55 carries one native file-drop path and window-pixel pointer coordinates. action=1
+// rejects an empty/oversized payload; no truncated path is delivered. The host routes the
+// drop by target and validates directories on its import worker.
 // Kind37 delivers pointer motion/down/drag/up/cancel to the terminal pane's AppKit header.
 // Coordinates are terminal-pane-local x and window-local y; action matches kind27.
 // Kind38 presses the mounted page title through its production AppKit accessibility action.
@@ -100,6 +109,11 @@ int tw_worker_wake(uint64_t identity);
 // the exact composer token. Kind51 presses a mounted choice row: action is the same kind,
 // key is its absolute option index and text is its exact host ID. The Swift host validates
 // these against the active composer and current options before changing a choice.
+// Kind56 presses the native conversation's Speed chip. Kind57 chooses one of its
+// three mounted rows; key is 0...2. Both carry the active session identity in text.
+// Kind60 presses a mounted attachment's Remove button. action is 1 opening or 2 native;
+// text is the exact tile UUID, revalidated by the active composer before removal.
+// Kind61 activates one modal text-prompt button through AT-SPI; action 0 cancels, 1 confirms.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
@@ -136,6 +150,7 @@ int tw_workspace_editor_focused(TWWindow *);
 // Keep functional keys with a mounted composer even when a chip/button owns focus. Text and
 // IME remain controlled by tw_workspace_editor_focus. This does not move pane or editor focus.
 int tw_workspace_composer_mode(TWWindow *, int enabled);
+void tw_workspace_minimum_height(TWWindow *, int height);
 // Reserve the top of the workspace's right pane for its AppKit header. Terminal input and
 // accessibility geometry use the remaining content rectangle; standalone mode has no inset.
 void tw_workspace_terminal_top_inset(TWWindow *, int pixels);
@@ -151,6 +166,10 @@ int tw_present_placeholder(TWWindow *, const uint8_t *rgba, int width, int heigh
 int tw_workspace_reset_terminal(TWWindow *);
 // Replace one bounded pane texture, then compose both. The pixels use pane-local coordinates.
 int tw_present_pane(TWWindow *, const uint8_t *rgba, int width, int height, int sidebar);
+// Replace one already laid out sidebar mark without rasterizing the whole AppKit tree.
+// The caller batches one or more updates and then calls tw_repaint once.
+int tw_update_sidebar_region(TWWindow *, const uint8_t *rgba,
+                             int x, int y, int width, int height);
 // The production pane header is a separate retained texture above the terminal grid.
 int tw_present_terminal_header(TWWindow *, const uint8_t *rgba, int width, int height);
 // A retained, bounded right-pane overlay is composed after the terminal and header. Its
@@ -160,6 +179,20 @@ void tw_hide_session_menu(TWWindow *);
 // App-only header button. Height0 hides; disabled buttons remain visible but cannot activate.
 void tw_actions_button(TWWindow *, const char *label, int enabled,
                        int x, int y, int width, int height);
+// One app-owned modal text prompt. Text ranges are Unicode scalar offsets; the existing
+// bounded composer edit queue carries AT-SPI field edits back to the prompt owner.
+void tw_accessibility_text_prompt(TWWindow *, const char *identity, const char *fieldID,
+                                  const char *fieldLabel, const char *fieldDescription,
+                                  const char *title, const char *message,
+                                  const char *confirmTitle, const char *clearTitle,
+                                  const char *value, int length,
+                                  int selectionStart, int selectionEnd, int focusKind,
+                                  int titleX, int titleY, int titleWidth, int titleHeight,
+                                  int messageX, int messageY, int messageWidth, int messageHeight,
+                                  int fieldX, int fieldY, int fieldWidth, int fieldHeight,
+                                  int cancelX, int cancelY, int cancelWidth, int cancelHeight,
+                                  int createX, int createY, int createWidth, int createHeight,
+                                  int clearX, int clearY, int clearWidth, int clearHeight);
 // Frame-level Add project button. Height0 hides it. Pointer input still comes through the
 // opt-in navigator view tree; this publishes only its matching accessible action and bounds.
 void tw_add_project_button(TWWindow *, int enabled, int x, int y, int width, int height);
@@ -173,6 +206,9 @@ void tw_close(TWWindow *);
 
 // Terminal mode keeps Escape/arrows as input. Timed waits let the UI present coalesced frames.
 void tw_terminal_mode(TWWindow *);
+// Fixed-size, text-editable app-owned prompt window. Uses the same text/IME and pointer event
+// transport as the workspace, and delivers hover motion without requiring a held button.
+int tw_prompt_mode(TWWindow *);
 // Optional host navigation: kind 8 activates/returns, 9 requests a fresh terminal,
 // 10/11 are saved terminal/agent commands, 12 is keyboard cancel, 13 requests fresh Codex,
 // 20 chooses a Codex account, 21 requests fresh Claude, 22 chooses a Claude account,
@@ -194,6 +230,14 @@ int tw_accessibility_add_project_row(TWWindow *, const char *id, const char *nam
                                      int createX, int createY, int createWidth, int createHeight,
                                      int actionsX, int actionsY, int actionsWidth, int actionsHeight,
                                      int controlsEnabled);
+// Repository rows retain their own stable accessibility identity while their controls target
+// the current representative checkout.
+int tw_accessibility_add_repository_row(TWWindow *, const char *id, const char *projectID,
+                                        const char *name, int selected,
+                                        int x, int y, int width, int height,
+                                        int createX, int createY, int createWidth, int createHeight,
+                                        int actionsX, int actionsY, int actionsWidth, int actionsHeight,
+                                        int controlsEnabled);
 // Disabled command rows remain selectable, but expose no open action or enabled state.
 int tw_accessibility_add_action_row(TWWindow *, const char *id, const char *name, int selected,
                                     int enabled, int x, int y, int width, int height);
@@ -201,6 +245,38 @@ void tw_accessibility_end_list(TWWindow *);
 // Describes the empty navigator without fabricating a selectable project row.
 void tw_accessibility_empty_list_message(TWWindow *, const char *message);
 void tw_accessibility_show_terminal(TWWindow *, const char *name);
+void tw_accessibility_show_conversation(TWWindow *, const char *name);
+// Publish only visible attachment tiles, at most 32. scope is 1 opening or 2 native.
+// The host owns the UUID and must revalidate it when a queued Remove action arrives.
+void tw_accessibility_attachments_begin(TWWindow *, int scope, const char *owner);
+int tw_accessibility_attachments_add(TWWindow *, const char *id, const char *name,
+    int x, int y, int width, int height,
+    int removeX, int removeY, int removeWidth, int removeHeight);
+void tw_accessibility_attachments_end(TWWindow *);
+// The native reply's latest provider context reading. NULL unmounts the static label.
+void tw_accessibility_conversation_context(TWWindow *, const char *identity,
+                                           const char *title, int x, int y, int width, int height);
+// The native reply's mounted Speed chip and three bounded choices. A NULL identity unmounts
+// the projection. All bounds are window pixels inside the right pane. Menu bounds with zero
+// size close its choices; queued actions are validated against the active session identity.
+void tw_accessibility_conversation_speed(TWWindow *, const char *identity,
+                                          const char *title, int enabled, int focused,
+                                          int x, int y, int width, int height,
+                                          int menuX, int menuY, int menuWidth, int menuHeight,
+                                          int selected, int highlighted);
+int tw_accessibility_conversation_speed_identity(int row, char *identity, int capacity);
+// Model, effort, and mode chips and their currently mounted, six-row choice page.
+void tw_accessibility_conversation_configuration_chip(TWWindow *, const char *identity,
+    int kind, const char *title, int enabled, int focused,
+    int x, int y, int width, int height);
+void tw_accessibility_conversation_configuration_menu(TWWindow *, const char *identity,
+    int kind, int x, int y, int width, int height, int first);
+void tw_accessibility_conversation_configuration_row(TWWindow *, int index,
+    const char *title, const char *detail, int selected, int enabled, int highlighted,
+    int x, int y, int width, int height);
+int tw_accessibility_conversation_configuration_identity(int kind, int row,
+    char *identity, int capacity);
+int tw_accessibility_conversation_configuration_menu_kind(void);
 // One mounted title button in the workspace header. The identity invalidates queued presses
 // when pages switch; height0 unmounts it. Bounds are window pixels and must fit the header.
 void tw_accessibility_page_title(TWWindow *, const char *identity, const char *name,
@@ -247,14 +323,14 @@ void tw_accessibility_composer_editor(TWWindow *, const char *identity,
                                       const char *utf8, int length,
                                       int selectionStart, int selectionEnd, int focused,
                                       int x, int y, int width, int height);
-// Publish mounted production ChipView choices. kind is 1 project, 2 identity, 3 permissions or 4 model/effort. identity is the current composer-opening token and must match the editor.
+// Publish mounted production ChipView choices. kind is 1 project, 2 identity, 3 permissions, 4 model/effort, 5 interface, or 6 speed. identity is the current composer-opening token and must match the editor.
 // label/value form the accessible name; NULL label unmounts that chip. Bounds are
 // window pixels inside the right pane. AT-SPI presses are queued for host validation.
 void tw_accessibility_composer_chip(TWWindow *, const char *identity, int kind,
                                     const char *label, const char *value,
                                     int enabled, int x, int y, int width, int height);
 // Publish the retained window's focus owner after mounting the composer projection. kind is
-// 0 none, 1 project chip, 2 identity chip, 3 editor, 4 submit, 5 permissions, 6 model/effort. Stale identities are refused.
+// 0 none, 1 project chip, 2 identity chip, 3 editor, 4 submit, 5 permissions, 6 model/effort, 7 interface, 8 speed. Stale identities are refused.
 void tw_accessibility_composer_focus(TWWindow *, const char *identity, int kind);
 // Publish only visible choices (at most six menu rows or 128 matrix cells). A NULL identity or
 // zero rows unmounts the menu. optionIndex is the absolute choice index; id is its
@@ -292,6 +368,16 @@ const char *tw_event_text(const TWEvent *);
 int tw_clipboard_read(uint8_t *destination, int capacity);
 // Copies at most 1 MiB of UTF-8 to the native clipboard. Returns 0 on success.
 int tw_clipboard_write(const uint8_t *source, int length);
+// Must run before SDL initializes X11 so the worker can use a separate Xlib connection.
+void tw_clipboard_prepare(void);
+// X11 selection read on a worker only. Returns 0 with allocated bytes, -1 if absent, -2 on
+// timeout/error/oversize. The caller frees successful bytes with tw_clipboard_free.
+int tw_clipboard_read_target(const char *target, uint8_t **bytes, int *length);
+// The active SDL window transport determines which native clipboard owns Paste.
+int tw_clipboard_is_wayland(void);
+// Worker-only Wayland read through the packaged wl-paste client. Same bounded result contract.
+int tw_clipboard_read_wayland_target(const char *target, uint8_t **bytes, int *length);
+void tw_clipboard_free(void *bytes);
 typedef struct { int offset, length, width; uint32_t foreground, background; int bold, underline; } TWCell;
 enum { TW_TERMINAL_CELL_WIDTH = 10, TW_TERMINAL_CELL_HEIGHT = 22 };
 // Worker-only Pango/Cairo renderer. Output is RGBA, in fixed-size terminal cells.

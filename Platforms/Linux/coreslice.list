@@ -10,6 +10,7 @@
 # and after those two splits nothing in the slice needs them.
 Sources/Threading/Core/Storage/SQLiteDatabase.swift
 Sources/Threading/Core/Storage/ProjectDatabase.swift
+Platforms/Linux/Shared/LinuxGitCheckout.swift
 Sources/Threading/Core/Logging/Logger.swift	ThreadingLogger.swift
 Sources/Threading/Core/Localization/AppLocalization.swift
 Sources/Threading/Core/Events/AppEvent.swift
@@ -17,6 +18,7 @@ Sources/Threading/Core/Settings/SettingsEvents.swift
 Sources/Threading/Core/Settings/LimitRecoveryPolicy.swift
 Sources/Threading/Core/Settings/PreferenceStore.swift
 Sources/Threading/Core/Agent/AgentDefaults.swift
+Sources/Threading/Core/Agent/ProviderArchiveState.swift
 Sources/Threading/Core/Agent/ModelName.swift
 Sources/Threading/Core/Agent/AgentModelOption.swift
 Sources/Threading/Core/Agent/ProviderModelCatalog.swift
@@ -65,6 +67,7 @@ Sources/Threading/Core/Agent/CodexRolloutNumbering.swift
 Sources/Threading/Core/Project/ProjectDirectory.swift
 Sources/Threading/Core/Session/AgentSessionCreation.swift
 Sources/Threading/Core/Session/AgentSessionRowPresentation.swift
+Sources/Threading/Core/Session/SessionHistoryTitle.swift
 Sources/Threading/Core/Session/ProjectTerminalStartPlan.swift
 Sources/Threading/Core/Agent/AgentEnvironment.swift
 Sources/Threading/Core/Constants/EnvironmentKeys.swift
@@ -100,6 +103,7 @@ Sources/Threading/Core/PTYHost/PTYHostPipeLink.swift
 Sources/Threading/Core/PTYHost/PTYHostSessionTransport.swift
 Sources/Threading/Core/PTYHost/SignalSafePipeWriter.swift
 Sources/Threading/Core/Session/ProcessStartTime.swift
+Sources/Threading/Core/Session/SnoozeWallClockMoments.swift
 Sources/Threading/Core/Session/ProjectIconDefaults.swift
 Sources/Threading/Core/Storage/AppDataReset.swift
 Sources/Threading/Core/Logging/EventLog.swift
@@ -120,6 +124,7 @@ Sources/Threading/Core/Agent/PermissionDecision.swift
 Sources/Threading/Core/Agent/ConversationPermissionDecision.swift
 Sources/Threading/Core/PTYHost/PTYHostEvents.swift
 Sources/Threading/Core/PTYHost/PTYHostLatch.swift
+Sources/Threading/Core/PTYHost/PTYHostSessionStop.swift
 Sources/Threading/Core/MCP/MCPToolNaming.swift
 Sources/Threading/Models/ChartSpec+ToolCall.swift
 Sources/Threading/Core/Agent/ConversationTimeline+ChartTools.swift

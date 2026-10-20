@@ -118,7 +118,7 @@ Version: $version
 Section: devel
 Priority: optional
 Architecture: arm64
-Depends: libsqlite3-0, libcurl4t64, zlib1g, libstdc++6, libsdl2-2.0-0, libpangocairo-1.0-0, libpangoft2-1.0-0, libfontconfig1, libatk-bridge2.0-0t64, libglib2.0-0t64, libgdk-pixbuf-2.0-0, librsvg2-common, libdecor-0-plugin-1-cairo, zenity, fonts-dejavu-core, fonts-noto-color-emoji, util-linux, git
+Depends: libsqlite3-0, libcurl4t64, zlib1g, libstdc++6, libsdl2-2.0-0, libx11-6, libpangocairo-1.0-0, libpangoft2-1.0-0, libfontconfig1, libatk-bridge2.0-0t64, libglib2.0-0t64, libgdk-pixbuf-2.0-0, librsvg2-common, libdecor-0-plugin-1-cairo, zenity, fonts-dejavu-core, fonts-noto-color-emoji, util-linux, git, wl-clipboard
 Maintainer: David Everlöf <support@mjukis.dev>
 Description: Experimental native Linux host for Threading
  Local projects, terminals and coding-agent sessions in a desktop window.

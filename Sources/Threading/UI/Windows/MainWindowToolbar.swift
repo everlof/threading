@@ -406,17 +406,11 @@ extension MainWindowController: NSToolbarDelegate {
     }
 }
 
-// MARK: - Page Tab Defaults
+// MARK: - Page Title Defaults
 
-/// How wide the page's name is allowed to grow, and what stands in for a page with no mark of
-/// its own.
-///
-/// A cap and no floor. The floor existed to keep a *tab* from changing width around every
-/// session name — a plate that resized itself as pages changed reads as chrome twitching — and
-/// with the plate gone there is nothing to hold open: a plain name hugs its own line the way the
-/// header's other labels do, and only the cap still has a job.
+/// The mark for a page with no provider mark of its own. The shared title view owns the
+/// width cap used by both desktop hosts.
 enum SessionTitleDefaults {
-    static let maxWidth: CGFloat = 360
     static let projectSymbolName = "folder"
 }
 

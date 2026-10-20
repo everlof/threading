@@ -56,6 +56,28 @@ final class TranscriptFactReaderTests: XCTestCase {
         XCTAssertEqual(gate.maximumConcurrentScans, 1)
     }
 
+    func testForgettingAStoppedTranscriptKeepsOtherRunningReadings() async throws {
+        let stopped = try file("stopped mode")
+        let running = try file("running mode")
+        let reader = TranscriptFactReader<String> { try? String(contentsOf: $0, encoding: .utf8) }
+        let firstReads = expectation(description: "both observations")
+        firstReads.expectedFulfillmentCount = 2
+        reader.revalidate(at: stopped) { _ in firstReads.fulfill() }
+        reader.revalidate(at: running) { _ in firstReads.fulfill() }
+        await fulfillment(of: [firstReads], timeout: 3)
+
+        reader.forget(at: stopped)
+        XCTAssertNil(reader.known(at: stopped))
+        XCTAssertEqual(reader.known(at: running), "running mode")
+
+        let resumed = expectation(description: "fresh observation on resume")
+        reader.revalidate(at: stopped) { value in
+            XCTAssertEqual(value, "stopped mode")
+            resumed.fulfill()
+        }
+        await fulfillment(of: [resumed], timeout: 3)
+    }
+
     func testSameSizeAtomicReplacementInvalidatesTheFact() async throws {
         let url = try file("limited")
         let reader = TranscriptFactReader<String> { try? String(contentsOf: $0, encoding: .utf8) }

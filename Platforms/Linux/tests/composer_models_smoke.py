@@ -27,7 +27,7 @@ def eventually(read, label, timeout=20):
     last = None
     while time.monotonic() < deadline:
         if process is not None:
-            assert process.poll() is None, window_log.read_text()
+            assert process.poll() is None, f'process exited {process.returncode}: {window_log.read_text()}'
         try:
             result = read()
             if result:
@@ -145,7 +145,13 @@ base_options = [option('model-alpha', 'Alpha', ['low', 'medium', 'high', 'ultra'
                 option('model-beta', 'Beta', ['low', 'high'], 'low'),
                 option('model-plain', 'Plain', [], None)]
 cases = [('codex', 'keyboard'), ('codex', 'inherit'), ('claude', 'pointer'),
-         ('claude', 'inherit'), ('codex', 'account'), ('codex', 'large'), ('codex', 'stale')]
+         ('claude', 'inherit'), ('codex', 'account'), ('codex', 'large'),
+         ('codex', 'stale'), ('codex', 'visibility'), ('codex', 'remember')]
+requested_case = os.getenv('THREADING_MODEL_CASE')
+if requested_case:
+    cases = [(provider, scenario) for provider, scenario in cases
+             if f'{provider}-{scenario}' == requested_case]
+    assert cases, requested_case
 try:
     state = root / 'daemon'
     state.mkdir()
@@ -166,7 +172,7 @@ try:
         (claude / 'settings.json').write_text(json.dumps(dict(model='sonnet', effortLevel='medium')))
         (claude / '.claude.json').write_text(json.dumps(dict(additionalModelOptionsCache=[
             dict(value='vendor-preview', label='Preview', description='Preview · account model')])) )
-        if scenario == 'account':
+        if scenario in ('account', 'remember'):
             catalog(home / '.codex-work', [option('work-default', 'Work default', ['high']),
                 option('work-other', 'Work other', ['high'])], 'work-default', 'high')
         if scenario == 'large':
@@ -175,7 +181,8 @@ try:
                             for i in range(600)], 'model-000', levels[0])
         subprocess.run([host, '--add-project', str(store), str(project)],
                        check=True, capture_output=True, timeout=8)
-        environment = dict(os.environ, HOME=str(home), MODEL_FIXTURE_PROVIDER=provider,
+        environment = dict(os.environ, HOME=str(home), THREADING_LINUX_DATA_DIR=str(directory / 'data'),
+                           MODEL_FIXTURE_PROVIDER=provider,
                            MODEL_FIXTURE_KEEPALIVE='1' if scenario == 'keyboard' else '0')
         command = [binary, '--app-agents-project', str(store), str(socket), '/bin/sh',
                    str(agent), str(agent), str(project)]
@@ -218,7 +225,64 @@ try:
             assert not enabled(unavailable) and unavailable.get_action_iface().get_n_actions() == 0
             assert cell('Alpha · Auto').get_description() == 'Account default'
             capture(f'{case}-grid')
-            if scenario == 'inherit':
+            if scenario == 'visibility':
+                plain = eventually(lambda: cell('Plain · Auto'), 'model to hide')
+                bounds = plain.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
+                xdo('mousemove', bounds.x - 22, bounds.y + bounds.height // 2)
+                time.sleep(.1)
+                capture('codex-hide-model-hover')
+                xdo('click', 1)
+                eventually(lambda: control('linux.composer.choices') is None, 'hide closes picker')
+                visibility_file = directory / 'data/model-visibility.json'
+                eventually(lambda: visibility_file.exists(), 'saved account visibility')
+                open_models()
+                assert cell('Plain · Auto') is None
+                capture('codex-hidden-model-footer')
+                footer = eventually(lambda: control('model-effort.show-hidden-models'), 'accessible footer')
+                assert footer.get_role_name() == 'push button'
+                assert footer.get_name() == 'Show hidden models (1)'
+                assert footer.get_action_iface().get_n_actions() == 1
+                xdo('key', 'Tab')
+                eventually(lambda: footer.get_state_set().contains(Atspi.StateType.FOCUSED),
+                           'keyboard footer focus')
+                capture('codex-hidden-model-footer-focused')
+                xdo('key', 'shift+Tab')
+                eventually(lambda: not footer.get_state_set().contains(Atspi.StateType.FOCUSED),
+                           'keyboard return to grid')
+                xdo('key', 'Escape')
+                process.terminate(); process.wait(timeout=5); process = None
+                window_log = output / 'codex-visibility-restart.log'
+                with window_log.open('w') as log:
+                    process = subprocess.Popen(command, env=environment, stdout=log, stderr=log)
+                app = eventually(application, 'restarted application')
+                editor = eventually(lambda: control('linux.composer.editor'), 'restarted editor')
+                window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid', process.pid,
+                    '--name', '^Threading experiment - '), 'restarted window').splitlines()[0]
+                xdo('windowfocus', '--sync', window)
+                assert editor.get_editable_text_iface().set_text_contents(prompt)
+                menu = open_models()
+                assert cell('Plain · Auto') is None, 'hidden model must survive restart'
+                xdo('key', 'Tab', 'space')
+                eventually(lambda: control('linux.composer.choices') is None, 'show hidden closes picker')
+                open_models()
+                eventually(lambda: cell('Plain · Auto'), 'restored model')
+                capture('codex-restored-model-grid')
+                plain = cell('Plain · Auto')
+                bounds = plain.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
+                xdo('mousemove', bounds.x - 22, bounds.y + bounds.height // 2)
+                xdo('click', 1)
+                eventually(lambda: control('linux.composer.choices') is None, 'second hide closes picker')
+                open_models()
+                footer = eventually(lambda: control('model-effort.show-hidden-models'),
+                                    'accessible footer after second hide')
+                assert footer.get_action_iface().do_action(0)
+                eventually(lambda: control('linux.composer.choices') is None,
+                           'AT-SPI show hidden closes picker')
+                open_models()
+                eventually(lambda: cell('Plain · Auto'), 'AT-SPI restored model')
+                select_cell('Beta · High')
+                expected_model, expected_effort = 'model-beta', 'high'
+            elif scenario == 'inherit':
                 select_cell('Alpha · Auto')
             elif scenario == 'keyboard':
                 select_cell('Alpha · Ultra', pointer=True)
@@ -226,7 +290,15 @@ try:
                 capture('codex-selected-ultra-light')
                 xdo('key', 'ctrl+shift+t')
                 eventually(lambda: 'THEME_APPEARANCE dark' in window_log.read_text(), 'dark theme')
-                capture('codex-selected-ultra-dark')
+                def dark_frame():
+                    capture('codex-selected-ultra-dark')
+                    image = output / 'codex-selected-ultra-dark.png'
+                    width, height = map(int, subprocess.check_output(
+                        ['identify', '-format', '%w %h', str(image)], text=True).split())
+                    red = float(subprocess.check_output(['convert', str(image), '-format',
+                        f'%[fx:p{{{width - 10},{height // 2}}}.r]', 'info:'], text=True))
+                    return red < 0.2
+                eventually(dark_frame, 'presented dark model grid')
                 xdo('key', 'Escape')
                 open_models()
                 # Move to Auto, down one model, then skip Beta's unsupported Medium column.
@@ -303,6 +375,58 @@ try:
             assert f'model_reasoning_effort="{expected_effort}"' in args, resumed
             assert args[-2:] == ['resume', report['provider_id']], resumed
             xdo('key', 'q')
+        if scenario == 'remember':
+            preference = directory / 'data/new-session-run-choice.json'
+            def remembered_choice():
+                if not preference.exists():
+                    return None
+                accounts = json.loads(preference.read_text())['accounts']
+                if len(accounts) != 1:
+                    return None
+                return next(iter(accounts.values()))
+            assert eventually(remembered_choice, 'accepted account choice') == {
+                'model': 'model-beta', 'reasoningEffort': 'high'}
+
+            def restart(label):
+                global process, app, editor, window, window_log
+                process.terminate(); process.wait(timeout=5); process = None
+                window_log = output / f'{case}-{label}.log'
+                with window_log.open('w') as log:
+                    process = subprocess.Popen(command, env=environment, stdout=log, stderr=log)
+                app = eventually(application, label + ' application')
+                window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid', process.pid,
+                    '--name', '^Threading').splitlines()[0], label + ' window')
+                xdo('windowfocus', '--sync', window)
+
+            restart('remembered')
+            editor = eventually(lambda: control('linux.composer.editor'), 'restarted composer editor')
+            chip = eventually(lambda: control('linux.composer.model-effort'), 'remembered model chip')
+            eventually(lambda: 'Beta · High' in chip.get_name(), 'restored account run choice')
+            capture('codex-remembered-choice')
+            select_account('codex-work')
+            eventually(lambda: 'Work default' in chip.get_name(), 'other account keeps its own default')
+            assert control('linux.composer.provider').get_action_iface().do_action(0)
+            identity_menu = eventually(lambda: control('linux.composer.choices'), 'identity menu')
+            assert identity_menu.get_child_at_index(0).get_action_iface().do_action(0)
+            eventually(lambda: 'Beta · High' in chip.get_name(), 'restored original account choice')
+            open_models()
+            select_cell('Alpha · Auto')
+            eventually(lambda: 'Alpha' in chip.get_name(), 'automatic model choice')
+            assert editor.get_editable_text_iface().set_text_contents('Clear remembered choice')
+            assert control('linux.placeholder.action').get_action_iface().do_action(0)
+            def cleared_choice():
+                if not preference.exists():
+                    return False
+                with sqlite3.connect(store / 'threading.db') as database:
+                    count = database.execute('SELECT COUNT(*) FROM session').fetchone()[0]
+                return count == 2 and json.loads(preference.read_text())['accounts'] == {}
+            eventually(cleared_choice, 'automatic choice cleared after accepted creation')
+            restart('cleared')
+            eventually(lambda: control('linux.composer.editor'), 'cleared composer editor')
+            chip = eventually(lambda: control('linux.composer.model-effort'), 'cleared model chip')
+            eventually(lambda: 'Alpha' in chip.get_name() and 'Beta' not in chip.get_name(),
+                       'provider default restored after restart')
+            capture('codex-cleared-choice')
         process.terminate(); process.wait(timeout=5); process = None
         print(f'PASS model/effort {case}: real grid, exact account, persistence and launch', flush=True)
 finally:

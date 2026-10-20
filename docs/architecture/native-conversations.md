@@ -115,11 +115,25 @@ The Linux preview's ordinary workspace now honors `usesNativeUI` for saved recor
 pane shares header/menu ownership with the terminal pane and mounts production Design message,
 prompt and content-table components. The preview host uses the shared transports and timeline;
 it does not yet mount the complete Mac conversation controller or its extension presentation.
+Its outer layout now uses the Mac pane's constraint relationships: the scroll viewport spans the
+pane and ends above the status line; the status text follows the reply box's inset column; and
+the reply box is centered, capped at the conversation reading width plus its own padding, and
+pinned above the pane bottom. The editor's cached TextKit and attachment height updates one
+composer-height constraint. The scroll document remains a separate, recycled viewport island,
+so transcript length does not enter the pane's root constraint solve. The Linux host still lays
+out the editor, attachments and footer inside the reply box with `PromptChrome` frames, and it
+does not mount the Mac controller's minimap, scheduled rail or extension surfaces.
 Worker preparation owns account/history lookup, Markdown partitioning, child launch and durable
 metadata. `ConversationPreparedChild` transfers a worker-created child once to the UI transport,
 retaining an exit that arrives before installation. The ordinary Codex journey checks native
 selection, persistent turns, draft retention across a terminal switch, restart replay and
 same-thread resume, and the same journey passes for Claude's stream-json route.
+
+The Linux opening composer remembers model and reasoning effort per account only after a fresh
+terminal or native session commits. It reloads that bounded choice with the account catalogue on
+the serial worker, then admits it only if the current catalogue still offers the model and effort
+and the model is visible. Selecting Auto for both clears an older explicit choice; a different
+login cannot inherit it. The chip and picker receive only the admitted values on the UI actor.
 
 Linux presents permission requests with the production `PermissionRequestView`, inline after the
 transcript. Its own `PermissionBroker` applies the shared policy, then queues what is left on
@@ -164,6 +178,13 @@ so a conversation still following an explicit General Standard/Fast choice does 
 the process. Claude's Native transport receives the same startup policy in its per-session
 `--settings` file and restates it over `apply_flag_settings` when the stream is ready.
 The full precedence and Terminal parity live in [`sessions.md`](sessions.md#startup-speed-per-runtime-and-per-conversation).
+Linux's native reply uses a retained themed Speed chip and three mounted menu rows. Its serial
+session worker saves an explicit Standard/Fast override before updating the displayed value.
+Claude receives the live `apply_flag_settings` acknowledgement before that save; Codex's next
+`turn/start` reads the new service tier from the retained prepared session. Following the agent's
+setting clears the override in storage and takes effect on the next launch, because the active
+transport cannot generically restore a provider-owned setting. The Linux AT-SPI actions carry
+the active conversation UUID and are revalidated before reaching the pane.
 
 `CodexAppServerEvent` maps provider-specific JSON-RPC notifications onto `[StreamEvent]`.
 Agent-message deltas use the same streaming placeholder as Claude, completed messages become
@@ -1269,7 +1290,7 @@ the answer it was written to get. The fade's direction was wrong on the first cu
 opening line dissolved) and only the render pass caught it: the label's backing layer takes
 the hierarchy's flipped geometry, so unit-point y = 0 is the first line.
 
-**The status row carries a context meter** (`contextLabel`, `TurnStatusText.context`) — how
+**The reply footer carries a context meter** (`contextLabel`, `TurnStatusText.context`) — how
 full the model's window is, which is a different fact from the account usage pill's quota.
 Readings ride `TurnMetrics` on `.turnFinished`, so live and replay share one path: Claude
 sums the four `usage` fields (its `input_tokens` excludes cache reads, so the parts are
@@ -2035,6 +2056,40 @@ the selected model publishes those controls. The mode chip
 is also configured *before* the model-catalog guard: a runtime that publishes no catalog — Grok
 today — still has a permission posture, and the early return that hides the model, effort and
 speed chips used to take this one with it.
+
+Linux's native reply mirrors the separate Model and Effort chips through the production
+`ChipView` and themed menu rows. Its account catalogue remains the opening composer's bounded
+worker snapshot; the popup materializes at most six rows and changes pages as keyboard focus
+moves. Session identity, provider control requests and durable changes stay host-owned. Claude
+acknowledges `set_model` before the record changes; Codex reads model and effort from the saved
+runtime into each next `turn/start`. Changing to a model without Fast support turns Fast off, and
+an explicit effort that the new model does not support is cleared. Claude's reply Effort chip is
+hidden until that transport offers a live effort control. The Mode chip uses the same shared
+permission choices as the opening composer.
+The Linux reply and opening composers now mount their attachment rail, editor and footer in the
+same `PromptChrome` vertical stack that configures macOS `PromptView`. The shared sizing
+constraints give the attachment rail its 80-point height and pin the editor and footer to the
+stack width; each host supplies its field's outer anchors and bounded height. The footer remains
+a production `NSStackView`, and the chips use the Mac's low horizontal compression priority so
+their labels shorten before the send control moves. A reply with an image raises the Linux
+window minimum until the required rail, editor and footer fit; removing it restores the ordinary
+180-pixel floor.
+The Linux reply retains the newest `TurnMetrics.contextTokens` and optional context window from
+both replayed and live turn boundaries. A later turn with no usage leaves that reading intact.
+The production `TurnStatusText` formatter draws it beside Send, using warning ink above 90% of a
+known window; the AT-SPI projection exposes the complete text as a bounded static label. The
+session status occupies the narration row above the box, leaving model, mode, effort, speed and
+context inside its footer. This remains host-owned session truth presented through the existing
+reply composer, not a new extension component.
+
+Linux's two composers now route SDL file drops by pointer target: the navigator still admits
+project directories, while the prompt admits image files. `LinuxPromptAttachmentStrip` in Design
+prepares at most 32 images on one worker, with a 32 MiB regular-file cap, source dimension and
+pixel caps, and a 128-pixel RGBA preview. A draft generation discards work from a cleared prompt.
+An 80-point tile matches the Mac strip, can be removed, and contributes its quoted path only at
+submit; files without an image preview go into editor text as literal paths. Submission and path
+admission remain host-owned behaviors of the existing protected composer slots. Linux still
+needs session-owned custody, clipboard images, movie posters and AT-SPI actions for these tiles.
 
 **Speed has one presentation on both composers.** `ConversationSpeedPresentation` owns the
 **Follow General Setting**, **Standard**, and **Fast** rows, including their selected state and the

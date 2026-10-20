@@ -37,6 +37,10 @@ three rendered PNG specimens, then injects a layout failure to verify that the e
 nonzero before rendering. It skips the optional scaling benchmark in this smoke; ordinary
 `Harness` runs retain that measurement. Fresh images and logs remain under `out/shim-smoke.*`
 for visual inspection.
+The layout cases include a view whose `layout()` callback changes a child constraint after its
+width is solved: `layoutSubtreeIfNeeded()` must settle that change before drawing or input reads
+the child frame. The shared Settings row exercises the same narrow/wide/narrow transition in
+the static `WindowHarness --settings-row-contract` bundle gate.
 
 `tests/glyph_view/typecheck.sh` checks the exact production `GlyphView` and
 `TemplateImageDrawing` files together against shim AppKit. Its test-only theme declarations
@@ -112,7 +116,8 @@ composer. Project and agent choices, the brief editor and Start Session are pres
 including for an empty store. Missing choices disable launch and their unavailable chooser
 actions. Escape returns focus to the navigator while preserving the draft; selecting or importing
 a project updates the destination without clearing it. Start requires a valid project, an available
-agent and a nonempty committed draft, and waits for pending project selection/import to finish.
+agent and committed text or an image attachment, and waits for pending project selection/import
+to finish.
 The idle pane retains one bitmap and republishes it only on resize or interaction. Its controls
 are available through pointer, keyboard and AT-SPI, and the terminal node enters the accessibility
 tree only after a terminal opens. The welcome uses the shared Threading mark and calendar-aware
@@ -152,6 +157,8 @@ project/child reorder. The host now queries the outline's identity index rather 
 second single-expanded-project projection. Empty projects retain a disclosure, and clicking a
 sibling disclosure leaves the selected child in place. `multi_project_outline_smoke.py` checks
 these behaviors in the native shell, including keyboard traversal and durable terminal identity.
+The indexed navigator excludes archived conversations from both counts and recent rows before
+its limit; archived records remain available by exact session ID for a future restore surface.
 `--session-row-layout-fixture` and `--terminal-row-layout-fixture` check the shared title/icon
 stacks at their native slot sizes. Plain Right expands a project while keeping it selected; Left collapses a project or selects
 a child’s parent. The navigator restores each project's persisted `isExpanded` value, including
@@ -295,6 +302,15 @@ share the eight-runtime limit. The native host prepares account routing, history
 on a serial worker, then mounts the shared production rows and prompt editor. Codex and Claude
 launch plans are available, and the ordinary journey is verified for both against deterministic
 peers speaking each provider's production wire.
+The native prompt footer includes Speed for supported models, using the same menu vocabulary
+as the opening composer. Its two explicit choices take effect in the active conversation and
+persist with the session; the inherited choice takes effect when the provider next starts.
+The footer also shows the newest provider context reading beside Send: Codex uses a percentage
+when it reports a window size and warns above 90%, while Claude shows an absolute token count.
+The reading survives a later turn with no usage data, including after transcript replay. The
+session status sits above the reply box, matching the Mac's separation between narration and
+controls. The bounded AT-SPI label exposes the full reading even when the compact footer
+shortens its visible text.
 Codex and ACP permission requests appear as the production permission card inline after the
 transcript. The shared `PermissionPolicy` answers read-only tools and commands, Allow for Session
 and the session's mode first. Codex questions appear as the production question card, and an
@@ -677,27 +693,103 @@ production shortcut cue, and is disabled for an empty or provisional IME draft. 
 presents project and provider choices in bounded, visible
 production menu rows; project and provider identities, availability, and launch remain host-owned.
 The prompt footer now exposes permissions through the shared hand-mark chip and mode labels.
-It starts at Manual, preserving the preview's existing launch policy. The six explicit modes
-and Use Agent's Setting pass through the shared session record and provider command builders;
-the latter emits no permission override. The bounded menu shows the provider-specific
-explanations, including Codex's Plan limitation, and exposes them to AT-SPI. Its six-row viewport
-can reach all seven choices by keyboard or scrolling.
+It starts with the session mode unset and displays the account's configured mode when known.
+Terminal launches emit no permission override; the native Codex app-server keeps the Mac's
+fixed `--sandbox workspace-write` when no mode is selected. Where a configured mode is known,
+its row carries the `(default)` qualifier and restores inheritance; otherwise the menu has a
+separate Use Agent's Setting row. The six explicit modes pass through the shared session record
+and provider command builders. The bounded menu shows provider-specific explanations, including
+Codex's Plan limitation, and exposes them to AT-SPI. Its six-row viewport can reach every choice
+by keyboard or scrolling. Claude's newest transcript can mark a mode `(last used)` without treating that
+past run as an inherited setting. Linux still lacks the macOS app-wide Chats default.
 The model/effort chip opens the shared production matrix. An account-scoped worker reads Codex's
 model cache or Claude's aliases and additional models, admitting at most 512 models and 32 effort
 columns plus Auto. The marked default row and Auto preserve CLI inheritance; explicit values
 are saved with the session and reused on resume. Fresh launches revalidate explicit choices
 against the account catalogue before creating a session. A refreshed catalogue never silently
-clears a withdrawn explicit choice. Account changes clear choices while preserving the brief.
+clears an in-progress explicit choice. Account changes restore that login's saved run choice
+while preserving the brief.
 Arrow keys skip unsupported combinations; Home/End and Page Up/Down reveal distant rows.
 Only visible cells enter the accessibility tree. Missing Codex metadata disables the picker
-while still allowing a launch using the CLI's own defaults. Speed, surface, attachments,
-last-used choice restoration, hidden-model preferences and full popover chrome remain parity work.
+while still allowing a launch using the CLI's own defaults. A model row's hide control saves a
+provider-qualified account preference on the catalogue worker; the footer restores all hidden
+models for that account. The default and currently selected model stay available, and stale
+hidden identifiers do not inflate the footer count. The Interface chip offers the Mac's
+provider terminal UI or Native (Experimental) for Codex and Claude. A fresh native choice
+commits the exact project, account, mode, model and surface on a bounded worker, then mounts
+the conversation pane and sends the opening brief once. The existing terminal choice keeps
+its PTY launch. `tests/composer_surface_smoke.py` checks the accessible menu, saved record,
+provider turn and rendered pane. The Speed chip appears for a Codex model with a Fast tier or
+Claude Opus. It saves an optional per-conversation override: Standard explicitly disables an
+inherited Fast setting, and Fast selects the model's service tier or Claude's fast-mode flag.
+The opening composer restores the last model and effort accepted for that exact login after a
+new chat. Choices persist only after the session record commits; choosing Auto for both clears
+an older explicit one. A bounded catalogue rejects withdrawn or hidden saved models, and
+switching accounts restores each account's own choice. The host owns this account-qualified
+preference on its serial catalogue worker, with at most 128 account entries and no file work in
+chip or paint callbacks. The existing model picker remains the presentation component; this
+adds no extension surface.
+Terminal and native launches carry that choice, and resumed sessions retain it. Follow Agent
+Setting leaves provider configuration in charge. Linux has no app-wide Settings ▸ Chats speed
+preference yet, so that Mac inheritance layer remains parity work alongside attachments,
+and full popover chrome. The native reply now mounts the same
+themed Speed chip and a bounded three-row menu. Standard and Fast save the conversation override;
+Claude also applies a live `apply_flag_settings` request, while Codex sends the selected service
+tier on its next `turn/start`. Following the agent's setting records inheritance for the next
+launch, since the live transports have no generic provider-setting reset. AT-SPI exposes the
+mounted chip and rows with the active session identity, and
+`tests/composer_surface_smoke.py ... codex|claude speed-live` verifies persistence and a second
+provider turn.
+The native reply also exposes Model, Mode and Effort chips in the Mac footer order. Model
+choices come from the same bounded account catalogue as the opening composer, respect hidden
+models, and mount at most six themed menu rows at once. Codex saves model and effort for its next
+`turn/start`; Claude sends `set_model` on the live control channel before saving. Choosing a
+model without Fast support turns Fast off, and an unsupported explicit effort returns to the
+model default. Claude reply effort stays hidden because its transport has no live effort control.
+Mode offers the six shared permission postures even when the model catalogue is empty. Claude
+sends a live `set_permission_mode` control request and saves only after success. Codex and dormant
+chats save the selection for the next launch, and their menu says when it takes effect. The
+inherited title resolves Claude's layered settings or Codex's approval, sandbox and reviewer
+configuration; Claude's newest transcript can qualify a menu row as `(last used)` without
+changing the inherited chip or the next launch. While Claude is running, its own transcript can
+name the live posture in the reply chip when no configured or selected mode outranks it; the
+reader coalesces stream events onto a bounded file worker. Linux has no app-wide Chats default yet.
+AT-SPI publishes only mounted rows with the active session identity, including the disabled timing note.
+`tests/composer_surface_smoke.py ... codex|claude configuration-live` checks these choices,
+the durable record and the next provider turn in the real X11 shell.
 The composer-only journey checks permission choices and model/effort selection against both
 providers' exact launch arguments and saved records, including Codex resume.
+The hidden-model footer is a real button in the bounded AT-SPI model panel; Tab reaches it from
+the grid, Shift-Tab returns, and Space or its accessibility action restores the account's rows.
 The second composer chip now presents provider-qualified account choices with cached provider
 marks. The host discovers at most 32 accounts per provider and passes the selected handle to
 the exact agent launch; the menu mounts only the rows that fit. Run
 `THREADING_LINUX_COMPOSER_ACCOUNT_ONLY=1 ./window-smoke.sh` for its named-account X11 journey.
+The location chip reads Git control files on a worker and names the selected checkout's branch.
+For an added repository it offers this checkout and distinct added sibling worktrees as launch
+destinations, then **New Worktree…**, with project navigation behind **Switch Project…**.
+Choosing a sibling keeps the
+draft and routes terminal or native session creation, model settings, the agent process and the
+saved session row to that checkout. The discovered catalogue groups by repository on the worker;
+composer refreshes touch only siblings. Git reads are capped at 4 KiB per control file, and a
+missing checkout never borrows an enclosing repository's identity. Session creation rechecks
+the selected checkout and branch on its worker before saving a record. Run
+`THREADING_LINUX_CHECKOUT_ONLY=1 ./window-smoke.sh` for terminal and native X11 journeys.
+The composer menu and repository root `+` create a sibling checkout on a new branch, import it,
+reveal it in the sidebar and move the composer there without losing its draft. The prompt and
+Git/import work run off the UI thread; Git has a 15-second timeout. The branch prompt is an
+app-owned dialog drawn with the shared themed field and buttons, with keyboard and AT-SPI
+editing and Create/Cancel actions. `tests/themed_prompt_smoke.py` exercises that dialog in
+light and dark appearances. An inotify
+worker watches each added checkout's Git metadata directory for a replaced `HEAD`; it wakes the
+window only when a branch changes. The composer chip and mounted checkout row update without
+reopening the window, while checkout discovery handles changed or missing identities.
+The sidebar groups every added Git project below its repository, including a repository with
+one checkout. Checkout rows show the branch and a shortened path; an unavailable saved checkout
+stays in that group. Repository folding is remembered across launches. Import reveals a folded
+repository before selecting its new checkout. The same bounded outline
+keeps project and session rows virtualized; `tests/composer_checkout_smoke.py` checks the real
+X11 tree, folding, missing checkout and live launch routing.
 The terminal header also mounts the unchanged production `SplitIconButtonView` for Open In.
 GIO discovers directory handlers, and the Linux host launches the selected handler with the
 active checkout path after revalidation. The chooser mounts at most six production menu rows
@@ -726,7 +818,7 @@ indexed by viewport before drawing, so scrolling does not scan the entire brief.
 `THREADING_EDITOR_CONFIGURATION=release THREADING_EDITOR_SCROLL_BENCHMARK=1
 tests/text_editor/run.sh` measures preparation separately from warm scroll/draw for 170 and
 1,700 lines in the same fixed viewport.
-The composer declares its project, identity, editor, model/effort, permission and submit key-view loop in the shim window. Tab/Shift+Tab skip
+The composer declares its project, identity, editor, model/effort, permission, speed, interface and submit key-view loop in the shim window. Tab/Shift+Tab skip
 disabled, hidden and detached controls; choice keyboard activation does not edit the draft.
 AT-SPI focus follows the retained first responder. Home/End, Ctrl+Home/End and Page Up/Down
 preserve text and grapheme boundaries, and vertical movement retains its column across short
@@ -739,8 +831,27 @@ The installed `bundle-smoke.sh` repeats that journey from the packaged binary. A
 up to 64 KiB of composer text and queues programmatic text, selection and clipboard edits through
 the same TextKit editor as keyboard input. Each queued edit carries a fresh composer identity so
 starting a new brief cannot apply an old edit to it. Escape preserves the current brief's identity.
-Full Mac composer
-behavior, including attachments and durable drafts, remains open. Other editing surfaces,
+Image files dropped onto either composer are decoded on a bounded serial worker and shown as
+removable 80-point thumbnails. Image-only prompts submit the same quoted path spelling as the Mac;
+nonimage and unpreviewable files become literal paths in the editor. The real Xdnd journeys
+exercise opening terminal sessions and live Codex/Claude native replies. On X11 and Wayland,
+Ctrl+V also accepts local file URLs, raw PNG and TIFF from the clipboard. The active SDL window
+transport selects X11's separate selection connection or the packaged `wl-paste` client. Selection
+conversion runs on a serial worker with a 32 MiB ceiling and 1.2-second timeout per target;
+TIFF is decoded and written as PNG, matching the Mac composer, before the same preview path.
+The ordinary text paste remains
+available when the clipboard has no supported image. A delayed text fallback retains the selection
+from the Paste keypress, moving it past disjoint edits in UTF-16 text instead of following a later
+caret position. Later caret moves remain active after insertion; if intervening edits replaced the
+selected text, it leaves that text alone. The
+X11 composer journey holds the clipboard owner while typing at both ends of the draft to check
+this ordering. The installed X11 package repeats URL, TIFF and PNG paste in the opening composer
+and both native provider conversations. The installed Wayland journey pastes URI, TIFF and PNG
+into the opening composer, checks their previews and removal, and checks the exact PNG bytes
+delivered to its agent. Movie posters, session-owned
+attachment custody and durable drafts remain open. The mounted thumbnail rail
+also appears in AT-SPI as image nodes with separate named Remove buttons in both composers;
+actions are tied to the current tile identity and retire when the image is removed. Other editing surfaces,
 full table and outline behavior, animation,
 system services, and the remaining AppKit shims need work. The layout solver still solves a whole
 subtree at a time and can pay a cold cubic cost on structural changes; see FINDINGS sections 8
@@ -1059,6 +1170,25 @@ name. A reserved status region
 shows durable wake/snooze attention or `Retained` for a cached runtime; it does not claim agent
 activity. Visible snooze deadlines refresh even before a terminal is opened. The native wait
 keeps accessibility responsive while waiting for the next deadline.
+The session menu's `Custom time…` Snooze choice opens a separate themed sheet. Its day/time
+options, rows and internal constraints are shared with macOS; the host returns the chosen moment
+to the existing exact-session durable Snooze transaction. Standalone windows admit its full
+520×460-point sheet at both supported scales.
+The row menu also offers `Rename Session…`. It uses the constrained design-system text prompt,
+prepopulates the custom name, and offers `Use Agent's Name` when one exists. The store worker
+uses the same visible-name and history policy as macOS, and an empty answer clears the custom
+name. `tests/session_rename_smoke.py` exercises the installed row menu, Unicode input, history
+and clearing through AT-SPI and SQLite.
+An active agent row also offers `Close Session`. Its warning confirmation uses the shared alert
+content constraints; Cancel leaves the process alone, while confirmation asks the daemon to
+stop it and retains the saved session for a later resume. The selected row remains selected and
+the pane mounts the shared, constraint-laid-out dormant placeholder below its page header.
+Its action starts the saved session again. The macOS sheet also has a remembered “Don't ask
+again” checkbox that Linux has not ported yet. `tests/session_actions_smoke.py` checks the
+installed confirmation, daemon exit, retained database row, dormant pane and restart action.
+The row menu checks the daemon on a worker when its session is not mounted locally, so a
+running detached child can also be closed without first opening its terminal.
+`tests/session_close_unmounted_smoke.py` covers that installed path.
 Two bounded PNGs decode once on a worker, and mounted rows reuse their cached images.
 `tests/image_shim/run.py` checks the narrow compositing contracts in an isolated Swift build.
 The same image fixture now compares real macOS AppKit and the shim for interpolation hints,

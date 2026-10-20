@@ -4,6 +4,17 @@ import Foundation
 import LinuxWindowBridge
 @testable import CoreSlice
 
+@MainActor
+private final class ConversationChoiceSession: ChipChoicePresentationSession {
+    private var didDismiss: (() -> Void)?
+    init(didDismiss: @escaping () -> Void) { self.didDismiss = didDismiss }
+    func dismissChipChoicePresentation() {
+        let callback = didDismiss
+        didDismiss = nil
+        callback?()
+    }
+}
+
 /// Native conversation content in the ordinary workspace. The same chrome serves a terminal;
 /// transcript cells and prompt controls come from the production Design sources.
 @MainActor
@@ -17,14 +28,55 @@ final class WorkspaceConversationPane: WorkspacePane {
     private let rows = DocumentRowSource()
     private let editor = PromptTextView.scrollingPrompt()
     private let composer = NSView(frame: .zero)
-    private let composerContent = NSStackView()
+    private let attachments = LinuxPromptAttachmentStrip(frame: .zero)
     private let composerFooter = NSStackView()
     private let composerSpacer = NSView(frame: .zero)
+    private var composerContentLayout: LinuxPromptContentLayout!
+    private let modelChip = ChipView()
+    private let modeChip = ChipView()
+    private let effortChip = ChipView()
+    private let speedChip = ChipView()
+    private let contextLabel = NSTextField(labelWithString: "")
+    private let configurationMenu = SessionMenuSurface(frame: .zero)
+    private enum ConfigurationKind: Int { case model = 1, effort = 2, mode = 3 }
+    private var configurationKind: ConfigurationKind?
+    private var configurationChoices: [NativeConfigurationChoice] = []
+    private var configurationRows: [ThemedMenuRowView] = []
+    private var configurationSession: ConversationChoiceSession?
+    private var configurationFirst = 0
+    private var configurationMountedFirst = -1
+    private var configurationSelected = 0
+    private var configurationVisibleCount = 0
+    private var configurationRowHeight: CGFloat = 44
+    private var configurationWidth: CGFloat = 240
+    private let speedMenu = SessionMenuSurface(frame: .zero)
+    private var speedRows: [ThemedMenuRowView] = []
+    private var speedSession: ConversationChoiceSession?
+    private var speedSelected = 0
+    private var speedOpen = false
+    private var speedRowHeight: CGFloat = 44
     private let submit = ThemedButton()
     private let status: NSTextField
+    private lazy var composerHeightConstraint = composer.heightAnchor.constraint(
+        equalToConstant: Design.Size.inputHeight)
+    private lazy var composerColumnCap = composer.widthAnchor.constraint(
+        lessThanOrEqualToConstant: Design.Chat.columnWidth + 2 * Design.Spacing.inset)
+    private lazy var composerColumnWidth: NSLayoutConstraint = {
+        let constraint = composer.widthAnchor.constraint(
+            equalToConstant: Design.Chat.columnWidth + 2 * Design.Spacing.inset)
+        constraint.priority = .init(400)
+        return constraint
+    }()
     private var needsPresentation = true
     private var presentedSize = NSSize.zero
     private var displayRevision: UInt64 = 0
+    var onAgentActivityChange: (() -> Void)?
+    var onSnoozeWakeReason: ((SessionWakeReason) -> Void)?
+    private var lastPendingOutcome: Bool?
+    private var lastCompletedTurns = 0
+    private var completionAwaitingOutcome = false
+    private var lastPresentedActiveAgent: Bool?
+    private var lastPresentedActivity: NativeSessionActivity?
     private var followTail = true
     private var focused = false
     private var composerFocused = false
@@ -34,6 +86,7 @@ final class WorkspaceConversationPane: WorkspacePane {
     /// Every decision card in arrival order, as the trailing transcript block shows them.
     private var decisionOrder: [NSView] = []
     var title: String { "Threading conversation · \(runtime.status)" }
+    var activity: NativeSessionActivity { runtime.activity }
     var needsPolling: Bool { false }
     func takeInitialViewport() -> (Int, Int)? { nil }
 
@@ -41,15 +94,15 @@ final class WorkspaceConversationPane: WorkspacePane {
         self.runtime = runtime
         chrome = WorkspacePaneChrome(pageName: pageName, pageIdentity: runtime.id.uuidString,
             symbolName: "text.bubble", icon: icon, showsSessionActions: true, onReveal: onReveal)
-        status = NSTextField(wrappingLabelWithString: runtime.status)
-        status.applyFont(.body, in: .conversation)
-        status.textColor = Design.Text.secondary
+        status = NSTextField(labelWithString: runtime.status)
+        status.applyFont(.subheading, in: .conversation)
+        status.textColor = Design.Text.tertiary
+        status.lineBreakMode = .byTruncatingTail
+        status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         status.isSelectable = true
-        // These peers are positioned by this bounded host, while each peer's own
-        // internal constraints still own its content. Do not feed their intrinsic fits back
-        // into the root as unconstrained Auto Layout siblings.
-        let positionedViews: [NSView] = [scroll, status, composer]
-        for view in positionedViews { view.translatesAutoresizingMaskIntoConstraints = true }
+        for view in [scroll, status, composer] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+        }
         table.dataSource = rows
         table.delegate = rows
         scroll.documentView = table
@@ -68,30 +121,74 @@ final class WorkspaceConversationPane: WorkspacePane {
             if self.runtime.canInterrupt { self.runtime.interrupt() }
             else { self.send() }
         }
-        editor.textView.nextKeyView = submit
+        editor.textView.nextKeyView = modelChip
+        modelChip.nextKeyView = modeChip
+        modeChip.nextKeyView = effortChip
+        effortChip.nextKeyView = speedChip
+        speedChip.nextKeyView = submit
         submit.nextKeyView = editor.textView
         root.addSubview(scroll)
         root.addSubview(status)
         root.addSubview(composer)
+        root.addSubview(speedMenu)
+        root.addSubview(configurationMenu)
+        configurationMenu.isHidden = true
+        speedMenu.isHidden = true
         PromptChrome.configureFooter(composerFooter, spacer: composerSpacer)
+        composerFooter.insertArrangedSubview(modelChip, at: 0)
+        composerFooter.insertArrangedSubview(modeChip, at: 1)
+        composerFooter.insertArrangedSubview(effortChip, at: 2)
+        composerFooter.insertArrangedSubview(speedChip, at: 3)
+        composerFooter.addArrangedSubview(contextLabel)
         composerFooter.addArrangedSubview(submit)
-        composerContent.orientation = .vertical
-        composerContent.alignment = .leading
-        composerContent.spacing = Design.Spacing.medium
-        composerContent.translatesAutoresizingMaskIntoConstraints = false
-        editor.translatesAutoresizingMaskIntoConstraints = false
+        modelChip.configure(symbolName: "cpu", title: "Default model")
+        modelChip.isHidden = true
+        modelChip.choicePresentationProvider = { [weak self] _, didDismiss in
+            self?.openConfigurationChoice(.model, didDismiss: didDismiss)
+        }
+        modeChip.configure(symbolName: "hand.raised", title: "Agent's Setting")
+        modeChip.isHidden = true
+        modeChip.choicePresentationProvider = { [weak self] _, didDismiss in
+            self?.openConfigurationChoice(.mode, didDismiss: didDismiss)
+        }
+        effortChip.configure(symbolName: "brain", title: "Default effort")
+        effortChip.isHidden = true
+        effortChip.choicePresentationProvider = { [weak self] _, didDismiss in
+            self?.openConfigurationChoice(.effort, didDismiss: didDismiss)
+        }
+        speedChip.configure(symbolName: "gauge", title: "Agent's Setting")
+        speedChip.isHidden = true
+        speedChip.choicePresentationProvider = { [weak self] _, didDismiss in
+            self?.openSpeedChoice(didDismiss: didDismiss)
+        }
+        // The Mac reply footer compresses chip labels before letting the send control escape
+        // a narrow pane. Keep the same priorities in the Linux layout island.
+        for chip in [modelChip, modeChip, effortChip, speedChip] {
+            chip.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        contextLabel.applyFont(.subheading)
+        contextLabel.textColor = Design.Text.tertiary
+        contextLabel.isHidden = true
+        contextLabel.setAccessibilityIdentifier("conversation.context")
         submit.translatesAutoresizingMaskIntoConstraints = false
-        composerContent.addArrangedSubview(editor)
-        composerContent.addArrangedSubview(composerFooter)
-        composer.addSubview(composerContent)
-        NSLayoutConstraint.activate([
-            composerContent.leadingAnchor.constraint(equalTo: composer.leadingAnchor, constant: Design.Spacing.inset),
-            composerContent.trailingAnchor.constraint(equalTo: composer.trailingAnchor, constant: -Design.Spacing.inset),
-            composerContent.topAnchor.constraint(equalTo: composer.topAnchor, constant: PromptChrome.footerVerticalInset),
-            composerContent.bottomAnchor.constraint(equalTo: composer.bottomAnchor, constant: -PromptChrome.footerVerticalInset),
-            editor.widthAnchor.constraint(equalTo: composerContent.widthAnchor),
-            composerFooter.widthAnchor.constraint(equalTo: composerContent.widthAnchor),
-            composerFooter.heightAnchor.constraint(equalToConstant: Design.Size.chipHeight),
+        composerContentLayout = LinuxPromptContentLayout(surface: composer, editor: editor,
+            attachments: attachments, footer: composerFooter)
+        attachments.onChange = { [weak self] in self?.updateState() }
+        attachments.onLiteralPath = { [weak self] path in
+            guard let self else { return }
+            self.insertLiteralPath(path)
+        }
+        NSLayoutConstraint.activate(ConversationPaneLayout.constraints(
+            in: root,
+            transcript: scroll,
+            status: status,
+            composer: composer,
+            transcriptTop: scroll.topAnchor.constraint(equalTo: root.topAnchor),
+            composerBottom: root.bottomAnchor,
+            columnCap: composerColumnCap,
+            columnWidth: composerColumnWidth
+        ) + [
+            composerHeightConstraint,
             submit.widthAnchor.constraint(equalToConstant: PromptChrome.submitSize),
             submit.heightAnchor.constraint(equalToConstant: PromptChrome.submitSize)
         ])
@@ -120,6 +217,7 @@ final class WorkspaceConversationPane: WorkspacePane {
     private func updatePermission() {
         let pending = runtime.pendingPermission
         guard pending?.id != presentedPermission else { return }
+        if pending != nil { onSnoozeWakeReason?(.approvalRequested) }
         presentedPermission = pending?.id
         let card = pending.map { pending in
             PermissionRequestView(request: pending.request) { [weak self] decision in
@@ -143,6 +241,7 @@ final class WorkspaceConversationPane: WorkspacePane {
             retire(card, returningFocus: true)
         }
         for question in runtime.questions where questionCards[question.request.id] == nil {
+            onSnoozeWakeReason?(.inputRequested)
             let id = question.request.id
             let card = ConversationQuestionCard(request: question.request) { [weak self] answers in
                 self?.runtime.answerQuestion(id, answers)
@@ -171,27 +270,385 @@ final class WorkspaceConversationPane: WorkspacePane {
     }
 
     private func updateState() {
+        let activeAgent = runtime.presentsActiveAgent
+        let activity = runtime.activity
+        let pendingOutcome = runtime.hasPendingOutcome
+        if runtime.completedTurns > lastCompletedTurns {
+            completionAwaitingOutcome = true
+        }
+        if lastPendingOutcome == true, !pendingOutcome {
+            if completionAwaitingOutcome {
+                onSnoozeWakeReason?(.turnCompleted)
+            } else if runtime.failure != nil {
+                onSnoozeWakeReason?(.failed)
+            }
+            completionAwaitingOutcome = false
+        }
+        lastPendingOutcome = pendingOutcome
+        lastCompletedTurns = runtime.completedTurns
+        if (lastPresentedActiveAgent != nil && lastPresentedActiveAgent != activeAgent)
+            || (lastPresentedActivity != nil && lastPresentedActivity != activity) {
+            onAgentActivityChange?()
+        }
+        lastPresentedActiveAgent = activeAgent
+        lastPresentedActivity = activity
         status.stringValue = runtime.pendingPermission != nil ? "Waiting for permission"
             : runtime.questions.isEmpty ? runtime.status : "Waiting for your answer"
         status.textColor = runtime.failure == nil ? Design.Text.secondary : Design.Status.negative
+        if let reading = runtime.contextReading {
+            contextLabel.stringValue = TurnStatusText.context(tokens: reading.tokens, window: reading.window)
+            contextLabel.textColor = TurnStatusText.contextIsNearlyFull(
+                tokens: reading.tokens, window: reading.window)
+                ? Design.Status.warning : Design.Text.tertiary
+            contextLabel.isHidden = false
+        } else {
+            contextLabel.isHidden = true
+        }
         let canSubmit = runtime.canSend
             && !editor.textView.hasMarkedText()
-            && !editor.textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !attachments.isPreparing
+            && (!editor.textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || attachments.hasImages)
         PromptChrome.updateSubmit(submit, canSubmit: canSubmit, isStop: runtime.canInterrupt)
         submit.toolTip = runtime.canInterrupt ? "Stop · Esc" : "Send · Return"
+        if let choice = runtime.modelChoice {
+            modelChip.configure(symbolName: "cpu", title: choice.title)
+            modelChip.isHidden = false
+            modelChip.isEnabled = choice.enabled
+        } else {
+            modelChip.isHidden = true
+            if configurationKind == .model { dismissConfigurationChoice() }
+        }
+        if let choice = runtime.modeChoice {
+            modeChip.configure(symbolName: "hand.raised", title: choice.title)
+            modeChip.isHidden = false
+            modeChip.isEnabled = choice.enabled
+        } else {
+            modeChip.isHidden = true
+            if configurationKind == .mode { dismissConfigurationChoice() }
+        }
+        if let choice = runtime.effortChoice {
+            effortChip.configure(symbolName: "brain", title: choice.title)
+            effortChip.isHidden = false
+            effortChip.isEnabled = choice.enabled
+        } else {
+            effortChip.isHidden = true
+            if configurationKind == .effort { dismissConfigurationChoice() }
+        }
+        if let choice = runtime.speedChoice {
+            speedChip.configure(symbolName: choice.title == "Fast" ? "bolt.fill" : "gauge",
+                                title: choice.title)
+            speedChip.isHidden = false
+            speedChip.isEnabled = choice.enabled
+        } else {
+            speedChip.isHidden = true
+            if speedOpen { dismissSpeedChoice() }
+        }
+        needsPresentation = true
+    }
+
+    private func openConfigurationChoice(_ kind: ConfigurationKind,
+        didDismiss: @escaping () -> Void) -> ChipChoicePresentationSession? {
+        let available: Bool?
+        let choices: [NativeConfigurationChoice]
+        switch kind {
+        case .model: available = runtime.modelChoice?.enabled; choices = runtime.modelChoices
+        case .mode: available = runtime.modeChoice?.enabled; choices = runtime.modeChoices
+        case .effort: available = runtime.effortChoice?.enabled; choices = runtime.effortChoices
+        }
+        guard available == true else { return nil }
+        dismissSpeedChoice()
+        dismissConfigurationChoice()
+        guard !choices.isEmpty else { return nil }
+        configurationKind = kind
+        configurationChoices = choices
+        configurationMountedFirst = -1
+        configurationSelected = choices.firstIndex(where: \.selected) ?? 0
+        configurationFirst = max(0, configurationSelected - 2)
+        let entries = choices.map { choice in
+            ThemedMenuEntry.item(ThemedMenuItem(title: choice.title, subtitle: choice.detail,
+                isSelected: choice.selected, isEnabled: choice.enabled))
+        }
+        configurationRowHeight = ThemedMenuMetrics.heights(for: entries).max() ?? 44
+        configurationWidth = kind == .model ? 320 : kind == .mode ? 340 : 280
+        configurationMenu.isHidden = false
+        let session = ConversationChoiceSession(didDismiss: didDismiss)
+        configurationSession = session
+        layoutConfigurationMenu()
+        needsPresentation = true
+        return session
+    }
+
+    private func layoutConfigurationMenu() {
+        guard let kind = configurationKind, !configurationChoices.isEmpty else { return }
+        owner.layoutIfNeeded()
+        let chip: ChipView
+        switch kind {
+        case .model: chip = modelChip
+        case .mode: chip = modeChip
+        case .effort: chip = effortChip
+        }
+        let source = chip.convert(chip.bounds, to: root)
+        let width = min(configurationWidth, max(1, root.bounds.width - 16))
+        let availableAbove = max(0, root.bounds.height - source.maxY - 8)
+        let availableBelow = max(0, source.minY - 8)
+        let available = max(availableAbove, availableBelow)
+        let rowCapacity = max(1, Int((available - 12) / configurationRowHeight))
+        configurationVisibleCount = min(6, configurationChoices.count, rowCapacity)
+        configurationFirst = min(configurationFirst,
+            max(0, configurationChoices.count - configurationVisibleCount))
+        let height = configurationRowHeight * CGFloat(configurationVisibleCount) + 12
+        let x = min(max(8, source.minX), max(8, root.bounds.width - width - 8))
+        let y = availableAbove >= height ? source.maxY + 4
+            : max(4, source.minY - height - 4)
+        configurationMenu.frame = NSRect(x: x, y: y, width: width, height: height)
+        mountConfigurationRows()
+    }
+
+    private func mountConfigurationRows() {
+        let end = min(configurationChoices.count, configurationFirst + configurationVisibleCount)
+        guard configurationFirst < end else { return }
+        if configurationMountedFirst == configurationFirst && configurationRows.count == end - configurationFirst {
+            for (slot, row) in configurationRows.enumerated() {
+                row.frame = NSRect(x: 6,
+                    y: configurationMenu.bounds.height - 6 - CGFloat(slot + 1) * configurationRowHeight,
+                    width: configurationMenu.bounds.width - 12, height: configurationRowHeight)
+                row.isKeyboardHighlighted = configurationFirst + slot == configurationSelected
+            }
+            return
+        }
+        for row in configurationRows { row.removeFromSuperview() }
+        configurationRows.removeAll(keepingCapacity: true)
+        configurationMountedFirst = configurationFirst
+        let entries = configurationChoices[configurationFirst..<end].map { choice in
+            ThemedMenuEntry.item(ThemedMenuItem(title: choice.title, subtitle: choice.detail,
+                isSelected: choice.selected, isEnabled: choice.enabled))
+        }
+        let plan = ThemedMenuRowPlan(entries: entries)
+        for slot in 0..<entries.count {
+            guard let row = plan.row(at: slot) else { continue }
+            let index = configurationFirst + slot
+            row.frame = NSRect(x: 6,
+                y: configurationMenu.bounds.height - 6 - CGFloat(slot + 1) * configurationRowHeight,
+                width: configurationMenu.bounds.width - 12, height: configurationRowHeight)
+            row.isKeyboardHighlighted = index == configurationSelected
+            row.onChoose = { [weak self] _, _ in self?.chooseConfiguration(index) }
+            row.onHighlight = { [weak self] _ in self?.highlightConfiguration(index) }
+            configurationMenu.addSubview(row)
+            configurationRows.append(row)
+        }
+    }
+
+    private func highlightConfiguration(_ index: Int) {
+        guard configurationKind != nil, configurationChoices.indices.contains(index) else { return }
+        let selectable = configurationChoices.indices.filter { configurationChoices[$0].enabled }
+        guard let target = selectable.first(where: { $0 >= index }) ?? selectable.last else { return }
+        configurationSelected = target
+        if target < configurationFirst { configurationFirst = target; mountConfigurationRows() }
+        else if target >= configurationFirst + configurationVisibleCount {
+            configurationFirst = target - configurationVisibleCount + 1
+            mountConfigurationRows()
+        } else {
+            for (slot, row) in configurationRows.enumerated() {
+                row.isKeyboardHighlighted = configurationFirst + slot == target
+            }
+        }
+        needsPresentation = true
+    }
+
+    private func chooseConfiguration(_ index: Int) {
+        guard let kind = configurationKind, configurationChoices.indices.contains(index),
+              configurationChoices[index].enabled else { return }
+        let id = configurationChoices[index].id
+        dismissConfigurationChoice()
+        switch kind {
+        case .model: runtime.selectModel(id)
+        case .mode: runtime.selectMode(id.flatMap(AgentPermissionMode.init(rawValue:)))
+        case .effort: runtime.selectEffort(id)
+        }
+        _ = owner.makeFirstResponder(editor.textView)
+        needsPresentation = true
+    }
+
+    private func dismissConfigurationChoice() {
+        guard configurationKind != nil else { return }
+        configurationKind = nil
+        configurationMenu.isHidden = true
+        for row in configurationRows { row.removeFromSuperview() }
+        configurationRows.removeAll(keepingCapacity: true)
+        configurationChoices.removeAll(keepingCapacity: true)
+        configurationVisibleCount = 0
+        configurationMountedFirst = -1
+        let session = configurationSession
+        configurationSession = nil
+        session?.dismissChipChoicePresentation()
+        needsPresentation = true
+    }
+
+    @discardableResult
+    func pressConfiguration(kind: Int, identity: String) -> Bool {
+        guard identity == runtime.id.uuidString, let configuration = ConfigurationKind(rawValue: kind) else {
+            return false
+        }
+        let chip: ChipView
+        switch configuration {
+        case .model: chip = modelChip
+        case .mode: chip = modeChip
+        case .effort: chip = effortChip
+        }
+        guard !chip.isHidden, chip.isEnabled else { return false }
+        if configurationKind == configuration { dismissConfigurationChoice(); return true }
+        let pressed = chip.accessibilityPerformPress()
+        needsPresentation = true
+        return pressed
+    }
+
+    @discardableResult
+    func chooseConfiguration(kind: Int, index: Int, identity: String) -> Bool {
+        guard identity == runtime.id.uuidString, configurationKind?.rawValue == kind,
+              (configurationFirst..<configurationFirst + configurationVisibleCount).contains(index),
+              configurationChoices.indices.contains(index),
+              configurationChoices[index].enabled else { return false }
+        chooseConfiguration(index)
+        return true
+    }
+
+    var hasOpenConfigurationChoice: Bool { configurationKind != nil }
+
+    private func openSpeedChoice(didDismiss: @escaping () -> Void) -> ChipChoicePresentationSession? {
+        guard let choice = runtime.speedChoice, choice.enabled else { return nil }
+        dismissConfigurationChoice()
+        dismissSpeedChoice()
+        let entries = speedEntries(selected: choice.selected)
+        let plan = ThemedMenuRowPlan(entries: entries)
+        speedRowHeight = ThemedMenuMetrics.heights(for: entries).max() ?? 44
+        speedSelected = choice.selected.map { $0 ? 2 : 1 } ?? 0
+        for index in 0..<3 {
+            guard let row = plan.row(at: index) else { continue }
+            row.onChoose = { [weak self] _, _ in self?.chooseSpeed(index) }
+            row.onHighlight = { [weak self] _ in self?.highlightSpeed(index) }
+            speedMenu.addSubview(row)
+            speedRows.append(row)
+        }
+        speedOpen = true
+        speedMenu.isHidden = false
+        let session = ConversationChoiceSession(didDismiss: didDismiss)
+        speedSession = session
+        layoutSpeedMenu()
+        highlightSpeed(speedSelected)
+        needsPresentation = true
+        return session
+    }
+
+    private func speedEntries(selected: Bool?) -> [ThemedMenuEntry] {
+        [
+            .item(ThemedMenuItem(title: "Follow Agent Setting",
+                subtitle: "Applies the next time this chat starts.", isSelected: selected == nil)),
+            .item(ThemedMenuItem(title: "Standard", subtitle: "Normal speed and usage",
+                isSelected: selected == false)),
+            .item(ThemedMenuItem(title: "Fast", subtitle: "1.5× speed, increased usage",
+                isSelected: selected == true))
+        ]
+    }
+
+    private func layoutSpeedMenu() {
+        guard speedOpen else { return }
+        owner.layoutIfNeeded()
+        let source = speedChip.convert(speedChip.bounds, to: root)
+        let width = min(300, max(1, root.bounds.width - 16))
+        let height = speedRowHeight * 3 + 12
+        let x = min(max(8, source.minX), max(8, root.bounds.width - width - 8))
+        let above = root.bounds.height - source.maxY
+        let y = above >= height + 8 ? source.maxY + 4 : max(4, source.minY - height - 4)
+        speedMenu.frame = NSRect(x: x, y: y, width: width, height: height)
+        for (index, row) in speedRows.enumerated() {
+            row.frame = NSRect(x: 6, y: height - 6 - CGFloat(index + 1) * speedRowHeight,
+                               width: width - 12, height: speedRowHeight)
+        }
+    }
+
+    private func highlightSpeed(_ index: Int) {
+        guard (0..<speedRows.count).contains(index) else { return }
+        speedSelected = index
+        for (slot, row) in speedRows.enumerated() { row.isKeyboardHighlighted = slot == index }
+        needsPresentation = true
+    }
+
+    private func chooseSpeed(_ index: Int) {
+        guard speedOpen, (0..<3).contains(index) else { return }
+        dismissSpeedChoice()
+        runtime.selectSpeed(index == 0 ? nil : index == 2)
+        _ = owner.makeFirstResponder(editor.textView)
+        needsPresentation = true
+    }
+
+    @discardableResult
+    func pressSpeed(identity: String) -> Bool {
+        guard identity == runtime.id.uuidString, !speedChip.isHidden, speedChip.isEnabled else { return false }
+        if speedOpen { dismissSpeedChoice(); return true }
+        let pressed = speedChip.accessibilityPerformPress()
+        needsPresentation = true
+        return pressed
+    }
+
+    @discardableResult
+    func chooseSpeed(index: Int, identity: String) -> Bool {
+        guard identity == runtime.id.uuidString, speedOpen, speedRows.indices.contains(index) else { return false }
+        chooseSpeed(index)
+        return true
+    }
+
+    var hasOpenSpeedChoice: Bool { speedOpen }
+
+    private func dismissSpeedChoice() {
+        guard speedOpen else { return }
+        speedOpen = false
+        speedMenu.isHidden = true
+        for row in speedRows { row.removeFromSuperview() }
+        speedRows.removeAll(keepingCapacity: true)
+        let session = speedSession
+        speedSession = nil
+        session?.dismissChipChoicePresentation()
         needsPresentation = true
     }
 
     private func send() {
-        guard !editor.textView.hasMarkedText(), runtime.send(editor.textView.string) else { updateState(); return }
+        let prompt = attachments.submissionText(editor.textView.string)
+        guard !attachments.isPreparing, !editor.textView.hasMarkedText(),
+              runtime.send(prompt) else { updateState(); return }
         editor.textView.string = ""
+        attachments.clear()
         followTail = true
         updateState()
+    }
+
+    private func insertLiteralPath(_ path: String) {
+        let quoted = path.contains(" ") ? "\"\(path)\"" : path
+        let separator = editor.textView.string.isEmpty || editor.textView.string.hasSuffix(" ")
+            || editor.textView.string.hasSuffix("\n") ? "" : " "
+        editor.textView.insertText(separator + quoted, replacementRange: editor.textView.selectedRange())
+        updateState()
+    }
+
+    @discardableResult
+    func removeAttachment(id: String) -> Bool { attachments.removeAttachment(id: id) }
+
+    func drainAttachments() { attachments.drainPrepared() }
+
+    func acceptFileDrop(_ path: String, windowX: Int, windowY: Int,
+                        originX: Int, wakeIdentity: UInt64) -> Bool {
+        let point = NSPoint(x: CGFloat(windowX - originX) / WorkspaceDisplay.scale,
+            y: root.bounds.height - CGFloat(windowY - WorkspacePaneChrome.headerPixelHeight)
+                / WorkspaceDisplay.scale)
+        guard composer.frame.contains(point) else { return false }
+        return attachments.addDroppedPath(path, wakeIdentity: wakeIdentity)
     }
 
     func setThemeAppearance() {
         chrome.setThemeAppearance()
         root.appearance = LinuxTheme.appearance
+        speedMenu.appearance = LinuxTheme.appearance
+        configurationMenu.appearance = LinuxTheme.appearance
         root.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
         refreshComposerSurface()
         rows.refreshTheme()
@@ -219,31 +676,44 @@ final class WorkspaceConversationPane: WorkspacePane {
         try chrome.refresh(window: window, width: width, height: height, originX: originX)
         let contentHeight = max(1, height - WorkspacePaneChrome.headerPixelHeight)
         let size = NSSize(width: CGFloat(width) / WorkspaceDisplay.scale, height: CGFloat(contentHeight) / WorkspaceDisplay.scale)
-        guard needsPresentation || size != presentedSize || displayRevision != owner.displayRevision else { return }
-        root.frame = NSRect(origin: .zero, size: size)
-        let inset = min(Design.Spacing.inset, size.width / 8)
-        let actionHeight = min(28, max(1, size.height / 5))
-        let composerWidth = max(1, size.width - 2 * inset)
-        // Width changes reflow the same cached TextKit document the editor already paints.
-        // Reading its used rect adds no second string scan or alternate text measurement.
-        editor.frame.size.width = max(1, composerWidth - 2 * Design.Spacing.inset)
+        let inset = Design.Spacing.inset
         let lineHeight = (editor.textView.font ?? Design.Typography.body()).boundingRectForFont.height
         let resting = PromptChrome.restingHeight(minimum: Design.Size.inputHeight,
             lineHeight: lineHeight, showsFooter: true)
+        let attachmentHeight = attachments.attachmentHeight
+        let statusHeight = status.intrinsicContentSize.height
+        let attachedMinimumContentHeight = resting + attachmentHeight + 2 * inset + statusHeight
+            + 2 * Design.Spacing.small + Design.Size.chipHeight
+        let minimumWindowHeight = attachments.hasImages
+            ? Int((attachedMinimumContentHeight * WorkspaceDisplay.scale).rounded(.up))
+                + WorkspacePaneChrome.headerPixelHeight : 180
+        tw_workspace_minimum_height(window, Int32(minimumWindowHeight))
+        guard height >= minimumWindowHeight else { needsPresentation = true; return }
+        guard needsPresentation || size != presentedSize || displayRevision != owner.displayRevision else { return }
+        root.frame = NSRect(origin: .zero, size: size)
+        let columnCap = Design.Chat.columnWidth + 2 * inset
+        let composerWidth = max(1, min(columnCap, size.width - 2 * inset))
+        if composerColumnCap.constant != columnCap { composerColumnCap.constant = columnCap }
+        if composerColumnWidth.constant != composerWidth {
+            composerColumnWidth.constant = composerWidth
+        }
+        // Width changes reflow the same cached TextKit document the editor already paints.
+        // Reading its used rect adds no second string scan or alternate text measurement.
+        owner.layoutIfNeeded()
         let textHeight = editor.textView.layoutManager.flatMap { manager in
             editor.textView.textContainer.map { manager.usedRect(for: $0).height }
         } ?? 0
-        let fitted = PromptChrome.fittedHeight(textHeight: textHeight, restingHeight: resting, showsFooter: true)
-        let composerHeight = min(fitted.height, max(1, size.height - 2 * inset - actionHeight
-            - Design.Spacing.small - Design.Size.chipHeight))
+        let fitted = PromptChrome.fittedHeight(textHeight: textHeight, restingHeight: resting,
+            showsFooter: true, attachmentHeight: attachmentHeight)
+        let composerHeight = min(fitted.height, max(1, size.height - 2 * inset - statusHeight
+            - 2 * Design.Spacing.small - Design.Size.chipHeight))
         let needsScroller = fitted.scrolls || composerHeight < fitted.height
         if editor.hasVerticalScroller != needsScroller { editor.hasVerticalScroller = needsScroller }
-        composer.frame = NSRect(x: inset, y: inset + actionHeight + Design.Spacing.small,
-            width: composerWidth, height: composerHeight)
-        status.frame = NSRect(x: inset, y: inset, width: composerWidth, height: actionHeight)
-        let bottom = composer.frame.maxY + Design.Spacing.medium
-        scroll.frame = NSRect(x: inset, y: bottom, width: max(1, size.width - 2 * inset),
-            height: max(1, size.height - bottom - inset))
+        if composerHeightConstraint.constant != composerHeight {
+            composerHeightConstraint.constant = composerHeight
+        }
+        owner.layoutIfNeeded()
+        attachments.layoutTiles()
         // The clip view already sizes its document to the viewport, so the table's own width is
         // no signal; the column's is. Cells read it when they are built and state it as theirs.
         if table.tableColumns.first?.width != scroll.bounds.width || table.frame.width != scroll.bounds.width {
@@ -253,6 +723,8 @@ final class WorkspaceConversationPane: WorkspacePane {
             table.noteHeightOfRows(withIndexesChanged: table.visibleRowIndexes)
         }
         owner.layoutIfNeeded()
+        layoutSpeedMenu()
+        layoutConfigurationMenu()
         if followTail {
             scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, table.frame.height - scroll.contentView.bounds.height)))
         }
@@ -269,7 +741,13 @@ final class WorkspaceConversationPane: WorkspacePane {
                 Int32(WorkspacePaneChrome.headerPixelHeight + Int((size.height - caret.maxY) * WorkspaceDisplay.scale)),
                 Int32(max(1, caret.width * WorkspaceDisplay.scale)), Int32(max(1, caret.height * WorkspaceDisplay.scale)))
         }
-        tw_accessibility_show_terminal(window, title)
+        tw_accessibility_show_conversation(window, title)
+        ComposerAttachmentAccessibility.publish(window: window, strip: attachments,
+            owner: runtime.id.uuidString, scope: 2, root: root, originX: originX,
+            topInset: WorkspacePaneChrome.headerPixelHeight)
+        publishConfigurationAccessibility(window: window, originX: originX, size: size)
+        publishSpeedAccessibility(window: window, originX: originX, size: size)
+        publishContextAccessibility(window: window, originX: originX, size: size)
         needsPresentation = false
         presentedSize = size
         displayRevision = owner.displayRevision
@@ -315,10 +793,111 @@ final class WorkspaceConversationPane: WorkspacePane {
         fflush(nil)
     }
 
+    private func publishSpeedAccessibility(window: OpaquePointer, originX: Int, size: NSSize) {
+        guard let choice = runtime.speedChoice, !speedChip.isHidden else {
+            tw_accessibility_conversation_speed(window, nil, nil, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+            return
+        }
+        func pixels(_ view: NSView) -> (Int32, Int32, Int32, Int32) {
+            let rect = view.convert(view.bounds, to: root)
+            return (Int32(originX + Int(rect.minX * WorkspaceDisplay.scale)),
+                Int32(WorkspacePaneChrome.headerPixelHeight + Int((size.height - rect.maxY) * WorkspaceDisplay.scale)),
+                Int32(rect.width * WorkspaceDisplay.scale), Int32(rect.height * WorkspaceDisplay.scale))
+        }
+        let chip = pixels(speedChip)
+        let menu = speedOpen ? pixels(speedMenu) : (Int32(0), Int32(0), Int32(0), Int32(0))
+        runtime.id.uuidString.withCString { identity in
+            choice.title.withCString { title in
+                tw_accessibility_conversation_speed(window, identity, title,
+                    choice.enabled ? 1 : 0, owner.firstResponder === speedChip ? 1 : 0,
+                    chip.0, chip.1, chip.2, chip.3,
+                    menu.0, menu.1, menu.2, menu.3,
+                    Int32(choice.selected.map { $0 ? 2 : 1 } ?? 0), Int32(speedSelected))
+            }
+        }
+    }
+
+    private func publishContextAccessibility(window: OpaquePointer, originX: Int, size: NSSize) {
+        guard !contextLabel.isHidden else {
+            tw_accessibility_conversation_context(window, nil, nil, 0, 0, 0, 0)
+            return
+        }
+        let rect = contextLabel.convert(contextLabel.bounds, to: root)
+        let x = Int32(originX + Int(rect.minX * WorkspaceDisplay.scale))
+        let y = Int32(WorkspacePaneChrome.headerPixelHeight
+            + Int((size.height - rect.maxY) * WorkspaceDisplay.scale))
+        runtime.id.uuidString.withCString { identity in
+            contextLabel.stringValue.withCString { title in
+                tw_accessibility_conversation_context(window, identity, title, x, y,
+                    Int32(rect.width * WorkspaceDisplay.scale),
+                    Int32(rect.height * WorkspaceDisplay.scale))
+            }
+        }
+    }
+
+    private func publishConfigurationAccessibility(window: OpaquePointer, originX: Int, size: NSSize) {
+        func pixels(_ view: NSView) -> (Int32, Int32, Int32, Int32) {
+            let rect = view.convert(view.bounds, to: root)
+            return (Int32(originX + Int(rect.minX * WorkspaceDisplay.scale)),
+                Int32(WorkspacePaneChrome.headerPixelHeight + Int((size.height - rect.maxY) * WorkspaceDisplay.scale)),
+                Int32(rect.width * WorkspaceDisplay.scale), Int32(rect.height * WorkspaceDisplay.scale))
+        }
+        let identity = runtime.id.uuidString
+        for kind in [ConfigurationKind.model, .mode, .effort] {
+            let choice: (title: String, enabled: Bool)?
+            let chip: ChipView
+            switch kind {
+            case .model: choice = runtime.modelChoice; chip = modelChip
+            case .mode: choice = runtime.modeChoice; chip = modeChip
+            case .effort: choice = runtime.effortChoice; chip = effortChip
+            }
+            guard let choice, !chip.isHidden else {
+                tw_accessibility_conversation_configuration_chip(window, nil,
+                    Int32(kind.rawValue), nil, 0, 0, 0, 0, 0, 0)
+                continue
+            }
+            let bounds = pixels(chip)
+            identity.withCString { key in
+                choice.title.withCString { title in
+                    tw_accessibility_conversation_configuration_chip(window, key,
+                        Int32(kind.rawValue), title, choice.enabled ? 1 : 0,
+                        owner.firstResponder === chip ? 1 : 0,
+                        bounds.0, bounds.1, bounds.2, bounds.3)
+                }
+            }
+        }
+        guard let kind = configurationKind else {
+            tw_accessibility_conversation_configuration_menu(window, nil, 0, 0, 0, 0, 0, 0)
+            return
+        }
+        let menu = pixels(configurationMenu)
+        identity.withCString { key in
+            tw_accessibility_conversation_configuration_menu(window, key,
+                Int32(kind.rawValue), menu.0, menu.1, menu.2, menu.3,
+                Int32(configurationFirst))
+        }
+        for (slot, row) in configurationRows.enumerated() {
+            let index = configurationFirst + slot
+            guard configurationChoices.indices.contains(index) else { continue }
+            let choice = configurationChoices[index]
+            let bounds = pixels(row)
+            choice.title.withCString { title in
+                (choice.detail ?? "").withCString { detail in
+                    tw_accessibility_conversation_configuration_row(window, Int32(index),
+                        title, detail, choice.selected ? 1 : 0, choice.enabled ? 1 : 0,
+                        index == configurationSelected ? 1 : 0,
+                        bounds.0, bounds.1, bounds.2, bounds.3)
+                }
+            }
+        }
+    }
+
     func handle(_ input: TWEvent, window: OpaquePointer) {
         var input = input
         switch input.kind {
         case 6, 46:
+            if configurationKind != nil { dismissConfigurationChoice() }
             if let text = String(validatingCString: tw_event_text(&input)) {
                 activeTextView.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
             }
@@ -333,13 +912,43 @@ final class WorkspaceConversationPane: WorkspacePane {
         case 7, 48:
             guard input.action != 3 else { return }
             let event = WindowHarness.composerKeyEvent(input)
-            if input.modifiers & (4 | 8) != 0, Int(input.key) == 118 { paste() }
+            if configurationKind != nil {
+                switch event.keyCode {
+                case 53: dismissConfigurationChoice()
+                case 126: highlightConfiguration(max(0, configurationSelected - 1))
+                case 125: highlightConfiguration(min(configurationChoices.count - 1, configurationSelected + 1))
+                case 115: highlightConfiguration(0)
+                case 119: highlightConfiguration(configurationChoices.count - 1)
+                case 116: highlightConfiguration(max(0, configurationSelected - configurationVisibleCount))
+                case 121: highlightConfiguration(min(configurationChoices.count - 1,
+                    configurationSelected + configurationVisibleCount))
+                case 36, 49, 76: chooseConfiguration(configurationSelected)
+                default: dismissConfigurationChoice()
+                }
+            } else if speedOpen {
+                switch event.keyCode {
+                case 53: dismissSpeedChoice()
+                case 126: highlightSpeed(max(0, speedSelected - 1))
+                case 125: highlightSpeed(min(2, speedSelected + 1))
+                case 36, 49, 76: chooseSpeed(speedSelected)
+                default: dismissSpeedChoice()
+                }
+            } else if input.modifiers & (4 | 8) != 0, Int(input.key) == 118 {
+                paste(window: window)
+            }
             else if input.modifiers & (4 | 8) != 0, Int(input.key) == 97 {
                 activeTextView.selectAll(nil)
             }
             else { _ = owner.dispatchToContent(event) }
-        case 14: paste()
+        case 14: paste(window: window)
         case 15, 17, 16:
+            if input.kind == 16, configurationKind != nil {
+                let step = input.key > 0 ? -1 : 1
+                highlightConfiguration(max(0, min(configurationChoices.count - 1,
+                    configurationSelected + step)))
+                updateState()
+                return
+            }
             let type: NSEvent.EventType = input.kind == 16 ? .scrollWheel
                 : input.kind == 17 ? .leftMouseDragged
                 : input.action == 3 ? .leftMouseUp : .leftMouseDown
@@ -355,8 +964,11 @@ final class WorkspaceConversationPane: WorkspacePane {
         updateState()
     }
 
-    private func paste() {
-        activeTextView.paste(nil)
+    private func paste(window: OpaquePointer) {
+        let view = activeTextView
+        guard view === editor.textView else { view.paste(nil); return }
+        ComposerClipboardPaste.paste(into: view, attachments: attachments,
+                                     wakeIdentity: tw_worker_wake_identity(window))
     }
 
     /// Native text input reaches the focused text view: a decision card's field editor while

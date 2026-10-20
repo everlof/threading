@@ -1830,7 +1830,8 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         ].map { name in
             AppThemeLibrary.stock.first { $0.name == name }
         }
-        let themes = try [AppTheme.system] + styled.map { try XCTUnwrap($0) }
+        let themes = try [AppTheme.system, AppThemeStyles.threading]
+            + styled.map { try XCTUnwrap($0) }
 
         var written = 0
         var expected = 0

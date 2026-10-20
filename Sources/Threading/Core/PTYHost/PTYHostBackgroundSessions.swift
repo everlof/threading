@@ -13,16 +13,6 @@ enum PTYHostBackgroundSessionsDefaults {
     /// this long is one the page is better off not waiting for.
     static let surveyTimeout = PTYHostReattachDefaults.surveyTimeout
 
-    /// How long a stopped child is given to die before the connection is dropped.
-    static let stopTimeout: TimeInterval = 3
-
-    /// The replay a stop-only attach asks for.
-    ///
-    /// Bound to the floor rather than to nothing: attaching is the only way to name a session on
-    /// a `kill`, and a watcher that is about to end the child has no use for its history. The
-    /// daemon clamps anything smaller up to this anyway.
-    static let stopReplayBudget = PTYHostReplayDefaults.minimumBudgetBytes
-
     static let queueLabel = "codes.threading.ptyhost.inventory"
 }
 
@@ -215,59 +205,6 @@ struct PTYHostBackgroundSessionsState: Equatable {
     /// The empty state's sentence, which is the status line's — the reason the list is empty is
     /// the same fact either way, and two sentences for it would be two things to keep in step.
     var emptyMessage: String { status.sentence }
-}
-
-// MARK: - Stopping one session
-
-/// Ends one child the daemon is holding.
-///
-/// **Attach, then kill, on a connection of its own.** `kill` names a session, and the daemon
-/// only accepts a frame naming the session the connection is *bound* to — one connection is one
-/// session, which is what lets terminal bytes travel with no envelope. Ending another held child
-/// therefore binds a dedicated lifecycle connection first. This keeps output from competing
-/// with the ending. The replay
-/// budget remains at the floor for older hosts that do not yet honor that attachment mode.
-///
-/// **Blocking**; never on the main actor.
-enum PTYHostSessionStop {
-
-    @discardableResult
-    static func run(
-        _ identity: PTYHostSessionIdentity,
-        socketPath: String,
-        build: String,
-        eventLog: EventLog = .shared
-    ) -> Bool {
-        let exited = PTYHostLatch<Void>()
-        let client = PTYHostClient(
-            socketPath: socketPath,
-            build: build,
-            events: PTYHostClient.Events(
-                frame: { frame in
-                    guard case .exited(let ending) = frame, ending.id == identity else { return }
-                    exited.complete(())
-                },
-                closed: { _ in exited.abandon() }
-            ),
-            eventLog: eventLog
-        )
-        defer { client.close() }
-
-        guard (try? client.connect()) != nil else { return false }
-        do {
-            try client.attach(PTYHostAttach(
-                id: identity,
-                replayBudget: PTYHostBackgroundSessionsDefaults.stopReplayBudget,
-                receivesOutput: false
-            ))
-            try client.kill(PTYHostKill(id: identity, escalate: true))
-        } catch {
-            return false
-        }
-        let didExit = exited.wait(PTYHostBackgroundSessionsDefaults.stopTimeout) != nil
-        if didExit { NotificationCenter.default.post(PTYHostMayHaveDrained()) }
-        return didExit
-    }
 }
 
 // MARK: - The inventory

@@ -54,6 +54,7 @@ enum ObservedPermissionMode {
         let known: @MainActor (URL) -> AgentPermissionMode?
         let revalidate:
             @MainActor (URL, @escaping @MainActor @Sendable (AgentPermissionMode?) -> Void) -> Void
+        let forget: @MainActor (URL) -> Void
     }
 
     // MARK: - Public Methods
@@ -94,6 +95,13 @@ enum ObservedPermissionMode {
         source.revalidate(source.url, completion)
     }
 
+    /// A stopped process no longer owns its last recorded posture. Clear only this transcript
+    /// so a later launch cannot display the old answer before its first fresh assertion.
+    static func forget(for session: AgentSession, in project: Project) {
+        guard let source = source(for: session, in: project) else { return }
+        source.forget(source.url)
+    }
+
     // MARK: - Private Methods
 
     /// This session's readable posture, or nil where there is none to read.
@@ -111,7 +119,8 @@ enum ObservedPermissionMode {
             return Source(
                 url: url,
                 known: { ClaudeTranscriptPermissionMode.known(at: $0) },
-                revalidate: { ClaudeTranscriptPermissionMode.revalidate(at: $0, completion: $1) }
+                revalidate: { ClaudeTranscriptPermissionMode.revalidate(at: $0, completion: $1) },
+                forget: { ClaudeTranscriptPermissionMode.forget(at: $0) }
             )
 
         case nil:

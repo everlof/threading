@@ -726,6 +726,21 @@ current reachability, last-observed freshness, and the Windows setup export. Unk
 never promoted to automatic startup. Themes style existing labels, glyphs, help and buttons;
 extensions cannot suppress or replace this availability warning or change host power settings.
 
+**Linux session Snooze** extends the existing `sidebar.session-row@1` presentation and its
+host-owned action menu. Extensions may still replace or add to session-row content, while the
+host retains exact session identity, deadline persistence, wake reasons, acknowledgement on
+visit, menu command routing, and the single bounded deadline coordinator. The menu action and
+its durable state are deliberately host-only; a replaceable row cannot present a different
+deadline or claim a wake that the host has not committed. Themes style the shared menu rows and
+the existing attention caption. The custom-time picker is also host-owned: it presents the
+shared valid day and quarter-hour choices, while the host validates and commits the chosen
+deadline for the exact session. Its sheet and rows use Design components and theme roles.
+
+**Linux Close Session** extends the same host-owned session-row action menu. Extensions retain
+their existing row-content slot. Threading owns exact session identity, confirmation, process
+stop authority, and the decision to retain the saved row for resume. The warning dialog uses
+Design controls and the shared alert constraints; it adds no extension action authority.
+
 **Remote-chat login reuse** extends the host-only remote host editor with the shared themed
 checkbox and explanatory label. Threading owns SSH destination selection, explicit per-host
 credential-copy consent, selected-account custody, private remote storage, provider launch and

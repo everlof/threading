@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ./vendor-core.sh --verify
 mkdir -p out
-docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_RESTART_ONLY="${THREADING_LINUX_RESTART_ONLY:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_LINUX_STARTUP_TRACE="${THREADING_LINUX_STARTUP_TRACE:-0}" -e THREADING_LINUX_AGENT_ONLY="${THREADING_LINUX_AGENT_ONLY:-0}" -e THREADING_LINUX_NAMED_ONLY="${THREADING_LINUX_NAMED_ONLY:-0}" -e THREADING_LINUX_IME_ONLY="${THREADING_LINUX_IME_ONLY:-0}" -e THREADING_LINUX_COMPOSER_IME_ONLY="${THREADING_LINUX_COMPOSER_IME_ONLY:-0}" -e THREADING_LINUX_A11Y_ONLY="${THREADING_LINUX_A11Y_ONLY:-0}" -e THREADING_LINUX_COMPOSER_ONLY="${THREADING_LINUX_COMPOSER_ONLY:-0}" -e THREADING_LINUX_COMPOSER_ACCOUNT_ONLY="${THREADING_LINUX_COMPOSER_ACCOUNT_ONLY:-0}" -e THREADING_LINUX_OPEN_IN_ONLY="${THREADING_LINUX_OPEN_IN_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Platforms/Linux swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
+docker run --rm -i --platform linux/arm64 -e THREADING_LINUX_TERMINAL_STRESS="${THREADING_LINUX_TERMINAL_STRESS:-0}" -e THREADING_LINUX_RESTART_ONLY="${THREADING_LINUX_RESTART_ONLY:-0}" -e THREADING_LINUX_STARTUP_ONLY="${THREADING_LINUX_STARTUP_ONLY:-0}" -e THREADING_LINUX_STARTUP_TRACE="${THREADING_LINUX_STARTUP_TRACE:-0}" -e THREADING_LINUX_AGENT_ONLY="${THREADING_LINUX_AGENT_ONLY:-0}" -e THREADING_LINUX_NAMED_ONLY="${THREADING_LINUX_NAMED_ONLY:-0}" -e THREADING_LINUX_IME_ONLY="${THREADING_LINUX_IME_ONLY:-0}" -e THREADING_LINUX_COMPOSER_IME_ONLY="${THREADING_LINUX_COMPOSER_IME_ONLY:-0}" -e THREADING_LINUX_A11Y_ONLY="${THREADING_LINUX_A11Y_ONLY:-0}" -e THREADING_LINUX_COMPOSER_ONLY="${THREADING_LINUX_COMPOSER_ONLY:-0}" -e THREADING_LINUX_CHECKOUT_ONLY="${THREADING_LINUX_CHECKOUT_ONLY:-0}" -e THREADING_LINUX_COMPOSER_ACCOUNT_ONLY="${THREADING_LINUX_COMPOSER_ACCOUNT_ONLY:-0}" -e THREADING_LINUX_OPEN_IN_ONLY="${THREADING_LINUX_OPEN_IN_ONLY:-0}" -e THREADING_TERMINAL_REFERENCE_RENDERER="${THREADING_TERMINAL_REFERENCE_RENDERER:-0}" -v "$PWD/../..:/repo" -w /repo/Platforms/Linux swift:6.3.2-noble bash -s <<'INNER' 2>&1 | tee out/window-smoke.log
 set -euo pipefail
 apt-get update -qq >/dev/null
 apt-get install -y -qq libsqlite3-dev libsdl2-dev libpango1.0-dev libatk-bridge2.0-dev libglib2.0-dev libgdk-pixbuf-2.0-dev librsvg2-common fonts-dejavu-core fonts-noto-cjk fonts-noto-color-emoji xvfb xdotool xclip imagemagick zenity python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 dbus-x11 >/dev/null
@@ -66,6 +66,41 @@ if [[ "$THREADING_LINUX_COMPOSER_ONLY" == 1 ]]; then
     "$daemon" "$fixture/composer-permissions.sock" "$fixture" "$PWD/out/composer-permissions"
   dbus-run-session -- python3 tests/composer_models_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
     "$daemon" "$fixture/composer-models.sock" "$fixture" "$PWD/out/composer-models"
+  dbus-run-session -- python3 tests/composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/composer-surface.sock" "$fixture" "$PWD/out/composer-surface"
+  dbus-run-session -- python3 tests/composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/composer-surface-claude.sock" "$fixture" "$PWD/out/composer-surface-claude" claude
+  dbus-run-session -- python3 tests/composer_attachment_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/composer-attachment.sock" "$fixture" "$PWD/out/composer-attachment"
+  for provider in codex claude; do
+    for mode in speed-terminal speed-native speed-live configuration-live attachment; do
+      dbus-run-session -- python3 tests/composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+        "$daemon" "$fixture/composer-$provider-$mode.sock" "$fixture" \
+        "$PWD/out/composer-$provider-$mode" "$provider" "$mode"
+    done
+  done
+  THREADING_TEST_LAST_USED_MODE=1 dbus-run-session -- python3 tests/composer_surface_smoke.py \
+    "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/composer-claude-last-used.sock" \
+    "$fixture" "$PWD/out/composer-claude-last-used" claude configuration-live
+  THREADING_TEST_LAST_USED_MODE=1 THREADING_TEST_INHERITED_MODE=1 \
+    dbus-run-session -- python3 tests/composer_surface_smoke.py \
+    "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/composer-claude-precedence.sock" \
+    "$fixture" "$PWD/out/composer-claude-precedence" claude configuration-live
+  THREADING_TEST_OBSERVED_MODE=1 THREADING_TEST_LAST_USED_MODE=1 \
+    dbus-run-session -- python3 tests/composer_surface_smoke.py \
+    "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/composer-claude-observed.sock" \
+    "$fixture" "$PWD/out/composer-claude-observed" claude baseline
+  THREADING_TEST_OBSERVED_MODE=1 THREADING_TEST_INHERITED_MODE=1 \
+    dbus-run-session -- python3 tests/composer_surface_smoke.py \
+    "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/composer-claude-observed-default.sock" \
+    "$fixture" "$PWD/out/composer-claude-observed-default" claude baseline
+  exit 0
+fi
+if [[ "${THREADING_LINUX_CHECKOUT_ONLY:-0}" == 1 ]]; then
+  dbus-run-session -- python3 tests/composer_checkout_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/checkout.sock" "$fixture" "$PWD/out/composer-checkout"
+  dbus-run-session -- python3 tests/composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+    "$daemon" "$fixture/native-checkout.sock" "$fixture" "$PWD/out/composer-native-checkout" codex checkout
   exit 0
 fi
 if [[ "$THREADING_LINUX_COMPOSER_ACCOUNT_ONLY" == 1 ]]; then
@@ -461,10 +496,38 @@ dbus-run-session -- python3 tests/provider_marks_smoke.py "$bin/WindowHarness" "
   "$daemon" "$fixture/pty.sock" "$fixture"
 dbus-run-session -- python3 tests/composer_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$daemon" "$fixture/composer.sock" "$fixture" "$PWD/out/composer"
+dbus-run-session -- python3 tests/composer_attachment_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$daemon" "$fixture/composer-attachment.sock" "$fixture" "$PWD/out/composer-attachment"
 dbus-run-session -- python3 tests/composer_permissions_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$daemon" "$fixture/composer-permissions.sock" "$fixture" "$PWD/out/composer-permissions"
 dbus-run-session -- python3 tests/composer_models_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$daemon" "$fixture/composer-models.sock" "$fixture" "$PWD/out/composer-models"
+dbus-run-session -- python3 tests/composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$daemon" "$fixture/composer-surface.sock" "$fixture" "$PWD/out/composer-surface"
+dbus-run-session -- python3 tests/composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$daemon" "$fixture/composer-surface-claude.sock" "$fixture" "$PWD/out/composer-surface-claude" claude
+for provider in codex claude; do
+  for mode in speed-terminal speed-native speed-live configuration-live attachment; do
+    dbus-run-session -- python3 tests/composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+      "$daemon" "$fixture/composer-$provider-$mode.sock" "$fixture" \
+      "$PWD/out/composer-$provider-$mode" "$provider" "$mode"
+  done
+done
+THREADING_TEST_LAST_USED_MODE=1 dbus-run-session -- python3 tests/composer_surface_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/composer-claude-last-used.sock" \
+  "$fixture" "$PWD/out/composer-claude-last-used" claude configuration-live
+THREADING_TEST_LAST_USED_MODE=1 THREADING_TEST_INHERITED_MODE=1 \
+  dbus-run-session -- python3 tests/composer_surface_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/composer-claude-precedence.sock" \
+  "$fixture" "$PWD/out/composer-claude-precedence" claude configuration-live
+THREADING_TEST_OBSERVED_MODE=1 THREADING_TEST_LAST_USED_MODE=1 \
+  dbus-run-session -- python3 tests/composer_surface_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/composer-claude-observed.sock" \
+  "$fixture" "$PWD/out/composer-claude-observed" claude baseline
+THREADING_TEST_OBSERVED_MODE=1 THREADING_TEST_INHERITED_MODE=1 \
+  dbus-run-session -- python3 tests/composer_surface_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$daemon" "$fixture/composer-claude-observed-default.sock" \
+  "$fixture" "$PWD/out/composer-claude-observed-default" claude baseline
 dbus-run-session -- python3 tests/composer_account_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$daemon" "$fixture/composer-account.sock" "$fixture" "$PWD/out/composer-account"
 dbus-run-session -- python3 tests/project_count_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \

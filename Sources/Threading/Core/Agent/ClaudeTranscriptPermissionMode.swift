@@ -3,7 +3,7 @@ import ThreadingUsage
 
 // MARK: - Claude Transcript Permission Mode
 
-/// The permission mode a Claude **terminal** session is in, read back from its own transcript.
+/// The permission mode a running Claude session is in, read back from its own transcript.
 ///
 /// Threading knows a session's posture only when Threading chose it: `session.permissionMode`,
 /// or `AppSettings.defaultPermissionMode` behind it, become `--permission-mode` on the launch
@@ -63,6 +63,10 @@ enum ClaudeTranscriptPermissionMode {
     /// Forgets what has been read. For tests, and for a reset that should re-ask.
     static func forgetAll() {
         reader.forgetAll()
+    }
+
+    static func forget(at url: URL) {
+        reader.forget(at: url)
     }
 
     /// The newest mode a transcript records, or nil when none lies within the budget and nil

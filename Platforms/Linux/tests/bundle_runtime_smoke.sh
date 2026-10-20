@@ -137,6 +137,9 @@ dbus-run-session -- python3 /workspace_smoke.py "$bin/WindowHarness" "$bin/Linux
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
 dbus-run-session -- python3 /session_actions_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$fixture/pty.sock" "$fixture" /evidence/restart-out
+dbus-run-session -- python3 /session_close_unmounted_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" \
+  /evidence/restart-out
 dbus-run-session -- python3 /open_in_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$fixture/pty.sock" "$fixture" /evidence/restart-out/open-in
 LD_PRELOAD=/gtk-present-delay.so THREADING_GTK_PRESENT_DELAY_MS=3000 \
@@ -152,10 +155,48 @@ dbus-run-session -- python3 /project_create_menu_smoke.py "$bin/WindowHarness" "
   "$bin/threading-ptyd" "$fixture" /evidence/restart-out/project-create-menu
 dbus-run-session -- python3 /composer_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/composer.sock" "$fixture" /evidence/restart-out/composer
+dbus-run-session -- python3 /composer_checkout_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/checkout.sock" "$fixture" /evidence/restart-out/composer-checkout
+dbus-run-session -- python3 /composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/native-checkout.sock" "$fixture" \
+  /evidence/restart-out/composer-native-checkout codex checkout
+dbus-run-session -- python3 /composer_attachment_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/composer-attachment.sock" "$fixture" /evidence/restart-out/composer-attachment
 dbus-run-session -- python3 /composer_permissions_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/composer-permissions.sock" "$fixture" /evidence/restart-out/composer-permissions
 dbus-run-session -- python3 /composer_models_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/composer-models.sock" "$fixture" /evidence/restart-out/composer-models
+dbus-run-session -- python3 /composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/composer-surface.sock" "$fixture" /evidence/restart-out/composer-surface
+dbus-run-session -- python3 /composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/composer-surface-claude.sock" "$fixture" \
+  /evidence/restart-out/composer-surface-claude claude
+for provider in codex claude; do
+  for mode in speed-terminal speed-native speed-live configuration-live attachment; do
+    dbus-run-session -- python3 /composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+      "$bin/threading-ptyd" "$fixture/composer-$provider-$mode.sock" "$fixture" \
+      "/evidence/restart-out/composer-$provider-$mode" "$provider" "$mode"
+  done
+done
+THREADING_TEST_LAST_USED_MODE=1 dbus-run-session -- python3 /composer_surface_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$bin/threading-ptyd" \
+  "$fixture/composer-claude-last-used.sock" "$fixture" \
+  /evidence/restart-out/composer-claude-last-used claude configuration-live
+THREADING_TEST_LAST_USED_MODE=1 THREADING_TEST_INHERITED_MODE=1 \
+  dbus-run-session -- python3 /composer_surface_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$bin/threading-ptyd" \
+  "$fixture/composer-claude-precedence.sock" "$fixture" \
+  /evidence/restart-out/composer-claude-precedence claude configuration-live
+THREADING_TEST_OBSERVED_MODE=1 THREADING_TEST_LAST_USED_MODE=1 \
+  dbus-run-session -- python3 /composer_surface_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$bin/threading-ptyd" \
+  "$fixture/composer-claude-observed.sock" "$fixture" \
+  /evidence/restart-out/composer-claude-observed claude baseline
+THREADING_TEST_OBSERVED_MODE=1 THREADING_TEST_INHERITED_MODE=1 \
+  dbus-run-session -- python3 /composer_surface_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$bin/threading-ptyd" \
+  "$fixture/composer-claude-observed-default.sock" "$fixture" \
+  /evidence/restart-out/composer-claude-observed-default claude baseline
 dbus-run-session -- python3 /document_ui_smoke.py "$bin/WindowHarness" /evidence/restart-out/document
 dbus-run-session -- python3 /user_bubble_smoke.py "$bin/WindowHarness" /evidence/restart-out/user-bubble
 dbus-run-session -- python3 /automatic_rows_smoke.py "$bin/WindowHarness" /evidence/restart-out/automatic-rows
@@ -180,6 +221,28 @@ THREADING_LINUX_UI_SCALE=2 dbus-run-session -- python3 /native_workspace_smoke.p
 THREADING_LINUX_UI_SCALE=2 dbus-run-session -- python3 /native_permission_smoke.py \
   "$bin/WindowHarness" "$bin/LinuxHost" "$bin/threading-ptyd" "$fixture/pty.sock" \
   "$fixture/ui-scale-2" /evidence/restart-out/native-permission-2x
+dbus-run-session -- python3 /native_activity_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
+  "$fixture/ui-scale-2" /evidence/restart-out/native-activity-light
+mkdir "$fixture/ui-scale-2-dark"
+THREADING_TEST_DARK=1 dbus-run-session -- python3 /native_activity_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
+  "$fixture/ui-scale-2-dark" /evidence/restart-out/native-activity-dark
+dbus-run-session -- python3 /native_background_activity_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
+  "$fixture/ui-scale-2" /evidence/restart-out/native-background-activity-light
+THREADING_TEST_DARK=1 dbus-run-session -- python3 /native_background_activity_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
+  "$fixture/ui-scale-2-dark" /evidence/restart-out/native-background-activity-dark
+dbus-run-session -- python3 /archived_navigation_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
+  "$fixture/ui-scale-2" /evidence/restart-out/archived-navigation
+dbus-run-session -- python3 /session_rename_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
+  "$fixture/ui-scale-2" /evidence/restart-out/session-rename-2x
+THREADING_LINUX_UI_SCALE=1 dbus-run-session -- python3 /session_rename_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
+  "$fixture" /evidence/restart-out/session-rename-1x
 dbus-run-session -- python3 /composer_account_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/composer-account.sock" "$fixture" \
   /evidence/restart-out/composer-account

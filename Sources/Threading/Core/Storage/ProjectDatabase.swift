@@ -117,6 +117,7 @@ struct ProjectNavigationEntry {
     let name: String
     let folderPath: String
     let isScratchpad: Bool
+    let lastKnownRepositoryIdentity: String?
     let sessionCount: Int
     let terminalCount: Int
     let recentSessions: [AgentSession]
@@ -387,6 +388,7 @@ final class ProjectDatabase {
                 name: project.name,
                 folderPath: project.folderPath,
                 isScratchpad: project.isTheScratchpad,
+                lastKnownRepositoryIdentity: project.lastKnownRepositoryIdentity,
                 sessionCount: countsByProject.removeValue(forKey: project.id) ?? 0,
                 terminalCount: project.terminals.count,
                 recentSessions: decoded[project.id] ?? [],
@@ -638,6 +640,21 @@ final class ProjectDatabase {
         position: Int
     ) throws {
         try upsert(session, in: projectID, position: position)
+    }
+
+    /// Archive changes one payload and may retire its selected-session scalar. Keep those two
+    /// writes in one transaction so a relaunch cannot point at a row that has left navigation.
+    func saveArchivedSession(
+        _ session: AgentSession,
+        in projectID: ProjectID,
+        position: Int
+    ) throws {
+        try database.transaction {
+            try upsert(session, in: projectID, position: position)
+            if session.isArchived, try selectedSessionID() == session.id {
+                try setSelectedSessionID(nil)
+            }
+        }
     }
 
     /// Persists a related set of standing-session mutations atomically, without walking any
@@ -1857,11 +1874,23 @@ enum ProjectDatabaseSchema {
     static let selectProjectByID =
         "SELECT \(ProjectLoadColumn.list) FROM project WHERE id = ?"
 
-    static let selectSessionCountsByProject =
-        "SELECT project_id, COUNT(*) FROM session GROUP BY project_id"
+    /// The archived flag predates the indexed navigator and lives in the encoded session.
+    /// Keep corrupt, unrelated rows in the count so a partial read does not silently hide
+    /// damage; the full graph loader still reports them. `CASE` avoids asking JSON1 to parse
+    /// malformed payloads during a bounded navigator read.
+    private static let visibleSessionPredicate = """
+        CASE WHEN json_valid(data)
+             THEN COALESCE(json_extract(data, '$.archived'), 0)
+             ELSE 0 END = 0
+        """
+    static let selectSessionCountsByProject = """
+        SELECT project_id, COUNT(*) FROM session
+        WHERE \(visibleSessionPredicate) GROUP BY project_id
+        """
     static let selectRecentSessionsByProject = """
         SELECT \(SessionLoadColumn.list)
-        FROM session WHERE project_id = ? ORDER BY position DESC LIMIT ?
+        FROM session WHERE project_id = ? AND \(visibleSessionPredicate)
+        ORDER BY position DESC LIMIT ?
         """
 
     /// Every conversation's completion generation with each participant's position in it. A left

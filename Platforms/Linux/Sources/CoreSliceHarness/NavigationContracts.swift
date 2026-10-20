@@ -103,7 +103,67 @@ func runNavigationContracts() throws {
                 "indexed launch did not select its new session")
     try require(try database.sessionRecord(id: appended.id)?.session.id == appended.id,
                 "indexed launch could not reopen its new row")
+    try runArchivedNavigationContract()
+    try runProviderArchiveStateContract()
     print("PASS bounded project navigation: indexed recent windows, counts, selection and partial-read fence")
+}
+
+private func runArchivedNavigationContract() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("threading-archived-navigation-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let database = try ProjectDatabase(url: root.appendingPathComponent("projects.db"))
+    defer { database.close() }
+
+    var sessions = (0..<5).map { AgentSession(kind: .codex, title: "Chat \($0)") }
+    sessions[1].synchronizeArchiveState(true)
+    sessions[4].synchronizeArchiveState(true)
+    var project = Project(name: "archive", folderURL: root)
+    project.sessions = sessions
+    try database.save(ProjectsState(projects: [project]))
+
+    let snapshot = try database.navigationSnapshot(recentSessionLimit: 2, recentTerminalLimit: 0)
+    try require(snapshot.projects[0].sessionCount == 3, "archived rows counted as sidebar rows")
+    try require(snapshot.projects[0].recentSessions.map(\.id) == [sessions[3].id, sessions[2].id],
+                "archived recent row displaced a visible conversation")
+    try require(try database.sessionRecord(id: sessions[4].id)?.session.isArchived == true,
+                "archived conversation was removed from durable storage")
+    print("PASS archived sessions stay durable and leave the bounded navigator")
+}
+
+private func runProviderArchiveStateContract() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("threading-provider-archive-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let active = root.appendingPathComponent("sessions/2026/10/20", isDirectory: true)
+    let archived = root.appendingPathComponent("archived_sessions", isDirectory: true)
+    try FileManager.default.createDirectory(at: active, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: archived, withIntermediateDirectories: true)
+
+    let activeID = TranscriptID("019fd131-6e9a-7b02-90f2-c291334e6d83")
+    let archivedID = TranscriptID("019f8e9e-5101-7033-922d-916884a443a7")
+    let missingID = TranscriptID("019faf76-e5c4-7331-9832-fb6654e397cc")
+    let ambiguousID = TranscriptID("019f99c1-98d4-7251-81d4-2ac20e834d30")
+    for (directory, identifier) in [(active, activeID), (archived, archivedID),
+                                    (active, ambiguousID), (archived, ambiguousID)] {
+        let url = directory.appendingPathComponent(
+            "rollout-2026-10-20T00-00-00-\(identifier.rawValue).jsonl")
+        try Data().write(to: url)
+    }
+    let account = AgentAccount(provider: .codex, handle: .standard, configPath: root.path)
+    guard let snapshot = ProviderArchiveSnapshot.read(
+        account: account, sessionIDs: [activeID, archivedID, missingID, ambiguousID])
+    else { throw ContractFailure.failed("Linux could not read provider archive directories") }
+    try require(snapshot[activeID] == .active, "active provider rollout was missed")
+    try require(snapshot[archivedID] == .archived, "archived provider rollout was missed")
+    try require(snapshot[missingID] == .absent, "missing provider rollout was invented")
+    try require(snapshot[ambiguousID] == .ambiguous, "duplicate provider rollout was guessed")
+    let plan = ProviderArchiveReconciliationPlan.make(
+        local: false, provider: true, lastSynchronized: false)
+    try require(plan.synchronizedState && plan.providerTarget == nil,
+                "external provider archive was not mirrored")
+    print("PASS shared provider archive snapshot and reconciliation plan on Linux")
 }
 
 /// Opt-in matched read of the old startup path and the bounded navigator on one real store.

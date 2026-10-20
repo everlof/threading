@@ -11,6 +11,12 @@ import ThreadingPTYHostKit
 /// Experimental host-only terminal surface. Threading retains store identity, process ownership,
 /// input and exit truth. This is not a new extension component or a shipping theme boundary.
 final class GraphicalTerminal: @unchecked Sendable {
+    private let onActivityChange: (@Sendable () -> Void)?
+
+    init(onActivityChange: (@Sendable () -> Void)? = nil) {
+        self.onActivityChange = onActivityChange
+    }
+
     enum RuntimePresence {
         case running
         case exited(Int32)
@@ -219,8 +225,10 @@ final class GraphicalTerminal: @unchecked Sendable {
     func startAgent(store: String, socket: String, directory: String, shell: String,
                     kind: AgentKind, executable: String, accountHandle: AccountHandle, id: SessionID,
                     width: Int, height: Int, prompt: String? = nil,
-                    permissionMode: AgentPermissionMode? = .manual,
-                    model: String? = nil, reasoningEffort: String? = nil) {
+                    permissionMode: AgentPermissionMode? = nil,
+                    model: String? = nil, reasoningEffort: String? = nil,
+                    fastMode: Bool? = nil,
+                    expectedCheckout: LinuxGitCheckout? = nil) {
         lock.lock(); agentCreationPending = true; lock.unlock()
         worker.async { [self] in
             defer { lock.lock(); agentCreationPending = false; lock.unlock() }
@@ -232,6 +240,8 @@ final class GraphicalTerminal: @unchecked Sendable {
                                                 shell: shell, kind: kind, executable: executable,
                                                 accountHandle: accountHandle, prompt: prompt,
                                                 permissionMode: permissionMode, model: model, reasoningEffort: reasoningEffort,
+                                                fastMode: fastMode,
+                                                expectedCheckout: expectedCheckout,
                                                 accountPath: accountPath, id: id) { receipt in
                     lock.lock(); agentCreation = receipt; lock.unlock()
                 }
@@ -710,6 +720,9 @@ final class GraphicalTerminal: @unchecked Sendable {
         let records = try database.projectRecords()
         let existing = records.first { $0.project.folderPath == folder.path }
         var project = existing?.project ?? Project(name: folder.lastPathComponent, folderURL: folder)
+        if project.lastKnownRepositoryIdentity == nil {
+            project.lastKnownRepositoryIdentity = LinuxGitCheckout.read(at: folder.path)?.repositoryIdentity
+        }
         let position = existing?.position ?? records.count
         let terminal = ProjectTerminal(id: TerminalID(), title: URL(fileURLWithPath: executable).lastPathComponent,
             customTitle: nil, currentDirectory: folder.path, branch: nil, themeID: nil,
@@ -730,13 +743,21 @@ final class GraphicalTerminal: @unchecked Sendable {
     private static func createAgent(store: String, directory: String, shell: String,
                                     kind: AgentKind, executable: String, accountHandle: AccountHandle,
                                     prompt: String?, permissionMode: AgentPermissionMode?,
-                                    model: String?, reasoningEffort: String?, accountPath: String, id: SessionID,
+                                    model: String?, reasoningEffort: String?, fastMode: Bool?,
+                                    expectedCheckout: LinuxGitCheckout?,
+                                    accountPath: String, id: SessionID,
                                     admitted: (AgentCreation) -> Void) throws -> AgentLaunchPlan {
         guard shell.hasPrefix("/"), executable.hasPrefix("/") else {
             throw WindowFailure("shell and agent executable must be absolute paths")
         }
         guard let folder = ProjectDirectory.existing(at: directory) else {
             throw WindowFailure("project directory does not exist")
+        }
+        let checkout = LinuxGitCheckout.read(at: folder.path)
+        if let expectedCheckout,
+           (checkout?.identity != expectedCheckout.identity
+                || checkout?.branch != expectedCheckout.branch) {
+            throw WindowFailure("Selected checkout changed before the session started.")
         }
         let root = URL(fileURLWithPath: store, isDirectory: true)
         let file = root.appendingPathComponent("threading.db")
@@ -756,30 +777,42 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard try database.sessionRecord(id: id) == nil else {
             throw WindowFailure("session identity already exists")
         }
+        let catalogue = model != nil || reasoningEffort != nil || fastMode != nil
+            ? ComposerModelCatalog.read(provider: kind,
+                directory: URL(fileURLWithPath: accountPath, isDirectory: true),
+                projectDirectory: folder.path) : .empty
         if model != nil || reasoningEffort != nil {
-            let catalogue = ComposerModelCatalog.read(provider: kind,
-                directory: URL(fileURLWithPath: accountPath, isDirectory: true))
             guard catalogue.admits(model: model, effort: reasoningEffort) else {
                 throw WindowFailure("selected model or effort is no longer available for this account")
             }
         }
+        guard ComposerSpeedLaunch.admits(fastMode, kind: kind, model: model,
+                                         catalogue: catalogue) else {
+            throw WindowFailure("selected speed is no longer available for this model")
+        }
         guard var session = AgentSessionCreation.makeRecord(kind: kind,
                                                             accountHandle: accountHandle, model: model,
                                                             reasoningEffort: reasoningEffort,
+                                                            fastMode: fastMode,
                                                             permissionMode: permissionMode, id: id) else {
             throw WindowFailure("unsupported session configuration")
         }
+        session.branch = checkout?.branch
         let agentCommand: ShellCommand
         let resumeState: ResumeState
         switch kind {
         case .codex:
             (agentCommand, resumeState) = CodexLaunchCommand.terminal(executable: executable,
                 model: session.model, reasoningEffort: session.reasoningEffort,
+                conversationOverrides: ComposerSpeedLaunch.codexOverrides(
+                    session.fastMode, model: session.model, catalogue: catalogue),
                 permissionMode: session.permissionMode,
                 resumeState: session.resumeState, prompt: prompt)
         case .claude:
             let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: executable,
-                permissionMode: session.permissionMode, prompt: prompt)
+                permissionMode: session.permissionMode, prompt: prompt,
+                integrationFlags: try ComposerSpeedLaunch.claudeFlags(
+                    session.fastMode, store: store, id: session.id))
             agentCommand = pair.fresh
             resumeState = .resumable(pair.transcriptID)
         case .grok, .openCode, .cursor:
@@ -852,7 +885,12 @@ final class GraphicalTerminal: @unchecked Sendable {
             // this incarnation's final metadata. An ended PID is never sampled again.
             stopDirectoryTracking(sample: false)
             exitStatus = value.signalled ? 128 + value.status : value.status
-            lock.lock(); running = false; spawnMayBeLive = false; finished = true; lock.unlock(); dirty = true
+            lock.lock()
+            let wasReplaceable = !spawnMayBeLive && (finished || failure != nil)
+            running = false; spawnMayBeLive = false; finished = true
+            lock.unlock()
+            dirty = true
+            if !wasReplaceable { onActivityChange?() }
             if let savedAgent, let exitStatus {
                 do { try Self.recordAgentExit(store: savedAgent.store, id: savedAgent.id,
                                               status: exitStatus, observedNow: true) }
@@ -1012,6 +1050,10 @@ final class GraphicalTerminal: @unchecked Sendable {
             throw WindowFailure("saved agent has no conversation identifier")
         }
         let accountPath = try accountPath(for: session.kind, handle: session.accountHandle)
+        let catalogue = session.fastMode != nil
+            ? ComposerModelCatalog.read(provider: session.kind,
+                directory: URL(fileURLWithPath: accountPath, isDirectory: true),
+                projectDirectory: project.folderPath) : .empty
         let agentCommand: ShellCommand
         let resumeState: ResumeState
         switch session.kind {
@@ -1031,6 +1073,8 @@ final class GraphicalTerminal: @unchecked Sendable {
             }
             (agentCommand, resumeState) = CodexLaunchCommand.terminal(executable: codex,
                 model: session.model, reasoningEffort: session.reasoningEffort,
+                conversationOverrides: ComposerSpeedLaunch.codexOverrides(
+                    session.fastMode, model: session.model, catalogue: catalogue),
                 permissionMode: session.permissionMode,
                 resumeState: session.resumeState, prompt: nil)
         case .claude:
@@ -1043,7 +1087,9 @@ final class GraphicalTerminal: @unchecked Sendable {
                 throw WindowFailure("saved Claude conversation is missing from its account")
             }
             let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: claude,
-                permissionMode: session.permissionMode, prompt: nil)
+                permissionMode: session.permissionMode, prompt: nil,
+                integrationFlags: try ComposerSpeedLaunch.claudeFlags(
+                    session.fastMode, store: store, id: session.id))
             agentCommand = pair.resume
             resumeState = .resumable(pair.transcriptID)
         case .grok, .openCode, .cursor:
@@ -1061,9 +1107,12 @@ final class GraphicalTerminal: @unchecked Sendable {
     private func fail(_ error: Error) {
         lock.lock()
         let firstFailure = !closed && failure == nil
+        let wasReplaceable = !spawnMayBeLive && (finished || failure != nil)
         if firstFailure { failure = String(describing: error) }
+        let isReplaceable = !spawnMayBeLive && (finished || failure != nil)
         lock.unlock()
         if firstFailure {
+            if !wasReplaceable && isReplaceable { onActivityChange?() }
             worker.async { [self] in stopDirectoryTracking(sample: false) }
         }
     }

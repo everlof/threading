@@ -146,46 +146,7 @@ enum SettingsUI {
         top: NSLayoutYAxisAnchor? = nil,
         width pageWidth: CGFloat = SettingsUIDefaults.pageWidth
     ) -> [NSLayoutConstraint] {
-        content.translatesAutoresizingMaskIntoConstraints = false
-        if content.superview !== host { host.addSubview(content) }
-
-        // Keep a comfortable inset when the pane can afford it, but do not make either page edge
-        // equal to the pane. Only a <= relationship may mention the host's width here: content
-        // inside a split item must never supply that item's preferred measure.
-        let insetWidth = content.widthAnchor.constraint(
-            lessThanOrEqualTo: host.widthAnchor,
-            constant: -Design.Spacing.large * 2
-        )
-        // One point above ordinary content compression. At the same 750 priority, a page whose
-        // readable labels wanted their intrinsic width could spend this ceiling instead and
-        // consume the narrow pane's entire margin. The shell owns that boundary; content then
-        // resolves its own lower-level compression inside the canvas it was actually given.
-        insetWidth.priority = NSLayoutConstraint.Priority(
-            NSLayoutConstraint.Priority.defaultHigh.rawValue + 1
-        )
-
-        // One step below the inset ceiling, the canvas states its own stable measure. This keeps
-        // pages with little intrinsic content from collapsing to their fitting size after the
-        // pane grows wider than the cap.
-        let preferred = content.widthAnchor.constraint(equalToConstant: pageWidth)
-        preferred.priority = NSLayoutConstraint.Priority(
-            NSLayoutConstraint.Priority.defaultHigh.rawValue - 1
-        )
-
-        let constraints = [
-            insetWidth,
-            preferred,
-            content.topAnchor.constraint(equalTo: top ?? host.topAnchor),
-            content.bottomAnchor.constraint(equalTo: host.bottomAnchor),
-            content.centerXAnchor.constraint(equalTo: host.centerXAnchor),
-            content.widthAnchor.constraint(lessThanOrEqualToConstant: pageWidth),
-            // This required ceiling deliberately has no negative inset. AppKit constructs some
-            // hosts at zero width; the optional inset may yield there, while required constraints
-            // remain satisfiable and the page can never escape the pane.
-            content.widthAnchor.constraint(lessThanOrEqualTo: host.widthAnchor)
-        ]
-        NSLayoutConstraint.activate(constraints)
-        return constraints
+        SettingsPageCanvasLayout.install(page: content, in: host, top: top, width: pageWidth)
     }
 
     private static func fixedHeaderPage(
@@ -1008,203 +969,6 @@ final class SettingsPageView: NSView {
     }
 }
 
-// MARK: - Settings Card
-
-/// A rounded panel that stacks rows with hairline dividers between them — the container every
-/// group of settings sits in.
-final class SettingsCard: NSView {
-
-    init(rows: [NSView]) {
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        applySurface(
-            fill: Design.Surface.panel,
-            radius: .panel,
-            border: Design.Surface.border,
-            glow: true
-        )
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 0
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        // The stack goes in first, so every anchor below shares an ancestor at activation —
-        // constraining a view before it is in the hierarchy raises an exception AppKit swallows,
-        // leaving the card silently unbuilt.
-        addSubview(stack)
-        // The two ends are where the card's corner is still sweeping, and the row there pads
-        // itself by `medium` — enough under a 10pt corner, and half of what a 40pt one asks. The
-        // card pays the difference, so the first row's title clears the curve by the same margin
-        // as the column beside it, and the rhythm *between* rows is untouched.
-        let endPadding = Design.Spacing.inset - Design.Spacing.medium
-        let ends = [
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: endPadding),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -endPadding)
-        ]
-        NSLayoutConstraint.activate(ends + [
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor)
-        ])
-        holdAtContentInset(ends, less: Design.Spacing.medium)
-
-        for (index, row) in rows.enumerated() {
-            if index > 0 {
-                let divider = NSView()
-                divider.wantsLayer = true
-                divider.applyLayerBackground(Design.Surface.border)
-                divider.translatesAutoresizingMaskIntoConstraints = false
-                stack.addArrangedSubview(divider)
-                // Starting on the label column, so it stays there when a broad corner moves the
-                // column in.
-                let start = divider.leadingAnchor.constraint(
-                    equalTo: stack.leadingAnchor,
-                    constant: Design.Spacing.inset
-                )
-                NSLayoutConstraint.activate([
-                    divider.heightAnchor.constraint(equalToConstant: 1),
-                    start,
-                    divider.trailingAnchor.constraint(equalTo: stack.trailingAnchor)
-                ])
-                holdAtContentInset([start])
-            }
-
-            row.translatesAutoresizingMaskIntoConstraints = false
-            stack.addArrangedSubview(row)
-            NSLayoutConstraint.activate([
-                row.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
-                row.trailingAnchor.constraint(equalTo: stack.trailingAnchor)
-            ])
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-}
-
-// MARK: - Adaptive Control Row
-
-/// A row's words beside its control while both fit, and the control on a line of its own when
-/// they do not.
-///
-/// Beside was the only arrangement, and a narrow pane paid for it in words: the control keeps its
-/// width by contract, so a three-way choice or a sign-in button beside a sentence left the label
-/// column a hundred points, the title truncated to "Keep this…" and the subtitle broke the
-/// readable floor `fill` states, because the row's required edges outrank it. Remote Access's
-/// Connection card in a 420-point pane showed both at once, and so did every page with a wide
-/// control. `stackedControlRow` already had the right shape, but only as a choice a page makes
-/// once for every width.
-///
-/// So the row chooses by its own width: beside while the label column keeps
-/// `SettingsUIDefaults.minimumTextWidth` next to the control at its narrowest, and stacked —
-/// words across the row, control trailing beneath them, the `stackedControlRow` shape — when it
-/// cannot. The row's width comes from its card and not from its arrangement, so the choice cannot
-/// feed back into itself, and a pane dragged wider puts the control back beside the words.
-///
-/// Structural only: it draws nothing and chooses no styling.
-final class SettingsAdaptiveControlRow: NSView {
-    private let labels: NSView
-    private let control: NSView
-    private let stack = NSStackView()
-    private let labelsSpanTheRow: NSLayoutConstraint
-    private(set) var isStacked = false
-
-    init(labels: NSView, control: NSView) {
-        self.labels = labels
-        self.control = control
-        labelsSpanTheRow = labels.widthAnchor.constraint(equalTo: stack.widthAnchor)
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-
-        // `.gravityAreas` (the default) may leave unused room after the arranged views. That is
-        // invisible with a long subtitle, whose fitting width happens to consume the row, but a
-        // short title beside a fixed-width control clusters at the leading edge and wraps its
-        // subtitle one word per line. `.fill` makes the low-hugging label column absorb the row's
-        // slack and keeps the control on the trailing edge.
-        stack.distribution = .fill
-        stack.spacing = Design.Spacing.medium
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(labels)
-        stack.addArrangedSubview(control)
-        addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
-        arrange(stacked: false)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    /// The narrowest this row can be with the control beside its words.
-    var besideWidth: CGFloat {
-        SettingsUIDefaults.minimumTextWidth + Design.Spacing.medium + Self.narrowestWidth(of: control)
-    }
-
-    override func layout() {
-        // A row not yet given a width has nothing to decide with.
-        if bounds.width > 0 {
-            let stacked = bounds.width < besideWidth
-            if stacked != isStacked {
-                arrange(stacked: stacked)
-                needsLayout = true
-            }
-        }
-        super.layout()
-    }
-
-    /// Stacked, the words take the row and the control keeps the trailing edge every other row's
-    /// control is on.
-    ///
-    /// The order matters. "The words span the row" beside a horizontal run that also holds a
-    /// control is unsatisfiable, and `NSStackView` rebuilds its own constraints lazily, on its
-    /// next constraint pass rather than when its orientation is set. So the span goes before the
-    /// run turns horizontal, and comes only after the vertical run's constraints actually exist:
-    /// activated straight after setting the orientation, it met the old horizontal ones and
-    /// AppKit broke a constraint to recover, once per row per switch.
-    private func arrange(stacked: Bool) {
-        isStacked = stacked
-        if stacked {
-            stack.orientation = .vertical
-            stack.alignment = .trailing
-            stack.updateConstraintsForSubtreeIfNeeded()
-            labelsSpanTheRow.isActive = true
-        } else {
-            labelsSpanTheRow.isActive = false
-            stack.orientation = .horizontal
-            stack.alignment = .centerY
-        }
-    }
-
-    /// The width a control will not give up: what it draws, or a width it requires.
-    ///
-    /// Not `fittingSize` for a control that has an intrinsic width, because that honours the
-    /// *preferred* measure `SettingsUI.preferControlWidth` states and would stack a row whose
-    /// control is only wishing for 380 points — the wish is what a narrow pane is meant to take
-    /// back first. A composite control, a stack, has no intrinsic width, and its fitting size is
-    /// its members' own.
-    static func narrowestWidth(of control: NSView) -> CGFloat {
-        let intrinsic = control.intrinsicContentSize.width
-        let drawn = intrinsic == NSView.noIntrinsicMetric ? control.fittingSize.width : intrinsic
-        let required = control.constraints
-            .filter {
-                $0.firstItem === control && $0.firstAttribute == .width && $0.secondItem == nil
-                    && $0.relation != .lessThanOrEqual && $0.priority == .required
-            }
-            .map(\.constant)
-            .max() ?? 0
-        return max(drawn, required)
-    }
-}
-
 // MARK: - Flipped View
 
 /// Top-left origin, so a short page anchors to the top of a tall scroll view.
@@ -1224,12 +988,12 @@ enum SettingsUIDefaults {
     /// The narrowest a wrapping line in a row may be squeezed before it stops being words.
     /// Measured rather than chosen: under the System theme a subheading fits about four short
     /// words on a line at this width, which is the point where a sentence still reads as one.
-    static let minimumTextWidth: CGFloat = 180
+    static let minimumTextWidth: CGFloat = SettingsAdaptiveControlMetrics.minimumTextWidth
 
     /// The one width every settings destination asks its pane for: the shared content canvas
     /// plus the halo gutter `SettingsUI.page` keeps clear on either side. Stated here so the
     /// pane, every page fixture and extension-provided settings agree without a per-page choice.
     static var pageWidth: CGFloat {
-        Design.Size.settingsContentWidth + Design.Size.glowGutter * 2
+        SettingsPageCanvasLayout.width
     }
 }

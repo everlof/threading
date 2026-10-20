@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import time
@@ -56,7 +57,12 @@ for letter in 'ABCDEFGH':
     'inode/directory=' + ''.join(
         f'threading-fixture-{letter.lower()}.desktop;' for letter in 'ABCDEFGH') + '\n')
 environment = dict(os.environ, HOME=str(home), XDG_DATA_HOME=str(home / '.local' / 'share'),
-                   XDG_CONFIG_HOME=str(configuration), XDG_CACHE_HOME=str(home / '.cache'))
+                   XDG_CONFIG_HOME=str(configuration), XDG_CACHE_HOME=str(home / '.cache'),
+                   THREADING_LINUX_UI_SCALE='2')
+subprocess.run([host, str(store), socket, 'codex', str(project), '/bin/sh', '/bin/true', 'Seed'],
+               input=b'', env=environment, check=True, capture_output=True, timeout=20)
+with sqlite3.connect(store / 'threading.db') as database:
+    session_id, = database.execute('SELECT id FROM session').fetchone()
 output = Path(evidence)
 output.mkdir(parents=True, exist_ok=True)
 log_path = output / 'window.log'
@@ -97,6 +103,13 @@ def child(identity):
     frame = app.get_child_at_index(0)
     return next((frame.get_child_at_index(index) for index in range(frame.get_child_count())
                  if frame.get_child_at_index(index).get_accessible_id() == identity), None)
+
+
+def list_named(name):
+    frame = app.get_child_at_index(0)
+    return next((frame.get_child_at_index(index) for index in range(frame.get_child_count())
+                 if frame.get_child_at_index(index).get_role_name() == 'list'
+                 and frame.get_child_at_index(index).get_name() == name), None)
 
 
 def opened():
@@ -192,17 +205,55 @@ try:
                            'later app launched')
         assert paged[-1] == {'app': later_app, 'path': str(project)}, paged
 
+        xdo('windowsize', window, '900', '480')
+        listed = eventually(lambda: list_named('Projects'), 'saved session in sidebar')
+        def saved_row():
+            current = list_named('Projects')
+            return next((current.get_child_at_index(index)
+                         for index in range(current.get_child_count())
+                         if current.get_child_at_index(index).get_accessible_id() == session_id), None)
+        row = eventually(saved_row, 'saved session row')
+        bounds = row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        xdo('mousemove', '--window', window,
+            str(bounds.x + bounds.width - 108), str(bounds.y + bounds.height // 2))
+        xdo('click', '--window', window, '1')
+        menu = eventually(lambda: list_named('Session actions'), 'session actions menu')
+        open_in = next(menu.get_child_at_index(index)
+                       for index in range(menu.get_child_count())
+                       if menu.get_child_at_index(index).get_name() == 'Open in')
+        choice = open_in.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        xdo('mousemove', '--window', window,
+            str(choice.x + choice.width // 2), str(choice.y + choice.height // 2))
+        xdo('click', '--window', window, '1')
+        def session_app_row(name):
+            current = list_named('Session actions')
+            if current is None:
+                return None
+            return next((current.get_child_at_index(index)
+                         for index in range(current.get_child_count())
+                         if current.get_child_at_index(index).get_name() == name), None)
+        eventually(lambda: session_app_row('Fixture A'), 'session Open in apps')
+        capture('open-in-session-menu.png')
+        for _ in range(7):
+            xdo('key', 'Down')
+        eventually(lambda: session_app_row('Fixture H'), 'later session app scrolled into view')
+        capture('open-in-session-scrolled.png')
+        xdo('key', 'Return')
+        via_session = eventually(lambda: opened() if len(opened()) == 5 else None,
+                                 'session menu app launched')
+        assert via_session[-1] == {'app': 'H', 'path': str(project)}, via_session
+
         moved = project.with_name('Removed checkout')
         project.rename(moved)
         primary = child('linux.open-in.primary')
         assert primary.get_action_iface().do_action(0)
         eventually(lambda: 'OPEN_IN_REFUSED' in log_path.read_text(),
                    'missing checkout refused')
-        assert len(opened()) == 4, 'missing checkout launched an app'
+        assert len(opened()) == 5, 'missing checkout launched an app'
         assert not (root / 'INJECTED').exists(), 'checkout path entered a shell'
         xdo('windowfocus', '--sync', window, 'key', 'alt+F4')
         assert process.wait(timeout=6) == 0
-    print('PASS Open In split control, virtualized GIO choices, last used app, exact path and stale checkout refusal',
+    print('PASS Open In split control, session row submenu, virtualized GIO choices, exact path and stale checkout refusal',
           flush=True)
 finally:
     if process is not None and process.poll() is None:

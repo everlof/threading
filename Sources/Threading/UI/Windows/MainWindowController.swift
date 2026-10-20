@@ -419,7 +419,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         title.onActions = { [weak self] button in self?.showSessionContextMenu(from: button) }
         title.isHidden = containerViewController.isShowingSettings
-        title.maxWidth = SessionTitleDefaults.maxWidth
+        title.maxWidth = PageTitleView.maximumWidth
         // The label inside the title can truncate, but the enclosing control also publishes
         // an intrinsic width. Both must yield before the split item's holding priority.
         title.setContentCompressionResistancePriority(
@@ -427,7 +427,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             for: .horizontal
         )
         NSLayoutConstraint.activate([
-            title.widthAnchor.constraint(lessThanOrEqualToConstant: SessionTitleDefaults.maxWidth),
+            title.widthAnchor.constraint(lessThanOrEqualToConstant: PageTitleView.maximumWidth),
         ])
         sessionContextToolbarButton = title.actionsAnchor
 

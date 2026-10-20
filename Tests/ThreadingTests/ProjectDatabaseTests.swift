@@ -1436,6 +1436,22 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertThrowsError(try database.load())
     }
 
+    func testNavigationSnapshotExcludesArchivedRowsBeforeApplyingRecentLimit() throws {
+        let database = try makeDatabase()
+        var sessions = (0..<5).map { AgentSession(kind: .codex, title: "Chat \($0)") }
+        sessions[1].synchronizeArchiveState(true)
+        sessions[4].synchronizeArchiveState(true)
+        let project = makeProject("archive", sessions: sessions)
+        try database.save(ProjectsState(projects: [project]))
+
+        let snapshot = try database.navigationSnapshot(recentSessionLimit: 2,
+                                                       recentTerminalLimit: 0)
+        XCTAssertEqual(snapshot.projects[0].sessionCount, 3)
+        XCTAssertEqual(snapshot.projects[0].recentSessions.map(\.id),
+                       [sessions[3].id, sessions[2].id])
+        XCTAssertEqual(try database.sessionRecord(id: sessions[4].id)?.session.isArchived, true)
+    }
+
     func testProjectRecordsLeaveUnrelatedSessionsUnreadForTerminalWrites() throws {
         let database = try makeDatabase()
         let archived = AgentSession(kind: .codex, title: "Archived")

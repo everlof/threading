@@ -123,9 +123,9 @@ def application():
 def listed():
     result = app.get_child_at_index(0).get_child_at_index(0)
     assert result.get_role_name() == 'list'
-    # At this fixture's explicit 2× scale, seven project rows (last clipped) or
-    # eight complete saved-picker rows fit in the 480px window.
-    maximum = 7 if result.get_name() == 'Projects' else 8
+    # At this fixture's explicit 2× scale, seven complete rows fit in the
+    # 480px window for both the outline and the saved picker.
+    maximum = 7
     assert result.get_child_count() <= maximum, 'offscreen rows mounted in AT-SPI'
     return result
 
@@ -134,10 +134,10 @@ def assert_picker():
     def read():
         listing = listed()
         assert listing.get_name() == 'Saved terminals (512 of 513)', listing.get_name()
-        assert listing.get_description() == 'Showing 1 through 8 of 512 items'
-        assert listing.get_child_count() == 8
-        expected = [fresh_id] + [row['id'] for row in reversed(seeded[-7:])]
-        actual = [listing.get_child_at_index(index).get_accessible_id() for index in range(8)]
+        assert listing.get_description() == 'Showing 1 through 7 of 512 items'
+        assert listing.get_child_count() == 7
+        expected = [fresh_id] + [row['id'] for row in reversed(seeded[-6:])]
+        actual = [listing.get_child_at_index(index).get_accessible_id() for index in range(7)]
         assert actual == expected, actual
         first = listing.get_child_at_index(0)
         assert first.get_state_set().contains(Atspi.StateType.SELECTED)
@@ -224,7 +224,7 @@ with log_path.open('w+') as log:
                                     str(child), str(marker)], stdout=log, stderr=log,
                                    env=dict(os.environ, THREADING_LINUX_UI_SCALE='2'))
         window = project_title(0)
-        # Keep the deliberate eight-row catalog viewport independent of display scaling.
+        # Keep the seven-row catalog viewport independent of display scaling.
         xdo('windowsize', '--sync', window, '1120', '480')
         eventually(lambda: 'IDLE_PANE_FRAME 640x480 ' in log_path.read_text(), 'catalog viewport')
         app = eventually(application, 'fixture AT-SPI registration')
@@ -319,7 +319,7 @@ with log_path.open('w+') as log:
                        check=True, timeout=5)
         key('alt+F4')
         assert process.wait(timeout=5) == 0
-        print('PASS immediate 512-row picker cap, new row first, 8 mounted rows; 8 shared runtime slots; '
+        print('PASS immediate 512-row picker cap, new row first, 7 mounted rows; 8 shared runtime slots; '
               'same saved owner usable at capacity; ninth refused; folder refresh preserves exact counts', flush=True)
     except BaseException:
         print(log_path.read_text()[-16384:], file=sys.stderr)

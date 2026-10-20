@@ -14,6 +14,7 @@ enum ComposerWelcomeLayout {
 final class ComposerWelcomeView: NSView, ThemedComponent {
     private let mark = ThreadingMarkView()
     private let greeting = NSTextField(wrappingLabelWithString: "")
+    private lazy var stack = NSStackView(views: [mark, greeting])
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -21,8 +22,20 @@ final class ComposerWelcomeView: NSView, ThemedComponent {
         greeting.textColor = Design.Text.label
         greeting.alignment = .center
         greeting.maximumNumberOfLines = ComposerWelcomeLayout.maximumLines
-        addSubview(mark)
-        addSubview(greeting)
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = Design.Spacing.inset
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            mark.widthAnchor.constraint(equalToConstant: ComposerWelcomeLayout.markSide),
+            mark.heightAnchor.constraint(equalToConstant: ComposerWelcomeLayout.markSide),
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor,
+                                           constant: Design.Spacing.pane),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor,
+                                            constant: -Design.Spacing.pane)
+        ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -33,20 +46,12 @@ final class ComposerWelcomeView: NSView, ThemedComponent {
 
     var greetingBounds: NSRect { greeting.convert(greeting.bounds, to: superview) }
 
-    func place(in region: NSRect) {
-        frame = region
+    func updateVisibility() {
         let measure = min(ComposerWelcomeLayout.measure,
-            max(1, region.width - 2 * Design.Spacing.pane))
+            max(1, bounds.width - 2 * Design.Spacing.pane))
         if greeting.preferredMaxLayoutWidth != measure { greeting.preferredMaxLayoutWidth = measure }
-        let textHeight = greeting.intrinsicContentSize.height
-        let side = ComposerWelcomeLayout.markSide
-        let contentHeight = side + Design.Spacing.inset + textHeight
-        isHidden = region.height < contentHeight + ComposerWelcomeLayout.minimumClearance
-        let bottom = (region.height - contentHeight) / 2
-        greeting.frame = NSRect(x: (region.width - measure) / 2, y: bottom,
-            width: measure, height: textHeight)
-        mark.frame = NSRect(x: (region.width - side) / 2,
-            y: bottom + textHeight + Design.Spacing.inset, width: side, height: side)
+        isHidden = bounds.height
+            < stack.fittingSize.height + ComposerWelcomeLayout.minimumClearance
     }
 }
 #endif

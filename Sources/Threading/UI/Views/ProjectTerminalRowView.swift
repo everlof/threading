@@ -108,27 +108,12 @@ final class ProjectTerminalRowView: NSTableCellView, ThemeDerivedContent {
         addSubview(rowVisuals)
         addSubview(actionButton)
 
-        let leading = rowVisuals.leadingAnchor.constraint(
-            equalTo: leadingAnchor,
-            constant: SidebarRowDefaults.leadingInset
-        )
-        let trailing = actionButton.trailingAnchor.constraint(
-            equalTo: trailingAnchor,
-            constant: -trailingSlotInset(for: SidebarRowDefaults.trailingInset)
-        )
-        contentLeadingConstraint = leading
-        trailingSlotConstraint = trailing
-
-        NSLayoutConstraint.activate([
-            leading,
-            rowVisuals.centerYAnchor.constraint(equalTo: centerYAnchor),
-            rowVisuals.trailingAnchor.constraint(
-                lessThanOrEqualTo: actionButton.leadingAnchor,
-                constant: -SidebarRowDefaults.horizontalSpacing
-            ),
-            trailing,
-            actionButton.centerYAnchor.constraint(equalTo: centerYAnchor)
-        ])
+        let edges = SidebarRowDefaults.constrainContent(
+            rowVisuals, trailingSlot: actionButton, in: self,
+            leadingInset: SidebarRowDefaults.leadingInset,
+            trailingInset: trailingSlotInset(for: SidebarRowDefaults.trailingInset))
+        contentLeadingConstraint = edges.leading
+        trailingSlotConstraint = edges.trailing
 
         setAccessibilityRole(.staticText)
     }

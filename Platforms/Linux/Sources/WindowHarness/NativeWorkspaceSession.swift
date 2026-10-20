@@ -6,15 +6,38 @@ import ThreadingPTYClient
 import ThreadingPTYHostKit
 @testable import CoreSlice
 
+struct NativeConfigurationChoice {
+    let id: String?
+    let title: String
+    let detail: String?
+    let selected: Bool
+    var enabled = true
+}
+
+enum NativeSessionActivity: Equatable {
+    case idle
+    case loading
+    case working
+    case readyWithBackgroundWork
+    case awaitingUser
+
+    var showsWorkingMark: Bool { self == .loading || self == .working }
+}
+
 /// A saved native conversation in the ordinary workspace. File/account/replay work and durable
 /// updates use one serial worker per retained runtime, within the workspace's eight-runtime cap.
 @MainActor
 final class NativeWorkspaceSession {
     private struct Prepared: Sendable {
-        let session: AgentSession
+        var session: AgentSession
         let projectID: ProjectID
         let directory: String
         let plan: AgentLaunchPlan
+        var fastServiceTier: String?
+        let speedCatalogue: ComposerModelCatalog
+        let hiddenModelIDs: Set<String>
+        let observedTranscriptURL: URL?
+        let observedTranscriptStartingLength: UInt64
         var events: [StreamEvent]
         let truncated: Bool
         /// The provider replays this conversation's history itself, over its protocol, once the
@@ -25,10 +48,13 @@ final class NativeWorkspaceSession {
     let id: SessionID
     private let store: String
     private let socket: String
+    private let shell: String
+    private let executables: [AgentKind: String]
     private let worker: DispatchQueue
     private var prepared: Prepared?
     private var stream: (any ConversationStreamSession)?
     private var timeline: ConversationTimeline
+    private var initialPrompt: String?
     private(set) var revision = 0
     private(set) var status = "Loading conversation…"
     private(set) var failure: String?
@@ -64,20 +90,182 @@ final class NativeWorkspaceSession {
     private var replaying = true
     /// The agent is running and its provider is replaying the saved history to it.
     private var loadingHistory = false
+    /// Claude restates the complete in-flight task list; a completed foreground turn can
+    /// still continue through one of those tasks while the composer accepts input.
+    private var backgroundTaskCount = 0
     private var launchRecordedAt: Date?
+    private var speedChangeInFlight = false
+    private var modelChangeInFlight = false
+    private var effortChangeInFlight = false
+    private var modeChangeInFlight = false
+    private var observedMode: AgentPermissionMode?
+    private var observedFileLength: UInt64 = 0
+    private var observedScanScheduled = false
+    private var observedScanInFlight = false
+    private var observedScanNeeded = false
     private(set) var completedTurns = 0
+    /// The newest provider reading survives a later Ready status with no usage fields.
+    private(set) var contextReading: (tokens: Int, window: Int?)?
     var rowsPrepared: Bool { !replaying && pendingRenderCount == 0 }
     // Rows are an immutable value snapshot; none of the worker's copies is mutated by the UI.
     private struct RowSnapshot: @unchecked Sendable { let rows: [ConversationTimeline.Row] }
     var canSend: Bool { !stopped && !launching && !replaying && failure == nil && prepared != nil && (stream?.canSend ?? true) }
+    /// Row presentation follows the provider process or its in-flight launch, not whether
+    /// this reusable pane remains cached after the provider exits.
+    var presentsActiveAgent: Bool {
+        !stopped && (replaying || launching || stream?.isRunning == true)
+    }
     var canInterrupt: Bool { stream?.canInterrupt ?? false }
+    /// The same foreground/continuation distinction used by macOS Snooze. Startup history
+    /// replay and launch are not a new turn and cannot later spend a completion wake.
+    var hasPendingOutcome: Bool {
+        stream?.hasActiveTurn == true || backgroundTaskCount > 0
+    }
+    var activity: NativeSessionActivity {
+        guard !stopped, failure == nil else { return .idle }
+        if pendingPermission != nil || !questions.isEmpty { return .awaitingUser }
+        if launching || replaying || loadingHistory { return .loading }
+        if stream?.hasActiveTurn == true { return .working }
+        return stream?.isRunning == true && backgroundTaskCount > 0
+            ? .readyWithBackgroundWork : .idle
+    }
     var rootProcessIdentifier: Int32? { stream?.rootProcessIdentifier }
+    var speedChoice: (title: String, selected: Bool?, enabled: Bool)? {
+        guard let prepared,
+              prepared.speedCatalogue.supportsFastMode(kind: prepared.session.kind,
+                                                        model: prepared.session.model) else { return nil }
+        return (prepared.speedCatalogue.speedTitle(selected: prepared.session.fastMode,
+                                                   kind: prepared.session.kind),
+                prepared.session.fastMode, !stopped && !launching && !speedChangeInFlight
+                    && !modelChangeInFlight && !effortChangeInFlight
+                    && !modeChangeInFlight
+                    && (stream == nil || stream is FastModeConversation || stream?.canSend == true))
+    }
+
+    var modelChoice: (title: String, enabled: Bool)? {
+        guard let prepared, !prepared.speedCatalogue.options.isEmpty else { return nil }
+        let selected = prepared.session.model ?? prepared.speedCatalogue.defaultModel
+        let title = prepared.speedCatalogue.option(for: selected)?.displayName
+            ?? selected ?? "Default model"
+        let canChange = stream?.acceptsConfigurationChange ?? true
+        return (title, !stopped && !launching && !replaying && !modelChangeInFlight
+                && !speedChangeInFlight && !effortChangeInFlight && !modeChangeInFlight && canChange)
+    }
+
+    var modelChoices: [NativeConfigurationChoice] {
+        guard let prepared else { return [] }
+        let catalogue = prepared.speedCatalogue
+        let selected = prepared.session.model
+        let defaultModel = catalogue.defaultModel
+        let markedDefault = catalogue.option(for: defaultModel) != nil
+        var rows: [NativeConfigurationChoice] = []
+        if !markedDefault {
+            rows.append(NativeConfigurationChoice(id: nil, title: "Default model",
+                detail: "Uses the agent's configured model.", selected: selected == nil))
+        }
+        if let selected, catalogue.option(for: selected) == nil {
+            rows.append(NativeConfigurationChoice(id: selected, title: selected,
+                detail: "This model is no longer in the account catalogue.", selected: true))
+        }
+        for option in catalogue.options {
+            let isDefault = option.identifier == defaultModel
+            guard isDefault || option.identifier == selected ||
+                !prepared.hiddenModelIDs.contains(option.identifier) else { continue }
+            rows.append(NativeConfigurationChoice(id: isDefault ? nil : option.identifier,
+                title: option.displayName,
+                detail: isDefault ? "Account default" : nil,
+                selected: isDefault ? (selected == nil || selected == option.identifier)
+                    : selected == option.identifier))
+        }
+        return rows
+    }
+
+    var effortChoice: (title: String, enabled: Bool)? {
+        guard let prepared, prepared.session.kind == .codex,
+              let option = prepared.speedCatalogue.option(for:
+                  prepared.session.model ?? prepared.speedCatalogue.defaultModel),
+              !option.reasoningLevels.isEmpty else { return nil }
+        let selected = prepared.session.reasoningEffort
+        let inherited = prepared.speedCatalogue.defaultEffort.flatMap { option.supports(reasoningEffort: $0) ? $0 : nil }
+            ?? option.defaultReasoningLevel
+        let effective = selected ?? inherited
+        let title = option.reasoningLevels.first(where: { $0.effort == effective })?.displayName
+            ?? effective.map { AgentReasoningLevel(effort: $0, description: "").displayName }
+            ?? "Default effort"
+        let canChange = stream?.canSend ?? true
+        return (title, !stopped && !launching && !replaying && !modelChangeInFlight
+                && !speedChangeInFlight && !effortChangeInFlight && !modeChangeInFlight && canChange)
+    }
+
+    var modeChoice: (title: String, enabled: Bool)? {
+        guard let prepared else { return nil }
+        let kind = prepared.session.kind
+        guard kind.supportsPermissionModes else { return nil }
+        let selected = prepared.session.permissionMode
+        let inherited = prepared.speedCatalogue.inheritedPermissionMode
+        let observed = stream?.isRunning == true ? observedMode : nil
+        let title = (selected ?? inherited ?? observed)?.displayName(for: kind) ?? "Agent's Setting"
+        return (title, !stopped && !launching && !replaying && !modeChangeInFlight
+                && !modelChangeInFlight && !effortChangeInFlight && !speedChangeInFlight)
+    }
+
+    var modeChoices: [NativeConfigurationChoice] {
+        guard let prepared else { return [] }
+        let kind = prepared.session.kind
+        guard kind.supportsPermissionModes else { return [] }
+        let inherited = prepared.speedCatalogue.inheritedPermissionMode
+        let observed = stream?.isRunning == true ? observedMode : nil
+        let lastUsed = inherited == nil ? observed ?? prepared.speedCatalogue.lastUsedPermissionMode : nil
+        let selected = prepared.session.permissionMode
+        var rows: [NativeConfigurationChoice] = []
+        if inherited == nil {
+            rows.append(NativeConfigurationChoice(id: nil, title: "Use Agent's Setting",
+                detail: nil, selected: selected == nil))
+        }
+        for mode in AgentPermissionMode.allCases {
+            let isDefault = mode == inherited
+            let detail = [mode.menuDescription(for: kind),
+                mode.caveat(for: kind)].compactMap { $0 }.joined(separator: " ")
+            rows.append(NativeConfigurationChoice(id: isDefault ? nil : mode.rawValue,
+                title: mode.displayName(for: kind)
+                    + (isDefault ? "  (default)" : mode == lastUsed ? "  (last used)" : ""),
+                detail: detail,
+                selected: isDefault ? (selected == nil || selected == mode) : selected == mode))
+        }
+        if !(stream?.acceptsConfigurationChange == true && stream is PermissionModeSwitchableConversation) {
+            rows.append(NativeConfigurationChoice(id: nil,
+                title: "Applies the next time this chat starts.", detail: nil, selected: false,
+                enabled: false))
+        }
+        return rows
+    }
+
+    var effortChoices: [NativeConfigurationChoice] {
+        guard let prepared,
+              let option = prepared.speedCatalogue.option(for:
+                  prepared.session.model ?? prepared.speedCatalogue.defaultModel) else { return [] }
+        let inherited = prepared.speedCatalogue.defaultEffort.flatMap { option.supports(reasoningEffort: $0) ? $0 : nil }
+            ?? option.defaultReasoningLevel
+        let inheritedName = option.reasoningLevels.first(where: { $0.effort == inherited })?.displayName
+            ?? "Default effort"
+        var rows = [NativeConfigurationChoice(id: nil, title: inheritedName,
+            detail: "Uses the account or model default.", selected: prepared.session.reasoningEffort == nil)]
+        rows += option.reasoningLevels.map { level in
+            NativeConfigurationChoice(id: level.effort, title: level.displayName,
+                detail: level.description.isEmpty ? nil : level.description,
+                selected: prepared.session.reasoningEffort == level.effort)
+        }
+        return rows
+    }
 
     init(store: String, socket: String, id: SessionID, shell: String,
-         executables: [AgentKind: String]) {
+         executables: [AgentKind: String], initialPrompt: String? = nil) {
         self.store = store
         self.socket = socket
+        self.shell = shell
+        self.executables = executables
         self.id = id
+        self.initialPrompt = initialPrompt
         worker = DispatchQueue(label: "codes.threading.linux.native-workspace.\(id.uuidString)", qos: .userInitiated)
         timeline = ConversationTimeline(sessionID: id, chartDecoder: { _, _ in nil })
         PermissionBroker.register(self)
@@ -94,8 +282,13 @@ final class NativeWorkspaceSession {
         case .success(let prepared):
             var retained = prepared
             retained.events = []
+            observedMode = nil
+            observedFileLength = prepared.observedTranscriptStartingLength
             self.prepared = retained
-            for event in prepared.events { _ = timeline.apply(event) }
+            for event in prepared.events {
+                retainContextReading(from: event)
+                _ = timeline.apply(event)
+            }
             let snapshot = RowSnapshot(rows: timeline.rows)
             let truncated = prepared.truncated
             worker.async { [weak self] in
@@ -116,6 +309,10 @@ final class NativeWorkspaceSession {
                     self.replaying = false
                     self.status = "Ready"
                     self.changed()
+                    if let prompt = self.initialPrompt, !prepared.session.hasLaunched {
+                        self.initialPrompt = nil
+                        _ = self.send(prompt)
+                    }
                     if let prepared = self.prepared, prepared.replaysOverProtocol,
                        prepared.session.hasLaunched, prepared.session.resumeState.isResumable {
                         self.launch(prompt: nil)
@@ -191,6 +388,7 @@ final class NativeWorkspaceSession {
         case .success(let started):
             launchRecordedAt = started.recordedAt
             let stream = makeStream(prepared, child: started.child)
+            backgroundTaskCount = 0
             self.stream = stream
             stream.onEvent = { [weak self] in self?.apply($0) }
             stream.onInteractionAvailabilityChange = { [weak self] in self?.interactionChanged() }
@@ -205,12 +403,24 @@ final class NativeWorkspaceSession {
             stream.onExit = { [weak self] status in
                 guard let self else { return }
                 self.status = "Agent exited (\(status))"
+                self.observedMode = nil
+                self.observedScanNeeded = false
                 self.settlePermissions(reason: "Denied — the agent exited.")
                 self.retireQuestions()
                 self.changed()
                 self.persist { session in session.lastExitCode = status; session.lastActiveAt = Date() }
             }
             stream.start()
+            if let fastMode = prepared.session.fastMode,
+               let claude = stream as? ClaudeStreamSession {
+                claude.setFastMode(fastMode) { [weak self] result in
+                    if case .failure(let error) = result {
+                        NativeConversationDelivery.callbacks.receive {
+                            self?.report("Could not apply conversation speed: \(error)")
+                        }
+                    }
+                }
+            }
             guard let prompt else {
                 loadingHistory = true
                 interactionChanged()
@@ -228,6 +438,7 @@ final class NativeWorkspaceSession {
             loadingHistory = false
             status = "Ready"
         }
+        requestObservedModeScan()
         changed()
     }
 
@@ -237,6 +448,268 @@ final class NativeWorkspaceSession {
             if case .failed(let reason) = receipt { self?.report(reason) }
             else { self?.changed() }
         }
+    }
+
+    /// Keep the saved startup choice and the active transport in step. Inheritance from the
+    /// provider has no live reset request; that choice takes effect on the next launch.
+    func selectModel(_ model: String?) {
+        guard let prepared, modelChoice?.enabled == true,
+              model == nil || prepared.speedCatalogue.option(for: model) != nil,
+              model != prepared.session.model else { return }
+        let selectedOption = prepared.speedCatalogue.option(for: model ?? prepared.speedCatalogue.defaultModel)
+        let wasFast = prepared.session.fastMode ?? prepared.speedCatalogue.inheritedFastMode ?? false
+        let resetFast = wasFast && !prepared.speedCatalogue.supportsFastMode(
+            kind: prepared.session.kind, model: model)
+        let resetEffort = prepared.session.reasoningEffort.map { effort in
+            selectedOption.map { !$0.reasoningLevels.isEmpty && !$0.supports(reasoningEffort: effort) } ?? false
+        } ?? false
+        modelChangeInFlight = true
+        changed()
+        if let switcher = stream as? ModelSwitchableConversation {
+            switcher.setModel(model) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success:
+                    self.applyModelChange(model, resetFast: resetFast, resetEffort: resetEffort)
+                case .failure(let error):
+                    self.modelChangeInFlight = false
+                    self.appendLocalNotice("Could not change conversation model: \(error)", kind: .error)
+                }
+            }
+        } else {
+            applyModelChange(model, resetFast: resetFast, resetEffort: resetEffort)
+        }
+    }
+
+    private func applyModelChange(_ model: String?, resetFast: Bool, resetEffort: Bool) {
+        if resetFast, let switcher = stream as? FastModeConversation {
+            switcher.setFastMode(false) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success:
+                    self.saveModel(model, resetFast: true, resetEffort: resetEffort)
+                case .failure(let error):
+                    self.saveModel(model, resetFast: false, resetEffort: resetEffort,
+                        warning: "The model changed, but Fast could not be turned off: \(error)")
+                }
+            }
+        } else {
+            saveModel(model, resetFast: resetFast, resetEffort: resetEffort)
+        }
+    }
+
+    private func saveModel(_ model: String?, resetFast: Bool, resetEffort: Bool,
+                           warning: String? = nil) {
+        saveSessionConfiguration({ session in
+            session.model = model
+            if resetFast { session.fastMode = false }
+            if resetEffort { _ = session.setReasoningEffort(nil) }
+        }) { [weak self] result in
+            guard let self else { return }
+            self.modelChangeInFlight = false
+            switch result {
+            case .success:
+                if let warning { self.appendLocalNotice(warning, kind: .error) }
+                else { self.changed() }
+            case .failure(let error):
+                self.appendLocalNotice("Could not save conversation model: \(error)", kind: .error)
+            }
+        }
+    }
+
+    func selectEffort(_ effort: String?) {
+        guard let prepared, effortChoice?.enabled == true,
+              let option = prepared.speedCatalogue.option(for:
+                  prepared.session.model ?? prepared.speedCatalogue.defaultModel),
+              effort == nil || option.supports(reasoningEffort: effort),
+              effort != prepared.session.reasoningEffort else { return }
+        effortChangeInFlight = true
+        changed()
+        saveSessionConfiguration({ session in _ = session.setReasoningEffort(effort) }) { [weak self] result in
+            guard let self else { return }
+            self.effortChangeInFlight = false
+            switch result {
+            case .success: self.changed()
+            case .failure(let error):
+                self.appendLocalNotice("Could not save conversation effort: \(error)", kind: .error)
+            }
+        }
+    }
+
+    func selectMode(_ mode: AgentPermissionMode?) {
+        guard let prepared, modeChoice?.enabled == true,
+              mode != prepared.session.permissionMode else { return }
+        modeChangeInFlight = true
+        changed()
+        let persist = { [weak self] (changedLiveAgent: Bool) in
+            guard let self else { return }
+            self.saveSessionConfiguration({ $0.permissionMode = mode }) { [weak self] result in
+                guard let self else { return }
+                self.modeChangeInFlight = false
+                switch result {
+                case .success: self.changed()
+                case .failure(let error):
+                    self.appendLocalNotice("Could not save conversation mode: \(error)", kind: .error)
+                    if changedLiveAgent {
+                        self.appendLocalNotice("The agent changed mode, but the saved session did not.", kind: .error)
+                    }
+                }
+            }
+        }
+        guard stream?.acceptsConfigurationChange == true,
+              let switcher = stream as? PermissionModeSwitchableConversation else {
+            persist(false)
+            return
+        }
+        guard let resolved = mode else {
+            persist(false)
+            appendLocalNotice("This chat keeps the permission mode it is running with. The agent's own setting applies the next time it starts.", kind: .muted)
+            return
+        }
+        switcher.setPermissionMode(resolved) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.observedMode = resolved
+                self.requestObservedModeScan()
+                persist(true)
+            case .failure(let error):
+                self.modeChangeInFlight = false
+                self.appendLocalNotice("Could not change conversation mode: \(error)", kind: .error)
+            }
+        }
+    }
+
+    private struct SavedConfiguration: Sendable {
+        let session: AgentSession
+        let refreshed: Prepared?
+    }
+
+    private func saveSessionConfiguration(
+        _ edit: @escaping @Sendable (inout AgentSession) -> Void,
+        completion: @escaping @MainActor @Sendable (Result<AgentSession, Error>) -> Void
+    ) {
+        guard let prepared else { return }
+        let store = store, id = id, shell = shell, executables = executables
+        let launchedAt = launchRecordedAt
+        let hasStream = stream != nil
+        worker.async { [weak self] in
+            let result = Result { () throws -> SavedConfiguration in
+                let updated = try Self.withDatabase(store: store) { database in
+                    guard let record = try database.sessionRecord(id: id),
+                          record.project.id == prepared.projectID,
+                          record.session.usesNativeUI,
+                          record.session.kind == prepared.session.kind,
+                          record.session.accountHandle == prepared.session.accountHandle,
+                          (record.session.lastActiveAt == prepared.session.lastActiveAt
+                              || launchedAt.map { record.session.lastActiveAt == $0 } == true)
+                    else { throw WindowFailure("Conversation changed before its configuration could be saved.") }
+                    var session = record.session
+                    edit(&session)
+                    try database.saveSession(session, in: record.project.id, position: record.position)
+                    return session
+                }
+                let refreshed = hasStream ? nil : try Self.prepare(store: store, id: id,
+                    shell: shell, executables: executables)
+                return SavedConfiguration(session: updated, refreshed: refreshed)
+            }
+            NativeConversationDelivery.callbacks.receive { [weak self] in
+                guard let self else { return }
+                switch result {
+                case .failure(let error): completion(.failure(error))
+                case .success(let saved):
+                    if var refreshed = saved.refreshed {
+                        refreshed.events = []
+                        self.prepared = refreshed
+                    } else {
+                        self.prepared?.session = saved.session
+                        if let fastMode = saved.session.fastMode,
+                           let catalogue = self.prepared?.speedCatalogue {
+                            self.prepared?.fastServiceTier = ComposerSpeedLaunch.codexServiceTier(
+                                fastMode, model: saved.session.model, catalogue: catalogue)
+                        }
+                    }
+                    completion(.success(saved.session))
+                }
+            }
+        }
+    }
+
+    func selectSpeed(_ choice: Bool?) {
+        guard let prepared, speedChoice?.enabled == true else { return }
+        guard choice != prepared.session.fastMode else { return }
+        speedChangeInFlight = true
+        changed()
+        if let choice, let claude = stream as? FastModeConversation {
+            claude.setFastMode(choice) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success: self.saveSpeed(choice)
+                case .failure(let error):
+                    self.speedChangeInFlight = false
+                    self.appendLocalNotice("Could not change conversation speed: \(error)", kind: .error)
+                }
+            }
+        } else {
+            saveSpeed(choice)
+        }
+    }
+
+    private func saveSpeed(_ choice: Bool?) {
+        guard let prepared else { return }
+        let store = store, id = id, shell = shell
+        let hasStream = stream != nil
+        let executables = executables
+        let launchedAt = launchRecordedAt
+        worker.async { [weak self] in
+            let result = Result { () throws -> Prepared? in
+                try Self.withDatabase(store: store) { database in
+                    guard let record = try database.sessionRecord(id: id),
+                          record.project.id == prepared.projectID,
+                          record.session.kind == prepared.session.kind,
+                          record.session.accountHandle == prepared.session.accountHandle,
+                          (record.session.lastActiveAt == prepared.session.lastActiveAt
+                              || launchedAt.map { record.session.lastActiveAt == $0 } == true)
+                    else { throw WindowFailure("Conversation changed before its speed could be saved.") }
+                    var session = record.session
+                    session.fastMode = choice
+                    try database.saveSession(session, in: record.project.id, position: record.position)
+                }
+                return hasStream ? nil : try Self.prepare(store: store, id: id,
+                    shell: shell, executables: executables)
+            }
+            NativeConversationDelivery.callbacks.receive { [weak self] in
+                guard let self else { return }
+                self.speedChangeInFlight = false
+                switch result {
+                case .failure(let error):
+                    self.appendLocalNotice("Could not save conversation speed: \(error)", kind: .error)
+                case .success(let refreshed):
+                    if var refreshed {
+                        refreshed.events = []
+                        self.prepared = refreshed
+                    }
+                    else {
+                        self.prepared?.session.fastMode = choice
+                        if let choice, self.prepared?.session.kind == .codex,
+                           let current = self.prepared {
+                            self.prepared?.fastServiceTier = ComposerSpeedLaunch.codexServiceTier(
+                                choice, model: current.session.model,
+                                catalogue: current.speedCatalogue)
+                        }
+                    }
+                    if choice == nil, hasStream {
+                        self.appendLocalNotice("This chat keeps its current speed. The agent's setting applies the next time it starts.", kind: .muted)
+                    } else { self.changed() }
+                }
+            }
+        }
+    }
+
+    private func appendLocalNotice(_ message: String, kind: ConversationTimeline.NoticeKind) {
+        let change = timeline.appendNotice(message, kind: kind)
+        if case .appended(let index) = change { onRow?(index, timeline.rows[index], nil) }
+        changed()
     }
 
     func stop() {
@@ -361,9 +834,10 @@ final class NativeWorkspaceSession {
                 preparedChild: child, effort: session.reasoningEffort, plan: { plan })
         case .codex:
             return CodexStreamSession(sessionID: session.id, callbackDelivery: NativeConversationDelivery.callbacks,
-                preparedChild: child, workingDirectory: directory, configurationProvider: {
-                    CodexTurnConfiguration(model: session.model, effort: session.reasoningEffort,
-                        serviceTier: session.fastMode.map { $0 ? AgentDefaults.codexFastServiceTier : AgentDefaults.codexStandardServiceTier })
+                preparedChild: child, workingDirectory: directory, configurationProvider: { [weak self] in
+                    CodexTurnConfiguration(model: self?.prepared?.session.model,
+                        effort: self?.prepared?.session.reasoningEffort,
+                        serviceTier: self?.prepared?.fastServiceTier)
                 }, plan: { plan })
         case .grok, .cursor:
             // The working directory is the session's own checkout every time, fresh or resumed:
@@ -377,7 +851,64 @@ final class NativeWorkspaceSession {
         }
     }
 
+    /// Coalesce streamed events into one bounded transcript read on this runtime's file worker.
+    /// The process must have appended after preparation before an observation can name its mode.
+    private func requestObservedModeScan() {
+        guard prepared?.observedTranscriptURL != nil, stream?.isRunning == true else { return }
+        observedScanNeeded = true
+        guard !observedScanScheduled, !observedScanInFlight else { return }
+        observedScanScheduled = true
+        worker.asyncAfter(deadline: .now() + .milliseconds(350)) { [weak self] in
+            NativeConversationDelivery.callbacks.receive { [weak self] in
+                self?.startObservedModeScan()
+            }
+        }
+    }
+
+    private func startObservedModeScan() {
+        observedScanScheduled = false
+        guard observedScanNeeded, !observedScanInFlight,
+              let prepared, let url = prepared.observedTranscriptURL,
+              stream?.isRunning == true else { return }
+        observedScanNeeded = false
+        observedScanInFlight = true
+        let startingLength = prepared.observedTranscriptStartingLength
+        let previousLength = observedFileLength
+        let previousMode = observedMode
+        worker.async { [weak self] in
+            let length = Self.fileLength(at: url)
+            let mode: AgentPermissionMode? = if length <= startingLength {
+                nil
+            } else if length == previousLength {
+                previousMode
+            } else {
+                ComposerRecentPermissionMode.read(at: url)
+            }
+            NativeConversationDelivery.callbacks.receive { [weak self] in
+                guard let self else { return }
+                self.observedScanInFlight = false
+                guard self.prepared?.observedTranscriptURL == url,
+                      self.stream?.isRunning == true else { return }
+                self.observedFileLength = length
+                if self.observedMode != mode {
+                    self.observedMode = mode
+                    self.changed()
+                }
+                if self.observedScanNeeded { self.requestObservedModeScan() }
+            }
+        }
+    }
+
+    private nonisolated static func fileLength(at url: URL) -> UInt64 {
+        guard let length = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else { return 0 }
+        return UInt64(max(0, length))
+    }
+
     private func apply(_ event: StreamEvent) {
+        if case .backgroundWork(let inFlight) = event {
+            backgroundTaskCount = inFlight.count
+        }
+        retainContextReading(from: event)
         let changes = timeline.apply(event)
         for change in changes {
             switch change {
@@ -395,7 +926,14 @@ final class NativeWorkspaceSession {
             default: break
             }
         }
+        requestObservedModeScan()
         changed()
+    }
+
+    private func retainContextReading(from event: StreamEvent) {
+        guard case .turnFinished(_, _, let metrics) = event,
+              let tokens = metrics.contextTokens else { return }
+        contextReading = (tokens, metrics.contextWindow)
     }
 
     /// Markdown partitioning stays off the actor. All row jobs use one ordered, paced lane;
@@ -464,7 +1002,7 @@ final class NativeWorkspaceSession {
         }
     }
 
-    private nonisolated static func withDatabase<T>(store: String, body: (ProjectDatabase) throws -> T) throws -> T {
+    nonisolated static func withDatabase<T>(store: String, body: (ProjectDatabase) throws -> T) throws -> T {
         let root = URL(fileURLWithPath: store, isDirectory: true)
         let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw WindowFailure("Cannot open store lock.") }
@@ -516,26 +1054,47 @@ final class NativeWorkspaceSession {
         }
         let agentCommand: ShellCommand
         let resumeState: ResumeState
+        let fastServiceTier: String?
+        let speedCatalogue: ComposerModelCatalog
         var environment: [String: String] = [:]
         let mode = session.kind.supportsPermissionModes ? session.permissionMode : nil
         switch session.kind {
         case .claude:
+            speedCatalogue = ComposerModelCatalog.read(provider: .claude,
+                directory: URL(fileURLWithPath: accountPath, isDirectory: true),
+                projectDirectory: directory.path)
+            var flags = ClaudeLaunchCommand.streamProtocolFlags()
+            flags.append(contentsOf: try ComposerSpeedLaunch.claudeFlags(
+                session.fastMode, store: store, id: session.id))
             let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: executable,
                 permissionMode: session.permissionMode, prompt: nil,
-                integrationFlags: ClaudeLaunchCommand.streamProtocolFlags())
+                integrationFlags: flags)
             agentCommand = session.hasLaunched ? pair.resume : pair.fresh
             resumeState = .resumable(pair.transcriptID)
+            fastServiceTier = nil
         case .codex:
+            let catalogue = ComposerModelCatalog.read(provider: .codex,
+                directory: URL(fileURLWithPath: accountPath, isDirectory: true),
+                projectDirectory: directory.path)
+            speedCatalogue = catalogue
             agentCommand = CodexLaunchCommand.appServer(executable: executable, model: session.model,
+                conversationOverrides: ComposerSpeedLaunch.codexOverrides(
+                    session.fastMode, model: session.model, catalogue: catalogue),
                 permissionMode: session.permissionMode)
             resumeState = session.resumeState
+            fastServiceTier = ComposerSpeedLaunch.codexServiceTier(
+                session.fastMode, model: session.model, catalogue: catalogue)
         case .grok:
+            speedCatalogue = .empty
             agentCommand = ACPLaunchCommand.grok(executable: executable, model: session.model, permissionMode: mode)
             resumeState = session.resumeState
+            fastServiceTier = nil
         case .cursor:
+            speedCatalogue = .empty
             agentCommand = ACPLaunchCommand.cursor(executable: executable)
             resumeState = session.resumeState
             environment = AgentDefaults.cursorLaunchEnvironment
+            fastServiceTier = nil
         case .openCode:
             throw WindowFailure("This provider's native workspace launch is not available yet.")
         }
@@ -545,8 +1104,25 @@ final class NativeWorkspaceSession {
             ?? ([], false)
         let plan = AgentLaunchPlan.inLoginShell(command: command, in: directory.path,
             shellPath: shell, resumeState: resumeState, environmentOverrides: environment)
+        let hiddenModelIDs: Set<String> = switch session.kind {
+        case .codex, .claude:
+            ComposerModelVisibilityStore.hiddenModelIDs(for:
+                AccountID(provider: session.kind, handle: session.accountHandle))
+        case .grok, .openCode, .cursor: []
+        }
+        let observedTranscriptURL = session.kind == .claude
+            ? resumeState.transcriptID.map {
+                ClaudeTranscript.StorageSlot(sessionID: $0, configPath: accountPath,
+                    folderPath: directory.path).resolve()
+            }
+            : nil
         return Prepared(session: session, projectID: record.project.id, directory: directory.path,
-            plan: plan, events: replay.0, truncated: replay.1, replaysOverProtocol: replaysOverProtocol)
+            plan: plan, fastServiceTier: fastServiceTier, speedCatalogue: speedCatalogue,
+            hiddenModelIDs: hiddenModelIDs,
+            observedTranscriptURL: observedTranscriptURL,
+            observedTranscriptStartingLength: observedTranscriptURL.map { fileLength(at: $0) } ?? 0,
+            events: replay.0,
+            truncated: replay.1, replaysOverProtocol: replaysOverProtocol)
     }
 }
 #endif

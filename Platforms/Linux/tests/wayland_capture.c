@@ -31,7 +31,8 @@ void SDL_RenderPresent(SDL_Renderer *renderer) {
             || strcmp(requested, "finger-down") == 0;
         if ((scrolling || strcmp(requested, "scroll-tail") == 0
              || strcmp(requested, "normal") == 0 || strcmp(requested, "alternate") == 0
-             || strcmp(requested, "open") == 0 || strcmp(requested, "idle") == 0
+             || strcmp(requested, "open") == 0 || strcmp(requested, "pasted") == 0
+             || strcmp(requested, "idle") == 0
              || strcmp(requested, "dark-idle") == 0
              || strcmp(requested, "light-idle") == 0
              || strcmp(requested, "terminal") == 0

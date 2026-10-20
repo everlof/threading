@@ -173,6 +173,14 @@ final class TranscriptFactReader<Value: Equatable & Sendable> {
         for path in Array(scanning.keys) { invalidateScan(at: path) }
     }
 
+    /// Drops one stopped conversation's fact without disturbing other live transcripts.
+    /// An in-flight result loses authority to publish after the process that wrote it exits.
+    func forget(at url: URL) {
+        let path = url.path
+        readings.removeValue(forKey: path)
+        invalidateScan(at: path)
+    }
+
     // MARK: - Private Methods
 
     private func invalidateScan(at path: String) {

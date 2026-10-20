@@ -129,7 +129,7 @@ with log_path.open('w+') as log:
                                 '/bin/sh', '/bin/true'], env=environment, stdout=log, stderr=log)
     try:
         window = await_title('Threading experiment - ' + str(project))
-        # The deep-selection check below intentionally uses an eight-row viewport.
+        # The deep-selection check below intentionally uses a seven-row viewport.
         xdo('windowsize', '--sync', window, '1120', '480')
         app = eventually(application, 'AT-SPI application registration')
         open_saved_agents(key)
@@ -191,7 +191,7 @@ with log_path.open('a') as log:
                                env=environment, stdout=log, stderr=log)
     try:
         window = await_title('Threading experiment - ' + str(project))
-        # The deep-selection check below intentionally uses an eight-row viewport.
+        # The deep-selection check below intentionally uses a seven-row viewport.
         xdo('windowsize', '--sync', window, '1120', '480')
         app = eventually(application, 'restored AT-SPI application')
         open_saved_agents(key)
@@ -199,12 +199,12 @@ with log_path.open('a') as log:
 
         def deep_row():
             listed = app.get_child_at_index(0).get_child_at_index(0)
-            if listed.get_role_name() != 'list' or listed.get_child_count() != 8:
+            if listed.get_role_name() != 'list' or listed.get_child_count() != 7:
                 return None
             first = listed.get_child_at_index(0)
             if first.get_accessible_id() != selected:
                 return None
-            assert listed.get_description() == 'Showing 1 through 8 of 512 items'
+            assert listed.get_description() == 'Showing 1 through 7 of 512 items'
             assert first.get_name() == f'{expected[selected]} [{selected[:8]}]'
             assert first.get_state_set().contains(Atspi.StateType.SELECTED)
             return first

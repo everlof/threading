@@ -28,6 +28,9 @@ import AppKit
 /// anybody is looking at it, while this is a label that happens to answer a press.
 final class PageTitleView: BackdropThemedControl {
 
+    /// The page header's title cap on both desktop hosts. A narrower pane may compress it.
+    static let maximumWidth: CGFloat = 360
+
     /// Rounded rect rather than pill, matching every other small container in the chrome.
     private static var radius: CGFloat { Design.Radius.control }
 

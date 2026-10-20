@@ -262,9 +262,9 @@ final class SessionStatusIndicator: NSView {
 // MARK: - Status Indicator Defaults
 
 enum StatusIndicatorDefaults {
-    static let size: CGFloat = 12
+    static let size: CGFloat = SidebarRowDefaults.sessionStatusSize
     static let spinnerSize: CGFloat = 12
     static let dotSize: CGFloat = 6
-    static let backgroundDotSize: CGFloat = 4
+    static let backgroundDotSize: CGFloat = SidebarRowDefaults.sessionBackgroundDotSize
     static let finishedDotSize: CGFloat = 7
 }

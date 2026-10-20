@@ -59,11 +59,8 @@ enum SessionNaming {
         kind: AgentKind,
         accountDisplayName: String?
     ) -> Bool {
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return true }
-
-        return placeholderBases(kind: kind, accountDisplayName: accountDisplayName)
-            .contains(strippingCounter(trimmed).lowercased())
+        SessionHistoryTitle.isPlaceholder(title, kind: kind,
+                                          accountDisplayName: accountDisplayName)
     }
 
     /// The narrower question: whether a title *is* the agent's or account's name — the part

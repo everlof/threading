@@ -125,7 +125,13 @@ open class NSTextField: NSView {
         needsDisplay = true
     }
     open weak var delegate: NSTextFieldDelegate?
-    open var placeholderString: String? { didSet { needsDisplay = true } }
+    open var placeholderString: String? {
+        didSet {
+            placeholderAttributedString = nil
+            needsDisplay = true
+        }
+    }
+    open var placeholderAttributedString: NSAttributedString? { didSet { needsDisplay = true } }
     /// Sent when Return ends editing. This field is not an `NSControl` here, so it owns the
     /// pair itself; on Linux a `Selector` is the closure.
     open var action: Selector?

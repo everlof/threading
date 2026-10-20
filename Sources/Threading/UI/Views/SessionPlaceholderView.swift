@@ -20,6 +20,25 @@ final class SessionPlaceholderView: NSView {
 
     /// The host publishes the actual laid-out target to its native accessibility bridge.
     var actionAnchor: ThemedButton { actionButton }
+    var titleFrame: NSRect { titleLabel.convert(titleLabel.bounds, to: self) }
+
+    /// Both hosts mount the same content edges; only the host's content top differs.
+    func pin(to container: NSView, contentTopAnchor: NSLayoutYAxisAnchor,
+             below sibling: NSView? = nil) {
+        guard superview == nil else { return }
+        translatesAutoresizingMaskIntoConstraints = false
+        if let sibling {
+            container.addSubview(self, positioned: .below, relativeTo: sibling)
+        } else {
+            container.addSubview(self)
+        }
+        NSLayoutConstraint.activate([
+            topAnchor.constraint(equalTo: contentTopAnchor),
+            bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            trailingAnchor.constraint(equalTo: container.trailingAnchor)
+        ])
+    }
 
     // MARK: - Initialization
 

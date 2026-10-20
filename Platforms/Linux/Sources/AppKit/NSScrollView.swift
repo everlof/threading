@@ -115,6 +115,13 @@ open class NSScrollView: NSView {
     open var hasVerticalScroller = false
     open var autohidesScrollers = false
     open var hasHorizontalScroller = false
+    /// Breathing belongs inside the scroll surface; the clip, not the scroll view, is inset.
+    open var contentInsets = NSEdgeInsets() {
+        didSet {
+            constrainViewport()
+            tile()
+        }
+    }
     /// Elasticity is a request; this renderer currently keeps the viewport clamped.
     open var horizontalScrollElasticity: Elasticity = .none
     /// The clip view clamps to the document bounds; there is no rubber-band animation in the
@@ -141,12 +148,13 @@ open class NSScrollView: NSView {
     }
 
     private func constrainViewport() {
+        NSLayoutConstraint.deactivate(viewportConstraints)
         contentView.translatesAutoresizingMaskIntoConstraints = false
         viewportConstraints = [
-            contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            contentView.topAnchor.constraint(equalTo: topAnchor),
-            contentView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentInsets.left),
+            contentView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -contentInsets.right),
+            contentView.topAnchor.constraint(equalTo: topAnchor, constant: contentInsets.top),
+            contentView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -contentInsets.bottom)
         ]
         NSLayoutConstraint.activate(viewportConstraints)
     }
@@ -159,7 +167,7 @@ open class NSScrollView: NSView {
     }
 
     open func tile() {
-        let viewport = NSRect(origin: .zero, size: bounds.size)
+        let viewport = bounds.inset(by: contentInsets)
         guard contentView.frame != viewport else { return }
         contentView.frame = viewport
     }

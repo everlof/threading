@@ -2056,15 +2056,8 @@ final class ProjectStore {
     }
 
     private func nameForHistory(_ session: AgentSession) -> String {
-        let name = AgentSessionRowPresentation(
-            session: session,
-            usesAgentTitle: AppSettings.usesAgentTitleInSidebar,
-            untitledTitle: ""
-        ).title
-        guard session.customTitle != nil || !SessionNaming.isPlaceholderTitle(
-            name, kind: session.kind, accountDisplayName: nil
-        ) else { return "" }
-        return name
+        SessionHistoryTitle.name(for: session,
+                                 usesAgentTitle: AppSettings.usesAgentTitleInSidebar)
     }
 
     private func recordNameChange(

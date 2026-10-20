@@ -65,6 +65,22 @@ final class ThemedProjectRowView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// Both table-cell hosts mount this complete visual on the same four edges. The Linux
+    /// outline contributes its own leading and trailing gutters; Mac's cell uses zero insets.
+    @discardableResult
+    func pin(to cell: NSView, leadingInset: CGFloat = 0, trailingInset: CGFloat = 0)
+        -> (leading: NSLayoutConstraint, trailing: NSLayoutConstraint) {
+        let leading = leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: leadingInset)
+        let trailing = trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -trailingInset)
+        NSLayoutConstraint.activate([
+            leading,
+            trailing,
+            topAnchor.constraint(equalTo: cell.topAnchor),
+            bottomAnchor.constraint(equalTo: cell.bottomAnchor)
+        ])
+        return (leading, trailing)
+    }
+
     /// Called before an extension container adopts nativeContent. The ordinary Linux row keeps
     /// the default mounting and never calls this method.
     func prepareForExternalContent() {
@@ -286,7 +302,14 @@ final class ThemedProjectRowView: NSView {
                 multiplier: SidebarRowDefaults.worktreePathMinimumFraction)
         }
         titleLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        #if os(Linux)
+        // The portable stack solver needs an explicit ordering when both labels overflow.
+        // Keep the checkout branch readable; shorten the quiet path first.
+        titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        label.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        #else
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        #endif
         #if os(Linux)
         label.stringValue = text
         #else

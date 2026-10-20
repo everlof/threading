@@ -8,15 +8,50 @@ import Glibc
 import LinuxWindowBridge
 #endif
 
+/// SDL's opaque window is owned by the one UI event loop. This wrapper only lets its
+/// main-actor drawing helper capture the handle; it never moves SDL calls to a worker.
+private struct SidebarActivityWindow: @unchecked Sendable {
+    let pointer: OpaquePointer
+}
+
+/// Provider callbacks carry only a bounded event into the owning UI loop. The loop checks the
+/// current row and durable snooze before spending the event, so callbacks never capture its
+/// mutable navigator model across an actor boundary.
+@MainActor
+private final class SnoozeWakeInbox {
+    struct Event {
+        let id: String
+        let projectID: String
+        let reason: SessionWakeReason
+        let at: Date
+    }
+
+    private var events: [String: Event] = [:]
+
+    func record(_ reason: SessionWakeReason, id: String, projectID: String) {
+        guard events[id] == nil, events.count < 8 else { return }
+        events[id] = Event(id: id, projectID: projectID, reason: reason, at: Date())
+    }
+
+    func take() -> Event? {
+        guard let event = events.first else { return nil }
+        events[event.key] = nil
+        return event.value
+    }
+}
+
 // Diagnostic platform harness, not a second product sidebar. It reuses the existing specimen
 // drawing and the production font while the native window/event transport is brought up.
 struct ProjectSnapshot: Sendable {
     struct SavedRuntime: Sendable {
         let id: String
-        let title: String
+        var title: String
+        var customTitle: String? = nil
         var kind: AgentKind? = nil
         var account: String? = nil
         var usesNativeUI = false
+        var isPinned = false
+        var agentSessionID: String? = nil
         var attention: AgentSessionRowPresentation.Attention? = nil
 
         var snoozedUntil: Date? = nil
@@ -46,6 +81,7 @@ struct ProjectSnapshot: Sendable {
     let name: String
     let path: String
     let isScratchpad: Bool
+    let lastKnownRepositoryIdentity: String?
     var isExpanded: Bool
     var sessions: Int
     var terminalCount: Int
@@ -120,8 +156,10 @@ struct WindowHarness {
     private static let maximumSelectableAgentsPerProject = 512
     private static let maximumSelectableTerminalsPerProject = 512
     private static let maximumPersistedRuntimeTitleScalars = 256
-    private static let navigatorRowHeight: CGFloat = 22
-    private static let navigatorRowStride: CGFloat = 24
+    // Saved-runtime rows use the same outer height as the production outline's session cells.
+    // The host still assigns viewport frames; the row's contents solve shared constraints.
+    private static let navigatorRowHeight: CGFloat = SidebarDefaults.rowHeight
+    private static let navigatorRowStride: CGFloat = SidebarDefaults.rowHeight
     @MainActor private static var navigatorHeaderHeight: CGFloat { PaneHeaderView.bandHeight }
     @MainActor private static var navigatorRowsTop: Int32 { Int32((navigatorHeaderHeight + 2) * WorkspaceDisplay.scale) }
     #if os(Linux)
@@ -152,20 +190,6 @@ struct WindowHarness {
                 Int32(row.width * scale), Int32(row.height * scale))
     }
 
-    private struct NavigatorTextRow {
-        let text: String
-        let x: Int32
-        let y: Int32
-        let width: Int32
-        let height: Int32
-        let inset: Int32
-        let ink: NSColor
-        var trailingInset: Int32 = 12
-        var isDetail = false
-        var isEmphasized = false
-        var isCount = false
-    }
-
     private static func readableNavigatorText(_ text: String) -> String {
         text.unicodeScalars.prefix(256).map { scalar -> String in
             if CharacterSet.controlCharacters.contains(scalar) ||
@@ -174,53 +198,12 @@ struct WindowHarness {
         }.joined()
     }
 
-    @MainActor private static func addNavigatorRow(
-        _ text: String, index: Int, width: Int, height: Int,
-        accent: NSColor, selected: Bool, selectedInk: Specimen.Ink, root: Specimen.Window,
-        textRows: inout [NavigatorTextRow], image: NSImage? = nil,
-        projectPresentation: NavigatorProjectRowPresentation? = nil,
-        imageSide: CGFloat = 13, trailingCount: Int = 0, indent: CGFloat = 0,
-        projectActionID: String? = nil, revealsProjectAction: Bool = false,
-        projectActionEnabled: Bool = true
-    ) {
-        let frame = navigatorRowRect(index, width: width, height: height, indent: indent)
-        let ink = selected ? selectedInk : root.bodyInk
-        root.mountNavigatorRow(frame: frame, accent: accent, selected: selected,
-                               ink: ink, image: image,
-                               showsMark: projectPresentation?.showsIdentityMark ?? true,
-                               imageSide: imageSide,
-                               projectActionID: projectActionID,
-                               revealsProjectAction: revealsProjectAction,
-                               projectActionEnabled: projectActionEnabled)
-        let pixels = navigatorRowPixels(index, width: width, height: height, indent: indent)
-        let role = projectPresentation?.titleRole
-        // Bound the optional count slot to the mounted row and leave a gap for the title.
-        let countText = trailingCount > 0 && !revealsProjectAction ? String(trailingCount) : ""
-        let trailingInset: CGFloat = 6
-        let minimumTitleWidth: CGFloat = 32
-        let countWidth = countText.isEmpty ? 0 : min(max(20, CGFloat(countText.count) * 6),
-                                                     max(0, frame.width - Specimen.navigatorRowGeometry.titleLeadingOffset
-                                                         - trailingInset - Specimen.navigatorRowGeometry.contentGap
-                                                         - minimumTitleWidth))
-        let titleTrailing = max(projectActionID == nil ? trailingInset :
-            (revealsProjectAction ? 48 : 26),
-            trailingInset + (countText.isEmpty ? 0 : countWidth + Specimen.navigatorRowGeometry.contentGap))
-        let titleRect = Specimen.navigatorRowGeometry.titleRect(in: frame, trailingInset: titleTrailing)
-        let titleTrailingPixels = pixels.x + pixels.width - Int32(titleRect.maxX * WorkspaceDisplay.scale)
-        textRows.append(NavigatorTextRow(text: readableNavigatorText(text), x: pixels.x, y: pixels.y,
-                                         width: pixels.width, height: pixels.height,
-                                         inset: Int32(Specimen.navigatorRowGeometry.titleLeadingOffset * WorkspaceDisplay.scale),
-                                         ink: ink.label,
-                                         trailingInset: titleTrailingPixels,
-                                         isDetail: role == .caption,
-                                         isEmphasized: role != nil))
-        if !countText.isEmpty, countWidth > 0 {
-            textRows.append(NavigatorTextRow(text: countText,
-                x: Int32((frame.maxX - trailingInset - countWidth) * WorkspaceDisplay.scale), y: pixels.y,
-                width: Int32(countWidth * WorkspaceDisplay.scale), height: pixels.height,
-                inset: 0, ink: selected ? selectedInk.secondary : root.bodyInk.secondary,
-                trailingInset: 0, isCount: true))
+    private static func repositoryAccessibilityID(_ identity: String) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in identity.utf8 {
+            hash = (hash ^ UInt64(byte)) &* 1_099_511_628_211
         }
+        return "repository:" + String(hash, radix: 16)
     }
 
     /// The production session content draws the title and provider mark in a bounded row slot.
@@ -228,29 +211,21 @@ struct WindowHarness {
     @MainActor private static func addSavedAgentRow(
         _ runtime: ProjectSnapshot.SavedRuntime, retained: Bool, at date: Date,
         index: Int, width: Int, height: Int, accent: NSColor, selected: Bool,
-        selectedInk: Specimen.Ink, root: Specimen.Window, textRows: inout [NavigatorTextRow], image: NSImage?,
+        selectedInk: Specimen.Ink, root: Specimen.Window, image: NSImage?,
+        activity: NativeSessionActivity, activityPhase: CGFloat,
         indent: CGFloat = 0
     ) {
         let frame = navigatorRowRect(index, width: width, height: height, indent: indent)
         let ink = selected ? selectedInk : root.bodyInk
         root.mountNavigatorRow(frame: frame, accent: accent,
                                selected: selected, ink: ink, showsMark: image == nil)
-        let pixels = navigatorRowPixels(index, width: width, height: height, indent: indent)
-        let status = runtime.attentionTitle(at: date) ?? (retained ? "Retained" : nil)
-        let regions = SavedAgentRowLayout(
-            row: frame,
-            showsStatus: status != nil,
-            titleLeadingInset: Specimen.navigatorRowGeometry.titleLeadingOffset
-        )
-        let contentTrailingInset = frame.maxX - regions.title.maxX
+        let attention = runtime.attention(at: date)
+        let dormant = !retained && attention != .scheduled
         root.mountSessionContent(title: readableNavigatorText(runtime.title), icon: image,
-                                 selected: selected, trailingInset: contentTrailingInset)
-        if let status, regions.status.width > 0 {
-            textRows.append(NavigatorTextRow(text: readableNavigatorText(status),
-                x: Int32(regions.status.minX * WorkspaceDisplay.scale), y: pixels.y,
-                width: Int32(regions.status.width * WorkspaceDisplay.scale), height: pixels.height,
-                inset: 0, ink: ink.secondary, trailingInset: 0, isDetail: true))
-        }
+                                 selected: selected, dormant: dormant)
+        root.mountSessionStatus(runtime.attentionTitle(at: date).map(readableNavigatorText),
+                                color: selected ? ink.secondary : Design.Text.tertiary)
+        root.mountSessionActivity(activity, phase: activityPhase)
     }
 
     /// A visible saved shell uses the Mac terminal row's icon and title composition. The
@@ -266,51 +241,6 @@ struct WindowHarness {
                                ink: ink, showsMark: false)
         root.mountTerminalContent(title: readableNavigatorText(runtime.title), icon: terminalMark,
                                   selected: selected, running: running)
-    }
-
-    /// Mount only the shaped text in the current viewport. Selection and commands still belong
-    /// to the native host, while the AppKit shim now owns the same label leaf as other UI views.
-    @MainActor private static func mountNavigatorText(_ rows: [NavigatorTextRow],
-                                                      in root: Specimen.Window) throws {
-        guard rows.count <= Int(TW_NAVIGATOR_MAX_LABELS) else {
-            throw WindowFailure("navigator text exceeds mounted-row fragment budget")
-        }
-        var byteCount = 0
-        for (index, row) in rows.enumerated() {
-            let encodedCount = row.text.utf8.count
-            guard encodedCount <= 1024, byteCount <= 32768 - encodedCount else {
-                throw WindowFailure("navigator label exceeds text budget")
-            }
-            byteCount += encodedCount
-            let contentWidth = row.width - row.inset - row.trailingInset
-            guard row.x >= 0, row.y >= 0, row.width > 0, row.height > 0,
-                  row.x + row.width <= Int32(root.bounds.width * WorkspaceDisplay.scale),
-                  row.y + row.height <= Int32(root.bounds.height * WorkspaceDisplay.scale),
-                  row.inset >= 0, row.trailingInset >= 0, contentWidth > 0 else {
-                throw WindowFailure("navigator label escaped its mounted rectangle")
-            }
-            let label = root.navigatorLabel(at: index)
-            if label.stringValue != row.text { label.stringValue = row.text }
-            let frame = NSRect(x: CGFloat(row.x + row.inset) / WorkspaceDisplay.scale,
-                               y: root.bounds.height - CGFloat(row.y + row.height) / WorkspaceDisplay.scale,
-                               width: CGFloat(contentWidth) / WorkspaceDisplay.scale,
-                               height: CGFloat(row.height) / WorkspaceDisplay.scale)
-            if label.frame != frame { label.frame = frame }
-            let size: CGFloat = row.isCount ? 8 : row.isDetail ? 7 : 9
-            let weight: NSFont.Weight = row.isEmphasized ? .semibold : .regular
-            let family = row.isCount ? "System-Mono" : row.isEmphasized ? "System-Semibold" : "System"
-            if label.font?.pointSize != size || label.font?.weight != weight ||
-                label.font?.familyName != family {
-                label.font = row.isCount ? NSFont.monospacedSystemFont(ofSize: size)
-                    : NSFont.systemFont(ofSize: size, weight: weight)
-            }
-            let alignment: NSTextAlignment = row.isCount ? .right : .left
-            if label.alignment != alignment { label.alignment = alignment }
-            if label.textColor != row.ink { label.textColor = row.ink }
-            if label.isHidden { label.isHidden = false }
-        }
-        root.finishNavigatorRows()
-        root.finishNavigatorLabels(visibleCount: rows.count)
     }
 
     private enum SavedPicker {
@@ -338,6 +268,11 @@ struct WindowHarness {
     private static func savedAgent(_ session: AgentSession) -> ProjectSnapshot.SavedRuntime {
         var saved = savedAgent(agentRow(session))
         saved.usesNativeUI = session.usesNativeUI
+        saved.isPinned = session.isPinned
+        saved.agentSessionID = session.resumeState.transcriptID?.rawValue
+        saved.customTitle = session.customTitle.map {
+            String($0.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars))
+        }
         // Retain durable facts, not a clock-derived state which can expire while the picker
         // stays open. Invalid/archived snooze records follow AgentSession.isSnoozed semantics.
         if !session.isArchived, let start = session.snoozedAt,
@@ -383,12 +318,59 @@ struct WindowHarness {
 
     @MainActor private static func run() async throws {
         #if os(Linux)
+        let mode = CommandLine.arguments.dropFirst().first
+        if mode == "--settings-row-contract" {
+            SettingsAdaptiveControlRowFixture.run()
+            return
+        }
+        if mode == "--session-archive-fixture" {
+            try SessionArchiveActionFixture.run()
+            return
+        }
+        if mode == "--text-prompt" {
+            if CommandLine.arguments.count == 3, CommandLine.arguments[2] == "worktree" {
+                guard let branch = try LinuxTextPrompt.runWorktree() else { exit(2) }
+                FileHandle.standardOutput.write(Data("\(branch)\n".utf8))
+                return
+            }
+            if CommandLine.arguments.count == 5,
+               CommandLine.arguments[2] == "confirm-close-session",
+               CommandLine.arguments[3].utf8.count <= 4_096,
+               CommandLine.arguments[4] == "resume" || CommandLine.arguments[4] == "shell" {
+                let title = "Close “\(CommandLine.arguments[3])”?"
+                let message = CommandLine.arguments[4] == "resume"
+                    ? "The agent will stop. The session stays in the sidebar and can be resumed."
+                    : "The shell will stop. The session stays in the sidebar."
+                guard try LinuxTextPrompt.runConfirmation(title: title, message: message,
+                                                          confirmTitle: "Close Session") else { exit(2) }
+                return
+            }
+            guard CommandLine.arguments.count == 5,
+                  CommandLine.arguments[2] == "rename-session",
+                  CommandLine.arguments[3].utf8.count <= 4_096,
+                  CommandLine.arguments[4].utf8.count <= 4_096 else {
+                throw WindowFailure("usage: WindowHarness --text-prompt rename-session <display> <current>")
+            }
+            guard let title = try LinuxTextPrompt.runRename(
+                displayTitle: CommandLine.arguments[3], currentTitle: CommandLine.arguments[4]
+            ) else { exit(2) }
+            let encoded = try JSONEncoder().encode(title)
+            FileHandle.standardOutput.write(encoded + Data([10]))
+            return
+        }
+        if mode == "--snooze-picker" {
+            guard CommandLine.arguments.count == 2 else {
+                throw WindowFailure("usage: WindowHarness --snooze-picker")
+            }
+            guard let deadline = try LinuxScheduleMomentPicker.runSnooze() else { exit(2) }
+            FileHandle.standardOutput.write(Data("\(deadline.timeIntervalSince1970)\n".utf8))
+            return
+        }
         let decodedMarks = await Task.detached(priority: .utility) {
             NSFont.prepareSystemFonts()
             return ProviderMarks.decode()
         }.value
         ProviderMarks.install(decodedMarks)
-        let mode = CommandLine.arguments.dropFirst().first
         if mode == "--app-event-contract" {
             try await AppEventContract.run()
             return
@@ -561,6 +543,362 @@ struct WindowHarness {
         }
     }
 
+    private final class ArchiveGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<SessionArchiveAction.Result, Error>?
+
+        func finish(_ value: Result<SessionArchiveAction.Result, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<SessionArchiveAction.Result, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private final class PinGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<SessionPinAction.Result, Error>?
+
+        func finish(_ value: Result<SessionPinAction.Result, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<SessionPinAction.Result, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private final class RenameGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<SessionRenameAction.Result, Error>?
+
+        func finish(_ value: Result<SessionRenameAction.Result, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<SessionRenameAction.Result, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private final class RenamePromptGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var process: Process?
+        private var cancelled = false
+        private var result: Result<String?, Error>?
+
+        func opened(_ child: Process) {
+            lock.lock(); process = child; let shouldCancel = cancelled; lock.unlock()
+            if shouldCancel && child.isRunning { child.terminate() }
+        }
+        func closed() { lock.lock(); process = nil; lock.unlock() }
+        func cancel() {
+            lock.lock(); cancelled = true; let child = process; lock.unlock()
+            if let child, child.isRunning { child.terminate() }
+        }
+        func isCancelled() -> Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+        func finish(_ value: Result<String?, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<String?, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private static func beginRenamePrompt(displayTitle: String, currentTitle: String,
+                                          dark: Bool) -> RenamePromptGate {
+        let gate = RenamePromptGate()
+        DispatchQueue.global(qos: .userInitiated).async {
+            gate.finish(Result {
+                let child = Process()
+                child.executableURL = URL(fileURLWithPath: "/proc/self/exe")
+                child.arguments = ["--text-prompt", "rename-session", displayTitle, currentTitle]
+                var environment = ProcessInfo.processInfo.environment
+                environment["THREADING_LINUX_PROMPT_DARK"] = dark ? "1" : "0"
+                child.environment = environment
+                child.standardInput = FileHandle.nullDevice
+                let output = Pipe()
+                child.standardOutput = output
+                child.standardError = FileHandle.nullDevice
+                try child.run()
+                gate.opened(child)
+                var bytes = Data()
+                while true {
+                    let chunk = output.fileHandleForReading.availableData
+                    if chunk.isEmpty { break }
+                    guard bytes.count + chunk.count <= 16_384 else {
+                        gate.cancel()
+                        throw WindowFailure("Session name is too long")
+                    }
+                    bytes.append(chunk)
+                }
+                child.waitUntilExit()
+                gate.closed()
+                if gate.isCancelled() || child.terminationStatus == 2 { return nil }
+                guard child.terminationStatus == 0, bytes.last == 10 else {
+                    throw WindowFailure("Rename prompt failed")
+                }
+                return try JSONDecoder().decode(String.self, from: bytes.dropLast())
+            })
+        }
+        return gate
+    }
+
+    private final class ClosePromptGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var process: Process?
+        private var cancelled = false
+        private var result: Result<Bool, Error>?
+
+        func opened(_ child: Process) {
+            lock.lock(); process = child; let shouldCancel = cancelled; lock.unlock()
+            if shouldCancel && child.isRunning { child.terminate() }
+        }
+        func closed() { lock.lock(); process = nil; lock.unlock() }
+        func cancel() {
+            lock.lock(); cancelled = true; let child = process; lock.unlock()
+            if let child, child.isRunning { child.terminate() }
+        }
+        func isCancelled() -> Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+        func finish(_ value: Result<Bool, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<Bool, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private static func beginCloseConfirmation(displayTitle: String,
+                                               canResume: Bool, dark: Bool) -> ClosePromptGate {
+        let gate = ClosePromptGate()
+        DispatchQueue.global(qos: .userInitiated).async {
+            gate.finish(Result {
+                let child = Process()
+                child.executableURL = URL(fileURLWithPath: "/proc/self/exe")
+                child.arguments = ["--text-prompt", "confirm-close-session", displayTitle,
+                                   canResume ? "resume" : "shell"]
+                var environment = ProcessInfo.processInfo.environment
+                environment["THREADING_LINUX_PROMPT_DARK"] = dark ? "1" : "0"
+                child.environment = environment
+                child.standardInput = FileHandle.nullDevice
+                child.standardOutput = FileHandle.nullDevice
+                child.standardError = FileHandle.nullDevice
+                try child.run()
+                gate.opened(child)
+                child.waitUntilExit()
+                gate.closed()
+                if gate.isCancelled() || child.terminationStatus == 2 { return false }
+                guard child.terminationStatus == 0 else {
+                    throw WindowFailure("Close Session confirmation failed")
+                }
+                return true
+            })
+        }
+        return gate
+    }
+
+    private final class CloseGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<Void, Error>?
+
+        func finish(_ value: Result<Void, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<Void, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private final class SessionPresenceGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: GraphicalTerminal.RuntimePresence?
+
+        func finish(_ value: GraphicalTerminal.RuntimePresence) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> GraphicalTerminal.RuntimePresence? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private final class SnoozeGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<SessionSnoozeAction.Result, Error>?
+
+        func finish(_ value: Result<SessionSnoozeAction.Result, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<SessionSnoozeAction.Result, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private final class SnoozePickerGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var picker: Process?
+        private var cancelled = false
+        private var result: Result<Date?, Error>?
+
+        func opened(_ process: Process) {
+            lock.lock()
+            picker = process
+            let shouldCancel = cancelled
+            lock.unlock()
+            if shouldCancel && process.isRunning { process.terminate() }
+        }
+        func closed() {
+            lock.lock(); picker = nil; lock.unlock()
+        }
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            let process = picker
+            lock.unlock()
+            if let process, process.isRunning { process.terminate() }
+        }
+        func isCancelled() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return cancelled
+        }
+        func finish(_ value: Result<Date?, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<Date?, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private static func beginSnoozePicker(dark: Bool) -> SnoozePickerGate {
+        let gate = SnoozePickerGate()
+        DispatchQueue.global(qos: .userInitiated).async {
+            gate.finish(Result {
+                let picker = Process()
+                picker.executableURL = URL(fileURLWithPath: "/proc/self/exe")
+                picker.arguments = ["--snooze-picker"]
+                var environment = ProcessInfo.processInfo.environment
+                environment["THREADING_LINUX_PROMPT_DARK"] = dark ? "1" : "0"
+                picker.environment = environment
+                picker.standardInput = FileHandle.nullDevice
+                let output = Pipe()
+                picker.standardOutput = output
+                picker.standardError = output
+                try picker.run()
+                gate.opened(picker)
+                var bytes = Data()
+                while true {
+                    let chunk = output.fileHandleForReading.availableData
+                    if chunk.isEmpty { break }
+                    guard bytes.count + chunk.count <= 4_096 else {
+                        gate.cancel()
+                        throw WindowFailure("Snooze picker returned too much data")
+                    }
+                    bytes.append(chunk)
+                }
+                picker.waitUntilExit()
+                gate.closed()
+                if gate.isCancelled() || picker.terminationStatus == 2 { return nil }
+                if picker.terminationStatus != 0 {
+                    let detail = String(data: bytes, encoding: .utf8)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "unknown error"
+                    throw WindowFailure("Snooze picker failed: \(detail)")
+                }
+                guard picker.terminationStatus == 0, bytes.last == 10,
+                      let value = String(data: bytes.dropLast(), encoding: .utf8),
+                      let seconds = Double(value), seconds.isFinite else {
+                    throw WindowFailure("Snooze picker returned an invalid time")
+                }
+                return Date(timeIntervalSince1970: seconds)
+            })
+        }
+        return gate
+    }
+
+    private final class SnoozeScanGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<SessionSnoozeAction.Deadlines, Error>?
+
+        func finish(_ value: Result<SessionSnoozeAction.Deadlines, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<SessionSnoozeAction.Deadlines, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private final class SnoozeExpiryGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<[SessionID: SessionSnoozeAction.Result], Error>?
+
+        func finish(_ value: Result<[SessionID: SessionSnoozeAction.Result], Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<[SessionID: SessionSnoozeAction.Result], Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private final class NativeCreationGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<ComposerNativeCreation.Receipt, Error>?
+
+        func finish(_ value: Result<ComposerNativeCreation.Receipt, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<ComposerNativeCreation.Receipt, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
+    private final class CheckoutDiscoveryGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: (LinuxGitCheckoutCatalog, [LinuxGitHeadMonitor.Entry])?
+
+        func finish(_ catalogue: LinuxGitCheckoutCatalog,
+                    entries: [LinuxGitHeadMonitor.Entry]) {
+            lock.lock(); result = (catalogue, entries); lock.unlock()
+        }
+        func take() -> (LinuxGitCheckoutCatalog, [LinuxGitHeadMonitor.Entry])? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
     /// GIO may read the desktop registry; publish one immutable result back to SDL's owner.
     private final class OpenInCatalogueGate: @unchecked Sendable {
         private let lock = NSLock()
@@ -656,13 +994,16 @@ struct WindowHarness {
         }
     }
 
-    /// The GTK dialog and store import run away from SDL's owning thread. Only one bounded
+    /// The prompt or GTK folder picker and store import run away from SDL's owning thread. One bounded
     /// snapshot crosses back to the navigator; closing the window closes a pending dialog.
     private final class FolderImportGate: @unchecked Sendable {
+        let blocksParentInput: Bool
         private let lock = NSLock()
         private var chooser: Process?
         private var cancelled = false
         private var result: Result<WindowSnapshot?, Error>?
+
+        init(blocksParentInput: Bool) { self.blocksParentInput = blocksParentInput }
 
         func opened(_ process: Process) {
             lock.lock()
@@ -696,12 +1037,18 @@ struct WindowHarness {
         }
     }
 
-    private enum ProjectFolderChoice { case existing, new, scratchpad }
+    private enum ProjectFolderChoice: Equatable {
+        case existing, new, scratchpad
+        case worktree(sourcePath: String, dark: Bool)
+    }
 
     private static func beginFolderImport(store: String, socket: String,
                                           choice: ProjectFolderChoice = .existing,
                                           droppedPath: String? = nil) -> FolderImportGate {
-        let gate = FolderImportGate()
+        let blocksParentInput: Bool
+        if case .worktree = choice { blocksParentInput = true }
+        else { blocksParentInput = false }
+        let gate = FolderImportGate(blocksParentInput: blocksParentInput)
         DispatchQueue.global(qos: .userInitiated).async {
             gate.finish(Result { try importFolder(store: store, socket: socket,
                                                   choice: choice, droppedPath: droppedPath, gate: gate) })
@@ -713,7 +1060,38 @@ struct WindowHarness {
                                      droppedPath: String?, gate: FolderImportGate) throws -> WindowSnapshot? {
         var bytes = Data()
         var tooLong = false
-        if let droppedPath {
+        if case .worktree(let sourcePath, let dark) = choice {
+            let chooser = Process()
+            chooser.executableURL = URL(fileURLWithPath: "/proc/self/exe")
+            chooser.arguments = ["--text-prompt", "worktree"]
+            var environment = ProcessInfo.processInfo.environment
+            environment["THREADING_LINUX_PROMPT_DARK"] = dark ? "1" : "0"
+            chooser.environment = environment
+            let output = Pipe()
+            chooser.standardInput = FileHandle.nullDevice
+            chooser.standardOutput = output
+            chooser.standardError = FileHandle.nullDevice
+            try chooser.run()
+            gate.opened(chooser)
+            var branchBytes = Data()
+            while true {
+                let chunk = output.fileHandleForReading.availableData
+                if chunk.isEmpty { break }
+                guard branchBytes.count + chunk.count <= 1024 else {
+                    gate.cancel()
+                    throw WindowFailure("Branch name is too long.")
+                }
+                branchBytes.append(chunk)
+            }
+            chooser.waitUntilExit()
+            gate.closed()
+            if gate.isCancelled() || chooser.terminationStatus == 2 { return nil }
+            guard chooser.terminationStatus == 0, branchBytes.last == 10,
+                  let branch = String(data: branchBytes.dropLast(), encoding: .utf8) else {
+                throw WindowFailure("Worktree prompt returned an invalid branch name.")
+            }
+            bytes = Data(try LinuxWorktreeCreation.create(branch: branch, from: sourcePath).utf8)
+        } else if let droppedPath {
             bytes = Data(droppedPath.utf8)
         } else if choice != .scratchpad {
             let chooser = Process()
@@ -913,6 +1291,7 @@ struct WindowHarness {
             }
             return ProjectSnapshot(id: String(describing: project.id), name: project.name,
                 path: project.folderPath, isScratchpad: project.isScratchpad,
+                lastKnownRepositoryIdentity: project.lastKnownRepositoryIdentity,
                 isExpanded: project.isExpanded,
                 sessions: project.sessionCount,
                 terminalCount: project.terminalCount, recentAgents: agents, recentTerminals: terminals)
@@ -1273,7 +1652,9 @@ struct WindowHarness {
         pending: inout [String: ProjectID],
         publishedCounts: inout [String: Int],
         retainedProjects: inout Set<String>,
-        preserving selection: (projectID: String, agentID: String)? = nil
+        preserving selection: (projectID: String, agentID: String)? = nil,
+        onCommitted: (GraphicalTerminal.AgentCreation) -> Void = { _ in },
+        onFailed: (String) -> Void = { _ in }
     ) -> Bool {
         var changed = false
         var admitted: [GraphicalTerminal.AgentCreation] = []
@@ -1281,7 +1662,11 @@ struct WindowHarness {
         // At most eight runtime receipts; no store reads or archive walk on the UI actor.
         for id in Array(pending.keys) {
             let key = SavedRuntimeKey.agent(id)
-            guard let runtime = runtimes[key] else { pending.removeValue(forKey: id); continue }
+            guard let runtime = runtimes[key] else {
+                pending.removeValue(forKey: id)
+                onFailed(id)
+                continue
+            }
             if let receipt = runtime.takeAgentCreation() {
                 admitted.append(receipt)
                 pending.removeValue(forKey: id)
@@ -1291,12 +1676,14 @@ struct WindowHarness {
                 runtime.stop()
                 runtimes.removeValue(forKey: key)
                 pending.removeValue(forKey: id)
+                onFailed(id)
                 changed = true
             }
         }
         // Keep commit order across batches too: a worker can publish just after this iteration
         // inspected it, while a newer admission is already consumed from a different runtime.
         for receipt in admitted.sorted(by: { $0.sessionCount < $1.sessionCount }) {
+            onCommitted(receipt)
             guard let index = projectIndexes[receipt.projectID.uuidString],
                   projects.indices.contains(index),
                   projects[index].id == receipt.projectID.uuidString else { continue }
@@ -1402,6 +1789,7 @@ struct WindowHarness {
         guard let window = openedWindow else {
             throw WindowFailure(String(cString: tw_error()))
         }
+        let activityWindow = SidebarActivityWindow(pointer: window)
         var initialX: Int32 = 0, initialY: Int32 = 0, initialWidth: Int32 = 0, initialHeight: Int32 = 0
         tw_window_geometry(window, &initialX, &initialY, &initialWidth, &initialHeight)
         print("WORKSPACE_WINDOW pixels=\(initialWidth)x\(initialHeight) scale=\(Int(scale))")
@@ -1483,11 +1871,13 @@ struct WindowHarness {
         outline.outlineTableColumn = outlineColumn
         outline.dataSource = outlineSource
         outline.delegate = outlineSource
-        let outlineScroll = NSScrollView(frame: .zero)
+        let outlineScroll = ThemedScrollView(frame: .zero)
         outlineScroll.verticalLineScroll = SidebarDefaults.rowHeight
             + outline.intercellSpacing.height
+        outlineScroll.contentBreathing = NSEdgeInsets(
+            top: SidebarDefaults.contentTopInset, left: 0, bottom: 0, right: 0)
         outlineScroll.documentView = outline
-        navigatorRoot.setNavigatorOutline(outlineScroll, visible: false)
+        navigatorRoot.setNavigatorOutline(outlineScroll, below: header, visible: false)
         var emptyStateView: NSStackView?
         func setEmptyStateVisible(_ visible: Bool) {
             guard visible else { emptyStateView?.isHidden = true; return }
@@ -1624,6 +2014,7 @@ struct WindowHarness {
         var terminals: [String: GraphicalTerminal] = [:]
         var restoredRuntimes: [SavedRuntimeKey: GraphicalTerminal] = [:]
         var nativeRuntimes: [SavedRuntimeKey: WorkspaceConversationPane] = [:]
+        var composerCreationPending = false
         var pendingAgentProjects: [String: ProjectID] = [:]
         // At most one commit count per retained agent runtime, within the shared eight-slot cap.
         var publishedAgentCounts: [String: Int] = [:]
@@ -1642,6 +2033,15 @@ struct WindowHarness {
             case .saved(let key): return restoredRuntimes[key]
             }
         }
+        func hasActiveRuntime(_ key: SavedRuntimeKey, projectID: String) -> Bool {
+            if let runtime = retainedRuntime(for: owner(of: key, projectID: projectID)) {
+                return !runtime.canReplace
+            }
+            if case .agent = key {
+                return nativeRuntimes[key]?.runtime.presentsActiveAgent == true
+            }
+            return false
+        }
         func retain(_ runtime: GraphicalTerminal, for owner: RuntimeOwner) {
             switch owner {
             case .project(let id): terminals[id] = runtime
@@ -1657,6 +2057,7 @@ struct WindowHarness {
         var width = Int(initialWidth), height = Int(initialHeight),
             selected = snapshot.selectedProjectIndex, first = 0
         var inlineSelection: NavigatorOutlineItem?
+        var pendingImportedProjectID: String?
         var outlineRevealTarget: NavigatorOutlineItem?
         var savedPicker: SavedPicker?
         var savedSelected = 0, savedFirst = 0
@@ -1666,15 +2067,95 @@ struct WindowHarness {
         var activatedAccountHandle: AccountHandle?
         var pendingSelection: PendingSelection?
         var pendingFolderImport: FolderImportGate?
+        var pendingArchive: (id: String, projectID: String, gate: ArchiveGate)?
+        var pendingPin: (id: String, projectID: String, gate: PinGate)?
+        var pendingRename: (id: String, projectID: String, gate: RenameGate)?
+        var pendingRenamePrompt: (id: String, projectID: String,
+                                  displayedCurrentTitle: String?, gate: RenamePromptGate)?
+        var pendingClosePrompt: (id: String, projectID: String, gate: ClosePromptGate)?
+        var pendingClose: (id: String, projectID: String, gate: CloseGate)?
+        var pendingSessionMenuPresence: (id: String, projectID: String,
+                                         gate: SessionPresenceGate)?
+        let snoozeWorker = DispatchQueue(label: "threading.linux.session-snooze", qos: .utility)
+        var pendingSnoozeScan: SnoozeScanGate?
+        var pendingSnooze: (id: String, projectID: String, gate: SnoozeGate)?
+        var pendingSnoozePicker: (id: String, projectID: String,
+                                  hadTurnInFlight: Bool, gate: SnoozePickerGate)?
+        var pendingSnoozeExpiry: (ids: [SessionID], gate: SnoozeExpiryGate)?
+        var snoozeDeadlines: [SessionID: Date] = [:]
+        var nextSnoozeDeadline: Date?
+        var nextSnoozeScanAttempt = Date.distantPast
+        let snoozeWakeInbox = SnoozeWakeInbox()
+        var pendingSnoozeAcknowledgements: [String: String] = [:]
         var actions: NavigatorActions.Presentation?
+        var sessionMenu: SidebarSessionMenu?
+        let sessionMenuSurface = SessionMenuSurface(frame: .zero)
+        let retainedSessionMenuRows = RetainedMenuRows()
+        var sessionMenuSeparators: [SeparatorView] = []
+        var sessionMenuFrame = NSRect.zero
+        var sessionMenuVisibleEntries: [Int] = []
+        var activatedSessionMenuEntry: Int?
         var activatedMenuEntry: Int?
         var actionsEnabled = true
         var dismissedActionGesture: Int32?
-        var hoveredProjectID: String?
+        var hoveredOutlineItem: NavigatorOutlineItem?
+        var dirty = true
+        func refreshSnoozeDeadline() {
+            nextSnoozeDeadline = snoozeDeadlines.values.min()
+        }
+        func updateSnoozeRow(_ id: String, projectID: String,
+                             result: SessionSnoozeAction.Result) {
+            guard let index = projectIndexes[projectID], projects.indices.contains(index),
+                  let row = projects[index].recentAgents.firstIndex(where: { $0.id == id }) else {
+                return
+            }
+            projects[index].recentAgents[row].snoozedUntil = result.deadline
+            projects[index].recentAgents[row].attention = result.hasWake ? .woke : nil
+            dirty = true
+        }
+        func startSnoozeScan() {
+            guard pendingSnoozeScan == nil, let launch else { return }
+            let gate = SnoozeScanGate()
+            pendingSnoozeScan = gate
+            nextSnoozeScanAttempt = Date.distantFuture
+            snoozeWorker.async {
+                gate.finish(Result {
+                    try SessionSnoozeAction.reconcileAtStartup(store: launch[0], now: Date())
+                })
+            }
+        }
+        startSnoozeScan()
+        func makeObservedTerminal() -> GraphicalTerminal {
+            GraphicalTerminal(onActivityChange: {
+                NativeConversationDelivery.callbacks.receive { navigatorRoot.needsDisplay = true }
+            })
+        }
+        var collapsedRepositoryIdentities = Set(PreferenceStore.shared.stringArray(
+            forKey: SidebarDefaults.collapsedRepositoriesKey) ?? [])
         var pendingExpansion: (projectID: String, expanded: Bool, selection: NavigatorOutlineItem?, gate: SelectionGate)?
+        var pendingRepositoryExpansion: (identity: String, expanded: Bool,
+            previous: Set<String>, gate: SelectionGate)?
         var quitAfterExpansion = false
-        outlineSource.canChangeExpansion = { pendingExpansion == nil }
+        outlineSource.canChangeExpansion = {
+            pendingExpansion == nil && pendingRepositoryExpansion == nil
+        }
         outlineSource.expansionChanged = { item, expanded in
+            if item.kind == .repository {
+                let previous = collapsedRepositoryIdentities
+                if expanded { collapsedRepositoryIdentities.remove(item.id) }
+                else { collapsedRepositoryIdentities.insert(item.id) }
+                let saved = Array(collapsedRepositoryIdentities)
+                let gate = SelectionGate()
+                pendingRepositoryExpansion = (item.id, expanded, previous, gate)
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let defaults = PreferenceStore.shared
+                    defaults.set(saved, forKey: SidebarDefaults.collapsedRepositoriesKey)
+                    gate.finish(defaults.synchronize() ? .success(())
+                        : .failure(WindowFailure("repository fold preference was not saved")))
+                }
+                dirty = true
+                return
+            }
             guard item.kind == .project, let index = projectIndexes[item.projectID] else { return }
             projects[index].isExpanded = expanded
             guard let launch else { return }
@@ -1695,6 +2176,8 @@ struct WindowHarness {
         var activatedOutlineItem: NavigatorOutlineItem?
         var activatedOutlineProjectActionID: String?
         var activatedOutlineProjectCreateID: String?
+        var activatedOutlineSessionActionID: String?
+        var activatedOutlineSessionArchiveID: String?
         var rowActionMenuGesture = false
         var rowActionMenuSource: NSRect = .zero
         var rowActionMenuEntered = false
@@ -1717,20 +2200,57 @@ struct WindowHarness {
             }
             let shell = project.flatMap { terminals[$0.id] }
             let runtimeCount = terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                + (composerCreationPending ? 1 : 0)
             return .init(projectID: project.flatMap { ProjectID(uuidString: $0.id) },
                 canOpenShell: shell != nil || runtimeCount < maximumOpenRuntimes,
                 canCreateShell: (shell == nil || shell!.canReplace)
                     && runtimeCount - (shell == nil ? 0 : 1) < maximumOpenRuntimes,
                 shellMayBeRunning: shell != nil && shell?.canReplace != true,
                 canCreateAgent: runtimeCount < maximumOpenRuntimes,
+                canCreateWorktree: project.flatMap { outlineSource.checkoutCatalog.checkouts[$0.id] } != nil,
                 hasCodex: agentExecutable != nil, hasClaude: claudeExecutable != nil,
                 hasAgents: project?.recentAgents.isEmpty == false,
                 hasTerminals: project?.recentTerminals.isEmpty == false)
         }
         defer { pendingFolderImport?.cancel() }
-        var dirty = true
+        defer { pendingSnoozePicker?.gate.cancel() }
+        defer { pendingRenamePrompt?.gate.cancel() }
+        defer { pendingClosePrompt?.gate.cancel() }
         var navigatorDisplayRevision: UInt64 = 0
         var nextVisibleAttentionExpiry: Date?
+        var visibleWorkingActivity = false
+        var activityPhase: CGFloat = 0
+        var nextActivityFrame = Date.distantPast
+        var workingMarks: [ThemedSessionActivityMark] = []
+        var workingPatches: [(mark: ThemedSessionActivityMark, x: Int, y: Int,
+                              width: Int, height: Int, background: [UInt8])] = []
+        func paintWorkingPatches() throws {
+            guard !workingPatches.isEmpty else { return }
+            activityPhase = Design.Motion.reducesStatusMotion ? 0 : CGFloat(
+                Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9)
+            for patch in workingPatches {
+                let tile = Bitmap(width: patch.width, height: patch.height)
+                tile.withMutablePixels { pixels in
+                    for index in patch.background.indices { pixels[index] = patch.background[index] }
+                }
+                let context = NSGraphicsContext(bitmap: tile, scale: scale)
+                NSGraphicsContext.current = context
+                patch.mark.updatePhase(activityPhase)
+                patch.mark.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    patch.mark.draw(patch.mark.bounds)
+                }
+                NSGraphicsContext.current = nil
+                let result = tile.pixels.withUnsafeBufferPointer {
+                    tw_update_sidebar_region(activityWindow.pointer, $0.baseAddress,
+                        Int32(patch.x), Int32(patch.y), Int32(patch.width), Int32(patch.height))
+                }
+                guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
+            }
+            guard tw_repaint(activityWindow.pointer) == 0 else {
+                throw WindowFailure(String(cString: tw_error()))
+            }
+            nextActivityFrame = Date().addingTimeInterval(1.0 / 24)
+        }
         func configureOutlineRow(_ row: Specimen.Row, item: NavigatorOutlineItem,
                                  frame: NSRect) {
             guard let model = item.resolvedRow(in: projects, indexes: projectIndexes) else {
@@ -1757,8 +2277,22 @@ struct WindowHarness {
             row.onProjectAction = { activatedOutlineProjectActionID = $0 }
             row.onProjectCreate = { activatedOutlineProjectCreateID = $0 }
             row.onProjectControlVisualChange = { dirty = true }
+            row.onSessionAction = { activatedOutlineSessionActionID = $0 }
+            row.onSessionArchive = { activatedOutlineSessionArchiveID = $0 }
+            row.onSessionControlVisualChange = { dirty = true }
 
             switch model {
+            case .repository(let identity, let representativeIndex, let representativeID):
+                guard let group = outlineSource.repositoryGroups[identity] else { return }
+                let title = String(group.name.unicodeScalars.prefix(80))
+                row.configureProductionProject(
+                    presentation: .repository(name: title,
+                        hasRepresentative: representativeIndex >= 0),
+                    icon: GeneratedProjectIcon.image(for: representativeIndex >= 0
+                        ? projects[representativeIndex].name : group.name), count: 0,
+                    projectID: launch == nil || representativeID.isEmpty ? nil : representativeID,
+                    revealed: hoveredOutlineItem == item, enabled: actionsEnabled)
+                row.configureProductionStatus(nil, color: ink.secondary)
             case .project(let projectIndex, _):
                 let project = projects[projectIndex]
                 let total = project.sessions.addingReportingOverflow(project.terminalCount)
@@ -1769,31 +2303,53 @@ struct WindowHarness {
                 let collapsedCount = outline.isItemExpanded(item)
                     ? max(0, totalRuntimes - visibleChildren) : totalRuntimes
                 let title = String(project.name.unicodeScalars.prefix(80))
+                let checkout = outlineSource.checkoutCatalog.checkouts[project.id]
+                let isGrouped = outlineSource.repositoryIdentityByProject[project.id] != nil
+                let home = FileManager.default.homeDirectoryForCurrentUser.path
+                let abbreviatedPath = project.path == home ? "~" :
+                    (project.path.hasPrefix(home + "/")
+                        ? "~" + project.path.dropFirst(home.count) : project.path)
+                let presentation: NavigatorProjectRowPresentation = isGrouped
+                    ? .checkout(branch: checkout == nil ? nil : outlineSource.branch(for: project.id),
+                                fallbackName: title,
+                                abbreviatedPath: abbreviatedPath)
+                    : .project(name: title)
                 row.configureProductionProject(
-                    presentation: .project(name: title),
+                    presentation: presentation,
                     icon: GeneratedProjectIcon.image(for: project.name), count: collapsedCount,
                     projectID: launch == nil ? nil : project.id,
-                    revealed: hoveredProjectID == project.id, enabled: actionsEnabled)
+                    revealed: hoveredOutlineItem == item, enabled: actionsEnabled,
+                    path: isGrouped ? project.path : nil,
+                    unavailable: isGrouped && checkout == nil)
                 row.configureProductionStatus(nil, color: ink.secondary)
             case .agent(let projectIndex, let childIndex, _):
                 let project = projects[projectIndex]
                 let runtime = project.recentAgents[childIndex]
-                let retained = retainedRuntime(for: owner(of: .agent(runtime.id),
-                    projectID: project.id)) != nil
+                let retained = hasActiveRuntime(.agent(runtime.id), projectID: project.id)
+                let activity = nativeRuntimes[.agent(runtime.id)]?.activity ?? .idle
+                if activity.showsWorkingMark { visibleWorkingActivity = true }
                 let now = Date()
-                let status = runtime.attentionTitle(at: now) ?? (retained ? "Retained" : nil)
-                if runtime.attention(at: now) == .snoozed, let expiry = runtime.snoozedUntil {
+                let attention = runtime.attention(at: now)
+                if attention == .snoozed, let expiry = runtime.snoozedUntil {
                     nextVisibleAttentionExpiry = min(nextVisibleAttentionExpiry ?? expiry, expiry)
                 }
                 row.configureProductionSession(title: readableNavigatorText(runtime.title),
                     icon: ProviderMarks.image(for: runtime.kind, selected: isSelected),
-                    selected: isSelected, trailingInset: status == nil ? 4 : 72)
-                row.configureProductionStatus(status, color: ink.secondary)
+                    selected: isSelected, dormant: !retained && attention != .scheduled,
+                    isPinned: runtime.isPinned,
+                    sessionID: runtime.id,
+                    revealsActions: (hoveredOutlineItem == item || sessionMenu?.sessionID == runtime.id)
+                        && attention != .scheduled,
+                    actionSelected: sessionMenu?.sessionID == runtime.id,
+                    archiveEnabled: actionsEnabled && pendingArchive == nil && pendingPin == nil)
+                row.configureProductionStatus(runtime.attentionTitle(at: now),
+                    color: isSelected ? ink.secondary : Design.Text.tertiary)
+                row.configureProductionActivity(activity, phase: activityPhase)
+                if let mark = row.productionWorkingMark { workingMarks.append(mark) }
             case .terminal(let projectIndex, let childIndex, _):
                 let project = projects[projectIndex]
                 let runtime = project.recentTerminals[childIndex]
-                let retained = retainedRuntime(for: owner(of: .terminal(runtime.id),
-                    projectID: project.id)) != nil
+                let retained = hasActiveRuntime(.terminal(runtime.id), projectID: project.id)
                 row.configureProductionTerminal(title: readableNavigatorText(runtime.title),
                     icon: terminalMark, selected: isSelected, running: retained)
                 row.configureProductionStatus(nil, color: ink.secondary)
@@ -1827,16 +2383,54 @@ struct WindowHarness {
             return row
         }
         var composerSubmitRequested = false
+        let composerCreationWorker = DispatchQueue(label: "threading.linux.composer-creation",
+                                                   qos: .userInitiated)
+        var pendingNativeCreation: (gate: NativeCreationGate, request: ComposerNativeCreation.Request,
+                                    prompt: String, pane: WorkspacePlaceholderPane?)?
         var composerAccount: AccountID?
-        var composerPermissionMode: AgentPermissionMode? = .manual
+        var composerPermissionMode: AgentPermissionMode?
+        var composerFastMode: Bool?
+        var composerUsesNativeUI = false
         var composerModel: String?
         var composerEffort: String?
+        var composerShouldRestoreRunChoice = false
         var composerModelAccount: AccountID?
+        var composerModelDirectory: String?
         var composerModels = ComposerModelCatalog.empty
+        var composerHiddenModels: Set<String> = []
+        var composerVisibilityPending = false
         let composerModelLoader = ComposerModelCatalogLoader()
+        var pendingComposerRunChoices: [String: (AccountID, ComposerNewSessionRunChoice)] = [:]
         var composerDisplayedProjectID = ""
         var composerProjectChoices = projects.map { (id: $0.id, name: $0.name) }
+        var composerCheckoutCatalog = LinuxGitCheckoutCatalog.empty
+        var checkoutBranchOverrides: [String: CheckoutBranchDisplay] = [:]
+        var checkoutHeadMonitor: LinuxGitHeadMonitor?
+        defer { checkoutHeadMonitor?.stop() }
+        var composerCheckoutProjectID: String?
+        var pendingCheckoutDiscovery: CheckoutDiscoveryGate?
+        var checkoutDiscoveryWanted = false
         var pendingComposerProjectID: String?
+        func discoverCheckouts() {
+            guard pendingCheckoutDiscovery == nil else {
+                checkoutDiscoveryWanted = true
+                return
+            }
+            checkoutDiscoveryWanted = false
+            let paths = projects.map { (id: $0.id, path: $0.path) }
+            let gate = CheckoutDiscoveryGate()
+            pendingCheckoutDiscovery = gate
+            DispatchQueue.global(qos: .utility).async {
+                let catalogue = LinuxGitCheckout.discover(paths)
+                let entries = paths.compactMap { project -> LinuxGitHeadMonitor.Entry? in
+                    guard let checkout = catalogue.checkouts[project.id] else { return nil }
+                    return .init(id: project.id, path: project.path,
+                                 gitDirectory: checkout.identity)
+                }
+                gate.finish(catalogue, entries: entries)
+            }
+        }
+        discoverCheckouts()
         var idlePane = launch.map { _ in
             WorkspacePlaceholderPane(onSubmit: {
                 guard pendingFolderImport == nil, pendingSelection == nil else { return }
@@ -1846,9 +2440,43 @@ struct WindowHarness {
         idlePane?.setThemeAppearance()
         func loadComposerModels() {
             guard let account = composerAccount else { composerModelLoader.cancel(); return }
-            composerModelLoader.load(account) { catalogue in
-                guard composerAccount == account else { return }
+            let targetID = composerCheckoutProjectID
+                ?? (projects.indices.contains(selected) ? projects[selected].id : "")
+            let directory = projectIndexes[targetID].flatMap {
+                projects.indices.contains($0) ? projects[$0].path : nil
+            }
+            composerModelLoader.load(account, projectDirectory: directory) { catalogue, hidden, remembered in
+                guard composerAccount == account,
+                      (composerCheckoutProjectID
+                          ?? (projects.indices.contains(selected) ? projects[selected].id : "")) == targetID
+                else { return }
                 composerModels = catalogue
+                composerHiddenModels = hidden
+                if composerShouldRestoreRunChoice {
+                    composerShouldRestoreRunChoice = false
+                    let restored = remembered.flatMap { choice -> ComposerNewSessionRunChoice? in
+                        guard catalogue.admits(model: choice.model, effort: choice.reasoningEffort),
+                              choice.model.map({ !hidden.contains($0) }) ?? true else { return nil }
+                        return choice
+                    }
+                    composerModel = restored?.model
+                    composerEffort = restored?.reasoningEffort
+                }
+                refreshComposerChoices()
+                dirty = true
+            }
+        }
+        func changeComposerVisibility(_ change: ComposerModelVisibilityStore.Change) {
+            guard !composerVisibilityPending, let account = composerAccount else { return }
+            composerVisibilityPending = true
+            composerModelLoader.changeVisibility(change, for: account) { hidden in
+                composerVisibilityPending = false
+                guard composerAccount == account else { return }
+                if let hidden {
+                    composerHiddenModels = hidden
+                } else {
+                    print("MODEL_VISIBILITY_REFUSED account=\(account.rawValue)")
+                }
                 refreshComposerChoices()
                 dirty = true
             }
@@ -1856,7 +2484,47 @@ struct WindowHarness {
         func refreshComposerChoices() {
             guard let pane = idlePane, pane.isComposing else { return }
             let projectID = projects.indices.contains(selected) ? projects[selected].id : ""
+            if composerDisplayedProjectID != projectID { composerCheckoutProjectID = nil }
             composerDisplayedProjectID = projectID
+            let currentCheckout = composerCheckoutCatalog.checkouts[projectID]
+            let siblingIDs = currentCheckout.flatMap {
+                composerCheckoutCatalog.projectIDsByRepository[$0.repositoryIdentity]
+            } ?? []
+            func branch(_ checkout: LinuxGitCheckout, for id: String) -> String? {
+                if let override = checkoutBranchOverrides[id] { return override.name }
+                return checkout.branch
+            }
+            let siblingCheckouts = siblingIDs.compactMap { siblingID -> ComposerCheckoutChoice? in
+                guard let index = projectIndexes[siblingID], projects.indices.contains(index),
+                      let currentCheckout,
+                      let checkout = composerCheckoutCatalog.checkouts[siblingID] else { return nil }
+                let project = projects[index]
+                guard !project.isScratchpad,
+                      checkout.repositoryIdentity == currentCheckout.repositoryIdentity,
+                      (project.id == projectID || checkout.identity != currentCheckout.identity),
+                      project.id == projectID || checkout.root == project.path else { return nil }
+                let title = branch(checkout, for: siblingID) ?? project.name
+                return ComposerCheckoutChoice(id: project.id,
+                    title: project.id == projectID ? "\(title) (this checkout)" : title,
+                    detail: project.path)
+            }
+            if let targetID = composerCheckoutProjectID,
+               !siblingCheckouts.contains(where: { $0.id == targetID }) {
+                composerCheckoutProjectID = nil
+            }
+            let targetID = composerCheckoutProjectID ?? projectID
+            let targetIndex = projectIndexes[targetID]
+            let targetBranch = composerCheckoutCatalog.checkouts[targetID].flatMap {
+                branch($0, for: targetID)
+            }
+            let projectName = projects.indices.contains(selected) ? projects[selected].name : nil
+            let locationTitle = [projectName, targetBranch].compactMap { $0 }.joined(separator: " › ")
+            let executionDirectory = targetIndex.flatMap {
+                projects.indices.contains($0) ? projects[$0].path : nil
+            }
+            let locationDetail = executionDirectory.map { path in
+                targetBranch.map { "\(path) › \($0)" } ?? path
+            }
             var identityChoices: [ComposerIdentityChoice] = []
             var identityBindings: [(token: String, identity: AccountID)] = []
             for (kind, executable, accounts) in [
@@ -1884,12 +2552,20 @@ struct WindowHarness {
                 composerModelAccount = composerAccount
                 composerModel = nil
                 composerEffort = nil
+                composerShouldRestoreRunChoice = true
+                composerFastMode = nil
                 composerModels = .empty
+                composerHiddenModels = []
+                loadComposerModels()
+            } else if composerModelDirectory != executionDirectory {
                 loadComposerModels()
             }
+            composerModelDirectory = executionDirectory
             let selectedToken = identityBindings.first { $0.identity == composerAccount }?.token ?? ""
             pane.configureComposerChoices(projects: composerProjectChoices,
                 selectedProjectID: projectID,
+                checkouts: siblingCheckouts, selectedCheckoutID: targetID,
+                locationTitle: locationTitle, locationDetail: locationDetail,
                 identities: identityChoices,
                 selectedIdentityID: selectedToken,
                 onProjectChoice: { projectID in
@@ -1897,10 +2573,28 @@ struct WindowHarness {
                           let index = projectIndexes[projectID], projects.indices.contains(index),
                           projects[index].id == projectID else { return }
                     selected = index
+                    composerCheckoutProjectID = nil
                     inlineSelection = NavigatorOutlineItem(projectID: projectID, projectIndex: index)
                     outlineScrollSelection = true
                     refreshComposerChoices()
                     dirty = true
+                },
+                onCheckoutChoice: { checkoutID in
+                    guard pane.isComposing,
+                          siblingCheckouts.contains(where: { $0.id == checkoutID }) else { return }
+                    composerCheckoutProjectID = checkoutID == projectID ? nil : checkoutID
+                    refreshComposerChoices()
+                    dirty = true
+                },
+                onNewWorktree: {
+                    guard pane.isComposing, currentCheckout != nil,
+                          pendingFolderImport == nil, pendingSelection == nil,
+                          let launch,
+                          let index = projectIndexes[projectID], projects.indices.contains(index),
+                          projects[index].id == projectID else { return }
+                    pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1],
+                        choice: .worktree(sourcePath: projects[index].path,
+                                          dark: LinuxTheme.isDark))
                 },
                 onIdentityChoice: { token in
                     guard pane.isComposing,
@@ -1917,7 +2611,16 @@ struct WindowHarness {
                 })
             let defaultName = composerModels.defaultOption?.displayName
                 ?? composerModels.defaultModel.map { ModelName.display(for: $0) } ?? "Default model"
-            let modelPresentation = ModelEffortPickerPresentation.make(options: composerModels.options,
+            let visibleOptions = composerModels.options.filter { option in
+                !composerHiddenModels.contains(option.identifier)
+                    || option.identifier == composerModels.defaultModel
+                    || option.identifier == composerModel
+            }
+            let hiddenCount = composerModels.options.reduce(0) { count, option in
+                count + (composerHiddenModels.contains(option.identifier)
+                    && option.identifier != composerModels.defaultModel ? 1 : 0)
+            }
+            let modelPresentation = ModelEffortPickerPresentation.make(options: visibleOptions,
                 defaultModelID: composerModels.defaultModel, defaultModelName: defaultName,
                 defaultModelDetail: "Account default", defaultOption: composerModels.defaultOption,
                 selectedModel: composerModel, selectedEffort: composerEffort)
@@ -1937,29 +2640,66 @@ struct WindowHarness {
                 ? "\(modelName) · \(effortTitle)" : modelName
             pane.configureModelChoices(modelPresentation, title: modelTitle,
                 selectionValid: composerModels.admits(model: composerModel, effort: composerEffort),
-                onRefresh: { loadComposerModels() }, onChoose: { model, effort in
+                hiddenModelCount: hiddenCount,
+                onRefresh: { loadComposerModels() },
+                onHideModel: { modelID in
+                    guard composerModels.options.contains(where: { $0.identifier == modelID }),
+                          modelID != composerModels.defaultModel, modelID != composerModel else { return }
+                    changeComposerVisibility(.hide(modelID))
+                },
+                onShowHiddenModels: { changeComposerVisibility(.showAll) },
+                onChoose: { model, effort in
                     guard pane.isComposing, composerModels.admits(model: model, effort: effort) else { return }
                     composerModel = model
                     composerEffort = effort
+                    if let kind = composerAccount?.provider,
+                       !composerModels.supportsFastMode(kind: kind, model: model) {
+                        composerFastMode = nil
+                    }
+                    refreshComposerChoices()
+                    dirty = true
+                })
+            let speedKind = composerAccount?.provider
+            let supportsSpeed = speedKind.map {
+                composerModels.supportsFastMode(kind: $0, model: composerModel)
+            } ?? false
+            if !supportsSpeed { composerFastMode = nil }
+            pane.configureSpeedChoice(available: supportsSpeed,
+                title: speedKind.map { composerModels.speedTitle(selected: composerFastMode, kind: $0) }
+                    ?? "Agent's Setting",
+                fastMode: composerFastMode,
+                onChoose: { value in
+                    guard pane.isComposing, let kind = composerAccount?.provider,
+                          composerModels.supportsFastMode(kind: kind, model: composerModel) else { return }
+                    composerFastMode = value
                     refreshComposerChoices()
                     dirty = true
                 })
             let permissionChoices: [ComposerPermissionChoice]
+            let inheritedPermissionMode = composerModels.inheritedPermissionMode
+            let lastUsedPermissionMode = composerModels.lastUsedPermissionMode
             if let kind = composerAccount?.provider, kind.supportsPermissionModes {
-                permissionChoices = [ComposerPermissionChoice(id: "inherit",
-                    title: PermissionModeLabels.agentSettingRowTitle, detail: "")]
-                    + AgentPermissionMode.allCases.map { mode in
-                        ComposerPermissionChoice(id: mode.rawValue, title: mode.displayName(for: kind),
-                            detail: [mode.menuDescription(for: kind), mode.caveat(for: kind)]
-                                .compactMap { $0 }.joined(separator: " "))
-                    }
+                let inheritRow = inheritedPermissionMode == nil
+                    ? [ComposerPermissionChoice(id: "inherit",
+                        title: PermissionModeLabels.agentSettingRowTitle, detail: "")]
+                    : []
+                permissionChoices = inheritRow + AgentPermissionMode.allCases.map { mode in
+                    ComposerPermissionChoice(id: mode == inheritedPermissionMode ? "inherit" : mode.rawValue,
+                        title: mode.displayName(for: kind)
+                            + (mode == inheritedPermissionMode ? "  (default)"
+                               : mode == lastUsedPermissionMode ? "  (last used)" : ""),
+                        detail: [mode.menuDescription(for: kind), mode.caveat(for: kind)]
+                            .compactMap { $0 }.joined(separator: " "))
+                }
             } else { permissionChoices = [] }
             let permissionTitle = composerAccount.map { identity in
-                composerPermissionMode?.displayName(for: identity.provider)
+                (composerPermissionMode ?? inheritedPermissionMode)?.displayName(for: identity.provider)
                     ?? PermissionModeLabels.agentSettingTitle
             } ?? PermissionModeLabels.agentSettingTitle
             pane.configurePermissionChoices(permissionChoices,
-                selectedID: composerPermissionMode?.rawValue ?? "inherit", title: permissionTitle,
+                selectedID: composerPermissionMode == inheritedPermissionMode
+                    ? "inherit" : composerPermissionMode?.rawValue ?? "inherit",
+                title: permissionTitle,
                 onChoose: { value in
                     guard pane.isComposing, composerAccount?.provider.supportsPermissionModes == true,
                           value == "inherit" || AgentPermissionMode(rawValue: value) != nil else { return }
@@ -1967,15 +2707,269 @@ struct WindowHarness {
                     refreshComposerChoices()
                     dirty = true
                 })
+            let surfaceKind = composerAccount?.provider
+            composerUsesNativeUI = surfaceKind.map {
+                AgentSession.resolvedNativeSurface(composerUsesNativeUI, for: $0)
+            } ?? false
+            pane.configureSurfaceChoice(kind: surfaceKind, usesNativeUI: composerUsesNativeUI,
+                onChoose: { isNative in
+                    guard let kind = composerAccount?.provider,
+                          kind.supportsNativeUI && kind.supports(.terminalUI) else { return }
+                    composerUsesNativeUI = isNative
+                    refreshComposerChoices()
+                    dirty = true
+                })
         }
         func composerTarget() -> (projectID: String, identity: AccountID)? {
             guard idlePane?.isComposing == true, projects.indices.contains(selected),
                   let identity = composerAccount else { return nil }
-            return (projects[selected].id, identity)
+            let projectID = composerCheckoutProjectID ?? projects[selected].id
+            guard projectIndexes[projectID] != nil else { return nil }
+            return (projectID, identity)
         }
         refreshComposerChoices()
         var activePane: (any WorkspacePane)?
         var activePageTarget: NavigatorOutlineItem?
+        var settingsPane: WorkspaceSettingsPane?
+        var settingsReturnPane: (any WorkspacePane)?
+        var settingsReturnIdlePane: WorkspacePlaceholderPane?
+        var settingsReturnSidebarFocus = true
+        func beginArchive(_ id: String, projectID: String) {
+            guard pendingArchive == nil, let launch,
+                  let sessionID = SessionID(uuidString: id),
+                  let index = projectIndexes[projectID], projects.indices.contains(index),
+                  projects[index].recentAgents.contains(where: { $0.id == id }) else { return }
+            let key = SavedRuntimeKey.agent(id)
+            // A provider archive must first stop an in-process writer, as on macOS. The
+            // worker performs the daemon stop and durable/provider transaction.
+            nativeRuntimes[key]?.runtime.stop()
+            let gate = ArchiveGate()
+            pendingArchive = (id, projectID, gate)
+            hoveredOutlineItem = nil
+            dirty = true
+            DispatchQueue.global(qos: .utility).async {
+                gate.finish(Result {
+                    try SessionArchiveAction.run(store: launch[0], socket: launch[1],
+                        shell: launch[2], sessionID: sessionID, archived: true)
+                })
+            }
+        }
+        func beginPin(_ id: String, projectID: String, pinned: Bool) {
+            guard pendingPin == nil, let launch,
+                  let sessionID = SessionID(uuidString: id),
+                  let index = projectIndexes[projectID], projects.indices.contains(index),
+                  projects[index].recentAgents.contains(where: { $0.id == id }) else { return }
+            let gate = PinGate()
+            pendingPin = (id, projectID, gate)
+            dirty = true
+            DispatchQueue.global(qos: .utility).async {
+                gate.finish(Result {
+                    try SessionPinAction.run(store: launch[0], sessionID: sessionID,
+                        pinned: pinned)
+                })
+            }
+        }
+        func beginRename(_ id: String, projectID: String, title: String,
+                         displayedCurrentTitle: String?) {
+            guard pendingRename == nil, let launch,
+                  let sessionID = SessionID(uuidString: id),
+                  let targetProjectID = ProjectID(uuidString: projectID),
+                  let index = projectIndexes[projectID], projects.indices.contains(index),
+                  projects[index].recentAgents.contains(where: { $0.id == id }) else { return }
+            let gate = RenameGate()
+            pendingRename = (id, projectID, gate)
+            dirty = true
+            DispatchQueue.global(qos: .utility).async {
+                gate.finish(Result {
+                    try SessionRenameAction.run(store: launch[0], sessionID: sessionID,
+                        projectID: targetProjectID, title: title,
+                        displayedCurrentTitle: displayedCurrentTitle)
+                })
+            }
+        }
+        func beginClose(_ id: String, projectID: String) {
+            guard pendingClose == nil, let launch,
+                  let sessionID = SessionID(uuidString: id),
+                  let targetProjectID = ProjectID(uuidString: projectID),
+                  let index = projectIndexes[projectID], projects.indices.contains(index),
+                  projects[index].recentAgents.contains(where: { $0.id == id }) else { return }
+            let key = SavedRuntimeKey.agent(id)
+            let hosted = restoredRuntimes[key] != nil
+                || nativeRuntimes[key]?.runtime.presentsActiveAgent != true
+            let gate = CloseGate()
+            pendingClose = (id, projectID, gate)
+            dirty = true
+            DispatchQueue.global(qos: .utility).async {
+                gate.finish(Result {
+                    try SessionCloseAction.run(store: launch[0], socket: launch[1],
+                        sessionID: sessionID, projectID: targetProjectID,
+                        stopHostedChild: hosted)
+                })
+            }
+        }
+        func beginSnooze(_ id: String, projectID: String,
+                         change: SessionSnoozeAction.Change) {
+            guard pendingSnooze == nil, pendingSnoozePicker == nil,
+                  pendingSnoozeScan == nil,
+                  pendingSnoozeExpiry == nil, let launch,
+                  let sessionID = SessionID(uuidString: id),
+                  let targetProjectID = ProjectID(uuidString: projectID),
+                  let index = projectIndexes[projectID], projects.indices.contains(index),
+                  projects[index].recentAgents.contains(where: { $0.id == id }) else { return }
+            let gate = SnoozeGate()
+            pendingSnooze = (id, projectID, gate)
+            dirty = true
+            snoozeWorker.async {
+                gate.finish(Result {
+                    try SessionSnoozeAction.run(store: launch[0], sessionID: sessionID,
+                        projectID: targetProjectID, change: change)
+                })
+            }
+        }
+        func dismissSessionMenu() {
+            guard sessionMenu != nil else { return }
+            sessionMenu = nil
+            pendingSessionMenuPresence = nil
+            sessionMenuVisibleEntries.removeAll(keepingCapacity: true)
+            activatedSessionMenuEntry = nil
+            retainedSessionMenuRows.reset()
+            dirty = true
+        }
+        func openSessionMenu(_ id: String, projectID: String,
+                             openInApps: [LinuxExternalApp]) {
+            guard let launch, actions == nil, accountPicker == nil, savedPicker == nil,
+                  pendingArchive == nil, pendingPin == nil, pendingSnooze == nil,
+                  pendingSnoozePicker == nil,
+                  pendingRename == nil, pendingRenamePrompt == nil,
+                  pendingClose == nil, pendingClosePrompt == nil,
+                  pendingSnoozeScan == nil, pendingSnoozeExpiry == nil,
+                  let index = projectIndexes[projectID], projects.indices.contains(index),
+                  let runtime = projects[index].recentAgents.first(where: { $0.id == id }) else {
+                return
+            }
+            if sessionMenu?.sessionID == id { dismissSessionMenu(); return }
+            pendingSessionMenuPresence = nil
+            let isRunning = hasActiveRuntime(.agent(id), projectID: projectID)
+            sessionMenu = SidebarSessionMenu(sessionID: id, projectID: projectID,
+                worktreePath: projects[index].path, agentSessionID: runtime.agentSessionID,
+                customTitle: runtime.customTitle, displayTitle: runtime.title,
+                openInApps: Array(openInApps.prefix(64)), isPinned: runtime.isPinned,
+                isSnoozed: runtime.attention(at: Date()) == .snoozed,
+                isRunning: isRunning,
+                canResume: runtime.kind?.supportsResume ?? true,
+                snoozeMoments: SnoozeWallClockMoments.future(from: Date()))
+            if !isRunning, let sessionID = SessionID(uuidString: id) {
+                let gate = SessionPresenceGate()
+                pendingSessionMenuPresence = (id, projectID, gate)
+                let socket = launch[1]
+                let wakeIdentity = tw_worker_wake_identity(window)
+                DispatchQueue.global(qos: .utility).async {
+                    gate.finish(GraphicalTerminal.agentPresence(socket: socket, id: sessionID))
+                    _ = tw_worker_wake(wakeIdentity)
+                }
+            }
+            dirty = true
+        }
+        func chooseSessionMenu(_ command: SidebarSessionMenu.Command) {
+            guard var menu = sessionMenu,
+                  let index = projectIndexes[menu.projectID], projects.indices.contains(index),
+                  projects[index].recentAgents.contains(where: { $0.id == menu.sessionID })
+            else { dismissSessionMenu(); return }
+            switch command {
+            case .copy:
+                menu.openCopy()
+                sessionMenu = menu
+                dirty = true
+                return
+            case .openIn:
+                menu.openIn()
+                sessionMenu = menu
+                dirty = true
+                return
+            case .snooze:
+                menu.openSnooze()
+                sessionMenu = menu
+                dirty = true
+                return
+            case .back:
+                menu.returnToActions()
+                sessionMenu = menu
+                dirty = true
+                return
+            case .pin:
+                dismissSessionMenu()
+                beginPin(menu.sessionID, projectID: menu.projectID, pinned: !menu.isPinned)
+                return
+            case .unsnooze:
+                dismissSessionMenu()
+                beginSnooze(menu.sessionID, projectID: menu.projectID, change: .unsnooze)
+                return
+            case .snoozeChoice:
+                guard let deadline = menu.snoozeDeadline(at: menu.selected),
+                      deadline > Date() else { return }
+                let sessionID = menu.sessionID
+                let projectID = menu.projectID
+                let hasPendingOutcome = nativeRuntimes[.agent(sessionID)]?.runtime.hasPendingOutcome
+                    ?? false
+                dismissSessionMenu()
+                beginSnooze(sessionID, projectID: projectID,
+                    change: .snooze(until: deadline, at: Date(),
+                                    hadTurnInFlight: hasPendingOutcome))
+                return
+            case .customSnooze:
+                let hasPendingOutcome = nativeRuntimes[.agent(menu.sessionID)]?
+                    .runtime.hasPendingOutcome ?? false
+                dismissSessionMenu()
+                pendingSnoozePicker = (menu.sessionID, menu.projectID,
+                    hasPendingOutcome, beginSnoozePicker(dark: LinuxTheme.isDark))
+                dirty = true
+                return
+            case .archive:
+                dismissSessionMenu()
+                beginArchive(menu.sessionID, projectID: menu.projectID)
+                return
+            case .close:
+                guard menu.isRunning else { return }
+                dismissSessionMenu()
+                if LinuxConfirmationSettings.asks(before: .closeRunningSession) {
+                    pendingClosePrompt = (menu.sessionID, menu.projectID,
+                        Self.beginCloseConfirmation(displayTitle: menu.displayTitle,
+                            canResume: menu.canResume, dark: LinuxTheme.isDark))
+                } else {
+                    beginClose(menu.sessionID, projectID: menu.projectID)
+                }
+                dirty = true
+                return
+            case .rename:
+                dismissSessionMenu()
+                pendingRenamePrompt = (menu.sessionID, menu.projectID, menu.customTitle,
+                    beginRenamePrompt(displayTitle: menu.displayTitle,
+                        currentTitle: menu.customTitle ?? "", dark: LinuxTheme.isDark))
+                dirty = true
+                return
+            case .openInChoice:
+                guard let app = menu.openInApp(at: menu.selected) else { return }
+                dismissSessionMenu()
+                launchOpenInForProject(app.id, projectID: menu.projectID, remember: false)
+                return
+            case .copyAgentID, .copyThreadingID, .copyWorktreePath:
+                let value: String?
+                switch command {
+                case .copyAgentID: value = menu.agentSessionID
+                case .copyThreadingID: value = menu.sessionID.lowercased()
+                case .copyWorktreePath: value = projects[index].path
+                default: value = nil
+                }
+                guard let value,
+                      NSPasteboard.general.setString(value, forType: .string) else {
+                    tw_title(window, "Threading - could not copy session value")
+                    return
+                }
+                print("SESSION_VALUE_COPIED \(command.rawValue) id=\(menu.sessionID)")
+                fflush(nil)
+                dismissSessionMenu()
+            }
+        }
         var pendingTerminalReveal: GraphicalTerminal?
         let pageReveal = WorkspacePageRevealRequest()
         var openInCatalogue = LinuxExternalApps.Catalogue(apps: [], defaultID: nil)
@@ -2021,11 +3015,19 @@ struct WindowHarness {
         }
         func launchOpenIn(_ appID: String, remember: Bool) {
             guard pendingOpenInLaunch == nil, let pane = activePane,
-                  let target = activePageTarget, pane.chrome.pageIdentity == target.id,
-                  let index = projectIndexes[target.projectID], projects.indices.contains(index),
-                  projects[index].id == target.projectID,
-                  openInCatalogue.apps.contains(where: { $0.id == appID }) else {
+                  let target = activePageTarget,
+                  pane.chrome.pageIdentity == target.id else {
                 print("OPEN_IN_REFUSED stale page or app"); fflush(nil)
+                return
+            }
+            launchOpenInForProject(appID, projectID: target.projectID, remember: remember)
+        }
+        func launchOpenInForProject(_ appID: String, projectID: String, remember: Bool) {
+            guard pendingOpenInLaunch == nil,
+                  let index = projectIndexes[projectID], projects.indices.contains(index),
+                  projects[index].id == projectID,
+                  openInCatalogue.apps.contains(where: { $0.id == appID }) else {
+                print("OPEN_IN_REFUSED stale project or app"); fflush(nil)
                 return
             }
             let directory = projects[index].path
@@ -2095,14 +3097,54 @@ struct WindowHarness {
             if focus { tw_title(window, navigatorTitle) }
             dirty = true
         }
+        func toggleSettings() {
+            if let shown = settingsPane {
+                shown.focus(false, window: window)
+                activePane = settingsReturnPane
+                idlePane = settingsReturnIdlePane
+                settingsReturnPane = nil
+                settingsReturnIdlePane = nil
+                settingsPane = nil
+                if !hasSplitPane { tw_workspace_mode(window, 0, 1) }
+                tw_workspace_placeholder_mode(window, idlePane == nil ? 0 : 1)
+                sidebarFocused = settingsReturnSidebarFocus
+                tw_workspace_focus(window, sidebarFocused ? 1 : 0)
+                if sidebarFocused { tw_title(window, navigatorTitle) }
+                else if let activePane { activePane.focus(true, window: window) }
+                else { idlePane?.focus(true) }
+                print("SETTINGS_CLOSED")
+            } else {
+                settingsReturnPane = activePane
+                settingsReturnIdlePane = idlePane
+                settingsReturnSidebarFocus = sidebarFocused
+                activePane?.focus(false, window: window)
+                idlePane?.focus(false)
+                let pane = WorkspaceSettingsPane()
+                pane.onDone = { toggleSettings() }
+                settingsPane = pane
+                activePane = pane
+                idlePane = nil
+                tw_workspace_mode(window, Int32(sidebarWidth), 0)
+                tw_workspace_placeholder_mode(window, 0)
+                sidebarFocused = false
+                pane.focus(true, window: window)
+                print("SETTINGS_OPENED")
+            }
+            dirty = true
+            fflush(nil)
+        }
         func dismissActions(returnToParent: Bool = true) {
             guard let presentation = actions else { return }
             if returnToParent, presentation.kind == .chatProviders,
                let target = presentation.projectID,
                actionState(for: target).projectID == target {
-                actions = .init(kind: .projectCreate, projectID: target,
+                let state = actionState(for: target)
+                let repository = presentation.returnsToRepositoryCreate
+                actions = .init(kind: repository ? .repositoryCreate : .projectCreate,
+                    projectID: target,
                     returnToSidebar: presentation.returnToSidebar,
-                    commands: NavigatorActions.projectCreateCommands(actionState(for: target)))
+                    commands: repository ? NavigatorActions.repositoryCreateCommands(state)
+                                         : NavigatorActions.projectCreateCommands(state))
                 dirty = true
                 return
             }
@@ -2118,7 +3160,7 @@ struct WindowHarness {
             guard targetID == nil || state.projectID == targetID else { return }
             // Menu content replaces the project rows. A later keyboard dismissal must not
             // restore an old row's hover reveal at coordinates that may now mean something else.
-            hoveredProjectID = nil
+            hoveredOutlineItem = nil
             rowActionMenuGesture = false
             rowActionMenuEntered = false
             actions = .init(kind: .projectActions, projectID: state.projectID,
@@ -2131,29 +3173,35 @@ struct WindowHarness {
             guard actionsEnabled, pendingFolderImport == nil, pendingSelection == nil,
                   addProjectButton.isEnabled else { return }
             if actions != nil { dismissActions(returnToParent: false) }
-            hoveredProjectID = nil
+            hoveredOutlineItem = nil
             actions = .init(kind: .addProject, projectID: nil,
                             returnToSidebar: sidebarFocused,
                             commands: NavigatorActions.addProjectMenuCommands())
             focusSidebar(true)
             dirty = true
         }
-        func openProjectCreateMenu(for targetID: ProjectID, returnToSidebar: Bool) {
+        func openProjectCreateMenu(for targetID: ProjectID, returnToSidebar: Bool,
+                                   repository: Bool = false) {
             guard actionsEnabled, actionState(for: targetID).projectID == targetID else { return }
-            hoveredProjectID = nil
+            hoveredOutlineItem = nil
             rowActionMenuGesture = false
             rowActionMenuEntered = false
-            actions = .init(kind: .projectCreate, projectID: targetID,
+            let state = actionState(for: targetID)
+            actions = .init(kind: repository ? .repositoryCreate : .projectCreate,
+                projectID: targetID,
                 returnToSidebar: returnToSidebar,
-                commands: NavigatorActions.projectCreateCommands(actionState(for: targetID)))
+                commands: repository ? NavigatorActions.repositoryCreateCommands(state)
+                                     : NavigatorActions.projectCreateCommands(state))
             focusSidebar(true)
             dirty = true
         }
         func openChatProvidersMenu(for targetID: ProjectID, returnToSidebar: Bool) {
             guard actionsEnabled, actionState(for: targetID).projectID == targetID else { return }
-            actions = .init(kind: .chatProviders, projectID: targetID,
+            var menu = NavigatorActions.Presentation(kind: .chatProviders, projectID: targetID,
                 returnToSidebar: returnToSidebar,
                 commands: NavigatorActions.chatProviderCommands(actionState(for: targetID)))
+            menu.returnsToRepositoryCreate = actions?.kind == .repositoryCreate
+            actions = menu
             focusSidebar(true)
             dirty = true
         }
@@ -2189,6 +3237,43 @@ struct WindowHarness {
             fflush(nil)
         }
         func routeTerminalInput(_ event: TWEvent) -> Bool {
+            if event.kind == 48, let pane = activePane as? WorkspaceSettingsPane {
+                pane.handle(event, window: window)
+                return true
+            }
+            if event.kind == 60 {
+                var request = event
+                guard let id = String(validatingCString: tw_event_text(&request)) else { return true }
+                let removed: Bool
+                if event.action == 1, activePane == nil {
+                    removed = idlePane?.removeAttachment(id: id) == true
+                } else if event.action == 2,
+                          let pane = activePane as? WorkspaceConversationPane {
+                    removed = pane.removeAttachment(id: id)
+                } else {
+                    removed = false
+                }
+                if removed { dirty = true }
+                return true
+            }
+            if (56...59).contains(event.kind) {
+                guard let pane = activePane as? WorkspaceConversationPane else { return true }
+                var actionEvent = event
+                let identity = String(validatingCString: tw_event_text(&actionEvent)) ?? ""
+                let accepted: Bool
+                switch event.kind {
+                case 56: accepted = pane.pressSpeed(identity: identity)
+                case 57: accepted = pane.chooseSpeed(index: Int(event.key), identity: identity)
+                case 58: accepted = pane.pressConfiguration(kind: Int(event.action), identity: identity)
+                default: accepted = pane.chooseConfiguration(kind: Int(event.action),
+                    index: Int(event.key), identity: identity)
+                }
+                if accepted { focusSidebar(false) }
+                _ = tw_workspace_editor_focus(window,
+                    pane.hasOpenSpeedChoice || pane.hasOpenConfigurationChoice ? 1 : 0)
+                dirty = true
+                return true
+            }
             if let pane = activePane as? WorkspaceConversationPane, [46, 47, 48, 49].contains(event.kind) {
                 pane.handle(event, window: window)
                 return true
@@ -2288,13 +3373,7 @@ struct WindowHarness {
                             }
                             return true
                         case "v":
-                            var bytes = [UInt8](repeating: 0, count: 65_536)
-                            let count = bytes.withUnsafeMutableBufferPointer {
-                                tw_clipboard_read($0.baseAddress, Int32($0.count))
-                            }
-                            if count > 0, let value = String(bytes: bytes.prefix(Int(count)), encoding: .utf8) {
-                                idlePane.insertCommittedText(value)
-                            }
+                            idlePane.pasteClipboard(wakeIdentity: tw_worker_wake_identity(window))
                             return true
                         default: break
                         }
@@ -2334,9 +3413,17 @@ struct WindowHarness {
                 dirty = true
                 return true
             }
+            if event.kind == 14, activePane == nil {
+                idlePane?.pasteClipboard(wakeIdentity: tw_worker_wake_identity(window))
+                return true
+            }
             if event.kind == 2 { focusSidebar(true) }
             if event.kind == 15 && event.action == 1 { focusSidebar(false) }
             if event.kind == 39 || event.kind == 40 {
+                if event.kind == 40, let dormant = activePane as? WorkspaceDormantPane {
+                    _ = dormant.pressAction()
+                    return true
+                }
                 guard activePane == nil, let idlePane else { return true }
                 if event.kind == 39 {
                     if event.action == 1 { focusSidebar(false) }
@@ -2346,7 +3433,8 @@ struct WindowHarness {
                             idlePane.editorHasFocus || idlePane.hasOpenComposerChoice ? 1 : 0)
                     }
                 } else {
-                    _ = idlePane.pressAction()
+                    let pressed = idlePane.pressAction()
+                    trace("composer.action pressed=\(pressed) submit=\(composerSubmitRequested) native=\(composerUsesNativeUI) selection=\(pendingSelection != nil) import=\(pendingFolderImport != nil)")
                 }
                 return true
             }
@@ -2384,6 +3472,7 @@ struct WindowHarness {
             }
             guard [6, 7, 14, 15, 16, 17, 18, 19].contains(event.kind) else { return false }
             activePane?.handle(event, window: window)
+            if activePane is WorkspaceDormantPane { dirty = true }
             return true
         }
         @MainActor func activate(_ session: GraphicalTerminal, pageName: String,
@@ -2422,10 +3511,11 @@ struct WindowHarness {
             dirty = true
         }
         @MainActor func activatePane(_ pane: any WorkspacePane, pageTarget: NavigatorOutlineItem) throws {
+            if settingsPane != nil { toggleSettings() }
             // Standalone coordinates become a bounded sidebar when the terminal appears. Clear
             // any held control gesture and hover before those same pixels name another pane.
             contentWindow.cancelPointerGesture()
-            hoveredProjectID = nil
+            hoveredOutlineItem = nil
             rowActionMenuGesture = false
             rowActionMenuEntered = false
             activePane?.focus(false, window: window)
@@ -2438,6 +3528,12 @@ struct WindowHarness {
             activePane = pane
             activePane?.setThemeAppearance()
             activePageTarget = pageTarget
+            if pageTarget.kind == .agent,
+               let index = projectIndexes[pageTarget.projectID], projects.indices.contains(index),
+               let row = projects[index].recentAgents.first(where: { $0.id == pageTarget.id }),
+               row.attention(at: Date()) == .woke {
+                pendingSnoozeAcknowledgements[pageTarget.id] = pageTarget.projectID
+            }
             configureOpenInPane()
             tw_workspace_placeholder_mode(window, 0)
             sidebarFocused = false
@@ -2470,7 +3566,8 @@ struct WindowHarness {
             let pane: WorkspaceConversationPane
             if let existing = nativeRuntimes[key] { pane = existing }
             else {
-                guard terminals.count + restoredRuntimes.count + nativeRuntimes.count < maximumOpenRuntimes else {
+                guard terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                        + (composerCreationPending ? 1 : 0) < maximumOpenRuntimes else {
                     throw WindowFailure("The workspace's open-runtime limit was reached.")
                 }
                 let session = NativeWorkspaceSession(store: launch[0], socket: launch[1], id: id,
@@ -2478,43 +3575,174 @@ struct WindowHarness {
                 pane = WorkspaceConversationPane(runtime: session, pageName: readableNavigatorText(runtime.title),
                     icon: ProviderMarks.image(for: runtime.kind, selected: false),
                     onReveal: { pageReveal.target = target })
+                pane.onAgentActivityChange = { navigatorRoot.needsDisplay = true }
+                pane.onSnoozeWakeReason = { reason in
+                    snoozeWakeInbox.record(reason, id: runtime.id,
+                                           projectID: target.projectID)
+                }
                 nativeRuntimes[key] = pane
             }
             try activatePane(pane, pageTarget: target)
         }
         func beginAgent(_ kind: AgentKind, prompt: String?,
                         accountOverride: AccountHandle? = nil,
-                        permissionMode: AgentPermissionMode? = .manual,
-                        model: String? = nil, reasoningEffort: String? = nil) throws {
+                        permissionMode: AgentPermissionMode? = nil,
+                        model: String? = nil, reasoningEffort: String? = nil,
+                        fastMode: Bool? = nil,
+                        composerProjectID: String? = nil) throws {
             guard let launch, !projects.isEmpty else { return }
+            if let composerProjectID, projectIndexes[composerProjectID] == nil {
+                throw WindowFailure("Selected checkout is no longer in the workspace.")
+            }
+            let targetIndex = composerProjectID.flatMap { projectIndexes[$0] } ?? selected
+            guard projects.indices.contains(targetIndex) else { return }
             let executable = kind == .codex ? agentExecutable : claudeExecutable
             guard let executable else { return }
             let accountHandle = accountOverride ?? (kind == .codex ? codexAccount : claudeAccount)
-            guard terminals.count + restoredRuntimes.count + nativeRuntimes.count < maximumOpenRuntimes else {
+            guard terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                    + (composerCreationPending ? 1 : 0) < maximumOpenRuntimes else {
                 tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                 return
             }
-            guard let projectID = ProjectID(uuidString: projects[selected].id) else {
+            guard let projectID = ProjectID(uuidString: projects[targetIndex].id) else {
                 throw WindowFailure("invalid project identity")
             }
             let id = SessionID()
             let savedID = String(describing: id)
-            let session = GraphicalTerminal()
+            let session = makeObservedTerminal()
             restoredRuntimes[.agent(savedID)] = session
             pendingAgentProjects[savedID] = projectID
-            session.startAgent(store: launch[0], socket: launch[1], directory: projects[selected].path,
+            if prompt != nil {
+                pendingComposerRunChoices[savedID] = (
+                    AccountID(provider: kind, handle: accountHandle),
+                    ComposerNewSessionRunChoice(model: model, reasoningEffort: reasoningEffort)
+                )
+            }
+            session.startAgent(store: launch[0], socket: launch[1], directory: projects[targetIndex].path,
                                shell: launch[2], kind: kind, executable: executable,
                                accountHandle: accountHandle, id: id,
                                width: terminalWidth,
                                height: max(1, height - WorkspaceTerminalPane.headerPixelHeight),
                                prompt: prompt, permissionMode: permissionMode,
-                               model: model, reasoningEffort: reasoningEffort)
+                               model: model, reasoningEffort: reasoningEffort,
+                               fastMode: fastMode,
+                               expectedCheckout: composerProjectID.flatMap {
+                                   composerCheckoutCatalog.checkouts[$0]
+                               })
+            selected = targetIndex
             try activate(session, pageName: kind.displayName, pageIdentity: savedID,
                 pageIcon: ProviderMarks.image(for: kind, selected: false),
                 pageTarget: NavigatorOutlineItem(kind: .agent,
-                    projectID: projects[selected].id, id: savedID,
-                    projectIndex: selected, childIndex: -1))
+                    projectID: projects[targetIndex].id, id: savedID,
+                    projectIndex: targetIndex, childIndex: -1))
             dirty = true
+        }
+        func beginNativeAgent(_ choice: (projectID: String, identity: AccountID),
+                              prompt: String) {
+            guard let launch, !composerCreationPending,
+                  let targetIndex = projectIndexes[choice.projectID],
+                  projects.indices.contains(targetIndex) else { return }
+            guard terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                    < maximumOpenRuntimes else {
+                tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
+                return
+            }
+            guard prompt.utf8.count <= 65_536 else {
+                tw_title(window, "Threading composer - brief is too long")
+                return
+            }
+            let request = ComposerNativeCreation.Request(store: launch[0],
+                directory: projects[targetIndex].path, kind: choice.identity.provider,
+                accountHandle: choice.identity.handle, permissionMode: composerPermissionMode,
+                model: composerModel, reasoningEffort: composerEffort,
+                fastMode: composerFastMode,
+                expectedCheckout: composerCheckoutCatalog.checkouts[choice.projectID],
+                id: SessionID())
+            let gate = NativeCreationGate()
+            pendingNativeCreation = (gate, request, prompt, idlePane)
+            composerCreationPending = true
+            composerCreationWorker.async {
+                gate.finish(Result { try ComposerNativeCreation.create(request) })
+            }
+            dirty = true
+        }
+        func finishNativeCreation(_ receipt: ComposerNativeCreation.Receipt,
+                                  request: ComposerNativeCreation.Request, prompt: String,
+                                  composingPane: WorkspacePlaceholderPane?) throws {
+            composerModelLoader.remember(
+                ComposerNewSessionRunChoice(model: request.model,
+                                            reasoningEffort: request.reasoningEffort),
+                for: AccountID(provider: request.kind, handle: request.accountHandle)
+            )
+            guard let launch, let index = projectIndexes[receipt.projectID.uuidString],
+                  projects.indices.contains(index), projects[index].id == receipt.projectID.uuidString else {
+                throw WindowFailure("Committed native conversation's project is unavailable in the window.")
+            }
+            let projectID = receipt.projectID.uuidString
+            let savedID = receipt.row.id.uuidString
+            var saved = savedAgent(receipt.row)
+            saved.usesNativeUI = true
+            let selectedSavedID: String?
+            if let picker = savedPicker, picker.isAgent, picker.projectIndex == index,
+               projects[index].recentAgents.indices.contains(savedSelected) {
+                selectedSavedID = projects[index].recentAgents[savedSelected].id
+            } else if let inlineSelection, inlineSelection.kind == .agent,
+                      inlineSelection.projectID == projectID {
+                selectedSavedID = inlineSelection.id
+            } else { selectedSavedID = nil }
+            let newer = projects[index].recentAgents.lastIndex {
+                (publishedAgentCounts[$0.id] ?? 0) > receipt.sessionCount
+            }
+            let row = newer.map { $0 + 1 } ?? 0
+            projects[index].recentAgents.insert(saved, at: row)
+            publishedAgentCounts[savedID] = receipt.sessionCount
+            projects[index].sessions = max(projects[index].sessions, receipt.sessionCount)
+            if projects[index].recentAgents.count > maximumSelectableAgentsPerProject {
+                let last = projects[index].recentAgents.count - 1
+                let preservesLast = projects[index].recentAgents[last].id == selectedSavedID
+                projects[index].recentAgents.remove(at: preservesLast ? last - 1 : last)
+            }
+            if let selectedSavedID,
+               let selectedRow = projects[index].recentAgents.firstIndex(where: { $0.id == selectedSavedID }) {
+                savedSelected = selectedRow
+            }
+            let target = NavigatorOutlineItem(kind: .agent, projectID: projectID,
+                id: savedID, projectIndex: index, childIndex: row)
+            let session = NativeWorkspaceSession(store: launch[0], socket: launch[1],
+                id: request.id, shell: launch[2], executables: nativeExecutables,
+                initialPrompt: prompt)
+            let pane = WorkspaceConversationPane(runtime: session,
+                pageName: readableNavigatorText(saved.title),
+                icon: ProviderMarks.image(for: saved.kind, selected: false),
+                onReveal: { pageReveal.target = target })
+            pane.onAgentActivityChange = { navigatorRoot.needsDisplay = true }
+            pane.onSnoozeWakeReason = { reason in
+                snoozeWakeInbox.record(reason, id: savedID, projectID: projectID)
+            }
+            nativeRuntimes[.agent(savedID)] = pane
+            outlineNeedsReload = true
+            let stillSubmitting = idlePane === composingPane
+                && (composerCheckoutProjectID ?? projects[selected].id) == projectID
+                && composerAccount == AccountID(provider: request.kind, handle: request.accountHandle)
+                && composerUsesNativeUI && idlePane?.composedPrompt == prompt
+            if stillSubmitting {
+                selected = index
+                inlineSelection = target
+                outlineRevealTarget = target
+                outlineScrollSelection = true
+                try activatePane(pane, pageTarget: target)
+            }
+            print("NATIVE_CREATION_COMMITTED \(savedID) project=\(projectID)")
+            fflush(nil)
+            dirty = true
+        }
+        func rememberCommittedComposerChoice(_ receipt: GraphicalTerminal.AgentCreation) {
+            guard let (account, choice) = pendingComposerRunChoices.removeValue(
+                forKey: receipt.row.id.uuidString) else { return }
+            composerModelLoader.remember(choice, for: account)
+        }
+        func forgetFailedComposerChoice(_ id: String) {
+            pendingComposerRunChoices.removeValue(forKey: id)
         }
         func reconcileTerminals() -> Bool {
             let selection: (projectID: String, terminalID: String)?
@@ -2584,7 +3812,7 @@ struct WindowHarness {
             if runtime.usesNativeUI {
                 try activateNative(runtime, projectIndex: selected, childIndex: row)
             } else {
-                let session = GraphicalTerminal()
+                let session = makeObservedTerminal()
                 restoredRuntimes[.agent(id)] = session
                 restoredProjectIDs.insert(projects[selected].id)
                 session.attachAgent(store: launch[0], socket: launch[1], sessionID: id)
@@ -2595,7 +3823,7 @@ struct WindowHarness {
         } else if let id = snapshot.restoreTerminalID, let launch,
                   projects.indices.contains(selected),
                   let row = projects[selected].recentTerminals.firstIndex(where: { $0.id == id }) {
-            let session = GraphicalTerminal()
+            let session = makeObservedTerminal()
             restoredRuntimes[.terminal(id)] = session
             restoredProjectIDs.insert(projects[selected].id)
             let target = NavigatorOutlineItem(kind: .terminal, projectID: projects[selected].id,
@@ -2610,7 +3838,91 @@ struct WindowHarness {
         }
         while true {
             _ = uiWork.drain()
+            if pendingSnoozeScan == nil, Date() >= nextSnoozeScanAttempt {
+                startSnoozeScan()
+            }
+            if pendingSnoozeScan == nil, pendingSnooze == nil,
+               pendingSnoozeExpiry == nil, let event = snoozeWakeInbox.take(),
+               let index = projectIndexes[event.projectID], projects.indices.contains(index),
+               let runtime = projects[index].recentAgents.first(where: { $0.id == event.id }),
+               runtime.attention(at: Date()) == .snoozed {
+                beginSnooze(event.id, projectID: event.projectID,
+                    change: .wake(event.reason, at: event.at))
+            }
+            if pendingSnoozeScan == nil, pendingSnooze == nil,
+               pendingSnoozeExpiry == nil,
+               let deadline = nextSnoozeDeadline, Date() >= deadline,
+               let launch {
+                let now = Date()
+                let due = snoozeDeadlines.compactMap { $0.value <= now ? $0.key : nil }
+                if !due.isEmpty {
+                    let gate = SnoozeExpiryGate()
+                    pendingSnoozeExpiry = (due, gate)
+                    snoozeWorker.async {
+                        gate.finish(Result {
+                            try SessionSnoozeAction.expire(store: launch[0], due: due,
+                                                           now: now)
+                        })
+                    }
+                }
+            }
             if contentWindow.displayRevision != navigatorDisplayRevision { dirty = true }
+            if visibleWorkingActivity, !Design.Motion.reducesStatusMotion,
+               Date() >= nextActivityFrame { try paintWorkingPatches() }
+            if let changes = checkoutHeadMonitor?.takeChanges(), !changes.isEmpty {
+                var changedBranch = false
+                var needsDiscovery = false
+                for (id, reading) in changes {
+                    guard projectIndexes[id] != nil else { continue }
+                    switch reading {
+                    case .unavailable:
+                        needsDiscovery = true
+                    case .checkout(let checkout):
+                        guard let previous = composerCheckoutCatalog.checkouts[id],
+                              previous.root == checkout.root,
+                              previous.identity == checkout.identity,
+                              previous.repositoryIdentity == checkout.repositoryIdentity else {
+                            needsDiscovery = true
+                            continue
+                        }
+                        let override: CheckoutBranchDisplay? = previous.branch == checkout.branch
+                            ? nil : checkout.branch.map(CheckoutBranchDisplay.named) ?? .detached
+                        if checkoutBranchOverrides[id] != override {
+                            checkoutBranchOverrides[id] = override
+                            changedBranch = true
+                            print("CHECKOUT_HEAD_CHANGED id=\(id) branch=\(checkout.branch ?? "(detached)")")
+                        }
+                    }
+                }
+                if changedBranch {
+                    outlineSource.branchOverrides = checkoutBranchOverrides
+                    refreshComposerChoices()
+                    dirty = true
+                    fflush(nil)
+                }
+                if needsDiscovery { discoverCheckouts() }
+            }
+            if let gate = pendingCheckoutDiscovery, let (catalogue, entries) = gate.take() {
+                pendingCheckoutDiscovery = nil
+                composerCheckoutCatalog = catalogue
+                checkoutBranchOverrides.removeAll(keepingCapacity: true)
+                outlineSource.branchOverrides = checkoutBranchOverrides
+                if entries.isEmpty {
+                    checkoutHeadMonitor?.stop()
+                    checkoutHeadMonitor = nil
+                } else {
+                    if checkoutHeadMonitor == nil {
+                        checkoutHeadMonitor = LinuxGitHeadMonitor(
+                            wakeIdentity: tw_worker_wake_identity(window))
+                    }
+                    checkoutHeadMonitor?.configure(entries: entries,
+                                                   baseline: catalogue.checkouts)
+                }
+                outlineNeedsReload = true
+                refreshComposerChoices()
+                if checkoutDiscoveryWanted { discoverCheckouts() }
+                dirty = true
+            }
             if let gate = pendingOpenInCatalogue, let catalogue = gate.take() {
                 pendingOpenInCatalogue = nil
                 openInCatalogue = catalogue
@@ -2648,15 +3960,18 @@ struct WindowHarness {
                 switch result {
                 case .success(let imported?):
                     projects = imported.projects
+                    composerCheckoutProjectID = nil
                     composerProjectChoices = projects.map { (id: $0.id, name: $0.name) }
                     projectIndexes = Dictionary(uniqueKeysWithValues: projects.enumerated().map { ($0.element.id, $0.offset) })
                     selected = imported.selectedProjectIndex
+                    pendingImportedProjectID = projects[selected].id
                     first = 0
                     inlineSelection = nil
                     outlineNeedsReload = true
                     outlineScrollSelection = true
                     dirty = true
                     print("PROJECT_IMPORTED \(projects[selected].path)"); fflush(nil)
+                    discoverCheckouts()
                 case .success(nil):
                     print("PROJECT_IMPORT_CANCELLED"); fflush(nil)
                 case .failure(let error):
@@ -2664,10 +3979,28 @@ struct WindowHarness {
                     tw_title(window, "Threading experiment - project import failed")
                 }
             }
+            if let pending = pendingNativeCreation, let result = pending.gate.take() {
+                pendingNativeCreation = nil
+                composerCreationPending = false
+                switch result {
+                case .success(let receipt):
+                    do {
+                        try finishNativeCreation(receipt, request: pending.request,
+                                                 prompt: pending.prompt, composingPane: pending.pane)
+                    } catch {
+                        print("NATIVE_CREATION_MOUNT_REFUSED \(error)"); fflush(nil)
+                        tw_title(window, "Threading composer - conversation saved, but could not open")
+                    }
+                case .failure(let error):
+                    print("NATIVE_CREATION_REFUSED \(error)"); fflush(nil)
+                    tw_title(window, "Threading composer - could not start conversation")
+                }
+                dirty = true
+            }
             if composerSubmitRequested {
                 composerSubmitRequested = false
                 if let choice = composerTarget(), let idlePane, idlePane.isComposing,
-                   projects.indices.contains(selected), projects[selected].id == choice.projectID {
+                   projectIndexes[choice.projectID] != nil {
                     let prompt = idlePane.composedPrompt
                     if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         tw_title(window, "Threading composer - write a brief first")
@@ -2675,10 +4008,16 @@ struct WindowHarness {
                         let accounts = choice.identity.provider == .codex
                             ? codexAccounts : claudeAccounts
                         if accounts.contains(choice.identity.handle) {
-                            try beginAgent(choice.identity.provider, prompt: prompt,
-                                           accountOverride: choice.identity.handle,
-                                           permissionMode: composerPermissionMode,
-                                           model: composerModel, reasoningEffort: composerEffort)
+                            if composerUsesNativeUI {
+                                beginNativeAgent(choice, prompt: prompt)
+                            } else if !composerCreationPending {
+                                try beginAgent(choice.identity.provider, prompt: prompt,
+                                               accountOverride: choice.identity.handle,
+                                               permissionMode: composerPermissionMode,
+                                               model: composerModel, reasoningEffort: composerEffort,
+                                               fastMode: composerFastMode,
+                                               composerProjectID: choice.projectID)
+                            }
                         } else {
                             tw_title(window, "Threading composer - account no longer available")
                         }
@@ -2692,7 +4031,10 @@ struct WindowHarness {
                 refreshComposerChoices()
                 dirty = true
             }
-            idlePane?.setLaunchBlocked(pendingFolderImport != nil || pendingSelection != nil)
+            idlePane?.setLaunchBlocked(pendingFolderImport != nil || pendingSelection != nil
+                || composerCreationPending)
+            (activePane as? WorkspaceConversationPane)?.drainAttachments()
+            idlePane?.drainAttachments()
             if let activePane {
                 if let adopted = activePane.takeInitialViewport() {
                     width = adopted.0 + sidebarWidth
@@ -2726,7 +4068,9 @@ struct WindowHarness {
                                           runtimes: &restoredRuntimes,
                                           pending: &pendingAgentProjects,
                                           publishedCounts: &publishedAgentCounts,
-                                          retainedProjects: &restoredProjectIDs, preserving: selection) {
+                                          retainedProjects: &restoredProjectIDs, preserving: selection,
+                                          onCommitted: rememberCommittedComposerChoice,
+                                          onFailed: forgetFailedComposerChoice) {
                     if let selection, let project = projectIndexes[selection.projectID],
                        let row = projects[project].recentAgents.firstIndex(where: { $0.id == selection.agentID }) {
                         savedSelected = row
@@ -2745,7 +4089,7 @@ struct WindowHarness {
             if dirty {
                 navigatorRoot.prepareNavigatorFrame(NSRect(x: 0, y: 0,
                     width: CGFloat(navigatorWidth) / scale, height: CGFloat(height) / scale))
-                navigatorRoot.setNavigatorOutline(outlineScroll,
+                navigatorRoot.setNavigatorOutline(outlineScroll, below: header,
                     visible: projectsMode && !projects.isEmpty)
                 setEmptyStateVisible(projectsMode && projects.isEmpty && launch != nil)
             }
@@ -2773,6 +4117,8 @@ struct WindowHarness {
                     commands = NavigatorActions.projectCommands(actionState(for: menu.projectID))
                 case .projectCreate:
                     commands = NavigatorActions.projectCreateCommands(actionState(for: menu.projectID))
+                case .repositoryCreate:
+                    commands = NavigatorActions.repositoryCreateCommands(actionState(for: menu.projectID))
                 case .chatProviders:
                     commands = NavigatorActions.chatProviderCommands(actionState(for: menu.projectID))
                 }
@@ -2795,7 +4141,11 @@ struct WindowHarness {
                 selected = max(0, min(projects.count - 1, selected))
                 if outlineNeedsReload {
                     trace("outline.reload.begin")
-                    let expandedItems = projects.enumerated().compactMap { index, project -> NavigatorOutlineItem? in
+                    outlineSource.rebuildRepositories(catalogue: composerCheckoutCatalog)
+                    var expandedItems = outlineSource.roots.filter {
+                        $0.kind == .repository && !collapsedRepositoryIdentities.contains($0.id)
+                    }
+                    expandedItems += projects.enumerated().compactMap { index, project -> NavigatorOutlineItem? in
                         guard project.isExpanded else { return nil }
                         return NavigatorOutlineItem(projectID: project.id, projectIndex: index)
                     }
@@ -2811,11 +4161,27 @@ struct WindowHarness {
                     outline.expandItem(NavigatorOutlineItem(projectID: target.projectID,
                         projectIndex: target.projectIndex))
                 }
+                if let importedID = pendingImportedProjectID,
+                   let importedIndex = projectIndexes[importedID],
+                   projects.indices.contains(importedIndex),
+                   projects[importedIndex].id == importedID {
+                    if let repository = outlineSource.repositoryItem(for: importedID),
+                       !outline.isItemExpanded(repository) {
+                        outline.expandItem(repository)
+                    }
+                    inlineSelection = NavigatorOutlineItem(projectID: importedID,
+                        projectIndex: importedIndex)
+                    pendingImportedProjectID = nil
+                }
                 let selectedIndex = inlineSelection.flatMap { sidebarRows.index(of: $0) }
                     ?? inlineSelection.flatMap {
                         sidebarRows.index(of: NavigatorOutlineItem(projectID: $0.projectID,
                             projectIndex: $0.projectIndex))
-                    } ?? sidebarRows.index(of: selected) ?? 0
+                    } ?? sidebarRows.index(of: selected)
+                    ?? (projects.indices.contains(selected)
+                        ? outlineSource.repositoryItem(for: projects[selected].id)
+                            .flatMap { sidebarRows.index(of: $0) } : nil)
+                    ?? 0
                 inlineSelection = outline.item(atRow: selectedIndex) as? NavigatorOutlineItem
                 if let inlineSelection, let current = projectIndexes[inlineSelection.projectID] {
                     selected = current
@@ -2840,6 +4206,11 @@ struct WindowHarness {
             }
             if dirty {
                 nextVisibleAttentionExpiry = nil
+                visibleWorkingActivity = false
+                workingMarks.removeAll(keepingCapacity: true)
+                workingPatches.removeAll(keepingCapacity: true)
+                activityPhase = Design.Motion.reducesStatusMotion ? 0 : CGFloat(
+                    Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9)
                 let width = navigatorWidth
                 trace(traceFirstFrame ? "first-frame.begin" : "frame.begin")
                 // At most viewport/count row objects, even for a large persisted catalogue.
@@ -2847,8 +4218,6 @@ struct WindowHarness {
                 root.prepareNavigatorFrame(NSRect(x: 0, y: 0, width: CGFloat(width) / scale, height: CGFloat(height) / scale))
                 let accent = Design.Surface.selectionFill
                 let selectedInk = LinuxTheme.neutralInk(on: accent, dark: LinuxTheme.isDark)
-                var textRows: [NavigatorTextRow] = []
-                textRows.reserveCapacity(count * 3 + 2)
                 var menuRows: [NSView] = []
                 let end: Int
                 if let menu = actions {
@@ -2928,9 +4297,11 @@ struct WindowHarness {
                     for index in savedFirst..<end {
                         let runtime = saved[index]
                         let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
-                        let retained = retainedRuntime(for: owner(of: key, projectID: project.id)) != nil
+                        let retained = hasActiveRuntime(key, projectID: project.id)
                         if savedPicker.isAgent {
                             let mark = ProviderMarks.image(for: runtime.kind, selected: index == savedSelected)
+                            let activity = nativeRuntimes[.agent(runtime.id)]?.activity ?? .idle
+                            if activity.showsWorkingMark { visibleWorkingActivity = true }
                             if runtime.attention(at: presentationDate) == .snoozed,
                                let expiry = runtime.snoozedUntil {
                                 nextVisibleAttentionExpiry = min(nextVisibleAttentionExpiry ?? expiry, expiry)
@@ -2939,7 +4310,10 @@ struct WindowHarness {
                                 index: index - savedFirst,
                                 width: width, height: height, accent: accent,
                                 selected: index == savedSelected, selectedInk: selectedInk, root: root,
-                                textRows: &textRows, image: mark)
+                                image: mark, activity: activity, activityPhase: activityPhase)
+                            if let mark = root.mountedRow(at: index - savedFirst)?.productionWorkingMark {
+                                workingMarks.append(mark)
+                            }
                         } else {
                             addSavedTerminalRow(runtime, running: retained, index: index - savedFirst,
                                 width: width, height: height, accent: accent,
@@ -2967,6 +4341,100 @@ struct WindowHarness {
                         trace("outline.configure.end")
                     }
                 }
+                var floatingMenuRows: [ThemedMenuRowView] = []
+                var floatingMenuViews: [NSView] = []
+                sessionMenuVisibleEntries.removeAll(keepingCapacity: true)
+                if var menu = sessionMenu {
+                    root.layoutSubtreeIfNeeded()
+                    let anchor = outline.visibleRowIndexes.compactMap { index -> NSRect? in
+                        guard let item = outline.item(atRow: index) as? NavigatorOutlineItem,
+                              item.kind == .agent, item.id == menu.sessionID,
+                              item.projectID == menu.projectID,
+                              let row = outline.view(atColumn: 0, row: index,
+                                  makeIfNecessary: false) as? Specimen.Row else { return nil }
+                        return row.sessionActionAnchor(in: root)
+                    }.first
+                    if let anchor {
+                        let entries = menu.entries
+                        let plan = ThemedMenuRowPlan(entries: entries)
+                        let menuWidth = min(root.bounds.width - 8,
+                            max(190, ThemedMenuMetrics.width(for: entries, minimum: 190,
+                                selectedEntryIndex: menu.selected)))
+                        let maximumHeight = max(64, root.bounds.height - 8)
+                        func visibleEnd(start: Int) -> Int {
+                            var height: CGFloat = 12
+                            var end = start
+                            while end < entries.count,
+                                  height + plan.heights[end] <= maximumHeight {
+                                height += plan.heights[end]
+                                end += 1
+                            }
+                            return max(start + 1, end)
+                        }
+                        var firstVisible = min(menu.firstVisible, menu.selected)
+                        while menu.selected >= visibleEnd(start: firstVisible),
+                              firstVisible < entries.count - 1 {
+                            firstVisible += 1
+                        }
+                        let visible = firstVisible..<visibleEnd(start: firstVisible)
+                        if menu.firstVisible != firstVisible {
+                            menu.firstVisible = firstVisible
+                            sessionMenu = menu
+                        }
+                        let menuHeight = visible.reduce(CGFloat(12)) {
+                            $0 + plan.heights[$1]
+                        }
+                        let x = max(4, min(root.bounds.width - menuWidth - 4, anchor.minX))
+                        let below = anchor.minY - menuHeight - 4
+                        let y = below >= 4 ? below : min(root.bounds.height - menuHeight - 4,
+                            anchor.maxY + 4)
+                        sessionMenuFrame = NSRect(x: x, y: y, width: menuWidth,
+                            height: menuHeight)
+                        retainedSessionMenuRows.prepare(
+                            menu: "session:\(menu.sessionID):\(menu.page)",
+                            entries: entries, visible: visible)
+                        var top: CGFloat = 6
+                        var separatorCount = 0
+                        for entry in visible {
+                            let rowHeight = plan.heights[entry]
+                            if case .separator = entries[entry] {
+                                if separatorCount == sessionMenuSeparators.count {
+                                    let separator = SeparatorView()
+                                    separator.translatesAutoresizingMaskIntoConstraints = true
+                                    sessionMenuSeparators.append(separator)
+                                }
+                                let separator = sessionMenuSeparators[separatorCount]
+                                separatorCount += 1
+                                let inset = ThemedMenuMetrics.contentInset
+                                separator.frame = NSRect(
+                                    x: 6 + inset,
+                                    y: menuHeight - top - rowHeight / 2 - Design.Radius.border / 2,
+                                    width: max(0, menuWidth - 12 - inset * 2),
+                                    height: Design.Radius.border)
+                                floatingMenuViews.append(separator)
+                            } else if let row = retainedSessionMenuRows.row(at: entry, plan: plan) {
+                                row.frame = NSRect(x: 6, y: menuHeight - top - rowHeight,
+                                    width: menuWidth - 12, height: rowHeight)
+                                row.isKeyboardHighlighted = entry == menu.selected
+                                row.onChoose = { chosen, _ in activatedSessionMenuEntry = chosen }
+                                row.onHighlight = { highlighted in
+                                    guard var current = sessionMenu,
+                                          current.entries.indices.contains(highlighted),
+                                          current.selected != highlighted else { return }
+                                    current.selected = highlighted
+                                    sessionMenu = current
+                                    dirty = true
+                                }
+                                floatingMenuRows.append(row)
+                                floatingMenuViews.append(row)
+                                sessionMenuVisibleEntries.append(entry)
+                            }
+                            top += rowHeight
+                        }
+                    } else {
+                        dismissSessionMenu()
+                    }
+                }
                 root.title = ""
                 if addProjectButton.isHidden != (launch == nil) {
                     addProjectButton.isHidden = launch == nil
@@ -2986,16 +4454,23 @@ struct WindowHarness {
                 let actionsRect = headerPixels(actionsButton)
                 trace("header bandHeight=\(navigatorHeaderHeight) title=\(titleRect) add=\(addRect) actions=\(actionsRect)")
                 let mountStarted = DispatchTime.now().uptimeNanoseconds
-                try mountNavigatorText(textRows, in: root)
+                root.finishNavigatorRows()
                 let scratchpadBoundary = actions.flatMap { $0.kind == .addProject ? 2 - $0.first : nil }
-                root.mountMenuRows(menuRows, separatorBeforeRow: scratchpadBoundary)
+                if sessionMenu != nil {
+                    root.mountFloatingMenu(sessionMenuSurface, frame: sessionMenuFrame,
+                        rows: floatingMenuViews)
+                } else {
+                    root.mountMenuRows(menuRows, separatorBeforeRow: scratchpadBoundary)
+                }
                 let focusedSlot: Int
                 if let menu = actions { focusedSlot = menu.selected - menu.first }
                 else if accountPicker != nil { focusedSlot = accountSelected - accountFirst }
                 else if savedPicker != nil { focusedSlot = savedSelected - savedFirst }
                 else { focusedSlot = selectedInlineIndex - first }
                 let focusedView: NSView?
-                if projectsMode && !projects.isEmpty {
+                if let menu = sessionMenu {
+                    focusedView = floatingMenuRows.first { $0.entryIndex == menu.selected }
+                } else if projectsMode && !projects.isEmpty {
                     focusedView = outline.view(atColumn: 0, row: selectedInlineIndex,
                                                makeIfNecessary: false)
                 } else {
@@ -3010,14 +4485,41 @@ struct WindowHarness {
                 let context = NSGraphicsContext(bitmap: bitmap, scale: scale)
                 NSGraphicsContext.current = context
                 let renderStarted = DispatchTime.now().uptimeNanoseconds
+                _ = root.layoutSubtreeIfNeeded()
+                let markRegions = workingMarks.compactMap { mark ->
+                    (mark: ThemedSessionActivityMark, x: Int, y: Int, width: Int, height: Int)? in
+                    let rect = mark.convert(mark.bounds, to: root)
+                    let x = Int((rect.minX * scale).rounded())
+                    let y = height - Int((rect.maxY * scale).rounded())
+                    let patchWidth = Int((rect.width * scale).rounded())
+                    let patchHeight = Int((rect.height * scale).rounded())
+                    guard x >= 0, y >= 0, patchWidth > 0, patchHeight > 0,
+                          x + patchWidth <= navigatorWidth, y + patchHeight <= height else {
+                        return nil
+                    }
+                    mark.isHidden = true
+                    return (mark, x, y, patchWidth, patchHeight)
+                }
                 root.render(in: context)
+                for region in markRegions {
+                    region.mark.isHidden = false
+                    var background: [UInt8] = []
+                    background.reserveCapacity(region.width * region.height * 4)
+                    for row in 0..<region.height {
+                        let start = ((region.y + row) * navigatorWidth + region.x) * 4
+                        background.append(contentsOf: bitmap.pixels[start..<(start + region.width * 4)])
+                    }
+                    workingPatches.append((region.mark, region.x, region.y,
+                                           region.width, region.height, background))
+                }
+                visibleWorkingActivity = !workingPatches.isEmpty
                 _ = root.takeProjectControlVisualChange()
                 addProjectControlVisualChanged = false
                 actionsControlVisualChanged = false
                 let renderMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - renderStarted) / 1_000_000
                 NSGraphicsContext.current = nil
                 trace("raster.end")
-                print("NAVIGATOR_TEXT mounted=\(textRows.count) mountMs=\(mountMilliseconds) renderMs=\(renderMilliseconds)")
+                print("NAVIGATOR_TEXT mounted=0 mountMs=\(mountMilliseconds) renderMs=\(renderMilliseconds)")
                 trace("present.begin")
                 let result = bitmap.pixels.withUnsafeBufferPointer {
                     hasSplitPane
@@ -3027,14 +4529,44 @@ struct WindowHarness {
                 }
                 trace("present.end")
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
+                if visibleWorkingActivity {
+                    try paintWorkingPatches()
+                }
                 trace("accessibility-title.begin")
-                if let menu = actions {
+                if let menu = sessionMenu {
+                    let rows = floatingMenuRows.filter { menu.command(at: $0.entryIndex) != nil }
+                    let bounds = sessionMenuSurface.convert(sessionMenuSurface.bounds, to: root)
+                    let listX = Int32(bounds.minX * scale)
+                    let listY = Int32((root.bounds.height - bounds.maxY) * scale)
+                    tw_accessibility_begin_list(window, "Session actions", 0,
+                        Int32(rows.count), 1, listX, listY,
+                        Int32(bounds.width * scale), Int32(bounds.height * scale))
+                    for row in rows {
+                        guard let command = menu.command(at: row.entryIndex),
+                              let title = menu.entries[row.entryIndex].item?.title else { continue }
+                        let rect = row.convert(row.bounds, to: root)
+                        let x = Int32(rect.minX * scale)
+                        let y = Int32((root.bounds.height - rect.maxY) * scale)
+                        let result = command.rawValue.withCString { identifier in
+                            title.withCString { label in
+                                tw_accessibility_add_action_row(window, identifier, label,
+                                    row.entryIndex == menu.selected ? 1 : 0, 1,
+                                    x, y, Int32(rect.width * scale), Int32(rect.height * scale))
+                            }
+                        }
+                        guard result == 0 else {
+                            throw WindowFailure("accessible session action exceeds its bound")
+                        }
+                    }
+                    tw_accessibility_end_list(window)
+                } else if let menu = actions {
                     let listY = Int32(navigatorHeaderHeight * scale)
                     let listTitle: String
                     switch menu.kind {
                     case .addProject: listTitle = "Add Project"
                     case .projectActions: listTitle = "Project actions"
                     case .projectCreate: listTitle = "New in Project"
+                    case .repositoryCreate: listTitle = "New in Repository"
                     case .chatProviders: listTitle = "New Chat providers"
                     }
                     tw_accessibility_begin_list(window,
@@ -3064,6 +4596,7 @@ struct WindowHarness {
                     case .addProject: setNavigatorTitle("Threading Add Project")
                     case .projectActions: setNavigatorTitle("Threading actions - " + targetPath)
                     case .projectCreate: setNavigatorTitle("Threading new in - " + targetPath)
+                    case .repositoryCreate: setNavigatorTitle("Threading new in - " + targetPath)
                     case .chatProviders: setNavigatorTitle("Threading new chat - " + targetPath)
                     }
                     let frameLabel: String
@@ -3071,6 +4604,7 @@ struct WindowHarness {
                     case .addProject: frameLabel = "ADD_PROJECT_MENU_FRAME"
                     case .projectActions: frameLabel = "ACTIONS_FRAME"
                     case .projectCreate: frameLabel = "PROJECT_CREATE_MENU_FRAME"
+                    case .repositoryCreate: frameLabel = "REPOSITORY_CREATE_MENU_FRAME"
                     case .chatProviders: frameLabel = "CHAT_PROVIDER_MENU_FRAME"
                     }
                     print("\(frameLabel) mounted=\(end - menu.first) selected=\(menu.commands[menu.selected].id) total=\(menu.commands.count)")
@@ -3116,13 +4650,24 @@ struct WindowHarness {
                     for index in savedFirst..<end {
                         let runtime = saved[index]
                         let key: SavedRuntimeKey = savedPicker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
-                        let retained = retainedRuntime(for: owner(of: key, projectID: project.id)) != nil
+                        let retained = hasActiveRuntime(key, projectID: project.id)
                         let provider = runtime.kind.map { "[\($0.displayName)] " } ?? ""
                         let account = runtime.account.map { " [\($0)]" } ?? ""
+                        let activity = savedPicker.isAgent
+                            ? nativeRuntimes[.agent(runtime.id)]?.activity ?? .idle : .idle
+                        let activityText: String = switch activity {
+                            case .idle: ""
+                            case .loading: " loading"
+                            case .working: " working"
+                            case .readyWithBackgroundWork: " ready for input; background work running"
+                            case .awaitingUser: " waiting for an answer"
+                            }
                         let title = boundedAccessibilityLabel(runtime.title,
-                            maximumBytes: 400 - provider.utf8.count - account.utf8.count)
+                            maximumBytes: 400 - provider.utf8.count - account.utf8.count
+                                - activityText.utf8.count)
                         let label = "\(provider)\(title)\(account) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
                             + (runtime.attentionTitle(at: presentationDate).map { " " + $0 } ?? "")
+                            + activityText
                         try publishAccessibleRow(window, id: runtime.id, label: label,
                                                  selected: index == savedSelected,
                                                  visibleIndex: index - savedFirst, width: width, height: height)
@@ -3146,10 +4691,43 @@ struct WindowHarness {
                             else { continue }
                             let isSelected = index == selectedInlineIndex
                             switch row {
+                            case .repository(let identity, _, let representativeID):
+                                let name = outlineSource.repositoryGroups[identity]?.name ?? identity
+                                let rowID = repositoryAccessibilityID(identity)
+                                let label = boundedAccessibilityLabel(name) + " repository"
+                                if launch != nil, !representativeID.isEmpty,
+                                   let bounds = outlineRowPixels(index),
+                                   let create = projectControlPixels(index, create: true),
+                                   let action = projectControlPixels(index, create: false) {
+                                    let result = rowID.withCString { identifier in
+                                        representativeID.withCString { target in
+                                            label.withCString { title in
+                                                tw_accessibility_add_repository_row(window,
+                                                    identifier, target, title, isSelected ? 1 : 0,
+                                                    bounds.x, bounds.y, bounds.width, bounds.height,
+                                                    create.x, create.y, create.width, create.height,
+                                                    action.x, action.y, action.width, action.height,
+                                                    actionsEnabled ? 1 : 0)
+                                            }
+                                        }
+                                    }
+                                    guard result == 0 else {
+                                        throw WindowFailure("native repository controls exceed their bound")
+                                    }
+                                } else {
+                                    try publishOutlineAccessibleRow(index, id: rowID,
+                                        label: label, selected: isSelected)
+                                }
                             case .project(let projectIndex, _):
                                 let project = projects[projectIndex]
                                 let retained = terminals[project.id] != nil || restoredProjectIDs.contains(project.id)
-                                let label = "\(boundedAccessibilityLabel(project.name)) [\(project.sessions) agents, \(project.terminalCount) terminals]\(retained ? " retained" : "")"
+                                let title = outlineSource.repositoryIdentityByProject[project.id] == nil
+                                    ? project.name : (outlineSource.branch(for: project.id)
+                                        ?? project.name) + " [\(project.path)]"
+                                let unavailable = outlineSource.repositoryIdentityByProject[project.id] != nil
+                                    && outlineSource.checkoutCatalog.checkouts[project.id] == nil
+                                let label = "\(boundedAccessibilityLabel(title)) [\(project.sessions) agents, \(project.terminalCount) terminals]\(retained ? " retained" : "")"
+                                    + (unavailable ? " Checkout unavailable at this path" : "")
                                 if launch == nil {
                                     try publishOutlineAccessibleRow(index, id: project.id,
                                         label: label, selected: isSelected)
@@ -3185,21 +4763,28 @@ struct WindowHarness {
                             case .agent(let projectIndex, let childIndex, _):
                                 let project = projects[projectIndex]
                                 let runtime = project.recentAgents[childIndex]
-                                let retained = retainedRuntime(for: owner(of: .agent(runtime.id),
-                                    projectID: project.id)) != nil
+                                let retained = hasActiveRuntime(.agent(runtime.id), projectID: project.id)
                                 let provider = runtime.kind.map { "[\($0.displayName)] " } ?? ""
                                 let account = runtime.account.map { " [\($0)]" } ?? ""
+                                let activityText: String = switch nativeRuntimes[.agent(runtime.id)]?.activity ?? .idle {
+                                case .idle: ""
+                                case .loading: " loading"
+                                case .working: " working"
+                                case .readyWithBackgroundWork: " ready for input; background work running"
+                                case .awaitingUser: " waiting for an answer"
+                                }
                                 let title = boundedAccessibilityLabel(runtime.title,
-                                    maximumBytes: 400 - provider.utf8.count - account.utf8.count)
+                                    maximumBytes: 400 - provider.utf8.count - account.utf8.count
+                                        - activityText.utf8.count)
                                 let label = "\(provider)\(title)\(account) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
                                     + (runtime.attentionTitle(at: presentationDate).map { " " + $0 } ?? "")
+                                    + activityText
                                 try publishOutlineAccessibleRow(index, id: runtime.id,
                                     label: label, selected: isSelected)
                             case .terminal(let projectIndex, let childIndex, _):
                                 let project = projects[projectIndex]
                                 let runtime = project.recentTerminals[childIndex]
-                                let retained = retainedRuntime(for: owner(of: .terminal(runtime.id),
-                                    projectID: project.id)) != nil
+                                let retained = hasActiveRuntime(.terminal(runtime.id), projectID: project.id)
                                 let label = "\(runtime.identityTitle) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
                                 try publishOutlineAccessibleRow(index, id: runtime.id,
                                     label: label, selected: isSelected)
@@ -3227,6 +4812,286 @@ struct WindowHarness {
             var event = TWEvent()
             var selectionWasCommitted = false
             var pointerActivatedRow = false
+            if let pending = pendingArchive, let result = pending.gate.take() {
+                pendingArchive = nil
+                switch result {
+                case .success:
+                    let key = SavedRuntimeKey.agent(pending.id)
+                    if let index = projectIndexes[pending.projectID], projects.indices.contains(index),
+                       let row = projects[index].recentAgents.firstIndex(where: { $0.id == pending.id }) {
+                        projects[index].recentAgents.remove(at: row)
+                        projects[index].sessions = max(0, projects[index].sessions - 1)
+                        if inlineSelection?.id == pending.id {
+                            inlineSelection = NavigatorOutlineItem(projectID: pending.projectID,
+                                projectIndex: index)
+                            outlineScrollSelection = true
+                        }
+                        outlineNeedsReload = true
+                    }
+                    restoredRuntimes.removeValue(forKey: key)?.stop()
+                    nativeRuntimes.removeValue(forKey: key)?.runtime.stop()
+                    if activePageTarget?.id == pending.id {
+                        activePane?.focus(false, window: window)
+                        activePane = nil
+                        activePageTarget = nil
+                        idlePane = WorkspacePlaceholderPane(onSubmit: {
+                            guard pendingFolderImport == nil, pendingSelection == nil else { return }
+                            composerSubmitRequested = true
+                        })
+                        idlePane?.setThemeAppearance()
+                        tw_workspace_terminal_top_inset(window, 0)
+                        tw_workspace_mode(window, Int32(sidebarWidth), 1)
+                        tw_workspace_placeholder_mode(window, 1)
+                        focusSidebar(true)
+                    }
+                    print("SESSION_ARCHIVED id=\(pending.id)")
+                case .failure(let error):
+                    tw_title(window, "Threading - could not archive conversation")
+                    print("SESSION_ARCHIVE_REFUSED id=\(pending.id) \(error)")
+                }
+                fflush(nil)
+                dirty = true
+                continue
+            }
+            if let pending = pendingPin, let result = pending.gate.take() {
+                pendingPin = nil
+                switch result {
+                case .success(let saved):
+                    if let index = projectIndexes[pending.projectID], projects.indices.contains(index),
+                       let row = projects[index].recentAgents.firstIndex(where: { $0.id == pending.id }) {
+                        var runtime = projects[index].recentAgents.remove(at: row)
+                        runtime.isPinned = saved.pinned
+                        let boundary = projects[index].recentAgents.firstIndex(where: { !$0.isPinned })
+                            ?? projects[index].recentAgents.count
+                        projects[index].recentAgents.insert(runtime, at: boundary)
+                        outlineNeedsReload = true
+                    }
+                    print("SESSION_PIN_SAVED id=\(pending.id) pinned=\(saved.pinned)")
+                case .failure(let error):
+                    tw_title(window, "Threading - could not change session pin")
+                    print("SESSION_PIN_REFUSED id=\(pending.id) \(error)")
+                }
+                fflush(nil)
+                dirty = true
+                continue
+            }
+            if let pending = pendingRenamePrompt, let result = pending.gate.take() {
+                pendingRenamePrompt = nil
+                switch result {
+                case .success(let title?):
+                    beginRename(pending.id, projectID: pending.projectID, title: title,
+                                displayedCurrentTitle: pending.displayedCurrentTitle)
+                case .success(nil):
+                    print("SESSION_RENAME_CANCELLED id=\(pending.id)")
+                case .failure(let error):
+                    tw_title(window, "Threading - could not rename session")
+                    print("SESSION_RENAME_PROMPT_REFUSED id=\(pending.id) \(error)")
+                }
+                fflush(nil)
+                dirty = true
+                continue
+            }
+            if let pending = pendingClosePrompt, let result = pending.gate.take() {
+                pendingClosePrompt = nil
+                switch result {
+                case .success(true):
+                    beginClose(pending.id, projectID: pending.projectID)
+                case .success(false):
+                    print("SESSION_CLOSE_CANCELLED id=\(pending.id)")
+                case .failure(let error):
+                    tw_title(window, "Threading - could not confirm Close Session")
+                    print("SESSION_CLOSE_PROMPT_REFUSED id=\(pending.id) \(error)")
+                }
+                fflush(nil)
+                dirty = true
+                continue
+            }
+            if let pending = pendingSessionMenuPresence,
+               let presence = pending.gate.take() {
+                pendingSessionMenuPresence = nil
+                if case .running = presence, var menu = sessionMenu,
+                   menu.sessionID == pending.id, menu.projectID == pending.projectID {
+                    menu.revealCloseForRunningSession()
+                    sessionMenu = menu
+                    dirty = true
+                }
+            }
+            if let pending = pendingClose, let result = pending.gate.take() {
+                pendingClose = nil
+                switch result {
+                case .success:
+                    let key = SavedRuntimeKey.agent(pending.id)
+                    restoredRuntimes.removeValue(forKey: key)?.stop()
+                    nativeRuntimes.removeValue(forKey: key)?.runtime.stop()
+                    if let target = activePageTarget, target.kind == .agent,
+                       target.id == pending.id, target.projectID == pending.projectID,
+                       let index = projectIndexes[pending.projectID],
+                       projects.indices.contains(index),
+                       let childIndex = projects[index].recentAgents.firstIndex(where: {
+                           $0.id == pending.id
+                       }) {
+                        let saved = projects[index].recentAgents[childIndex]
+                        activePane?.focus(false, window: window)
+                        let selected = NavigatorOutlineItem(kind: .agent,
+                            projectID: pending.projectID, id: pending.id,
+                            projectIndex: index, childIndex: childIndex)
+                        let dormant = WorkspaceDormantPane(
+                            pageName: readableNavigatorText(saved.title),
+                            displayTitle: readableNavigatorText(saved.title),
+                            pageIdentity: pending.id,
+                            icon: ProviderMarks.image(for: saved.kind, selected: false),
+                            supportsResume: saved.kind?.supportsResume ?? false,
+                            canResume: saved.agentSessionID != nil,
+                            onReveal: { pageReveal.target = selected })
+                        activePane = dormant
+                        activePageTarget = selected
+                        inlineSelection = selected
+                        dormant.focus(!sidebarFocused, window: window)
+                    }
+                    outlineNeedsReload = true
+                    print("SESSION_CLOSED id=\(pending.id)")
+                case .failure(let error):
+                    tw_title(window, "Threading - could not close session")
+                    print("SESSION_CLOSE_REFUSED id=\(pending.id) \(error)")
+                }
+                fflush(nil)
+                dirty = true
+                continue
+            }
+            if let pending = pendingRename, let result = pending.gate.take() {
+                pendingRename = nil
+                switch result {
+                case .success(let saved):
+                    if let index = projectIndexes[pending.projectID], projects.indices.contains(index),
+                       let row = projects[index].recentAgents.firstIndex(where: { $0.id == pending.id }) {
+                        let visibleTitle = String(saved.title.unicodeScalars.prefix(
+                            maximumPersistedRuntimeTitleScalars))
+                        projects[index].recentAgents[row].title = visibleTitle
+                        projects[index].recentAgents[row].customTitle = saved.customTitle.map {
+                            String($0.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars))
+                        }
+                        if let target = activePageTarget, target.kind == .agent,
+                           target.id == pending.id, target.projectID == pending.projectID {
+                            activePane?.chrome.updatePageName(readableNavigatorText(visibleTitle))
+                        }
+                        outlineNeedsReload = true
+                    }
+                    print("SESSION_RENAME_SAVED id=\(pending.id) changed=\(saved.changed)")
+                case .failure(let error):
+                    tw_title(window, "Threading - could not rename session")
+                    print("SESSION_RENAME_REFUSED id=\(pending.id) \(error)")
+                }
+                fflush(nil)
+                dirty = true
+                continue
+            }
+            if let gate = pendingSnoozeScan, let result = gate.take() {
+                pendingSnoozeScan = nil
+                switch result {
+                case .success(let scan):
+                    snoozeDeadlines = scan.active
+                    refreshSnoozeDeadline()
+                    let expired = Set(scan.expired.map(\.uuidString))
+                    if !expired.isEmpty {
+                        for projectIndex in projects.indices {
+                            for row in projects[projectIndex].recentAgents.indices
+                                where expired.contains(projects[projectIndex].recentAgents[row].id) {
+                                projects[projectIndex].recentAgents[row].snoozedUntil = nil
+                                projects[projectIndex].recentAgents[row].attention = .woke
+                            }
+                        }
+                        dirty = true
+                        if let target = activePageTarget, target.kind == .agent,
+                           expired.contains(target.id) {
+                            pendingSnoozeAcknowledgements[target.id] = target.projectID
+                        }
+                    }
+                    print("SESSION_SNOOZE_RECONCILED active=\(scan.active.count) expired=\(scan.expired.count)")
+                case .failure(let error):
+                    nextSnoozeScanAttempt = Date().addingTimeInterval(1)
+                    print("SESSION_SNOOZE_RECONCILE_RETRY \(error)")
+                }
+                fflush(nil)
+                continue
+            }
+            if pendingSnoozeScan == nil, pendingSnoozeExpiry == nil, pendingSnooze == nil,
+               let pending = pendingSnoozePicker, let result = pending.gate.take() {
+                pendingSnoozePicker = nil
+                switch result {
+                case .success(let deadline?):
+                    if deadline > Date(),
+                       let projectIndex = projectIndexes[pending.projectID],
+                       projects.indices.contains(projectIndex),
+                       projects[projectIndex].recentAgents.contains(where: {
+                           $0.id == pending.id
+                       }) {
+                        beginSnooze(pending.id, projectID: pending.projectID,
+                            change: .snooze(until: deadline, at: Date(),
+                                            hadTurnInFlight: pending.hadTurnInFlight))
+                    }
+                case .success(nil):
+                    print("SESSION_SNOOZE_CUSTOM_CANCELLED \(pending.id)")
+                case .failure(let error):
+                    print("SESSION_SNOOZE_CUSTOM_REFUSED \(error)")
+                    tw_title(window, "Threading - custom snooze failed")
+                }
+                fflush(nil)
+                dirty = true
+            }
+            if let pending = pendingSnooze, let result = pending.gate.take() {
+                pendingSnooze = nil
+                switch result {
+                case .success(let saved):
+                    if let id = SessionID(uuidString: pending.id) {
+                        snoozeDeadlines[id] = saved.deadline
+                        refreshSnoozeDeadline()
+                    }
+                    updateSnoozeRow(pending.id, projectID: pending.projectID,
+                                    result: saved)
+                    print("SESSION_SNOOZE_SAVED id=\(pending.id) deadline=\(String(describing: saved.deadline))")
+                case .failure(let error):
+                    tw_title(window, "Threading - could not change session snooze")
+                    print("SESSION_SNOOZE_REFUSED id=\(pending.id) \(error)")
+                }
+                fflush(nil)
+                dirty = true
+                continue
+            }
+            if let pending = pendingSnoozeExpiry, let result = pending.gate.take() {
+                pendingSnoozeExpiry = nil
+                switch result {
+                case .success(let expired):
+                    for id in pending.ids {
+                        snoozeDeadlines[id] = expired[id]?.deadline
+                    }
+                    refreshSnoozeDeadline()
+                    for projectIndex in projects.indices {
+                        for row in projects[projectIndex].recentAgents.indices {
+                            guard let id = SessionID(uuidString:
+                                projects[projectIndex].recentAgents[row].id),
+                                  let saved = expired[id] else { continue }
+                            projects[projectIndex].recentAgents[row].snoozedUntil = saved.deadline
+                            projects[projectIndex].recentAgents[row].attention = saved.hasWake
+                                ? .woke : nil
+                        }
+                    }
+                    dirty = true
+                    print("SESSION_SNOOZE_EXPIRED count=\(expired.values.filter(\.changed).count)")
+                case .failure(let error):
+                    nextSnoozeDeadline = Date().addingTimeInterval(1)
+                    print("SESSION_SNOOZE_EXPIRY_RETRY \(error)")
+                }
+                fflush(nil)
+                continue
+            }
+            if pendingSnoozeScan == nil, pendingSnooze == nil,
+               pendingSnoozeExpiry == nil,
+               let acknowledgement = pendingSnoozeAcknowledgements.first {
+                pendingSnoozeAcknowledgements[acknowledgement.key] = nil
+                beginSnooze(acknowledgement.key,
+                    projectID: acknowledgement.value, change: .acknowledge)
+                continue
+            }
             if let pending = pendingExpansion {
                 if let result = pending.gate.take() {
                     pendingExpansion = nil
@@ -3242,6 +5107,30 @@ struct WindowHarness {
                             dirty = true
                         }
                         print("OUTLINE_EXPANSION_REFUSED \(error)")
+                    }
+                    fflush(nil)
+                    if quitAfterExpansion { return }
+                } else if tw_next_timeout(window, &event, 33) == 1 {
+                    if event.kind == 5 { quitAfterExpansion = true }
+                    if event.kind == 1 { try updateSurface(event) }
+                    if event.kind == 24 { focusSidebar(event.action == 1) }
+                    _ = routeTerminalInput(event)
+                }
+                continue
+            }
+            if let pending = pendingRepositoryExpansion {
+                if let result = pending.gate.take() {
+                    pendingRepositoryExpansion = nil
+                    switch result {
+                    case .success:
+                        print("OUTLINE_REPOSITORY_SAVED identity=\(pending.identity) expanded=\(pending.expanded)")
+                    case .failure(let error):
+                        collapsedRepositoryIdentities = pending.previous
+                        PreferenceStore.shared.set(Array(pending.previous),
+                            forKey: SidebarDefaults.collapsedRepositoriesKey)
+                        outlineNeedsReload = true
+                        dirty = true
+                        print("OUTLINE_REPOSITORY_REFUSED \(error)")
                     }
                     fflush(nil)
                     if quitAfterExpansion { return }
@@ -3284,14 +5173,49 @@ struct WindowHarness {
                     }
                     continue
                 }
-            } else if pendingFolderImport != nil {
+            } else if let pendingFolderImport {
                 if tw_next_timeout(window, &event, 33) == 1 {
                     if event.kind == 5 { return }
                     if event.kind == 1 {
                         try updateSurface(event)
                     }
-                    if event.kind == 24 { focusSidebar(event.action == 1) }
-                    _ = routeTerminalInput(event)
+                    if !pendingFolderImport.blocksParentInput {
+                        if event.kind == 24 { focusSidebar(event.action == 1) }
+                        _ = routeTerminalInput(event)
+                    }
+                }
+                continue
+            } else if let pendingRenamePrompt {
+                if tw_next_timeout(window, &event, 33) == 1 {
+                    if event.kind == 5 {
+                        pendingRenamePrompt.gate.cancel()
+                        return
+                    }
+                    if event.kind == 1 { try updateSurface(event) }
+                }
+                continue
+            } else if let pendingClosePrompt {
+                if tw_next_timeout(window, &event, 33) == 1 {
+                    if event.kind == 5 {
+                        pendingClosePrompt.gate.cancel()
+                        return
+                    }
+                    if event.kind == 1 { try updateSurface(event) }
+                }
+                continue
+            } else if pendingClose != nil {
+                if tw_next_timeout(window, &event, 33) == 1 {
+                    if event.kind == 5 { return }
+                    if event.kind == 1 { try updateSurface(event) }
+                }
+                continue
+            } else if let pendingSnoozePicker {
+                if tw_next_timeout(window, &event, 33) == 1 {
+                    if event.kind == 5 {
+                        pendingSnoozePicker.gate.cancel()
+                        return
+                    }
+                    if event.kind == 1 { try updateSurface(event) }
                 }
                 continue
             } else {
@@ -3300,7 +5224,11 @@ struct WindowHarness {
                 let awaitingCreation = terminals.values.contains { $0.hasPendingTerminalCreation }
                     || restoredRuntimes.values.contains { $0.hasPendingAgentCreation }
                 let pollsRuntime = awaitingCreation || activePane?.needsPolling == true
-                    || pendingOpenInCatalogue != nil || pendingOpenInLaunch != nil
+                    || pendingNativeCreation != nil || pendingOpenInCatalogue != nil
+                    || pendingOpenInLaunch != nil || pendingArchive != nil || pendingPin != nil
+                    || pendingSnoozeScan != nil || pendingSnooze != nil
+                    || pendingSnoozeExpiry != nil
+                    || pendingRename != nil || pendingClose != nil
                     || openInIcons.isLoading
                 // A picker without a terminal still owes a deadline update. Sleep until that
                 // expiry (at most one second to recheck wall-clock changes), while the bridge
@@ -3308,7 +5236,14 @@ struct WindowHarness {
                 let expiryWait = nextVisibleAttentionExpiry.map {
                     Int32(max(1, min(1_000, ceil($0.timeIntervalSinceNow * 1_000))))
                 }
-                let timeout: Int32? = pollsRuntime ? 33 : expiryWait
+                let snoozeWait = pendingSnoozeExpiry == nil ? nextSnoozeDeadline.map {
+                    Int32(max(1, min(1_000, ceil($0.timeIntervalSinceNow * 1_000))))
+                } : nil
+                let activityWait = visibleWorkingActivity && !Design.Motion.reducesStatusMotion
+                    ? Int32(max(1, min(42, ceil(nextActivityFrame.timeIntervalSinceNow * 1_000))))
+                    : nil
+                let timeout = [pollsRuntime ? Int32(33) : nil, expiryWait, snoozeWait, activityWait]
+                    .compactMap { $0 }.min()
                 let received = timeout.map { tw_next_timeout(window, &event, $0) }
                     ?? tw_next(window, &event)
                 if timeout != nil, received == 0 { continue }
@@ -3322,6 +5257,17 @@ struct WindowHarness {
                 guard event.action == 0,
                       let path = String(validatingCString: tw_event_text(&event)) else {
                     print("PROJECT_IMPORT_REFUSED invalid dropped path"); fflush(nil)
+                    continue
+                }
+                if Int(event.x) >= sidebarWidth {
+                    let wakeIdentity = tw_worker_wake_identity(window)
+                    let accepted = (activePane as? WorkspaceConversationPane)?
+                        .acceptFileDrop(path, windowX: Int(event.x), windowY: Int(event.y),
+                                        originX: sidebarWidth, wakeIdentity: wakeIdentity)
+                        ?? (activePane == nil ? idlePane?.acceptFileDrop(path,
+                            windowX: Int(event.x), windowY: Int(event.y),
+                            originX: sidebarWidth, wakeIdentity: wakeIdentity) : nil) ?? false
+                    if accepted { dirty = true }
                     continue
                 }
                 if actions != nil { dismissActions(returnToParent: false) }
@@ -3362,6 +5308,11 @@ struct WindowHarness {
                 dirty = true
             }
             if event.kind == 45 { continue }
+            if event.kind == 62 {
+                toggleSettings()
+                continue
+            }
+            if settingsPane != nil && event.kind == 2 { toggleSettings() }
             if event.kind == 44 {
                 if event.action == 0 {
                     LinuxTheme.setDark(!LinuxTheme.isDark)
@@ -3421,21 +5372,32 @@ struct WindowHarness {
                 let index = first + slot
                 guard actions == nil, accountPicker == nil, savedPicker == nil,
                       slot >= 0, slot < outline.visibleRowIndexes.count,
-                      case .some(.project(let projectIndex, let projectID)) = sidebarRows.row(at: index),
+                      let row = sidebarRows.row(at: index),
                       let id = String(validatingCString: tw_event_text(&event)),
-                      projectID == id, let target = ProjectID(uuidString: id)
+                      let target = ProjectID(uuidString: id)
                 else { continue }
-                selected = projectIndex
-                openProjectCreateMenu(for: target, returnToSidebar: sidebarFocused)
+                switch row {
+                case .project(let projectIndex, let projectID) where projectID == id:
+                    selected = projectIndex
+                    openProjectCreateMenu(for: target, returnToSidebar: sidebarFocused)
+                case .repository(_, let projectIndex, let projectID) where projectID == id:
+                    selected = projectIndex
+                    openProjectCreateMenu(for: target, returnToSidebar: sidebarFocused,
+                                          repository: true)
+                default: break
+                }
                 continue
             }
             if event.kind == 29, launch != nil {
                 contentWindow.cancelPointerGesture()
-                guard actions == nil, accountPicker == nil, savedPicker == nil,
-                      projects.indices.contains(selected),
-                      let target = ProjectID(uuidString: projects[selected].id)
-                else { continue }
-                openActions(for: target, returnToSidebar: true)
+                guard actions == nil, accountPicker == nil, savedPicker == nil else { continue }
+                if let item = inlineSelection, item.kind == .agent {
+                    openSessionMenu(item.id, projectID: item.projectID,
+                        openInApps: openInCatalogue.apps)
+                } else if projects.indices.contains(selected),
+                          let target = ProjectID(uuidString: projects[selected].id) {
+                    openActions(for: target, returnToSidebar: true)
+                }
                 continue
             }
             if event.kind == 27 {
@@ -3448,16 +5410,17 @@ struct WindowHarness {
                 if event.action == 4 || event.action == 7 {
                     contentWindow.cancelPointerGesture()
                     _ = navigatorRoot.takeActivatedRowSlot()
-                    _ = navigatorRoot.takeActivatedProjectActionID()
-                    _ = navigatorRoot.takeActivatedProjectCreateID()
                     activatedOutlineItem = nil
                     activatedOutlineProjectActionID = nil
                     activatedOutlineProjectCreateID = nil
+                    activatedOutlineSessionActionID = nil
+                    activatedOutlineSessionArchiveID = nil
+                    activatedSessionMenuEntry = nil
                     activatedAccountHandle = nil
                     rowActionMenuGesture = false
                     rowActionMenuEntered = false
-                    if hoveredProjectID != nil {
-                        hoveredProjectID = nil; dirty = true
+                    if hoveredOutlineItem != nil {
+                        hoveredOutlineItem = nil; dirty = true
                     }
                     if event.action == 7, activePane == nil, let idlePane {
                         var motion = event
@@ -3471,19 +5434,19 @@ struct WindowHarness {
                 }
                 // Row hover uses the outline's indexed offset lookup and one geometry check;
                 // a pointer move never scans a stored catalogue or builds hidden controls.
-                var pointerProjectID: String?
+                var pointerOutlineItem: NavigatorOutlineItem?
                 if actions == nil, accountPicker == nil, savedPicker == nil,
                    launch != nil, let index = outlineRowIndex(at: event),
                    let item = outline.item(atRow: index) as? NavigatorOutlineItem,
-                   item.kind == .project,
+                   (item.kind == .project || item.kind == .repository || item.kind == .agent),
                    let row = outlineRowPixels(index) {
                     if event.x >= row.x, event.x < row.x + row.width,
                        event.y >= row.y, event.y < row.y + row.height {
-                        pointerProjectID = item.projectID
+                        pointerOutlineItem = item
                     }
                 }
-                if hoveredProjectID != pointerProjectID {
-                    hoveredProjectID = pointerProjectID
+                if hoveredOutlineItem != pointerOutlineItem {
+                    hoveredOutlineItem = pointerOutlineItem
                     dirty = true
                 }
                 let eventType: NSEvent.EventType
@@ -3500,9 +5463,47 @@ struct WindowHarness {
                     activatedOutlineItem = nil
                     activatedOutlineProjectActionID = nil
                     activatedOutlineProjectCreateID = nil
+                    activatedOutlineSessionActionID = nil
+                    activatedOutlineSessionArchiveID = nil
+                    activatedSessionMenuEntry = nil
                 }
                 _ = contentWindow.dispatchToContent(NSEvent(type: eventType,
                                                               locationInWindow: point))
+                if event.action == 1, let actionID = activatedOutlineSessionActionID {
+                    activatedOutlineSessionActionID = nil
+                    if pointerOutlineItem?.kind == .agent,
+                       pointerOutlineItem?.id == actionID,
+                       let projectID = pointerOutlineItem?.projectID {
+                        openSessionMenu(actionID, projectID: projectID,
+                            openInApps: openInCatalogue.apps)
+                    }
+                    continue
+                }
+                if event.action == 5,
+                   sessionMenu == nil || !sessionMenuFrame.contains(point) {
+                    if pointerOutlineItem?.kind == .agent,
+                       let item = pointerOutlineItem {
+                        openSessionMenu(item.id, projectID: item.projectID,
+                            openInApps: openInCatalogue.apps)
+                        continue
+                    }
+                    dismissSessionMenu()
+                }
+                if let menu = sessionMenu {
+                    if event.action == 3, let entry = activatedSessionMenuEntry,
+                       let command = menu.command(at: entry) {
+                        activatedSessionMenuEntry = nil
+                        sessionMenu?.selected = entry
+                        chooseSessionMenu(command)
+                    } else if event.action == 1, !sessionMenuFrame.contains(point) {
+                        contentWindow.cancelPointerGesture()
+                        _ = navigatorRoot.takeActivatedRowSlot()
+                        activatedOutlineItem = nil
+                        dismissSessionMenu()
+                    }
+                    if navigatorRoot.takeProjectControlVisualChange() { dirty = true }
+                    continue
+                }
                 if event.action == 3, let chosen = activatedMenuEntry,
                    var menu = actions, menu.commands.indices.contains(chosen) {
                     activatedMenuEntry = nil
@@ -3539,11 +5540,18 @@ struct WindowHarness {
                     else { openActions(for: nil, returnToSidebar: sidebarFocused) }
                     continue
                 }
+                if let archiveID = activatedOutlineSessionArchiveID {
+                    activatedOutlineSessionArchiveID = nil
+                    if pointerOutlineItem?.kind == .agent,
+                       pointerOutlineItem?.id == archiveID,
+                       let projectID = pointerOutlineItem?.projectID {
+                        beginArchive(archiveID, projectID: projectID)
+                    }
+                    continue
+                }
                 let wasSidebarFocused = sidebarFocused
                 let activatedCreate = activatedOutlineProjectCreateID
-                    ?? navigatorRoot.takeActivatedProjectCreateID()
                 let activatedProject = activatedOutlineProjectActionID
-                    ?? navigatorRoot.takeActivatedProjectActionID()
                 activatedOutlineProjectCreateID = nil
                 activatedOutlineProjectActionID = nil
                 let activatedRow = navigatorRoot.takeActivatedRowSlot()
@@ -3557,7 +5565,7 @@ struct WindowHarness {
                     // Mac. The right press has no selection effect and Shift+F10 remains its
                     // keyboard route. Resolve only the visible row hit above, then recheck
                     // identity before opening the host-owned command surface.
-                    guard let id = pointerProjectID,
+                    guard let id = pointerOutlineItem?.projectID,
                           let index = projectIndexes[id], projects.indices.contains(index),
                           projects[index].id == id, let target = ProjectID(uuidString: id)
                     else { continue }
@@ -3597,8 +5605,9 @@ struct WindowHarness {
                 } else if event.action == 1 {
                     if activePane != nil { focusSidebar(true) }
                     if let activatedCreate, let target = ProjectID(uuidString: activatedCreate),
-                       pointerProjectID == activatedCreate {
-                        openProjectCreateMenu(for: target, returnToSidebar: wasSidebarFocused)
+                       pointerOutlineItem?.projectID == activatedCreate {
+                        openProjectCreateMenu(for: target, returnToSidebar: wasSidebarFocused,
+                                              repository: pointerOutlineItem?.kind == .repository)
                         if actions?.projectID == target {
                             if let rowIndex = outlineRowIndex(at: event),
                                let source = projectControlPixels(rowIndex, create: true) {
@@ -3611,7 +5620,7 @@ struct WindowHarness {
                         continue
                     }
                     if let activatedProject, let target = ProjectID(uuidString: activatedProject),
-                       pointerProjectID == activatedProject {
+                       pointerOutlineItem?.projectID == activatedProject {
                         openActions(for: target, returnToSidebar: true)
                         if actions?.projectID == target {
                             if let rowIndex = outlineRowIndex(at: event),
@@ -3631,6 +5640,46 @@ struct WindowHarness {
                         event.action = 0
                     } else { continue }
                 } else { continue }
+            }
+            if var menu = sessionMenu {
+                let selectable = menu.entries.indices.filter { menu.command(at: $0) != nil }
+                switch event.kind {
+                case 5: return
+                case 1: try updateSurface(event); continue
+                case 12, 24:
+                    if menu.page != .actions { menu.returnToActions(); sessionMenu = menu; dirty = true }
+                    else { dismissSessionMenu() }
+                    continue
+                case 10:
+                    if let command = menu.command(at: menu.selected),
+                       command == .copy || command == .openIn {
+                        chooseSessionMenu(command)
+                    }
+                    continue
+                case 11:
+                    if menu.page != .actions { chooseSessionMenu(.back) }
+                    else { dismissSessionMenu() }
+                    continue
+                case 3, 4:
+                    guard let current = selectable.firstIndex(of: menu.selected),
+                          !selectable.isEmpty else { continue }
+                    let step = event.kind == 3 ? -1 : 1
+                    menu.selected = selectable[(current + step + selectable.count) % selectable.count]
+                    sessionMenu = menu
+                    dirty = true
+                    continue
+                case 2, 15:
+                    let slot = Int(event.key)
+                    guard sessionMenuVisibleEntries.indices.contains(slot) else { continue }
+                    menu.selected = sessionMenuVisibleEntries[slot]
+                    sessionMenu = menu
+                    dirty = true
+                    if event.kind == 2 && event.action == 1 { continue }
+                case 8: break
+                default: continue
+                }
+                if let command = menu.command(at: menu.selected) { chooseSessionMenu(command) }
+                continue
             }
             if var menu = actions {
                 switch event.kind {
@@ -3667,10 +5716,23 @@ struct WindowHarness {
                     print("ACTION_REFUSED \(command.rawValue) \(reason)"); fflush(nil)
                     continue
                 case .invoked:
-                    if menu.kind == .projectCreate, command == .newChat,
+                    if (menu.kind == .projectCreate || menu.kind == .repositoryCreate),
+                       command == .newChat,
                        let target = menu.projectID {
                         openChatProvidersMenu(for: target,
                             returnToSidebar: menu.returnToSidebar)
+                        continue
+                    }
+                    if menu.kind == .repositoryCreate, command == .newWorktree,
+                       let launch, let target = menu.projectID,
+                       let index = projectIndexes[target.uuidString], projects.indices.contains(index),
+                       projects[index].id == target.uuidString,
+                       pendingFolderImport == nil {
+                        let sourcePath = projects[index].path
+                        dismissActions(returnToParent: false)
+                        pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1],
+                            choice: .worktree(sourcePath: sourcePath,
+                                              dark: LinuxTheme.isDark))
                         continue
                     }
                     if menu.kind == .chatProviders, !menu.returnToSidebar,
@@ -3726,7 +5788,12 @@ struct WindowHarness {
                 }
                 continue
             }
-            if routeTerminalInput(event) { continue }
+            let routed = routeTerminalInput(event)
+            if let dormant = activePane as? WorkspaceDormantPane,
+               dormant.takeResumeRequest() {
+                event = TWEvent()
+                event.kind = 8
+            } else if routed { continue }
             switch event.kind {
             case 5: return
             case 12:
@@ -3744,7 +5811,7 @@ struct WindowHarness {
                     dirty = true
                 } else if activePane != nil {
                     focusSidebar(false)
-                } else if idlePane?.isComposing == true {
+                } else if !sidebarFocused, idlePane?.isComposing == true {
                     _ = tw_workspace_editor_focus(window, 0)
                     focusSidebar(true)
                     dirty = true
@@ -3775,20 +5842,29 @@ struct WindowHarness {
                     if accountPicker != nil { accountSelected = candidate }
                     else if savedPicker != nil { savedSelected = candidate }
                     else if let row = sidebarRows.row(at: candidate) {
-                        if case .project(let projectIndex, let projectID) = row,
-                           pointerActivatedRow,
+                        if pointerActivatedRow,
+                           (row.isExpandableParent),
                            let cell = outline.view(atColumn: 0, row: candidate,
                                 makeIfNecessary: false) as? Specimen.Row {
                             let point = NSPoint(x: CGFloat(event.x) / scale,
                                 y: navigatorRoot.bounds.height - CGFloat(event.y) / scale)
                             if cell.productionDisclosureContains(cell.convert(point, from: navigatorRoot)) {
-                                toggleProjectExpansion(projectID: projectID, projectIndex: projectIndex)
+                                let item = NavigatorOutlineItem(row, projects: projects)
+                                if item.kind == .project {
+                                    toggleProjectExpansion(projectID: item.projectID,
+                                        projectIndex: item.projectIndex)
+                                } else if item.kind == .repository {
+                                    if outline.isItemExpanded(item) { outline.collapseItem(item) }
+                                    else { outline.expandItem(item) }
+                                }
                                 dirty = true
                                 continue
                             }
                         }
                         inlineSelection = NavigatorOutlineItem(row, projects: projects)
                         switch row {
+                        case .repository(_, let projectIndex, _):
+                            if projects.indices.contains(projectIndex) { selected = projectIndex }
                         case .project(let projectIndex, _), .agent(let projectIndex, _, _),
                              .terminal(let projectIndex, _, _):
                             selected = projectIndex
@@ -3849,7 +5925,8 @@ struct WindowHarness {
                             && !(!picker.isAgent && $0.canReopenSavedTerminal)
                     } ?? false
                     guard reuses || existing != nil
-                            || terminals.count + restoredRuntimes.count + nativeRuntimes.count < maximumOpenRuntimes else {
+                            || terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                                + (composerCreationPending ? 1 : 0) < maximumOpenRuntimes else {
                         tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                         break
                     }
@@ -3863,7 +5940,7 @@ struct WindowHarness {
                     if reuses, let existing { session = existing }
                     else {
                         existing?.stop()
-                        session = GraphicalTerminal()
+                        session = makeObservedTerminal()
                         retain(session, for: runtimeOwner)
                         restoredProjectIDs.insert(project.id)
                         if picker.isAgent {
@@ -3894,7 +5971,8 @@ struct WindowHarness {
                 }
                 let project = projects[selected]
                 guard terminals[project.id] != nil
-                        || terminals.count + restoredRuntimes.count + nativeRuntimes.count < maximumOpenRuntimes else {
+                        || terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                            + (composerCreationPending ? 1 : 0) < maximumOpenRuntimes else {
                     tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                     break
                 }
@@ -3909,11 +5987,12 @@ struct WindowHarness {
                 let session: GraphicalTerminal
                 if let existing = terminals[project.id] { session = existing }
                 else {
-                    guard terminals.count + restoredRuntimes.count + nativeRuntimes.count < maximumOpenRuntimes else {
+                    guard terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                            + (composerCreationPending ? 1 : 0) < maximumOpenRuntimes else {
                         tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                         break
                     }
-                    session = GraphicalTerminal()
+                    session = makeObservedTerminal()
                     terminals[project.id] = session
                     session.start(store: launch[0], socket: launch[1], directory: project.path,
                                   executable: launch[2], arguments: Array(launch.dropFirst(3)))
@@ -3931,6 +6010,7 @@ struct WindowHarness {
                 // Its row must survive discarding the finished surface for an explicit new shell.
                 if reconcileTerminals() { dirty = true }
                 guard terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                        + (composerCreationPending ? 1 : 0)
                         - (terminals[project.id] == nil ? 0 : 1) < maximumOpenRuntimes else {
                     tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                     break
@@ -3944,7 +6024,7 @@ struct WindowHarness {
                     existing.stop()
                     terminals.removeValue(forKey: project.id)
                 }
-                let session = GraphicalTerminal()
+                let session = makeObservedTerminal()
                 terminals[project.id] = session
                 session.start(store: launch[0], socket: launch[1], directory: project.path,
                               executable: launch[2], arguments: Array(launch.dropFirst(3)))
@@ -3969,9 +6049,12 @@ struct WindowHarness {
                     let preferred = kind == .codex ? codexAccount : claudeAccount
                     let handle = accounts.contains(preferred) ? preferred : .standard
                     composerAccount = AccountID(provider: kind, handle: handle)
-                    composerPermissionMode = .manual
+                    composerPermissionMode = nil
+                    composerFastMode = nil
+                    composerUsesNativeUI = false
                     composerModel = nil
                     composerEffort = nil
+                    composerShouldRestoreRunChoice = true
                     loadComposerModels()
                     idlePane.showComposer(projectName: projects[selected].name,
                         providerName: kind.displayName)
@@ -4008,6 +6091,8 @@ struct WindowHarness {
                     if next != selectedInlineIndex, let row = sidebarRows.row(at: next) {
                         inlineSelection = NavigatorOutlineItem(row, projects: projects)
                         switch row {
+                        case .repository(_, let projectIndex, _):
+                            if projects.indices.contains(projectIndex) { selected = projectIndex }
                         case .project(let projectIndex, _),
                              .agent(let projectIndex, _, _),
                              .terminal(let projectIndex, _, _):
@@ -4019,9 +6104,16 @@ struct WindowHarness {
                 }
             case 36:
                 guard accountPicker == nil, savedPicker == nil, launch != nil,
-                      case .some(.project(let projectIndex, let projectID)) = sidebarRows.row(at: selectedInlineIndex)
-                else { break }
-                toggleProjectExpansion(projectID: projectID, projectIndex: projectIndex)
+                      let item = inlineSelection,
+                      item.kind == .project || item.kind == .repository else { break }
+                if item.kind == .project {
+                    toggleProjectExpansion(projectID: item.projectID,
+                        projectIndex: item.projectIndex)
+                } else if outline.isItemExpanded(item) {
+                    outline.collapseItem(item)
+                } else {
+                    outline.expandItem(item)
+                }
                 dirty = true
             case 10:
                 guard accountPicker == nil, savedPicker == nil, launch != nil,
@@ -4046,7 +6138,9 @@ struct WindowHarness {
                                               runtimes: &restoredRuntimes,
                                               pending: &pendingAgentProjects,
                                               publishedCounts: &publishedAgentCounts,
-                                              retainedProjects: &restoredProjectIDs) { dirty = true }
+                                              retainedProjects: &restoredProjectIDs,
+                                              onCommitted: rememberCommittedComposerChoice,
+                                              onFailed: forgetFailedComposerChoice) { dirty = true }
                     guard !projects[selected].recentAgents.isEmpty else {
                         let pending = pendingAgentProjects.values.contains {
                             $0.uuidString == projects[selected].id

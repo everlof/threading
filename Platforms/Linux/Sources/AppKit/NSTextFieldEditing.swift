@@ -167,9 +167,14 @@ extension NSTextField {
         let font = self.font ?? .systemFont(ofSize: 13)
         let text = fieldEditor?.string ?? stringValue
         if text.isEmpty, fieldEditor?.hasMarkedText() != true,
-           let placeholderString, !placeholderString.isEmpty {
-            placeholderString.draw(in: rect, withAttributes: [.font: font,
-                                                              .foregroundColor: NSColor.placeholderTextColor])
+           let placeholder = placeholderAttributedString?.string ?? placeholderString,
+           !placeholder.isEmpty {
+            var attributes = placeholderAttributedString?.attributes(at: 0, effectiveRange: nil) ?? [:]
+            if attributes[.font] == nil { attributes[.font] = font }
+            if attributes[.foregroundColor] == nil {
+                attributes[.foregroundColor] = NSColor.placeholderTextColor
+            }
+            placeholder.draw(in: rect, withAttributes: attributes)
         } else if fieldEditor == nil, !stringValue.isEmpty {
             stringValue.draw(in: rect, withAttributes: [.font: font,
                                                         .foregroundColor: textColor ?? .labelColor])

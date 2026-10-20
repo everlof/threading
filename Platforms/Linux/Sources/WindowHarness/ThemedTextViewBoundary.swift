@@ -18,6 +18,9 @@ extension SelectionSurface {
 
 @MainActor
 public class ThemedScrollView: NSScrollView {
+    var contentBreathing = NSEdgeInsets() {
+        didSet { contentInsets = contentBreathing }
+    }
     var fittedDocumentHeight: CGFloat? {
         didSet { invalidateIntrinsicContentSize() }
     }
@@ -47,6 +50,17 @@ class ThemedTextField: NSTextField {
     }
 
     override class var cellClass: NSTextFieldCell.Type { ThemedTextFieldCell.self }
+
+    override var placeholderString: String? {
+        didSet {
+            guard let placeholderString else { return }
+            placeholderAttributedString = NSAttributedString(
+                string: placeholderString,
+                attributes: [.font: font ?? Design.Typography.body(),
+                             .foregroundColor: Design.Text.tertiary]
+            )
+        }
+    }
 
     override var intrinsicContentSize: NSSize {
         var size = super.intrinsicContentSize

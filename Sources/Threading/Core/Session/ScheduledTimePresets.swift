@@ -39,56 +39,27 @@ enum ScheduledTimePresets {
         var calendar = calendar
         calendar.locale = locale
 
-        var presets: [ScheduledTimePreset] = []
-
-        // The one Slack has no use for and a coding agent does: "start on this after my
-        // meeting". Rounded up to the next five minutes, because a menu offering 13:07 is
-        // reporting a computation rather than making an offer.
-        if let hour = roundedHourAhead(from: now, calendar: calendar) {
-            presets.append(
-                ScheduledTimePreset(
-                    id: PresetDefaults.inAnHourID,
-                    title: L10n.string("In an hour"),
-                    detail: time(hour, locale: locale),
-                    date: hour,
-                    anchor: .wallClock
-                )
-            )
-        }
-
-        if let tomorrow = nextOccurrence(
-            ofHour: PresetDefaults.morningHour,
-            after: now,
-            calendar: calendar
-        ) {
-            presets.append(
-                ScheduledTimePreset(
-                    id: PresetDefaults.tomorrowID,
-                    title: L10n.format("Tomorrow at %@", time(tomorrow, locale: locale)),
-                    detail: nil,
-                    date: tomorrow,
-                    anchor: .wallClock
-                )
-            )
-
-            // Suppressed when it would name the same day twice: on a Sunday, "Monday" *is*
-            // tomorrow, and a menu offering one moment under two names is a menu with a bug in
-            // it rather than a choice.
-            if let monday = nextMonday(after: now, calendar: calendar),
-               !calendar.isDate(monday, inSameDayAs: tomorrow) {
-                presets.append(
-                    ScheduledTimePreset(
-                        id: PresetDefaults.mondayID,
-                        title: L10n.format("Monday at %@", time(monday, locale: locale)),
-                        detail: nil,
-                        date: monday,
-                        anchor: .wallClock
-                    )
-                )
+        return SnoozeWallClockMoments.future(from: now, calendar: calendar).map { moment in
+            let id: String
+            let title: String
+            let detail: String?
+            switch moment.kind {
+            case .inAnHour:
+                id = PresetDefaults.inAnHourID
+                title = L10n.string("In an hour")
+                detail = time(moment.date, locale: locale)
+            case .tomorrowMorning:
+                id = PresetDefaults.tomorrowID
+                title = L10n.format("Tomorrow at %@", time(moment.date, locale: locale))
+                detail = nil
+            case .mondayMorning:
+                id = PresetDefaults.mondayID
+                title = L10n.format("Monday at %@", time(moment.date, locale: locale))
+                detail = nil
             }
+            return ScheduledTimePreset(id: id, title: title, detail: detail,
+                                       date: moment.date, anchor: .wallClock)
         }
-
-        return presets.filter { $0.date > now }
     }
 
     // MARK: - Curfew Wall Clock
@@ -287,30 +258,6 @@ enum ScheduledTimePresets {
         )
     }
 
-    private static func nextOccurrence(
-        ofHour hour: Int,
-        after now: Date,
-        calendar: Calendar
-    ) -> Date? {
-        calendar.nextDate(
-            after: now,
-            matching: DateComponents(hour: hour, minute: 0),
-            matchingPolicy: .nextTime
-        )
-    }
-
-    private static func nextMonday(after now: Date, calendar: Calendar) -> Date? {
-        calendar.nextDate(
-            after: now,
-            matching: DateComponents(
-                hour: PresetDefaults.morningHour,
-                minute: 0,
-                weekday: PresetDefaults.mondayWeekday
-            ),
-            matchingPolicy: .nextTime
-        )
-    }
-
     /// The user's own clock convention, so a 24-hour locale reads `09:00` and never `9:00 AM`.
     static func time(_ date: Date, locale: Locale = .current) -> String {
         let formatter = DateFormatter()
@@ -328,7 +275,7 @@ enum PresetDefaults {
     /// Where a working day is taken to begin. Not configurable yet, and deliberately the same
     /// hour Slack picks: a preset is a good guess offered quickly, and the custom sheet is what
     /// exists for anyone whose morning is somewhere else.
-    static let morningHour = 9
+    static let morningHour = SnoozeWallClockMoments.morningHour
 
     /// `Calendar`'s Gregorian weekday numbering, where Sunday is 1.
     static let mondayWeekday = 2

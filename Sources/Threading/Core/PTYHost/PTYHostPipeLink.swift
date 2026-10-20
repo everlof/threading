@@ -150,7 +150,8 @@ final class PTYHostPipeLink: @unchecked Sendable {
 
     // MARK: - Types
 
-    /// Where the link's one edge goes. Invoked **on the main queue**, exactly once.
+    /// Where the link's one edge goes. Invoked from the link callback, exactly once;
+    /// the consumer chooses its UI executor.
     struct Delivery: Sendable {
 
         /// The child ended, with the status a shell would report. Never delivered inline from
@@ -559,7 +560,7 @@ final class PTYHostPipeLink: @unchecked Sendable {
     /// told "it exited" while its pipe was still open would tear itself down with the last of the
     /// child's output still unread. The channels are closed here — after every byte the daemon
     /// sent has been submitted to them, on this same serial queue — and only then is the status
-    /// delivered, on the main queue, which a synchronous `launch()` cannot be inside.
+    /// delivered. The consumer arranges its own UI hop, as local child exit observers do.
     private func end(status: Int32) {
         lock.lock()
         guard !hasEnded else {
@@ -594,7 +595,7 @@ final class PTYHostPipeLink: @unchecked Sendable {
         // wait out its deadline.
         spawnLatch.complete(.failure(.linkUnavailable("closed")))
 
-        DispatchQueue.main.async { delivery.ended(status) }
+        delivery.ended(status)
     }
 
     private func releaseTerminationRetention() {

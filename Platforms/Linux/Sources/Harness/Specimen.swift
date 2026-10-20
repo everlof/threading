@@ -137,11 +137,10 @@ enum Specimen {
         private let menuLayer = MenuRowLayer(frame: .zero)
         private var mountedRows: [Row] = []
         private var mountedMenuRows: [NSView] = []
+        private var mountedFloatingMenu: NSView?
         private var nextRowSlot = 0
         private var mountedLabels: [NSTextField] = []
         private var activatedRowSlot: Int?
-        private var activatedProjectActionID: String?
-        private var activatedProjectCreateID: String?
         private var projectControlVisualChanged = false
         private var navigationStep: Int?
 
@@ -159,12 +158,16 @@ enum Specimen {
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
-            rowLayer.frame = bounds
-            textLayer.frame = bounds
-            menuLayer.frame = bounds
-            addSubview(rowLayer)
-            addSubview(textLayer)
-            addSubview(menuLayer)
+            for layer in [rowLayer, textLayer, menuLayer] {
+                layer.translatesAutoresizingMaskIntoConstraints = false
+                addSubview(layer)
+                NSLayoutConstraint.activate([
+                    layer.leadingAnchor.constraint(equalTo: leadingAnchor),
+                    layer.trailingAnchor.constraint(equalTo: trailingAnchor),
+                    layer.topAnchor.constraint(equalTo: topAnchor),
+                    layer.bottomAnchor.constraint(equalTo: bottomAnchor)
+                ])
+            }
         }
 
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -180,7 +183,9 @@ enum Specimen {
             let rule = SeparatorView()
             rule.translatesAutoresizingMaskIntoConstraints = true
             rule.isHidden = !separatesScratchpad
-            backdrop.translatesAutoresizingMaskIntoConstraints = true
+            backdrop.translatesAutoresizingMaskIntoConstraints = false
+            backdropClip.translatesAutoresizingMaskIntoConstraints = false
+            well.translatesAutoresizingMaskIntoConstraints = false
             backdropClip.addSubview(backdrop)
             addSubview(backdropClip, positioned: .below, relativeTo: rowLayer)
             addSubview(well, positioned: .above, relativeTo: backdropClip)
@@ -209,39 +214,44 @@ enum Specimen {
         /// bounded by the viewport and reused through selection and resize.
         func prepareNavigatorFrame(_ rect: NSRect) {
             if frame != rect { frame = rect }
-            #if THREADING_WINDOW_HARNESS
-            let wellFrame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - headerHeight))
-            if let workspaceWell, workspaceWell.frame != wellFrame { workspaceWell.frame = wellFrame }
-            // The well is opaque. Clip the backdrop to the exposed band while retaining its
-            // full-column coordinate space, so scrolling never repaints the covered wash.
-            let bandFrame = NSRect(x: 0, y: wellFrame.maxY, width: bounds.width,
-                height: bounds.height - wellFrame.height)
-            if let workspaceBackdropClip, workspaceBackdropClip.frame != bandFrame {
-                workspaceBackdropClip.frame = bandFrame
-            }
-            let backdropFrame = NSRect(x: 0, y: -wellFrame.height, width: bounds.width, height: bounds.height)
-            if let workspaceBackdrop, workspaceBackdrop.frame != backdropFrame { workspaceBackdrop.frame = backdropFrame }
-            #endif
-            if rowLayer.frame != bounds { rowLayer.frame = bounds }
-            if textLayer.frame != bounds { textLayer.frame = bounds }
-            if menuLayer.frame != bounds { menuLayer.frame = bounds }
             nextRowSlot = 0
         }
 
         /// The outline owns the project viewport. The fixed slots remain for the bounded
         /// saved-runtime picker, and never sit behind an active outline.
-        func setNavigatorOutline(_ scrollView: NSScrollView, visible: Bool) {
+        func setNavigatorOutline(_ scrollView: NSScrollView, below header: NSView, visible: Bool) {
             if scrollView.superview !== self {
                 addSubview(scrollView, positioned: .below, relativeTo: menuLayer)
+                scrollView.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
+                    scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                    scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                    scrollView.bottomAnchor.constraint(equalTo: bottomAnchor)
+                ])
+                #if THREADING_WINDOW_HARNESS
+                if let clip = workspaceBackdropClip,
+                   let backdrop = workspaceBackdrop,
+                   let well = workspaceWell {
+                    // Keep the gradient in full-column coordinates, but clip drawing to the
+                    // band above the opaque navigator well.
+                    NSLayoutConstraint.activate([
+                        clip.topAnchor.constraint(equalTo: topAnchor),
+                        clip.bottomAnchor.constraint(equalTo: header.bottomAnchor),
+                        clip.leadingAnchor.constraint(equalTo: leadingAnchor),
+                        clip.trailingAnchor.constraint(equalTo: trailingAnchor),
+                        backdrop.topAnchor.constraint(equalTo: topAnchor),
+                        backdrop.bottomAnchor.constraint(equalTo: bottomAnchor),
+                        backdrop.leadingAnchor.constraint(equalTo: leadingAnchor),
+                        backdrop.trailingAnchor.constraint(equalTo: trailingAnchor),
+                        well.topAnchor.constraint(equalTo: header.bottomAnchor),
+                        well.bottomAnchor.constraint(equalTo: bottomAnchor),
+                        well.leadingAnchor.constraint(equalTo: leadingAnchor),
+                        well.trailingAnchor.constraint(equalTo: trailingAnchor)
+                    ])
+                }
+                #endif
             }
-            #if THREADING_WINDOW_HARNESS
-            let topInset = SidebarDefaults.contentTopInset
-            #else
-            let topInset: CGFloat = 2
-            #endif
-            let viewport = NSRect(x: 0, y: 0, width: bounds.width,
-                                  height: max(0, bounds.height - headerHeight - topInset))
-            if scrollView.frame != viewport { scrollView.frame = viewport }
             scrollView.isHidden = !visible
             rowLayer.isHidden = visible
             textLayer.isHidden = visible
@@ -252,6 +262,11 @@ enum Specimen {
         /// Rows that stay visible stay mounted: detaching a row mid-press would end the
         /// gesture its release is meant to complete.
         func mountMenuRows(_ rows: [NSView], separatorBeforeRow: Int? = nil) {
+            if subviews.last !== menuLayer {
+                addSubview(menuLayer, positioned: .above, relativeTo: nil)
+            }
+            mountedFloatingMenu?.removeFromSuperview()
+            mountedFloatingMenu = nil
             let kept = Set(rows.map(ObjectIdentifier.init))
             for row in mountedMenuRows where !kept.contains(ObjectIdentifier(row)) {
                 row.removeFromSuperview()
@@ -271,6 +286,26 @@ enum Specimen {
             #endif
         }
 
+        /// Keep an anchored menu over the standing outline, with the same production menu rows
+        /// used by the navigator's older full-column menus. Retain row identity through a press.
+        func mountFloatingMenu(_ surface: NSView, frame: NSRect, rows: [NSView]) {
+            if subviews.last !== menuLayer {
+                addSubview(menuLayer, positioned: .above, relativeTo: nil)
+            }
+            if mountedFloatingMenu !== surface {
+                mountedFloatingMenu?.removeFromSuperview()
+                mountedFloatingMenu = surface
+            }
+            if surface.superview !== menuLayer { menuLayer.addSubview(surface) }
+            surface.frame = frame
+            let kept = Set(rows.map(ObjectIdentifier.init))
+            for row in mountedMenuRows where !kept.contains(ObjectIdentifier(row)) {
+                row.removeFromSuperview()
+            }
+            mountedMenuRows = rows
+            for row in rows where row.superview !== surface { surface.addSubview(row) }
+        }
+
         func mountedMenuRow(at slot: Int) -> NSView? {
             guard mountedMenuRows.indices.contains(slot) else { return nil }
             return mountedMenuRows[slot]
@@ -279,10 +314,7 @@ enum Specimen {
         func mountNavigatorRow(frame: NSRect, accent: NSColor, selected: Bool, ink: Ink,
                                image: NSImage? = nil, showsMark: Bool = true,
                                disclosure: DisclosureTriangleDrawing.Direction? = nil,
-                               imageSide: CGFloat = 13,
-                               projectActionID: String? = nil,
-                               revealsProjectAction: Bool = false,
-                               projectActionEnabled: Bool = true) {
+                               imageSide: CGFloat = 13) {
             if nextRowSlot == mountedRows.count {
                 let slot = nextRowSlot
                 let row = Row(frame: frame, text: "", accent: accent, selected: selected,
@@ -290,8 +322,6 @@ enum Specimen {
                               disclosure: disclosure, imageSide: imageSide)
                 row.onPress = { [weak self] in self?.activatedRowSlot = slot }
                 row.onNavigation = { [weak self] step in self?.navigationStep = step }
-                row.onProjectAction = { [weak self] id in self?.activatedProjectActionID = id }
-                row.onProjectCreate = { [weak self] id in self?.activatedProjectCreateID = id }
                 row.onProjectControlVisualChange = { [weak self] in
                     self?.projectControlVisualChanged = true
                 }
@@ -302,9 +332,6 @@ enum Specimen {
                     selected: selected, ink: ink, image: image, showsMark: showsMark,
                     disclosure: disclosure, imageSide: imageSide)
             }
-            mountedRows[nextRowSlot].configureProjectControls(
-                id: projectActionID, revealed: revealsProjectAction,
-                enabled: projectActionEnabled)
             if mountedRows[nextRowSlot].isHidden { mountedRows[nextRowSlot].isHidden = false }
             nextRowSlot += 1
         }
@@ -325,10 +352,20 @@ enum Specimen {
         /// Mount the same default session content that the Mac sidebar places inside its
         /// extension container. The host retains row identity and the adjacent status text.
         func mountSessionContent(title: String, icon: NSImage?, selected: Bool,
-                                 trailingInset: CGFloat) {
+                                 dormant: Bool = false) {
             guard nextRowSlot > 0 else { return }
             mountedRows[nextRowSlot - 1].configureProductionSession(
-                title: title, icon: icon, selected: selected, trailingInset: trailingInset)
+                title: title, icon: icon, selected: selected, dormant: dormant)
+        }
+
+        func mountSessionStatus(_ status: String?, color: NSColor) {
+            guard nextRowSlot > 0 else { return }
+            mountedRows[nextRowSlot - 1].configureProductionStatus(status, color: color)
+        }
+
+        func mountSessionActivity(_ activity: NativeSessionActivity, phase: CGFloat) {
+            guard nextRowSlot > 0 else { return }
+            mountedRows[nextRowSlot - 1].configureProductionActivity(activity, phase: phase)
         }
 
         func mountTerminalContent(title: String, icon: NSImage, selected: Bool,
@@ -346,16 +383,6 @@ enum Specimen {
         func takeActivatedRowSlot() -> Int? {
             defer { activatedRowSlot = nil }
             return activatedRowSlot
-        }
-
-        func takeActivatedProjectActionID() -> String? {
-            defer { activatedProjectActionID = nil }
-            return activatedProjectActionID
-        }
-
-        func takeActivatedProjectCreateID() -> String? {
-            defer { activatedProjectCreateID = nil }
-            return activatedProjectCreateID
         }
 
         func takeProjectControlVisualChange() -> Bool {
@@ -506,14 +533,41 @@ enum Specimen {
         var productionTrailingInset: CGFloat = 0
         var productionLeadingInset: CGFloat = 0
         private var productionDisclosureView: GlyphView?
+        private var productionDisclosureLeading: NSLayoutConstraint?
         private var productionDisclosureExpanded: Bool?
         private var productionProjectView: ThemedProjectRowView?
+        private var productionProjectLeading: NSLayoutConstraint?
+        private var productionProjectTrailing: NSLayoutConstraint?
+        private var productionUnavailableMark: GlyphView?
+        private struct ProductionContentMount {
+            let slot: NSView
+            let leading: NSLayoutConstraint
+            let trailing: NSLayoutConstraint
+            let width: NSLayoutConstraint
+        }
         private var productionSessionView: ThemedSessionRowContentView?
+        private var productionSessionStack: NSStackView?
+        private var productionSessionMount: ProductionContentMount?
+        private var productionSessionStatusSlot: NSView?
+        private var productionSessionActivityMark: ThemedSessionActivityMark?
+        private var productionSessionHoverControls: NSStackView?
+        private var productionSessionActionButton: ThemedIconButton?
+        private var productionSessionArchiveButton: ThemedIconButton?
+        private var productionSessionPinnedIndicator: GlyphView?
+        private var productionSessionActionsRevealed = false
+        /// Saved-runtime picker cells draw their own selection; outline rows have an outer
+        /// SidebarHoverRowView that draws the same silhouette for them.
+        private var productionSidebarSelectionInset: CGFloat?
+        var productionWorkingMark: ThemedSessionActivityMark? {
+            guard let mark = productionSessionActivityMark,
+                  !mark.isHidden, mark.isWorking,
+                  productionSessionStack?.isHidden == false else { return nil }
+            return mark
+        }
         private var productionTerminalView: ThemedTerminalRowContentView?
-        private var productionStatusView: NSTextField?
+        private var productionTerminalMount: ProductionContentMount?
+        private var productionAttentionLabel: NSTextField?
         private var productionProjectActionsRevealed = false
-        private var projectCreateButton: ThemedIconButton?
-        private var projectActionButton: ThemedIconButton?
 
         /// The production row paints selection and hover independently of recorded layer fills.
         /// Standalone specimens still paint their own explicit selection background.
@@ -534,6 +588,9 @@ enum Specimen {
         var onProjectAction: ((String) -> Void)?
         var onProjectCreate: ((String) -> Void)?
         var onProjectControlVisualChange: (() -> Void)?
+        var onSessionAction: ((String) -> Void)?
+        var onSessionArchive: ((String) -> Void)?
+        var onSessionControlVisualChange: (() -> Void)?
 
         override var acceptsFirstResponder: Bool { true }
 
@@ -572,8 +629,17 @@ enum Specimen {
         override func hitTest(_ point: NSPoint) -> NSView? {
             guard let target = super.hitTest(point) else { return nil }
             #if THREADING_WINDOW_HARNESS
-            if productionSessionView?.isHidden == false ||
-               productionTerminalView?.isHidden == false { return self }
+            if productionSessionStack?.isHidden == false {
+                guard productionSessionActionsRevealed else { return self }
+                var ancestor: NSView? = target
+                while let view = ancestor, view !== self {
+                    if view === productionSessionActionButton ||
+                       view === productionSessionArchiveButton { return target }
+                    ancestor = view.superview
+                }
+                return self
+            }
+            if productionTerminalView?.isHidden == false { return self }
             guard let productionProjectView, !productionProjectView.isHidden else { return target }
             if !productionProjectActionsRevealed { return self }
             var ancestor: NSView? = target
@@ -613,11 +679,13 @@ enum Specimen {
             self.showsMark = showsMark
             self.disclosure = disclosure
             #if THREADING_WINDOW_HARNESS
+            productionSidebarSelectionInset = nil
             if !preserveProductionContent {
                 productionProjectView?.isHidden = true
-                productionSessionView?.isHidden = true
+                productionSessionStack?.isHidden = true
                 productionTerminalView?.isHidden = true
-                productionStatusView?.isHidden = true
+                productionSessionMount?.slot.isHidden = true
+                productionTerminalMount?.slot.isHidden = true
             }
             #endif
             if let image {
@@ -641,58 +709,6 @@ enum Specimen {
             needsDisplay = true
         }
 
-        func configureProjectControls(id: String?, revealed: Bool, enabled: Bool) {
-            #if THREADING_WINDOW_HARNESS
-            guard let id else {
-                projectCreateButton?.onPress = nil
-                projectCreateButton?.isHidden = true
-                projectActionButton?.onPress = nil
-                projectActionButton?.isHidden = true
-                return
-            }
-            if projectCreateButton == nil {
-                let button = ThemedIconButton(
-                    symbolName: "plus", accessibility: "New chat or terminal", target: .inline,
-                    inkSource: .chrome, glyphMaterialization: .deferred)
-                button.translatesAutoresizingMaskIntoConstraints = true
-                button.presentsMenu = true
-                button.surfaceStateDidChange = { [weak self] in
-                    self?.onProjectControlVisualChange?()
-                }
-                projectCreateButton = button
-                addSubview(button)
-            }
-            if projectActionButton == nil {
-                let button = ThemedIconButton(
-                    symbolName: "ellipsis", accessibility: "Project actions", target: .inline,
-                    inkSource: .chrome, glyphMaterialization: .deferred)
-                button.translatesAutoresizingMaskIntoConstraints = true
-                button.presentsMenu = true
-                button.surfaceStateDidChange = { [weak self] in
-                    self?.onProjectControlVisualChange?()
-                }
-                projectActionButton = button
-                addSubview(button)
-            }
-            guard let create = projectCreateButton, let actions = projectActionButton else { return }
-            // ProjectRowView keeps two 20-point inline targets with a 2-point gap. The
-            // trailing target stays six points from the edge; only visible rows own them.
-            let actionX = max(0, bounds.maxX - 26)
-            let buttonY = (bounds.height - 20) / 2
-            create.frame = NSRect(x: max(0, actionX - 22), y: buttonY,
-                                  width: 20, height: 20)
-            actions.frame = NSRect(x: actionX, y: buttonY, width: 20, height: 20)
-            create.onPress = { [weak self, id] in self?.onProjectCreate?(id) }
-            actions.onPress = { [weak self, id] in self?.onProjectAction?(id) }
-            for button in [create, actions] {
-                button.isEnabled = enabled
-                button.alphaValue = revealed ? 1 : 0
-                if revealed { button.materializeGlyphIfNeeded() }
-                button.isHidden = false
-            }
-            #endif
-        }
-
         #if THREADING_WINDOW_HARNESS
         /// The platform outline gutter belongs outside the row's native content. The cell
         /// keeps the full row hit target while the shared content and marker occupy their
@@ -710,8 +726,17 @@ enum Specimen {
                 marker = productionDisclosureView
             } else {
                 marker = GlyphView()
-                marker.translatesAutoresizingMaskIntoConstraints = true
+                marker.translatesAutoresizingMaskIntoConstraints = false
                 addSubview(marker)
+                let leading = marker.leadingAnchor.constraint(
+                    equalTo: leadingAnchor, constant: SidebarDefaults.insetDisclosureLeading + depth)
+                productionDisclosureLeading = leading
+                NSLayoutConstraint.activate([
+                    leading,
+                    marker.centerYAnchor.constraint(equalTo: centerYAnchor),
+                    marker.widthAnchor.constraint(equalToConstant: 13),
+                    marker.heightAnchor.constraint(equalToConstant: 13)
+                ])
                 productionDisclosureView = marker
             }
             if productionDisclosureExpanded != expanded {
@@ -722,8 +747,10 @@ enum Specimen {
             // Match SidebarHoverRowView's marker contract: quiet chrome at rest, the
             // selected ground's label tier when the project itself is selected.
             marker.tint = selected ? ink.label : Design.Text.tertiary
-            marker.frame = NSRect(x: SidebarDefaults.insetDisclosureLeading + depth,
-                y: bounds.midY - 6.5, width: 13, height: 13)
+            let leading = SidebarDefaults.insetDisclosureLeading + depth
+            if productionDisclosureLeading?.constant != leading {
+                productionDisclosureLeading?.constant = leading
+            }
             marker.isHidden = false
         }
 
@@ -732,51 +759,184 @@ enum Specimen {
             return bounds.contains(point) && point.x >= marker.frame.minX && point.x < marker.frame.maxX
         }
 
+        private func mountProductionContent(_ content: NSView, leadingInset: CGFloat)
+            -> ProductionContentMount {
+            let slot = NSView()
+            slot.translatesAutoresizingMaskIntoConstraints = false
+            slot.setAccessibilityElement(false)
+            addSubview(content)
+            addSubview(slot)
+            let edges = SidebarRowDefaults.constrainContent(
+                content, trailingSlot: slot, in: self,
+                leadingInset: leadingInset,
+                trailingInset: productionTrailingInset + SidebarRowDefaults.trailingInset)
+            let width = slot.widthAnchor.constraint(
+                equalToConstant: SidebarRowDefaults.trailingSlotSize)
+            NSLayoutConstraint.activate([
+                width,
+                slot.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize)
+            ])
+            return ProductionContentMount(slot: slot, leading: edges.leading,
+                                          trailing: edges.trailing, width: width)
+        }
+
+        private func updateProductionContent(_ mount: ProductionContentMount,
+                                             leadingInset: CGFloat) {
+            if mount.leading.constant != leadingInset { mount.leading.constant = leadingInset }
+            let trailingInset = productionTrailingInset + SidebarRowDefaults.trailingInset
+            if mount.trailing.constant != -trailingInset {
+                mount.trailing.constant = -trailingInset
+            }
+        }
+
         func configureProductionSession(title: String, icon: NSImage?, selected: Bool,
-                                        trailingInset: CGFloat, leadingIndent: CGFloat = 0) {
+                                        dormant: Bool = false,
+                                        isPinned: Bool = false,
+                                        leadingIndent: CGFloat = 0,
+                                        sessionID: String? = nil,
+                                        revealsActions: Bool = false,
+                                        actionSelected: Bool = false,
+                                        archiveEnabled: Bool = true) {
+            configureSidebarSelectionSilhouette()
             productionProjectView?.isHidden = true
             productionTerminalView?.isHidden = true
+            productionTerminalMount?.slot.isHidden = true
             let content: ThemedSessionRowContentView
             if let productionSessionView {
                 content = productionSessionView
             } else {
-                content = ThemedSessionRowContentView(frame: bounds)
-                content.translatesAutoresizingMaskIntoConstraints = true
-                addSubview(content)
+                content = ThemedSessionRowContentView(frame: .zero)
+                let stack = NSStackView(views: [content])
+                SidebarRowDefaults.configureSessionContentStack(stack)
+                stack.setAccessibilityIdentifier("sidebar.session.content-stack")
+                let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
+                let mount = mountProductionContent(stack, leadingInset: leading)
+                mount.slot.setAccessibilityIdentifier("sidebar.session.trailing")
+                let statusSlot = NSView()
+                statusSlot.translatesAutoresizingMaskIntoConstraints = false
+                statusSlot.setAccessibilityIdentifier("sidebar.session.status")
+                mount.slot.addSubview(statusSlot)
+                SidebarRowDefaults.constrainSessionStatus(statusSlot, in: mount.slot)
+                let action = ThemedIconButton(
+                    symbolName: SidebarRowDefaults.actionSymbol,
+                    accessibility: "Session actions",
+                    target: .inline, inkSource: .chrome,
+                    glyphMaterialization: .deferred)
+                action.translatesAutoresizingMaskIntoConstraints = false
+                action.presentsMenu = true
+                action.setAccessibilityIdentifier("sidebar.session.actions")
+                action.surfaceStateDidChange = { [weak self] in
+                    self?.onSessionControlVisualChange?()
+                }
+                let archive = ThemedIconButton(
+                    symbolName: SidebarRowDefaults.archiveSymbol,
+                    accessibility: SidebarRowDefaults.archiveAccessibilityLabel,
+                    target: .inline, inkSource: .chrome,
+                    glyphMaterialization: .deferred)
+                archive.translatesAutoresizingMaskIntoConstraints = false
+                archive.setAccessibilityIdentifier("sidebar.session.archive")
+                archive.surfaceStateDidChange = { [weak self] in
+                    self?.onSessionControlVisualChange?()
+                }
+                let hoverControls = NSStackView(views: [action, archive])
+                hoverControls.orientation = .horizontal
+                hoverControls.alignment = .centerY
+                hoverControls.spacing = SidebarRowDefaults.hoverButtonSpacing
+                hoverControls.translatesAutoresizingMaskIntoConstraints = false
+                hoverControls.setAccessibilityIdentifier("sidebar.session.hover-controls")
+                mount.slot.addSubview(hoverControls)
+                SidebarRowDefaults.constrainSessionHoverControls(hoverControls, in: mount.slot)
+                productionSessionMount = mount
+                productionSessionStatusSlot = statusSlot
+                productionSessionHoverControls = hoverControls
+                productionSessionActionButton = action
+                productionSessionArchiveButton = archive
+                productionSessionStack = stack
                 productionSessionView = content
             }
             let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
-            let width = max(0, bounds.width - leading - trailingInset - productionTrailingInset)
-            let frame = NSRect(x: leading, y: 0, width: width, height: bounds.height)
-            if content.frame != frame { content.frame = frame }
+            if let productionSessionMount {
+                updateProductionContent(productionSessionMount, leadingInset: leading)
+                productionSessionMount.slot.isHidden = false
+            }
+            productionSessionStack?.isHidden = false
             content.setTitle(title)
             content.setIcon(icon)
             content.iconView.contrastGround = { [weak self] in self?.contentGround ?? Specimen.bodyGround }
-            content.setSelection(selected, on: inkGround)
-            content.isHidden = false
+            content.setSelection(selected, dormant: dormant, on: inkGround)
+            if isPinned && productionSessionPinnedIndicator == nil,
+               let stack = productionSessionStack {
+                let indicator = GlyphView()
+                indicator.translatesAutoresizingMaskIntoConstraints = false
+                indicator.setSymbol(SidebarRowDefaults.pinnedSymbol,
+                                    slot: Design.Size.inlineButtonGlyph)
+                indicator.setAccessibilityRole(.image)
+                indicator.setAccessibilityLabel(SidebarRowDefaults.pinnedAccessibilityLabel)
+                indicator.setAccessibilityIdentifier("sidebar.session.pinned")
+                stack.insertArrangedSubview(indicator, at: 1)
+                NSLayoutConstraint.activate([
+                    indicator.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
+                    indicator.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
+                ])
+                productionSessionPinnedIndicator = indicator
+            }
+            productionSessionPinnedIndicator?.isHidden = !isPinned
+            productionSessionPinnedIndicator?.tint = selected
+                ? Design.Ink.selection.label : Design.Surface.accent
+            let revealsActions = revealsActions && sessionID != nil
+            productionSessionActionsRevealed = revealsActions
+            let width = revealsActions ? SidebarRowDefaults.sessionTrailingSlotWidth
+                : SidebarRowDefaults.trailingSlotSize
+            if productionSessionMount?.width.constant != width {
+                productionSessionMount?.width.constant = width
+            }
+            productionSessionHoverControls?.isHidden = !revealsActions
+            productionSessionHoverControls?.alphaValue = revealsActions ? 1 : 0
+            productionSessionStatusSlot?.alphaValue = revealsActions ? 0 : 1
+            productionSessionActionButton?.isEnabled = archiveEnabled
+            productionSessionActionButton?.isSelected = actionSelected
+            productionSessionActionButton?.onPress = sessionID.map { id in
+                { [weak self] in self?.onSessionAction?(id) }
+            }
+            productionSessionArchiveButton?.isEnabled = archiveEnabled
+            productionSessionArchiveButton?.onPress = sessionID.map { id in
+                { [weak self] in self?.onSessionArchive?(id) }
+            }
+            if revealsActions {
+                productionSessionActionButton?.materializeGlyphIfNeeded()
+                productionSessionArchiveButton?.materializeGlyphIfNeeded()
+            }
             iconView?.isHidden = true
+        }
+
+        func sessionActionAnchor(in root: NSView) -> NSRect? {
+            guard let button = productionSessionActionButton,
+                  productionSessionActionsRevealed else { return nil }
+            return button.convert(button.bounds, to: root)
         }
 
         func configureProductionTerminal(title: String, icon: NSImage, selected: Bool,
                                          running: Bool, leadingIndent: CGFloat = 0) {
+            configureSidebarSelectionSilhouette()
             productionProjectView?.isHidden = true
-            productionSessionView?.isHidden = true
+            productionSessionStack?.isHidden = true
+            productionSessionMount?.slot.isHidden = true
             let content: ThemedTerminalRowContentView
             if let productionTerminalView {
                 content = productionTerminalView
             } else {
-                content = ThemedTerminalRowContentView(frame: bounds)
-                content.translatesAutoresizingMaskIntoConstraints = true
-                addSubview(content)
+                content = ThemedTerminalRowContentView(frame: .zero)
+                let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
+                let mount = mountProductionContent(content, leadingInset: leading)
+                mount.slot.setAccessibilityIdentifier("sidebar.terminal.trailing")
+                productionTerminalMount = mount
                 productionTerminalView = content
             }
             let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
-            let trailing = SidebarRowDefaults.trailingInset +
-                SidebarRowDefaults.trailingSlotSize + SidebarRowDefaults.horizontalSpacing
-            let frame = NSRect(x: leading, y: 0,
-                               width: max(0, bounds.width - leading - trailing - productionTrailingInset),
-                               height: bounds.height)
-            if content.frame != frame { content.frame = frame }
+            if let productionTerminalMount {
+                updateProductionContent(productionTerminalMount, leadingInset: leading)
+                productionTerminalMount.slot.isHidden = false
+            }
             content.setTitle(title)
             content.setIcon(icon)
             content.iconView.contrastGround = { [weak self] in self?.contentGround ?? Specimen.bodyGround }
@@ -785,28 +945,67 @@ enum Specimen {
             iconView?.isHidden = true
         }
 
+        private func configureSidebarSelectionSilhouette() {
+            let columnWidth = superview?.bounds.width ?? bounds.width
+            let density = SidebarDensity(width: columnWidth,
+                floor: min(SidebarDefaults.tightDensityWidth, columnWidth))
+            // The picker cell starts six points into its bitmap viewport; the Mac outline
+            // row spans the column. Inset from the column edge so both capsules land alike.
+            productionSidebarSelectionInset = max(0, density.selectionInsetX - frame.minX)
+            needsDisplay = true
+        }
+
         func configureProductionStatus(_ status: String?, color: NSColor) {
+            guard let stack = productionSessionStack,
+                  stack.isHidden == false else {
+                return
+            }
             guard let status else {
-                productionStatusView?.isHidden = true
+                productionAttentionLabel?.stringValue = ""
+                productionAttentionLabel?.isHidden = true
                 return
             }
             let label: NSTextField
-            if let productionStatusView {
-                label = productionStatusView
+            if let productionAttentionLabel {
+                label = productionAttentionLabel
             } else {
                 label = NSTextField(labelWithString: "")
-                label.font = NSFont.systemFont(ofSize: 7)
-                label.alignment = .right
-                label.lineBreakMode = .byTruncatingTail
-                label.setAccessibilityElement(false)
-                addSubview(label)
-                productionStatusView = label
+                SidebarRowDefaults.configureAttentionLabel(label)
+                stack.addArrangedSubview(label)
+                productionAttentionLabel = label
             }
             if label.stringValue != status { label.stringValue = status }
             label.textColor = color
-            label.frame = NSRect(x: max(0, bounds.width - productionTrailingInset - 70), y: 0,
-                                 width: min(64, max(0, bounds.width - productionTrailingInset)), height: bounds.height)
             label.isHidden = false
+        }
+
+        func configureProductionActivity(_ activity: NativeSessionActivity, phase: CGFloat) {
+            guard let statusSlot = productionSessionStatusSlot,
+                  productionSessionStack?.isHidden == false else { return }
+            guard activity != .idle else {
+                productionSessionActivityMark?.isHidden = true
+                return
+            }
+            let mark: ThemedSessionActivityMark
+            if let productionSessionActivityMark {
+                mark = productionSessionActivityMark
+            } else {
+                mark = ThemedSessionActivityMark()
+                mark.translatesAutoresizingMaskIntoConstraints = false
+                mark.setAccessibilityIdentifier("sidebar.session.activity")
+                statusSlot.addSubview(mark)
+                SidebarRowDefaults.constrainSessionStatusContent(mark, in: statusSlot)
+                productionSessionActivityMark = mark
+            }
+            let state: ThemedSessionActivityMark.State = switch activity {
+            case .idle: preconditionFailure("idle activity has no mark")
+            case .loading: .loading
+            case .working: .working
+            case .readyWithBackgroundWork: .readyWithBackgroundWork
+            case .awaitingUser: .awaitingUser
+            }
+            mark.update(state, selectedInk: selected ? ink.label : nil, phase: phase)
+            mark.isHidden = false
         }
 
         func productionProjectControl(create: Bool) -> NSView? {
@@ -816,16 +1015,19 @@ enum Specimen {
 
         func configureProductionProject(
             presentation: NavigatorProjectRowPresentation, icon: NSImage?, count: Int,
-            projectID: String?, revealed: Bool, enabled: Bool
+            projectID: String?, revealed: Bool, enabled: Bool, path: String? = nil,
+            unavailable: Bool = false
         ) {
-            productionSessionView?.isHidden = true
+            productionSessionStack?.isHidden = true
             productionTerminalView?.isHidden = true
+            productionSessionMount?.slot.isHidden = true
+            productionTerminalMount?.slot.isHidden = true
             let content: ThemedProjectRowView
             if let productionProjectView {
                 content = productionProjectView
             } else {
                 content = ThemedProjectRowView(frame: bounds)
-                content.translatesAutoresizingMaskIntoConstraints = true
+                content.translatesAutoresizingMaskIntoConstraints = false
                 content.createButton.surfaceStateDidChange = { [weak self] in
                     self?.onProjectControlVisualChange?()
                 }
@@ -833,16 +1035,46 @@ enum Specimen {
                     self?.onProjectControlVisualChange?()
                 }
                 addSubview(content)
+                let edges = content.pin(to: self, leadingInset: productionLeadingInset,
+                    trailingInset: productionTrailingInset)
+                productionProjectLeading = edges.leading
+                productionProjectTrailing = edges.trailing
                 productionProjectView = content
             }
-            let contentFrame = NSRect(x: productionLeadingInset, y: 0,
-                width: max(0, bounds.width - productionLeadingInset - productionTrailingInset),
-                height: bounds.height)
-            if content.frame != contentFrame { content.frame = contentFrame }
+            if productionProjectLeading?.constant != productionLeadingInset {
+                productionProjectLeading?.constant = productionLeadingInset
+            }
+            if productionProjectTrailing?.constant != -productionTrailingInset {
+                productionProjectTrailing?.constant = -productionTrailingInset
+            }
             content.isHidden = false
-            content.configure(presentation, icon: icon, count: count,
+            content.configure(presentation, path: path, icon: icon, count: count,
                               moreSymbol: projectID == nil ? nil : SidebarRowDefaults.actionSymbol,
                               showsCreate: projectID != nil)
+            if unavailable {
+                let mark: GlyphView
+                if let productionUnavailableMark {
+                    mark = productionUnavailableMark
+                } else {
+                    mark = GlyphView()
+                    mark.setSymbol("exclamationmark.triangle", slot: Design.Size.inlineButtonGlyph)
+                    mark.contrastGround = { [weak self] in self?.contentGround ?? Specimen.bodyGround }
+                    mark.setAccessibilityElement(true)
+                    mark.setAccessibilityRole(.image)
+                    mark.setAccessibilityLabel("Checkout unavailable at this path")
+                    mark.setAccessibilityIdentifier("sidebar.project.checkout-unavailable")
+                    content.insertHostStatusMark(mark)
+                    NSLayoutConstraint.activate([
+                        mark.widthAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph),
+                        mark.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph)
+                    ])
+                    productionUnavailableMark = mark
+                }
+                mark.isHidden = false
+                mark.tint = selected ? Design.Ink.selection.secondary : Design.Text.secondary
+            } else {
+                productionUnavailableMark?.isHidden = true
+            }
             content.iconView.contrastGround = { [weak self] in self?.contentGround ?? Specimen.bodyGround }
             content.setSelection(selected)
             content.setHoverControlsVisible(revealed, animated: false)
@@ -870,8 +1102,22 @@ enum Specimen {
             paintsSelection = selected
             #endif
             if paintsSelection {
+                #if THREADING_WINDOW_HARNESS
+                if let inset = productionSidebarSelectionInset {
+                    let shape = bounds.insetBy(dx: inset,
+                        dy: SidebarRowDefaults.hoverHighlightInsetY)
+                    let radius = AppThemeLibrary.current.isSystem
+                        ? SidebarRowDefaults.systemHoverHighlightRadius
+                        : Design.Radius.control(fitting: shape.size)
+                    SurfaceDrawing.draw(shape, fill: accent, radius: radius, borderWidth: 0)
+                } else {
+                    SurfaceDrawing.draw(bounds, fill: accent,
+                                        radius: Self.selectionRadius, borderWidth: 0)
+                }
+                #else
                 SurfaceDrawing.draw(bounds, fill: accent,
                                     radius: Self.selectionRadius, borderWidth: 0)
+                #endif
             }
             if image == nil && showsMark {
                 ink.label.setFill()

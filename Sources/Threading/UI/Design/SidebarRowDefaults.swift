@@ -1,6 +1,82 @@
 import AppKit
 
 public enum SidebarRowDefaults {
+    @MainActor
+    static func configureSessionContentStack(_ stack: NSStackView) {
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = horizontalSpacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    @MainActor
+    static func configureAttentionLabel(_ label: NSTextField) {
+        #if os(Linux)
+        label.font = Design.Typography.caption()
+        #else
+        label.applyFont(.caption)
+        #endif
+        label.setAccessibilityIdentifier("sidebar.session.attention-overlay")
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+    }
+
+    /// Session and terminal cells share this outer relationship even though the slot carries
+    /// different host-owned actions and status. Insets account for the outline's cell gutter.
+    @MainActor
+    @discardableResult
+    static func constrainContent(_ content: NSView, trailingSlot: NSView, in row: NSView,
+                                 leadingInset: CGFloat, trailingInset: CGFloat)
+        -> (leading: NSLayoutConstraint, trailing: NSLayoutConstraint) {
+        let leading = content.leadingAnchor.constraint(
+            equalTo: row.leadingAnchor, constant: leadingInset)
+        let trailing = trailingSlot.trailingAnchor.constraint(
+            equalTo: row.trailingAnchor, constant: -trailingInset)
+        NSLayoutConstraint.activate([
+            leading,
+            content.trailingAnchor.constraint(lessThanOrEqualTo: trailingSlot.leadingAnchor,
+                                              constant: -horizontalSpacing),
+            content.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            trailing,
+            trailingSlot.centerYAnchor.constraint(equalTo: row.centerYAnchor)
+        ])
+        return (leading, trailing)
+    }
+
+    /// The status mark occupies the outer column of a session row at rest. The hover controls
+    /// use that same column when revealed, so both hosts must pin the mark to the slot itself.
+    @MainActor
+    static func constrainSessionStatus(_ status: NSView, in trailingSlot: NSView) {
+        NSLayoutConstraint.activate([
+            status.centerXAnchor.constraint(
+                equalTo: trailingSlot.trailingAnchor,
+                constant: -trailingSlotSize / 2
+            ),
+            status.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor),
+            status.widthAnchor.constraint(equalToConstant: sessionStatusSize),
+            status.heightAnchor.constraint(equalToConstant: sessionStatusSize)
+        ])
+    }
+
+    /// The actions occupy the status mark's trailing column when a session row is hovered.
+    @MainActor
+    static func constrainSessionHoverControls(_ controls: NSView, in trailingSlot: NSView) {
+        NSLayoutConstraint.activate([
+            controls.trailingAnchor.constraint(equalTo: trailingSlot.trailingAnchor),
+            controls.centerYAnchor.constraint(equalTo: trailingSlot.centerYAnchor)
+        ])
+    }
+
+    @MainActor
+    static func constrainSessionStatusContent(_ content: NSView, in status: NSView) {
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: status.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: status.trailingAnchor),
+            content.topAnchor.constraint(equalTo: status.topAnchor),
+            content.bottomAnchor.constraint(equalTo: status.bottomAnchor)
+        ])
+    }
+
     /// Preserve a readable location fragment even beside a long branch.
     public static let worktreePathMinimumFraction: CGFloat = 0.3
 
@@ -34,6 +110,8 @@ public enum SidebarRowDefaults {
     public static let settingsSymbol = "gearshape"
     /// Applied to secondary text when inverted on an emphasized selection.
     public static let secondaryTextAlpha: CGFloat = 0.7
+    /// Non-template provider marks fade to the same dormant weight on both platforms.
+    public static let dormantBrandAlpha: CGFloat = 0.5
 
     // The three below were 7, 5 and 8 — none of them on `Design.Spacing`'s scale, which is
     // deliberately small (4/6/10/12) precisely so a row cannot drift a point away from every
@@ -69,6 +147,8 @@ public enum SidebarRowDefaults {
     /// row's `⋯` and a tab's `×` are one control, and sizing this one where it was used is what
     /// made them differ. See `ThemedIconButton.Target.inline`.
     public static let trailingSlotSize: CGFloat = Design.Size.inlineButtonTarget
+    public static let sessionStatusSize: CGFloat = 12
+    public static let sessionBackgroundDotSize: CGFloat = 4
     /// Gap between the `+` and `⋯` when a project row shows both on hover.
     public static let hoverButtonSpacing: CGFloat = 2
 

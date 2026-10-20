@@ -3,6 +3,7 @@ import AppKit
 import Foundation
 import Glibc
 import LinuxWindowBridge
+@testable import CoreSlice
 
 @MainActor
 private final class ComposerChipChoiceSession: ChipChoicePresentationSession {
@@ -30,6 +31,12 @@ struct ComposerIdentityChoice {
     }
 }
 
+struct ComposerCheckoutChoice: Equatable {
+    let id: String
+    let title: String
+    let detail: String
+}
+
 struct ComposerPermissionChoice {
     let id: String
     let title: String
@@ -47,22 +54,36 @@ final class WorkspacePlaceholderPane {
     private let window = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
     private let composerRoot = NSView(frame: .zero)
     private let composerHero = ComposerWelcomeView(frame: .zero)
+    private let composerColumn = NSStackView()
+    private let destinationRow = NSStackView()
+    private let actionRow = NSView(frame: .zero)
     private let composerSurface = NSView(frame: .zero)
     private let composerEditor = PromptTextView.scrollingPrompt()
+    private let attachments = LinuxPromptAttachmentStrip(frame: .zero)
+    private let composerFooter = NSStackView()
+    private let composerFooterSpacer = NSView()
+    private var composerContentLayout: LinuxPromptContentLayout!
     private let composerStartButton = ThemedButton()
     private lazy var projectChip = ChipView()
     private lazy var providerChip = ChipView()
     private let modelChip = ChipView()
+    private let speedChip = ChipView()
+    private let surfaceChip = ChipView()
     private var modelSelectionValid = true
     private var modelPresentation: ModelEffortPickerPresentation?
     private var modelContent: ModelEffortPickerContentView?
+    private var modelContentConstraints: [NSLayoutConstraint] = []
+    private var modelShowHiddenButton: ThemedButton?
     private var modelMenuToken = ""
     private var selectedModelTitle = "Default model"
+    private var hiddenModelCount = 0
     private var onModelChoice: ((String?, String?) -> Void)?
     private var onModelRefresh: (() -> Void)?
+    private var onHideModel: ((String) -> Void)?
+    private var onShowHiddenModels: (() -> Void)?
     private let permissionChip = ChipView()
     private let choiceSurface = SessionMenuSurface(frame: .zero)
-    private enum ChoiceKind: Int { case project = 1, identity = 2, permission = 3, model = 4 }
+    private enum ChoiceKind: Int { case project = 1, identity = 2, permission = 3, model = 4, surface = 5, speed = 6 }
     private struct ChoiceOption {
         let id: String
         let name: String
@@ -77,10 +98,21 @@ final class WorkspacePlaceholderPane {
     private var choiceVisibleCount = 0
     private var choiceOptions: [ChoiceOption] = []
     private var projectOptions: [(id: String, name: String)] = []
+    private var checkoutOptions: [ComposerCheckoutChoice] = []
+    private var selectedCheckoutID = ""
+    private var showingProjectNavigation = false
     private var identityOptions: [ComposerIdentityChoice] = []
     private var permissionOptions: [ComposerPermissionChoice] = []
-    private var selectedPermissionID = "manual"
-    private var selectedPermissionTitle = "Manual"
+    private var surfaceOptions: [ChoiceOption] = []
+    private var speedOptions: [ChoiceOption] = []
+    private var selectedSpeedID = "inherit"
+    private var selectedSpeedTitle = "Agent's Setting"
+    private var onSpeedChoice: ((Bool?) -> Void)?
+    private var selectedSurfaceID = "terminal"
+    private var selectedSurfaceTitle = ""
+    private var onSurfaceChoice: ((Bool) -> Void)?
+    private var selectedPermissionID = "inherit"
+    private var selectedPermissionTitle = "Agent's Setting"
     private var onPermissionChoice: ((String) -> Void)?
     private var choiceRowHeight: CGFloat = 26
     private var choiceWidth: CGFloat = 180
@@ -88,9 +120,12 @@ final class WorkspacePlaceholderPane {
     private var selectedProjectID = ""
     private var selectedIdentityID = ""
     private var selectedProjectName = ""
+    private var selectedLocationTitle = ""
     private var selectedProviderName = ""
     private var selectedIdentityName = ""
     private var onProjectChoice: ((String) -> Void)?
+    private var onCheckoutChoice: ((String) -> Void)?
+    private var onNewWorktree: (() -> Void)?
     private var onIdentityChoice: ((String) -> Void)?
     private let showsComposer = true
     private(set) var composerIdentity: String?
@@ -102,18 +137,68 @@ final class WorkspacePlaceholderPane {
     private var composerFocused = false
     private var presentedSize = NSSize.zero
     private var needsPresentation = true
+    private var composerSurfaceHeight: NSLayoutConstraint!
+    private var composerBottom: NSLayoutConstraint!
 
     init(onSubmit: @escaping () -> Void) {
         LinuxSymbols.install()
         composerRoot.addSubview(composerHero)
-        composerRoot.addSubview(composerSurface)
-        composerSurface.addSubview(composerEditor)
-        composerSurface.addSubview(modelChip)
-        composerSurface.addSubview(permissionChip)
-        composerRoot.addSubview(composerStartButton)
-        composerRoot.addSubview(projectChip)
-        composerRoot.addSubview(providerChip)
+        composerHero.translatesAutoresizingMaskIntoConstraints = false
+        let destinationSpacer = NSView()
+        destinationSpacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        destinationSpacer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        destinationRow.orientation = .horizontal
+        destinationRow.alignment = .centerY
+        destinationRow.spacing = Design.Spacing.small
+        destinationRow.addArrangedSubview(projectChip)
+        destinationRow.addArrangedSubview(providerChip)
+        destinationRow.addArrangedSubview(destinationSpacer)
+        projectChip.setContentCompressionResistancePriority(.init(239), for: .horizontal)
+        providerChip.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        actionRow.addSubview(composerStartButton)
+        composerStartButton.translatesAutoresizingMaskIntoConstraints = false
+        composerColumn.orientation = .vertical
+        composerColumn.alignment = .leading
+        composerColumn.spacing = Design.Spacing.medium
+        composerColumn.translatesAutoresizingMaskIntoConstraints = false
+        composerColumn.addArrangedSubview(destinationRow)
+        composerColumn.addArrangedSubview(composerSurface)
+        composerColumn.addArrangedSubview(actionRow)
+        composerRoot.addSubview(composerColumn)
+        PromptChrome.configureFooter(composerFooter, spacer: composerFooterSpacer)
+        composerFooter.insertArrangedSubview(modelChip, at: 0)
+        composerFooter.insertArrangedSubview(permissionChip, at: 1)
+        composerFooter.insertArrangedSubview(speedChip, at: 2)
+        composerFooter.addArrangedSubview(surfaceChip)
+        for (chip, priority) in [
+            (modelChip, 239), (permissionChip, 263),
+            (speedChip, 261), (surfaceChip, 260)
+        ] {
+            chip.setContentCompressionResistancePriority(.init(Float(priority)), for: .horizontal)
+        }
+        composerContentLayout = LinuxPromptContentLayout(
+            surface: composerSurface, editor: composerEditor,
+            attachments: attachments, footer: composerFooter)
         composerRoot.addSubview(choiceSurface)
+        composerBottom = PromptChrome.constrainOpeningColumn(
+            composerColumn, in: composerRoot, prompt: composerSurface,
+            actionRow: actionRow)
+        composerSurfaceHeight = composerSurface.heightAnchor.constraint(
+            equalToConstant: PromptChrome.openingMinimumHeight)
+        NSLayoutConstraint.activate([
+            destinationRow.widthAnchor.constraint(equalTo: composerColumn.widthAnchor),
+            composerSurfaceHeight,
+            composerStartButton.trailingAnchor.constraint(equalTo: actionRow.trailingAnchor),
+            composerStartButton.topAnchor.constraint(equalTo: actionRow.topAnchor),
+            composerStartButton.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor),
+            composerStartButton.leadingAnchor.constraint(
+                greaterThanOrEqualTo: actionRow.leadingAnchor),
+            composerHero.topAnchor.constraint(equalTo: composerRoot.topAnchor),
+            composerHero.bottomAnchor.constraint(equalTo: composerColumn.topAnchor),
+            composerHero.leadingAnchor.constraint(equalTo: composerRoot.leadingAnchor),
+            composerHero.trailingAnchor.constraint(equalTo: composerRoot.trailingAnchor)
+        ])
         choiceSurface.isHidden = true
         projectChip.choicePresentationProvider = { [weak self] _, didDismiss in
             self?.openChoice(.project, didDismiss: didDismiss)
@@ -131,9 +216,24 @@ final class WorkspacePlaceholderPane {
         }
         permissionChip.configure(symbolName: PermissionModeLabels.symbol, title: selectedPermissionTitle)
         permissionChip.isEnabled = false
+        speedChip.choicePresentationProvider = { [weak self] _, didDismiss in
+            self?.openChoice(.speed, didDismiss: didDismiss)
+        }
+        speedChip.configure(symbolName: "gauge", title: selectedSpeedTitle)
+        speedChip.isHidden = true
+        surfaceChip.choicePresentationProvider = { [weak self] _, didDismiss in
+            self?.openChoice(.surface, didDismiss: didDismiss)
+        }
+        surfaceChip.configure(symbolName: "bubble.left.and.text.bubble.right", title: "Native (Experimental)")
+        surfaceChip.isHidden = true
         projectChip.configure(symbolName: "folder", title: "Project")
         providerChip.configure(symbolName: "terminal", title: "Choose an agent…")
         composerEditor.textView.placeholder = "Describe a task or ask a question"
+        attachments.onChange = { [weak self] in
+            self?.refreshStartButton()
+            self?.needsPresentation = true
+        }
+        attachments.onLiteralPath = { [weak self] path in self?.insertLiteralPath(path) }
         composerEditor.textView.submitsOnReturn = { false }
         composerEditor.textView.onSubmit = { [weak self] _ in
             guard let self, self.composerStartButton.isEnabled else { return }
@@ -158,7 +258,9 @@ final class WorkspacePlaceholderPane {
         providerChip.nextKeyView = composerEditor.textView
         composerEditor.textView.nextKeyView = modelChip
         modelChip.nextKeyView = permissionChip
-        permissionChip.nextKeyView = composerStartButton
+        permissionChip.nextKeyView = speedChip
+        speedChip.nextKeyView = surfaceChip
+        surfaceChip.nextKeyView = composerStartButton
         composerStartButton.nextKeyView = projectChip
         window.initialFirstResponder = composerEditor.textView
         window.contentView = composerRoot
@@ -192,9 +294,11 @@ final class WorkspacePlaceholderPane {
         projectChip.configure(symbolName: "folder", title: projectName)
         providerChip.configure(symbolName: "terminal", title: providerName)
         selectedProjectName = projectName
+        selectedLocationTitle = projectName
         selectedProviderName = providerName
         selectedIdentityName = providerName
         composerEditor.textView.string = ""
+        attachments.clear()
         refreshStartButton()
         window.contentView = composerRoot
         _ = window.makeFirstResponder(composerEditor.textView)
@@ -204,26 +308,38 @@ final class WorkspacePlaceholderPane {
     /// Choices are host-owned identities. This pane only presents a bounded visible page.
     func configureComposerChoices(
         projects: [(id: String, name: String)], selectedProjectID: String,
+        checkouts: [ComposerCheckoutChoice], selectedCheckoutID: String,
+        locationTitle: String, locationDetail: String?,
         identities: [ComposerIdentityChoice], selectedIdentityID: String,
         onProjectChoice: @escaping (String) -> Void,
+        onCheckoutChoice: @escaping (String) -> Void,
+        onNewWorktree: @escaping () -> Void,
         onIdentityChoice: @escaping (String) -> Void
     ) {
         let destinationChanged = self.selectedProjectID != selectedProjectID
+            || self.selectedCheckoutID != selectedCheckoutID
             || self.selectedIdentityID != selectedIdentityID
+            || self.checkoutOptions != checkouts
         if destinationChanged { dismissChoice() }
         projectOptions = projects
+        checkoutOptions = checkouts
         // Account discovery admits at most 32 per runtime; the current Linux composer has
         // two runtimes. Retain values for 64 choices but mount no more than six row views.
         identityOptions = Array(identities.prefix(64))
         hasLaunchProject = projects.contains { $0.id == selectedProjectID }
         hasLaunchIdentity = identityOptions.contains { $0.id == selectedIdentityID }
         self.selectedProjectID = selectedProjectID
+        self.selectedCheckoutID = selectedCheckoutID
         self.selectedIdentityID = selectedIdentityID
         self.onProjectChoice = onProjectChoice
+        self.onCheckoutChoice = onCheckoutChoice
+        self.onNewWorktree = onNewWorktree
         self.onIdentityChoice = onIdentityChoice
         selectedProjectName = projects.first(where: { $0.id == selectedProjectID })?.name ?? ""
+        selectedLocationTitle = selectedProjectName.isEmpty ? "Choose a project…" : locationTitle
         projectChip.configure(symbolName: "folder",
-            title: selectedProjectName.isEmpty ? "Choose a project…" : selectedProjectName)
+            title: selectedLocationTitle)
+        projectChip.toolTip = locationDetail
         if let identity = identityOptions.first(where: { $0.id == selectedIdentityID }) {
             selectedProviderName = identity.providerName
             selectedIdentityName = identity.title
@@ -252,16 +368,62 @@ final class WorkspacePlaceholderPane {
         needsPresentation = true
     }
 
-    func configureModelChoices(_ presentation: ModelEffortPickerPresentation?, title: String, selectionValid: Bool,
+    func configureSurfaceChoice(kind: AgentKind?, usesNativeUI: Bool,
+                                onChoose: @escaping (Bool) -> Void) {
+        let canSwitch = kind.map { $0.supportsNativeUI && $0.supports(.terminalUI) } ?? false
+        let title = usesNativeUI ? "Native (Experimental)" : kind?.originalUITitle ?? ""
+        selectedSurfaceID = usesNativeUI ? "native" : "terminal"
+        selectedSurfaceTitle = title
+        if let kind, canSwitch {
+            surfaceOptions = [
+                ChoiceOption(id: "terminal", name: kind.originalUITitle, icon: nil),
+                ChoiceOption(id: "native", name: "Native (Experimental)", icon: nil)
+            ]
+        } else { surfaceOptions = [] }
+        onSurfaceChoice = onChoose
+        surfaceChip.configure(symbolName: "bubble.left.and.text.bubble.right", title: title)
+        surfaceChip.isHidden = !canSwitch
+        surfaceChip.isEnabled = canSwitch
+        if choiceKind == .surface, !canSwitch { dismissChoice() }
+        needsPresentation = true
+    }
+
+    func configureSpeedChoice(available: Bool, title: String, fastMode: Bool?,
+                              onChoose: @escaping (Bool?) -> Void) {
+        selectedSpeedID = fastMode.map { $0 ? "fast" : "standard" } ?? "inherit"
+        selectedSpeedTitle = title
+        onSpeedChoice = onChoose
+        speedOptions = available ? [
+            ChoiceOption(id: "inherit", name: "Follow Agent Setting", icon: nil,
+                         detail: "Uses the speed configured for this agent."),
+            ChoiceOption(id: "standard", name: "Standard", icon: nil,
+                         detail: "Normal speed and usage"),
+            ChoiceOption(id: "fast", name: "Fast", icon: nil,
+                         detail: "1.5× speed, increased usage")
+        ] : []
+        speedChip.configure(symbolName: title == "Fast" ? "bolt.fill" : "gauge", title: title)
+        speedChip.isHidden = !available
+        speedChip.isEnabled = available
+        if choiceKind == .speed, !available { dismissChoice() }
+        needsPresentation = true
+    }
+
+    func configureModelChoices(_ presentation: ModelEffortPickerPresentation?, title: String,
+                               selectionValid: Bool, hiddenModelCount: Int,
                                onRefresh: @escaping () -> Void,
+                               onHideModel: @escaping (String) -> Void,
+                               onShowHiddenModels: @escaping () -> Void,
                                onChoose: @escaping (String?, String?) -> Void) {
-        let changed = modelPresentation != presentation
+        let changed = modelPresentation != presentation || self.hiddenModelCount != hiddenModelCount
         modelPresentation = presentation
         modelSelectionValid = selectionValid
+        self.hiddenModelCount = hiddenModelCount
         refreshStartButton()
         selectedModelTitle = title
         onModelChoice = onChoose
         onModelRefresh = onRefresh
+        self.onHideModel = onHideModel
+        self.onShowHiddenModels = onShowHiddenModels
         modelChip.configure(symbolName: "cpu", title: title)
         modelChip.isEnabled = presentation != nil
         if changed, choiceKind == .model {
@@ -273,22 +435,59 @@ final class WorkspacePlaceholderPane {
 
     private func installModelContent() {
         guard let presentation = modelPresentation else { return }
-        modelContent?.removeFromSuperview()
+        unmountModelContent()
         modelMenuToken = UUID().uuidString
-        let matrix = ModelEffortMatrixControl(presentation: presentation) { [weak self] model, effort in
+        let matrix = ModelEffortMatrixControl(presentation: presentation,
+                                             onHideModel: { [weak self] modelID in
+            guard let self else { return }
+            self.dismissChoice()
+            self.onHideModel?(modelID)
+            self.focusEditor()
+        }) { [weak self] model, effort in
             guard let self else { return }
             self.dismissChoice()
             self.onModelChoice?(model, effort)
             self.focusEditor()
         }
-        let content = ModelEffortPickerContentView(matrixView: matrix)
+        let showHidden: ThemedButton? = if hiddenModelCount > 0 {
+            ThemedButton()
+        } else { nil }
+        modelShowHiddenButton = showHidden
+        if let showHidden {
+            showHidden.title = L10n.format("Show hidden models (%d)", hiddenModelCount)
+            showHidden.emphasis = .tertiary
+            showHidden.contentAlignment = .leading
+            showHidden.setAccessibilityIdentifier("model-effort.show-hidden-models")
+            showHidden.action = { [weak self] in
+                guard let self else { return }
+                self.dismissChoice()
+                self.onShowHiddenModels?()
+                self.focusEditor()
+            }
+        }
+        let content = ModelEffortPickerContentView(matrixView: matrix, footer: showHidden)
+        content.translatesAutoresizingMaskIntoConstraints = false
         modelContent = content
         choiceSurface.addSubview(content)
+        modelContentConstraints = [
+            content.leadingAnchor.constraint(equalTo: choiceSurface.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: choiceSurface.trailingAnchor),
+            content.topAnchor.constraint(equalTo: choiceSurface.topAnchor),
+            content.bottomAnchor.constraint(equalTo: choiceSurface.bottomAnchor)
+        ]
+        NSLayoutConstraint.activate(modelContentConstraints)
         layoutChoiceSurface(in: composerRoot.bounds.size)
         window.layoutIfNeeded()
         _ = window.makeFirstResponder(matrix)
         matrix.revealFocusedChoice()
         needsPresentation = true
+    }
+
+    private func unmountModelContent() {
+        NSLayoutConstraint.deactivate(modelContentConstraints)
+        modelContentConstraints.removeAll()
+        modelContent?.removeFromSuperview()
+        modelContent = nil
     }
 
     private func chip(for kind: ChoiceKind) -> ChipView {
@@ -297,15 +496,19 @@ final class WorkspacePlaceholderPane {
         case .identity: providerChip
         case .permission: permissionChip
         case .model: modelChip
+        case .surface: surfaceChip
+        case .speed: speedChip
         }
     }
 
     private func selectedID(for kind: ChoiceKind) -> String {
         switch kind {
-        case .project: selectedProjectID
+        case .project: showingProjectNavigation ? selectedProjectID : selectedCheckoutID
         case .identity: selectedIdentityID
         case .permission: selectedPermissionID
         case .model: modelPresentation?.selectedModelID ?? ""
+        case .surface: selectedSurfaceID
+        case .speed: selectedSpeedID
         }
     }
 
@@ -329,7 +532,9 @@ final class WorkspacePlaceholderPane {
     func chooseComposerChoice(kind: Int, index: Int, id: String, identity: String) -> Bool {
         if choiceKind == .model, kind == ChoiceKind.model.rawValue,
            showsComposer, identity == composerIdentity, id == "\(modelMenuToken):\(index)" {
-            let chosen = modelContent?.matrixView.chooseVisibleChoice(at: index) ?? false
+            let chosen = index == -1
+                ? modelShowHiddenButton?.accessibilityPerformPress() ?? false
+                : modelContent?.matrixView.chooseVisibleChoice(at: index) ?? false
             needsPresentation = true
             return chosen
         }
@@ -349,8 +554,30 @@ final class WorkspacePlaceholderPane {
             if event.keyCode == 53 || event.charactersIgnoringModifiers == "\u{1b}" {
                 dismissChoice()
             } else if event.keyCode == 48 {
-                dismissChoice()
-                advanceFocus(backward: event.modifierFlags.contains(.shift))
+                if let footer = modelShowHiddenButton {
+                    if window.firstResponder === footer {
+                        if event.modifierFlags.contains(.shift) {
+                            _ = window.makeFirstResponder(modelContent?.matrixView)
+                        } else {
+                            dismissChoice()
+                            advanceFocus(backward: false)
+                        }
+                    } else if !event.modifierFlags.contains(.shift) {
+                        _ = window.makeFirstResponder(footer)
+                    } else {
+                        dismissChoice()
+                        advanceFocus(backward: true)
+                    }
+                } else {
+                    dismissChoice()
+                    advanceFocus(backward: event.modifierFlags.contains(.shift))
+                }
+            } else if let footer = modelShowHiddenButton, window.firstResponder === footer {
+                if event.keyCode == 36 || event.keyCode == 49 || event.keyCode == 76 {
+                    _ = footer.accessibilityPerformPress()
+                } else if event.keyCode == 126 {
+                    _ = window.makeFirstResponder(modelContent?.matrixView)
+                }
             } else {
                 modelContent?.matrixView.keyDown(with: event)
             }
@@ -403,7 +630,8 @@ final class WorkspacePlaceholderPane {
         let options: [ChoiceOption]
         switch kind {
         case .project:
-            options = projectOptions.map { ChoiceOption(id: $0.id, name: $0.name, icon: nil) }
+            showingProjectNavigation = false
+            options = locationOptions()
         case .identity:
             options = identityOptions.map { ChoiceOption(id: $0.id, name: $0.title, icon: $0.icon) }
         case .permission:
@@ -411,6 +639,8 @@ final class WorkspacePlaceholderPane {
                 ChoiceOption(id: $0.id, name: $0.title, icon: nil, detail: $0.detail)
             }
         case .model: return nil
+        case .surface: options = surfaceOptions
+        case .speed: options = speedOptions
         }
         guard showsComposer, !options.isEmpty else { return nil }
         dismissChoice()
@@ -422,7 +652,7 @@ final class WorkspacePlaceholderPane {
         choiceScrollRemainder = 0
         let entries = options.map { ThemedMenuEntry.item(ThemedMenuItem(title: $0.name, subtitle: $0.detail)) }
         choiceRowHeight = ThemedMenuMetrics.heights(for: entries).max() ?? 26
-        choiceWidth = kind == .permission
+        choiceWidth = kind == .project || kind == .permission || kind == .surface || kind == .speed
             ? ThemedMenuMetrics.width(for: entries, minimum: 180, selectedEntryIndex: choiceSelected)
             : 180
         let session = ComposerChipChoiceSession(didDismiss: didDismiss)
@@ -437,8 +667,9 @@ final class WorkspacePlaceholderPane {
     private func dismissChoice() {
         guard let previousKind = choiceKind else { return }
         choiceKind = nil
-        modelContent?.removeFromSuperview()
-        modelContent = nil
+        showingProjectNavigation = false
+        unmountModelContent()
+        modelShowHiddenButton = nil
         modelMenuToken = ""
         choiceOptions.removeAll(keepingCapacity: true)
         for row in choiceRows { row.removeFromSuperview() }
@@ -465,8 +696,6 @@ final class WorkspacePlaceholderPane {
             let x = min(max(8, sourceFrame.minX), max(8, size.width - width - 8))
             let y = opensAbove ? sourceFrame.maxY + 4 : max(4, sourceFrame.minY - height - 4)
             choiceSurface.frame = NSRect(x: x, y: y, width: width, height: height)
-            content.frame = choiceSurface.bounds
-            content.layout()
             return
         }
         let width = min(max(choiceWidth, sourceFrame.width + 28), max(1, size.width - 48))
@@ -541,19 +770,81 @@ final class WorkspacePlaceholderPane {
     private func chooseChoice(_ index: Int) {
         guard let choiceKind, choiceOptions.indices.contains(index) else { return }
         let id = choiceOptions[index].id
+        if choiceKind == .project, id == "@switch-project" || id == "@back-to-checkouts" {
+            showingProjectNavigation = id == "@switch-project"
+            choiceOptions = locationOptions()
+            choiceSelected = choiceOptions.firstIndex(where: { $0.id == selectedID(for: .project) }) ?? 0
+            choiceFirst = 0
+            layoutChoiceSurface(in: composerRoot.bounds.size)
+            rebuildChoiceRows()
+            return
+        }
+        let wasNavigating = showingProjectNavigation
         dismissChoice()
         switch choiceKind {
-        case .project: onProjectChoice?(id)
+        case .project:
+            if id == "@new-worktree" { onNewWorktree?() }
+            else if !wasNavigating, !checkoutOptions.isEmpty { onCheckoutChoice?(id) }
+            else { onProjectChoice?(id) }
         case .identity: onIdentityChoice?(id)
         case .permission: onPermissionChoice?(id)
         case .model: break
+        case .surface: onSurfaceChoice?(id == "native")
+        case .speed: onSpeedChoice?(id == "inherit" ? nil : id == "fast")
         }
         focusEditor()
     }
 
+    private func locationOptions() -> [ChoiceOption] {
+        if showingProjectNavigation || checkoutOptions.isEmpty {
+            let projects = projectOptions.map { ChoiceOption(id: $0.id, name: $0.name, icon: nil) }
+            return showingProjectNavigation
+                ? [ChoiceOption(id: "@back-to-checkouts", name: "‹ Checkouts", icon: nil)] + projects
+                : projects
+        }
+        let checkouts = checkoutOptions.map {
+            ChoiceOption(id: $0.id, name: $0.title, icon: nil, detail: $0.detail)
+        }
+        return checkouts + [
+            ChoiceOption(id: "@new-worktree", name: "New Worktree…", icon: nil),
+            ChoiceOption(id: "@switch-project", name: "Switch Project…", icon: nil)
+        ]
+    }
+
     var isComposing: Bool { showsComposer }
     var editorHasFocus: Bool { showsComposer && window.firstResponder === composerEditor.textView }
-    var composedPrompt: String { composerEditor.textView.string }
+    var composedPrompt: String { attachments.submissionText(composerEditor.textView.string) }
+
+    @discardableResult
+    func removeAttachment(id: String) -> Bool { attachments.removeAttachment(id: id) }
+
+    func pasteClipboard(wakeIdentity: UInt64) {
+        guard editorHasFocus else { return }
+        ComposerClipboardPaste.paste(into: composerEditor.textView, attachments: attachments,
+                                     wakeIdentity: wakeIdentity)
+    }
+
+    func drainAttachments() { attachments.drainPrepared() }
+
+    func acceptFileDrop(_ path: String, windowX: Int, windowY: Int,
+                        originX: Int, wakeIdentity: UInt64) -> Bool {
+        let point = NSPoint(x: CGFloat(windowX - originX) / WorkspaceDisplay.scale,
+            y: root.bounds.height - CGFloat(windowY) / WorkspaceDisplay.scale)
+        guard composerSurface.convert(composerSurface.bounds, to: root).contains(point)
+        else { return false }
+        return attachments.addDroppedPath(path, wakeIdentity: wakeIdentity)
+    }
+
+    private func insertLiteralPath(_ path: String) {
+        let quoted = path.contains(" ") ? "\"\(path)\"" : path
+        let separator = composerEditor.textView.string.isEmpty
+            || composerEditor.textView.string.hasSuffix(" ")
+            || composerEditor.textView.string.hasSuffix("\n") ? "" : " "
+        composerEditor.textView.insertText(separator + quoted,
+            replacementRange: composerEditor.textView.selectedRange())
+        refreshStartButton()
+        needsPresentation = true
+    }
 
     func focusEditor() {
         guard showsComposer else { return }
@@ -683,7 +974,9 @@ final class WorkspacePlaceholderPane {
         let text = composerEditor.textView.string
         let canSubmit = showsComposer && !launchBlocked && hasLaunchProject && hasLaunchIdentity
             && modelSelectionValid && !composerEditor.textView.hasMarkedText()
-            && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !attachments.isPreparing
+            && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || attachments.hasImages)
         composerStartButton.isEnabled = canSubmit
         composerStartButton.toolTip = launchBlocked ? "Wait for project selection"
             : !hasLaunchProject ? "Choose a project first"
@@ -760,62 +1053,46 @@ final class WorkspacePlaceholderPane {
                  originX: Int) throws {
         let size = NSSize(width: CGFloat(width) / WorkspaceDisplay.scale, height: CGFloat(height) / WorkspaceDisplay.scale)
         _ = tw_workspace_composer_mode(nativeWindow, showsComposer ? 1 : 0)
+        let attachmentHeight = attachments.attachmentHeight
+        let attachedMinimumHeight = PromptChrome.openingMinimumHeight + attachmentHeight
+            + 2 * Design.Spacing.medium + max(24, Design.Size.choiceHeight)
+            + max(26, composerStartButton.intrinsicContentSize.height) + Design.Spacing.pane
+        let minimumWindowHeight = attachments.hasImages
+            ? Int((attachedMinimumHeight * WorkspaceDisplay.scale).rounded(.up)) : 180
+        tw_workspace_minimum_height(nativeWindow, Int32(minimumWindowHeight))
+        // The Mac prompt keeps an 80-point image rail. Let SDL enforce enough room for that
+        // constraint tree before solving this frame, even if a resize event is still pending.
+        guard height >= minimumWindowHeight else { needsPresentation = true; return }
         guard needsPresentation || presentedSize != size else { return }
         root.frame = NSRect(origin: .zero, size: size)
         if showsComposer {
             let isShort = size.height < 160
-            let contentWidth = min(PromptChrome.openingContentWidth,
-                max(1, size.width - Design.Spacing.pane * 2))
-            let horizontalInset = (size.width - contentWidth) / 2
             let bottomInset: CGFloat = isShort ? 8 : Design.Spacing.pane
             let startTitle = isShort ? "Start" : "Start Session"
             if composerStartButton.title != startTitle { composerStartButton.title = startTitle }
-            let actionGap: CGFloat = isShort ? 4 : Design.Spacing.medium
-            let chipGap: CGFloat = isShort ? 4 : Design.Spacing.medium
+            let columnSpacing: CGFloat = isShort ? 4 : Design.Spacing.medium
+            if composerColumn.spacing != columnSpacing { composerColumn.spacing = columnSpacing }
+            if composerBottom.constant != -bottomInset { composerBottom.constant = -bottomInset }
             let actionHeight = max(26, composerStartButton.intrinsicContentSize.height)
             let chipHeight = max(24, Design.Size.choiceHeight)
-            composerEditor.frame.size.width = max(1, contentWidth - Design.Spacing.inset * 2)
+            window.layoutIfNeeded()
             let textHeight = composerEditor.textView.layoutManager.flatMap { manager in
                 composerEditor.textView.textContainer.map { manager.usedRect(for: $0).height }
             } ?? 0
             let fitted = PromptChrome.fittedHeight(textHeight: textHeight,
-                restingHeight: PromptChrome.openingMinimumHeight, showsFooter: true)
+                restingHeight: PromptChrome.openingMinimumHeight, showsFooter: true,
+                attachmentHeight: attachmentHeight)
             let availableEditorHeight = max(1, size.height - bottomInset - actionHeight
-                - actionGap - chipGap - chipHeight)
+                - 2 * composerColumn.spacing - chipHeight)
             let editorHeight = min(fitted.height, availableEditorHeight)
             let scrolls = fitted.scrolls || editorHeight < fitted.height
             if composerEditor.hasVerticalScroller != scrolls { composerEditor.hasVerticalScroller = scrolls }
-            let editorY = bottomInset + actionHeight + actionGap
-            let chipY = editorY + editorHeight + chipGap
-            let heroBottom = chipY + chipHeight
-            let available = contentWidth
-            let actionWidth = min(available, max(120, composerStartButton.intrinsicContentSize.width))
-            composerStartButton.frame = NSRect(
-                x: size.width - horizontalInset - actionWidth, y: bottomInset,
-                width: actionWidth, height: actionHeight
-            )
-            composerSurface.frame = NSRect(x: horizontalInset, y: editorY,
-                width: contentWidth, height: editorHeight)
-            let frames = PromptChrome.contentFrames(in: composerSurface.bounds)
-            composerEditor.frame = frames.editor
-            let permissionWidth = min(permissionChip.intrinsicContentSize.width, frames.footer.width * 0.45)
-            let modelWidth = min(modelChip.intrinsicContentSize.width,
-                max(1, frames.footer.width - permissionWidth - Design.Spacing.small))
-            modelChip.frame = NSRect(x: frames.footer.minX, y: frames.footer.minY,
-                width: modelWidth, height: frames.footer.height)
-            permissionChip.frame = NSRect(x: modelChip.frame.maxX + Design.Spacing.small,
-                y: frames.footer.minY, width: permissionWidth, height: frames.footer.height)
-            composerHero.place(in: NSRect(x: 0, y: heroBottom,
-                width: size.width, height: max(0, size.height - heroBottom)))
-            let gap: CGFloat = 8
-            let providerWidth = min(max(84, providerChip.intrinsicContentSize.width),
-                                    max(1, available - gap - 48))
-            let projectWidth = min(max(72, projectChip.intrinsicContentSize.width),
-                                   max(1, available - providerWidth - gap))
-            projectChip.frame = NSRect(x: horizontalInset, y: chipY,
-                                       width: projectWidth, height: chipHeight)
-            providerChip.frame = NSRect(x: horizontalInset + projectWidth + gap, y: chipY,
-                                        width: providerWidth, height: chipHeight)
+            if composerSurfaceHeight.constant != editorHeight {
+                composerSurfaceHeight.constant = editorHeight
+            }
+            window.layoutIfNeeded()
+            attachments.layoutTiles()
+            composerHero.updateVisibility()
             if choiceKind != nil {
                 let oldFrame = choiceSurface.frame
                 let oldCount = choiceVisibleCount
@@ -893,6 +1170,9 @@ final class WorkspacePlaceholderPane {
         }
         publishComposerChoiceAccessibility(nativeWindow: nativeWindow, originX: originX,
                                            scale: scale)
+        ComposerAttachmentAccessibility.publish(window: nativeWindow, strip: attachments,
+            owner: showsComposer ? composerIdentity : nil, scope: 1, root: root,
+            originX: originX)
         if showsComposer, let identity = composerIdentity {
             let focused: Int32
             if window.firstResponder === projectChip { focused = 1 }
@@ -901,6 +1181,8 @@ final class WorkspacePlaceholderPane {
             else if window.firstResponder === composerStartButton { focused = 4 }
             else if window.firstResponder === permissionChip { focused = 5 }
             else if window.firstResponder === modelChip { focused = 6 }
+            else if window.firstResponder === surfaceChip { focused = 7 }
+            else if window.firstResponder === speedChip { focused = 8 }
             else { focused = 0 }
             identity.withCString { tw_accessibility_composer_focus(nativeWindow, $0, focused) }
         }
@@ -917,6 +1199,8 @@ final class WorkspacePlaceholderPane {
             tw_accessibility_composer_chip(nativeWindow, nil, 2, nil, nil, 0, 0, 0, 0, 0)
             tw_accessibility_composer_chip(nativeWindow, nil, 3, nil, nil, 0, 0, 0, 0, 0)
             tw_accessibility_composer_chip(nativeWindow, nil, 4, nil, nil, 0, 0, 0, 0, 0)
+            tw_accessibility_composer_chip(nativeWindow, nil, 5, nil, nil, 0, 0, 0, 0, 0)
+            tw_accessibility_composer_chip(nativeWindow, nil, 6, nil, nil, 0, 0, 0, 0, 0)
             tw_accessibility_composer_menu_begin(nativeWindow, nil, 0, 0, 0, 0, 0)
             tw_accessibility_composer_menu_end(nativeWindow)
             return
@@ -932,12 +1216,20 @@ final class WorkspacePlaceholderPane {
             )
         }
 
-        for (kind, chip, value) in [(1, projectChip, selectedProjectName),
+        for (kind, chip, value) in [(1, projectChip, selectedLocationTitle),
                                     (2, providerChip, selectedIdentityName),
                                     (3, permissionChip, selectedPermissionTitle),
-                                    (4, modelChip, String(selectedModelTitle.prefix(100)))] {
+                                    (4, modelChip, String(selectedModelTitle.prefix(100))),
+                                    (5, surfaceChip, selectedSurfaceTitle),
+                                    (6, speedChip, selectedSpeedTitle)] {
+            if chip.isHidden {
+                tw_accessibility_composer_chip(nativeWindow, nil, Int32(kind), nil, nil, 0, 0, 0, 0, 0)
+                continue
+            }
             let frame = pixels(chip)
-            let label = kind == 1 ? "Project" : kind == 2 ? "Identity" : kind == 3 ? "Permissions" : "Model and effort"
+            let label = kind == 1 ? "Project" : kind == 2 ? "Identity"
+                : kind == 3 ? "Permissions" : kind == 4 ? "Model and effort"
+                : kind == 5 ? "Interface" : "Speed"
             identity.withCString { token in
                 label.withCString { name in
                     value.withCString { selected in
@@ -961,7 +1253,9 @@ final class WorkspacePlaceholderPane {
         }
         if choiceKind == .model, let content = modelContent {
             let matrix = content.matrixView
-            for cell in matrix.visibleChoices().prefix(128) {
+            let footer = modelShowHiddenButton
+            let footerFocused = footer != nil && window.firstResponder === footer
+            for cell in matrix.visibleChoices().prefix(footer == nil ? 128 : 127) {
                 let rect = matrix.convert(cell.frame, to: root)
                 let cellID = "\(modelMenuToken):\(cell.index)"
                 cellID.withCString { id in
@@ -969,11 +1263,23 @@ final class WorkspacePlaceholderPane {
                         String(cell.detail.prefix(100)).withCString { detail in
                             _ = tw_accessibility_composer_menu_add_row(nativeWindow, Int32(cell.index),
                                 id, name, detail, cell.selected ? 1 : 0, cell.enabled ? 1 : 0,
-                                cell.focused ? 1 : 0,
+                                cell.focused && !footerFocused ? 1 : 0,
                                 Int32(originX) + Int32((rect.minX * scale).rounded()),
                                 Int32(((root.bounds.height - rect.maxY) * scale).rounded()),
                                 Int32((rect.width * scale).rounded()), Int32((rect.height * scale).rounded()))
                         }
+                    }
+                }
+            }
+            if let footer {
+                let frame = pixels(footer)
+                let footerID = "\(modelMenuToken):-1"
+                footerID.withCString { id in
+                    footer.title.withCString { title in
+                        _ = tw_accessibility_composer_menu_add_row(nativeWindow, -1, id,
+                            title, "", 0, footer.isEnabled ? 1 : 0,
+                            footerFocused ? 1 : 0,
+                            frame.x, frame.y, frame.width, frame.height)
                     }
                 }
             }

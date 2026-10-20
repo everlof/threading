@@ -228,7 +228,7 @@ class Scenario:
         found = [frame.get_child_at_index(index) for index in range(frame.get_child_count())
                  if frame.get_child_at_index(index).get_role_name() == 'list']
         assert len(found) == 1
-        assert 1 <= found[0].get_child_count() <= 8
+        assert 1 <= found[0].get_child_count() <= 7
         return found[0]
 
     def start(self):
@@ -236,7 +236,7 @@ class Scenario:
                                          '/bin/sh', '/bin/true'], env=environment,
                                         stdout=self.log, stderr=self.log)
         self.window = self.title('Threading experiment - ' + str(project))
-        # The catalog bound below deliberately exercises eight visible rows.
+        # The catalog bound below deliberately exercises seven visible rows.
         self.xdo('windowsize', '--sync', self.window, '1120', '480')
         self.app = self.eventually(self.application, 'AT-SPI fixture application')
 
@@ -309,13 +309,14 @@ class Scenario:
         def read():
             listing = self.listed()
             assert listing.get_name() == f'Saved agents (512 of {self.expected_count})', listing.get_name()
-            assert listing.get_description() == 'Showing 1 through 8 of 512 items'
+            assert listing.get_description() == 'Showing 1 through 7 of 512 items'
             rows = [listing.get_child_at_index(index) for index in range(listing.get_child_count())]
             ids = [row.get_accessible_id() for row in rows]
             assert len(ids) == len(set(ids)), ids
             assert ids.count(self.fresh_id) == 1 and ids[0] == self.fresh_id, ids
             assert rows[0].get_name().startswith('[Claude Code] New Session [' + self.fresh_id[:8] + ']')
-            assert rows[0].get_name().endswith(' retained'), rows[0].get_name()
+            # The fixture sends a definitive spawn refusal before opening the picker.
+            assert not rows[0].get_name().endswith(' retained'), rows[0].get_name()
             chosen = listing.get_selection_iface().get_selected_child(0)
             assert chosen.get_accessible_id() == (self.fresh_id if selected is None else selected)
             return True

@@ -1082,17 +1082,8 @@ final class TerminalContainerViewController: NSViewController {
     }
 
     private func setupPlaceholder() {
-        let host = view
-        guard placeholderView.superview == nil else { return }
-        placeholderView.translatesAutoresizingMaskIntoConstraints = false
-        host.addSubview(placeholderView, positioned: .below, relativeTo: gitStatusOverlay)
-
-        NSLayoutConstraint.activate([
-            placeholderView.topAnchor.constraint(equalTo: contentTopAnchor),
-            placeholderView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            placeholderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            placeholderView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-        ])
+        placeholderView.pin(to: view, contentTopAnchor: contentTopAnchor,
+                            below: gitStatusOverlay)
     }
 
     // MARK: - Public Methods
@@ -2193,7 +2184,7 @@ final class TerminalContainerViewController: NSViewController {
         applyPaneBackground(.chrome)
         placeholderView.configure(
             symbolName: "arrow.clockwise.circle",
-            title: L10n.format("%@ ended", agentSession.title),
+            title: L10n.format("%@ ended", agentSession.displayTitle),
             detail: dormantDetail(for: agentSession),
             actionTitle: agentSession.isResumable
                 ? L10n.string("Resume Session")

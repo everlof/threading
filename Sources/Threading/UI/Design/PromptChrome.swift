@@ -6,6 +6,8 @@ import AppKit
 enum PromptChrome {
     nonisolated static let openingContentWidth: CGFloat = 720
     nonisolated static let openingMinimumHeight: CGFloat = 116
+    static let openingColumnMeasurePriority = NSLayoutConstraint.Priority(240)
+    static let openingColumnHuggingPriority = NSLayoutConstraint.Priority(1)
     nonisolated static let submitSize = Design.Size.compactSubmitHeight
     nonisolated static let restingLines: CGFloat = 2
     nonisolated static let verticalInset: CGFloat = 13
@@ -25,21 +27,56 @@ enum PromptChrome {
         row.addArrangedSubview(spacer)
     }
 
-    static func contentInset(showsFooter: Bool) -> CGFloat {
-        showsFooter ? footerVerticalInset : verticalInset
+    static func configureContentStack(_ stack: NSStackView, views: [NSView]) {
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.medium
+        stack.detachesHiddenViews = true
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        for view in views { stack.addArrangedSubview(view) }
     }
 
-    /// Frame-based hosts use the same text/footer anatomy as PromptView's content stack.
-    static func contentFrames(in bounds: CGRect) -> (editor: CGRect, footer: CGRect) {
-        let inset = min(footerVerticalInset, bounds.height / 4)
-        let width = max(1, bounds.width - Design.Spacing.inset * 2)
-        let available = max(1, bounds.height - inset * 2)
-        let footerHeight = min(Design.Size.chipHeight, max(0, available - 1))
-        let gap = min(Design.Spacing.medium, max(0, available - footerHeight - 1))
-        let footer = CGRect(x: Design.Spacing.inset, y: inset, width: width, height: footerHeight)
-        let editor = CGRect(x: Design.Spacing.inset, y: footer.maxY + gap,
-            width: width, height: max(1, available - footerHeight - gap))
-        return (editor, footer)
+    static func contentSizingConstraints(stack: NSStackView, attachments: NSView,
+                                         editor: NSView, footer: NSView) -> [NSLayoutConstraint] {
+        [
+            attachments.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            attachments.heightAnchor.constraint(
+                equalToConstant: Design.Size.promptAttachmentThumbnail),
+            editor.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            footer.heightAnchor.constraint(equalToConstant: Design.Size.chipHeight)
+        ]
+    }
+
+    /// The opening composer has the same bounded column in both hosts. Keep the optional
+    /// pane-width measurement below the split view's holding priority, and the stack's own
+    /// hugging below that measurement so its widest child cannot narrow the prompt.
+    @discardableResult
+    static func constrainOpeningColumn(_ column: NSStackView, in root: NSView,
+                                       prompt: NSView, actionRow: NSView) -> NSLayoutConstraint {
+        let measure = column.widthAnchor.constraint(
+            equalTo: root.widthAnchor, constant: -2 * Design.Spacing.pane)
+        measure.priority = openingColumnMeasurePriority
+        column.setHuggingPriority(openingColumnHuggingPriority, for: .horizontal)
+        let bottom = column.bottomAnchor.constraint(
+            equalTo: root.bottomAnchor, constant: -Design.Spacing.pane)
+        NSLayoutConstraint.activate([
+            column.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            bottom,
+            measure,
+            column.widthAnchor.constraint(lessThanOrEqualToConstant: openingContentWidth),
+            column.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor,
+                                            constant: Design.Spacing.pane),
+            column.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor,
+                                             constant: -Design.Spacing.pane),
+            prompt.widthAnchor.constraint(equalTo: column.widthAnchor),
+            actionRow.widthAnchor.constraint(equalTo: column.widthAnchor)
+        ])
+        return bottom
+    }
+
+    static func contentInset(showsFooter: Bool) -> CGFloat {
+        showsFooter ? footerVerticalInset : verticalInset
     }
 
     static func restingHeight(minimum: CGFloat, lineHeight: CGFloat, showsFooter: Bool,
@@ -83,3 +120,28 @@ enum PromptChrome {
             glow: true, bevel: .sunken)
     }
 }
+
+#if os(Linux)
+/// The same attachment / editor / footer constraint tree that `PromptView` mounts on macOS.
+/// The Linux host supplies the surface height; the stack allocates that height to the editor.
+@MainActor
+final class LinuxPromptContentLayout {
+    init(surface: NSView, editor: NSView, attachments: LinuxPromptAttachmentStrip,
+         footer: NSStackView) {
+        let stack = NSStackView()
+        PromptChrome.configureContentStack(stack, views: [attachments, editor, footer])
+        surface.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: surface.topAnchor,
+                                       constant: PromptChrome.footerVerticalInset),
+            stack.bottomAnchor.constraint(equalTo: surface.bottomAnchor,
+                                          constant: -PromptChrome.footerVerticalInset),
+            stack.leadingAnchor.constraint(equalTo: surface.leadingAnchor,
+                                           constant: Design.Spacing.inset),
+            stack.trailingAnchor.constraint(equalTo: surface.trailingAnchor,
+                                            constant: -Design.Spacing.inset)
+        ] + PromptChrome.contentSizingConstraints(stack: stack, attachments: attachments,
+            editor: editor, footer: footer))
+    }
+}
+#endif

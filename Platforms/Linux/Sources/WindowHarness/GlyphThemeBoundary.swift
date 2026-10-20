@@ -80,13 +80,20 @@ public enum Design {
         public static let small: CGFloat = 6
         public static let inset: CGFloat = 12
     }
-    public enum Motion { public static let quick: TimeInterval = 0.15 }
+    public enum Motion {
+        public static let quick: TimeInterval = 0.15
+        public static let reducesStatusMotion = ProcessInfo.processInfo.environment["THREADING_LINUX_REDUCE_MOTION"] == "1"
+    }
     public enum Size {
+        // Same derived Mac canvas: 300 summary + 32 pane + 64 axis + 620 plot + 12 axis.
+        public static let settingsContentWidth: CGFloat = 1_028
+        public static let glowGutter: CGFloat = 48
         public static let tabHeight: CGFloat = 28
         public static let footerHeight: CGFloat = 48
         public static let toolbarButtonWidth: CGFloat = 30
         public static let toolbarButtonHeight: CGFloat = 28
         public static let inlineButtonTarget: CGFloat = 20
+        public static let promptAttachmentThumbnail: CGFloat = 80
         public static let splitMenuWidth: CGFloat = 24
         public static let chipHeight: CGFloat = 26
         public static let compactSplitMenuWidth: CGFloat = 12
@@ -116,11 +123,21 @@ public enum Design {
         public static func image(_ name: String, slot: CGFloat, pointSize: CGFloat,
                                  weight: NSFont.Weight) -> NSImage? {
             precondition(name == "ellipsis" || name == "plus" || name == "terminal"
+                         || name == "archivebox" || name == "pin" || name == "pin.slash"
+                         || name == "pin.fill" || name == "moon.zzz" || name == "bell"
+                         || name == "calendar"
                          || name == "chevron.down" || name == "chevron.right"
-                         || name == "folder" || name == "doc.text"
-                         || name == "text.bubble" || name == "hand.raised" || name == "cpu"
+                         || name == "folder" || name == "doc.text" || name == "pencil"
+                         || name == "arrow.up.forward.app"
+                         || name == "text.bubble" || name == "bubble.left.and.text.bubble.right"
+                         || name == "hand.raised" || name == "cpu" || name == "brain"
+                         || name == "gauge" || name == "bolt.fill"
                          || name == "questionmark.bubble" || name == "circle"
-                         || name == "checkmark.circle.fill" || name == "return" || name == "stop.fill",
+                         || name == "eye.slash"
+                         || name == "exclamationmark.triangle"
+                         || name == "checkmark.circle.fill" || name == "return"
+                         || name == "stop.fill" || name == "stop.circle"
+                         || name == "arrow.clockwise.circle",
                          "No Linux diagnostic symbol artwork for \(name)")
             precondition(slot.isFinite && pointSize.isFinite && slot > 0 && pointSize > 0)
             // Keep the artwork at its optical point size inside the requested layout slot.
@@ -137,6 +154,208 @@ public enum Design {
                 if name == "stop.fill" {
                     NSBezierPath(roundedRect: NSRect(x: origin + side * 0.18, y: origin + side * 0.18,
                         width: side * 0.64, height: side * 0.64), xRadius: side * 0.06, yRadius: side * 0.06).fill()
+                } else if name == "stop.circle" {
+                    let ring = NSBezierPath(ovalIn: NSRect(x: origin + side * 0.1,
+                        y: origin + side * 0.1, width: side * 0.8, height: side * 0.8))
+                    ring.lineWidth = max(0.8, side * 0.08 * weightFactor)
+                    NSColor.white.setStroke()
+                    ring.stroke()
+                    NSBezierPath(roundedRect: NSRect(x: origin + side * 0.37,
+                        y: origin + side * 0.37, width: side * 0.26, height: side * 0.26),
+                        xRadius: side * 0.02, yRadius: side * 0.02).fill()
+                } else if name == "arrow.clockwise.circle" {
+                    let ring = NSBezierPath(ovalIn: NSRect(x: origin + side * 0.08,
+                        y: origin + side * 0.08, width: side * 0.84, height: side * 0.84))
+                    ring.lineWidth = max(0.8, side * 0.06 * weightFactor)
+                    NSColor.white.setStroke()
+                    ring.stroke()
+                    let arrow = NSBezierPath()
+                    arrow.move(to: NSPoint(x: origin + side * 0.70, y: origin + side * 0.71))
+                    arrow.curve(to: NSPoint(x: origin + side * 0.28, y: origin + side * 0.48),
+                        controlPoint1: NSPoint(x: origin + side * 0.37, y: origin + side * 0.85),
+                        controlPoint2: NSPoint(x: origin + side * 0.22, y: origin + side * 0.72))
+                    arrow.lineWidth = max(0.8, side * 0.08 * weightFactor)
+                    arrow.lineCapStyle = .round
+                    arrow.stroke()
+                    let tip = NSBezierPath()
+                    tip.move(to: NSPoint(x: origin + side * 0.69, y: origin + side * 0.71))
+                    tip.line(to: NSPoint(x: origin + side * 0.52, y: origin + side * 0.72))
+                    tip.line(to: NSPoint(x: origin + side * 0.65, y: origin + side * 0.57))
+                    tip.close()
+                    tip.fill()
+                } else if name == "pencil" {
+                    let pencil = NSBezierPath()
+                    pencil.move(to: NSPoint(x: origin + side * 0.15, y: origin + side * 0.14))
+                    pencil.line(to: NSPoint(x: origin + side * 0.28, y: origin + side * 0.44))
+                    pencil.line(to: NSPoint(x: origin + side * 0.69, y: origin + side * 0.85))
+                    pencil.line(to: NSPoint(x: origin + side * 0.85, y: origin + side * 0.69))
+                    pencil.line(to: NSPoint(x: origin + side * 0.44, y: origin + side * 0.28))
+                    pencil.close()
+                    pencil.lineWidth = max(0.7, side * 0.055 * weightFactor)
+                    pencil.lineJoinStyle = .round
+                    NSColor.white.setStroke()
+                    pencil.stroke()
+                    let tip = NSBezierPath()
+                    tip.move(to: NSPoint(x: origin + side * 0.15, y: origin + side * 0.14))
+                    tip.line(to: NSPoint(x: origin + side * 0.28, y: origin + side * 0.44))
+                    tip.line(to: NSPoint(x: origin + side * 0.44, y: origin + side * 0.28))
+                    tip.close()
+                    tip.fill()
+                } else if name == "pin" || name == "pin.slash" || name == "pin.fill" {
+                    let pin = NSBezierPath()
+                    pin.move(to: NSPoint(x: origin + side * 0.30, y: origin + side * 0.82))
+                    pin.line(to: NSPoint(x: origin + side * 0.70, y: origin + side * 0.82))
+                    pin.move(to: NSPoint(x: origin + side * 0.38, y: origin + side * 0.82))
+                    pin.line(to: NSPoint(x: origin + side * 0.34, y: origin + side * 0.43))
+                    pin.line(to: NSPoint(x: origin + side * 0.66, y: origin + side * 0.43))
+                    pin.line(to: NSPoint(x: origin + side * 0.62, y: origin + side * 0.82))
+                    pin.move(to: NSPoint(x: origin + side * 0.25, y: origin + side * 0.43))
+                    pin.line(to: NSPoint(x: origin + side * 0.75, y: origin + side * 0.43))
+                    pin.move(to: NSPoint(x: origin + side * 0.50, y: origin + side * 0.43))
+                    pin.line(to: NSPoint(x: origin + side * 0.50, y: origin + side * 0.12))
+                    if name == "pin.slash" {
+                        pin.move(to: NSPoint(x: origin + side * 0.17, y: origin + side * 0.13))
+                        pin.line(to: NSPoint(x: origin + side * 0.83, y: origin + side * 0.87))
+                    }
+                    pin.lineWidth = max(0.8, side * 0.08 * weightFactor)
+                    pin.lineCapStyle = .round
+                    pin.lineJoinStyle = .round
+                    NSColor.white.setStroke()
+                    pin.stroke()
+                } else if name == "moon.zzz" {
+                    let moon = NSBezierPath()
+                    moon.move(to: NSPoint(x: origin + side * 0.56, y: origin + side * 0.91))
+                    moon.curve(to: NSPoint(x: origin + side * 0.70, y: origin + side * 0.13),
+                        controlPoint1: NSPoint(x: origin + side * 0.12, y: origin + side * 0.89),
+                        controlPoint2: NSPoint(x: origin + side * 0.11, y: origin + side * 0.29))
+                    moon.curve(to: NSPoint(x: origin + side * 0.56, y: origin + side * 0.91),
+                        controlPoint1: NSPoint(x: origin + side * 0.32, y: origin + side * 0.36),
+                        controlPoint2: NSPoint(x: origin + side * 0.57, y: origin + side * 0.68))
+                    moon.lineWidth = max(0.8, side * 0.08 * weightFactor)
+                    moon.lineCapStyle = .round
+                    NSColor.white.setStroke()
+                    moon.stroke()
+                    let sleep = NSBezierPath()
+                    sleep.move(to: NSPoint(x: origin + side * 0.62, y: origin + side * 0.71))
+                    sleep.line(to: NSPoint(x: origin + side * 0.79, y: origin + side * 0.71))
+                    sleep.line(to: NSPoint(x: origin + side * 0.62, y: origin + side * 0.55))
+                    sleep.line(to: NSPoint(x: origin + side * 0.79, y: origin + side * 0.55))
+                    sleep.move(to: NSPoint(x: origin + side * 0.76, y: origin + side * 0.90))
+                    sleep.line(to: NSPoint(x: origin + side * 0.91, y: origin + side * 0.90))
+                    sleep.line(to: NSPoint(x: origin + side * 0.76, y: origin + side * 0.77))
+                    sleep.line(to: NSPoint(x: origin + side * 0.91, y: origin + side * 0.77))
+                    sleep.lineWidth = max(0.6, side * 0.055 * weightFactor)
+                    sleep.lineJoinStyle = .round
+                    sleep.stroke()
+                } else if name == "bell" {
+                    let bell = NSBezierPath()
+                    bell.move(to: NSPoint(x: origin + side * 0.21, y: origin + side * 0.31))
+                    bell.curve(to: NSPoint(x: origin + side * 0.33, y: origin + side * 0.57),
+                        controlPoint1: NSPoint(x: origin + side * 0.30, y: origin + side * 0.40),
+                        controlPoint2: NSPoint(x: origin + side * 0.27, y: origin + side * 0.50))
+                    bell.curve(to: NSPoint(x: origin + side * 0.67, y: origin + side * 0.57),
+                        controlPoint1: NSPoint(x: origin + side * 0.39, y: origin + side * 0.83),
+                        controlPoint2: NSPoint(x: origin + side * 0.61, y: origin + side * 0.83))
+                    bell.curve(to: NSPoint(x: origin + side * 0.79, y: origin + side * 0.31),
+                        controlPoint1: NSPoint(x: origin + side * 0.73, y: origin + side * 0.50),
+                        controlPoint2: NSPoint(x: origin + side * 0.70, y: origin + side * 0.40))
+                    bell.close()
+                    bell.move(to: NSPoint(x: origin + side * 0.43, y: origin + side * 0.19))
+                    bell.curve(to: NSPoint(x: origin + side * 0.57, y: origin + side * 0.19),
+                        controlPoint1: NSPoint(x: origin + side * 0.45, y: origin + side * 0.10),
+                        controlPoint2: NSPoint(x: origin + side * 0.55, y: origin + side * 0.10))
+                    bell.lineWidth = max(0.8, side * 0.08 * weightFactor)
+                    bell.lineJoinStyle = .round
+                    NSColor.white.setStroke()
+                    bell.stroke()
+                } else if name == "calendar" {
+                    let calendar = NSBezierPath(roundedRect: NSRect(
+                        x: origin + side * 0.14, y: origin + side * 0.14,
+                        width: side * 0.72, height: side * 0.67),
+                        xRadius: side * 0.06, yRadius: side * 0.06)
+                    calendar.move(to: NSPoint(x: origin + side * 0.14, y: origin + side * 0.60))
+                    calendar.line(to: NSPoint(x: origin + side * 0.86, y: origin + side * 0.60))
+                    for x: CGFloat in [0.34, 0.66] {
+                        calendar.move(to: NSPoint(x: origin + side * x,
+                            y: origin + side * 0.73))
+                        calendar.line(to: NSPoint(x: origin + side * x,
+                            y: origin + side * 0.91))
+                    }
+                    calendar.lineWidth = max(0.8, side * 0.08 * weightFactor)
+                    calendar.lineCapStyle = .round
+                    NSColor.white.setStroke()
+                    calendar.stroke()
+                    for x: CGFloat in [0.35, 0.58] {
+                        for y: CGFloat in [0.33, 0.48] {
+                            NSBezierPath(ovalIn: NSRect(x: origin + side * x,
+                                y: origin + side * y, width: side * 0.08,
+                                height: side * 0.08)).fill()
+                        }
+                    }
+                } else if name == "archivebox" {
+                    let box = NSBezierPath()
+                    box.move(to: NSPoint(x: origin + side * 0.16, y: origin + side * 0.68))
+                    box.line(to: NSPoint(x: origin + side * 0.21, y: origin + side * 0.16))
+                    box.line(to: NSPoint(x: origin + side * 0.79, y: origin + side * 0.16))
+                    box.line(to: NSPoint(x: origin + side * 0.84, y: origin + side * 0.68))
+                    box.move(to: NSPoint(x: origin + side * 0.08, y: origin + side * 0.68))
+                    box.line(to: NSPoint(x: origin + side * 0.92, y: origin + side * 0.68))
+                    box.line(to: NSPoint(x: origin + side * 0.92, y: origin + side * 0.84))
+                    box.line(to: NSPoint(x: origin + side * 0.08, y: origin + side * 0.84))
+                    box.close()
+                    box.move(to: NSPoint(x: origin + side * 0.39, y: origin + side * 0.48))
+                    box.line(to: NSPoint(x: origin + side * 0.61, y: origin + side * 0.48))
+                    box.lineWidth = max(0.8, side * 0.08 * weightFactor)
+                    box.lineJoinStyle = .round
+                    box.lineCapStyle = .round
+                    NSColor.white.setStroke()
+                    box.stroke()
+                } else if name == "exclamationmark.triangle" {
+                    let outline = NSBezierPath()
+                    outline.move(to: NSPoint(x: origin + side * 0.50, y: origin + side * 0.88))
+                    outline.line(to: NSPoint(x: origin + side * 0.91, y: origin + side * 0.16))
+                    outline.line(to: NSPoint(x: origin + side * 0.09, y: origin + side * 0.16))
+                    outline.close()
+                    outline.lineWidth = max(0.8, side * 0.08 * weightFactor)
+                    outline.lineJoinStyle = .round
+                    NSColor.white.setStroke()
+                    outline.stroke()
+                    let stem = NSBezierPath()
+                    stem.move(to: NSPoint(x: origin + side * 0.50, y: origin + side * 0.60))
+                    stem.line(to: NSPoint(x: origin + side * 0.50, y: origin + side * 0.39))
+                    stem.lineWidth = max(0.8, side * 0.09 * weightFactor)
+                    stem.lineCapStyle = .round
+                    stem.stroke()
+                    NSBezierPath(ovalIn: NSRect(x: origin + side * 0.46, y: origin + side * 0.25,
+                        width: side * 0.08, height: side * 0.08)).fill()
+                } else if name == "bolt.fill" {
+                    let bolt = NSBezierPath()
+                    bolt.move(to: NSPoint(x: origin + side * 0.56, y: origin + side * 0.94))
+                    bolt.line(to: NSPoint(x: origin + side * 0.21, y: origin + side * 0.47))
+                    bolt.line(to: NSPoint(x: origin + side * 0.47, y: origin + side * 0.47))
+                    bolt.line(to: NSPoint(x: origin + side * 0.39, y: origin + side * 0.06))
+                    bolt.line(to: NSPoint(x: origin + side * 0.79, y: origin + side * 0.57))
+                    bolt.line(to: NSPoint(x: origin + side * 0.52, y: origin + side * 0.57))
+                    bolt.close()
+                    bolt.fill()
+                } else if name == "gauge" {
+                    let arc = NSBezierPath()
+                    arc.move(to: NSPoint(x: origin + side * 0.15, y: origin + side * 0.42))
+                    arc.curve(to: NSPoint(x: origin + side * 0.5, y: origin + side * 0.77),
+                        controlPoint1: NSPoint(x: origin + side * 0.15, y: origin + side * 0.61),
+                        controlPoint2: NSPoint(x: origin + side * 0.31, y: origin + side * 0.77))
+                    arc.curve(to: NSPoint(x: origin + side * 0.85, y: origin + side * 0.42),
+                        controlPoint1: NSPoint(x: origin + side * 0.69, y: origin + side * 0.77),
+                        controlPoint2: NSPoint(x: origin + side * 0.85, y: origin + side * 0.61))
+                    arc.lineWidth = max(1, side * 0.09 * weightFactor)
+                    arc.lineCapStyle = .round
+                    arc.stroke()
+                    let needle = NSBezierPath()
+                    needle.move(to: NSPoint(x: origin + side * 0.5, y: origin + side * 0.42))
+                    needle.line(to: NSPoint(x: origin + side * 0.68, y: origin + side * 0.67))
+                    needle.lineWidth = arc.lineWidth
+                    needle.lineCapStyle = .round
+                    needle.stroke()
                 } else if name == "return" {
                     let mark = NSBezierPath()
                     mark.move(to: NSPoint(x: origin + side * 0.8, y: origin + side * 0.8))
@@ -148,6 +367,30 @@ public enum Design {
                     mark.lineWidth = max(1, side * 0.09 * weightFactor)
                     NSColor.white.setStroke()
                     mark.stroke()
+                } else if name == "bubble.left.and.text.bubble.right" {
+                    let left = NSBezierPath()
+                    left.move(to: NSPoint(x: origin + side * 0.08, y: origin + side * 0.38))
+                    left.line(to: NSPoint(x: origin + side * 0.08, y: origin + side * 0.82))
+                    left.line(to: NSPoint(x: origin + side * 0.62, y: origin + side * 0.82))
+                    left.line(to: NSPoint(x: origin + side * 0.62, y: origin + side * 0.38))
+                    left.line(to: NSPoint(x: origin + side * 0.30, y: origin + side * 0.38))
+                    left.line(to: NSPoint(x: origin + side * 0.19, y: origin + side * 0.25))
+                    left.line(to: NSPoint(x: origin + side * 0.19, y: origin + side * 0.38))
+                    left.close()
+                    left.lineWidth = max(0.8, side * 0.07 * weightFactor)
+                    NSColor.white.setStroke()
+                    left.stroke()
+                    let right = NSBezierPath()
+                    right.move(to: NSPoint(x: origin + side * 0.38, y: origin + side * 0.15))
+                    right.line(to: NSPoint(x: origin + side * 0.38, y: origin + side * 0.30))
+                    right.line(to: NSPoint(x: origin + side * 0.72, y: origin + side * 0.30))
+                    right.line(to: NSPoint(x: origin + side * 0.83, y: origin + side * 0.42))
+                    right.line(to: NSPoint(x: origin + side * 0.83, y: origin + side * 0.30))
+                    right.line(to: NSPoint(x: origin + side * 0.92, y: origin + side * 0.30))
+                    right.line(to: NSPoint(x: origin + side * 0.92, y: origin + side * 0.66))
+                    right.line(to: NSPoint(x: origin + side * 0.68, y: origin + side * 0.66))
+                    right.lineWidth = left.lineWidth
+                    right.stroke()
                 } else if name == "text.bubble" {
                     let bubble = NSBezierPath()
                     bubble.move(to: NSPoint(x: origin + side * 0.15, y: origin + side * 0.25))
@@ -168,6 +411,27 @@ public enum Design {
                     }
                     text.lineWidth = bubble.lineWidth
                     text.stroke()
+                } else if name == "eye.slash" {
+                    let eye = NSBezierPath()
+                    eye.move(to: NSPoint(x: origin + side * 0.10, y: origin + side * 0.50))
+                    eye.curve(to: NSPoint(x: origin + side * 0.90, y: origin + side * 0.50),
+                              controlPoint1: NSPoint(x: origin + side * 0.32, y: origin + side * 0.84),
+                              controlPoint2: NSPoint(x: origin + side * 0.68, y: origin + side * 0.84))
+                    eye.curve(to: NSPoint(x: origin + side * 0.10, y: origin + side * 0.50),
+                              controlPoint1: NSPoint(x: origin + side * 0.68, y: origin + side * 0.16),
+                              controlPoint2: NSPoint(x: origin + side * 0.32, y: origin + side * 0.16))
+                    eye.lineWidth = max(0.8, side * 0.08 * weightFactor)
+                    eye.lineCapStyle = .round
+                    NSColor.white.setStroke()
+                    eye.stroke()
+                    NSBezierPath(ovalIn: NSRect(x: origin + side * 0.43, y: origin + side * 0.43,
+                                                width: side * 0.14, height: side * 0.14)).fill()
+                    let slash = NSBezierPath()
+                    slash.move(to: NSPoint(x: origin + side * 0.16, y: origin + side * 0.14))
+                    slash.line(to: NSPoint(x: origin + side * 0.84, y: origin + side * 0.86))
+                    slash.lineWidth = max(0.9, side * 0.10 * weightFactor)
+                    slash.lineCapStyle = .round
+                    slash.stroke()
                 } else if name == "circle" || name == "checkmark.circle.fill" {
                     // A question choice's radio mark: an open ring, or a filled disc with the
                     // check knocked out of it once chosen.
@@ -215,6 +479,48 @@ public enum Design {
                     mark.stroke()
                     NSBezierPath(ovalIn: NSRect(x: origin + side * 0.46, y: origin + side * 0.31,
                                                 width: side * 0.08, height: side * 0.08)).fill()
+                } else if name == "brain" {
+                    let outline = NSBezierPath()
+                    outline.move(to: NSPoint(x: origin + side * 0.50, y: origin + side * 0.18))
+                    outline.curve(to: NSPoint(x: origin + side * 0.28, y: origin + side * 0.23),
+                        controlPoint1: NSPoint(x: origin + side * 0.41, y: origin + side * 0.11),
+                        controlPoint2: NSPoint(x: origin + side * 0.29, y: origin + side * 0.14))
+                    outline.curve(to: NSPoint(x: origin + side * 0.16, y: origin + side * 0.45),
+                        controlPoint1: NSPoint(x: origin + side * 0.12, y: origin + side * 0.25),
+                        controlPoint2: NSPoint(x: origin + side * 0.10, y: origin + side * 0.38))
+                    outline.curve(to: NSPoint(x: origin + side * 0.28, y: origin + side * 0.69),
+                        controlPoint1: NSPoint(x: origin + side * 0.07, y: origin + side * 0.56),
+                        controlPoint2: NSPoint(x: origin + side * 0.16, y: origin + side * 0.69))
+                    outline.curve(to: NSPoint(x: origin + side * 0.50, y: origin + side * 0.82),
+                        controlPoint1: NSPoint(x: origin + side * 0.29, y: origin + side * 0.86),
+                        controlPoint2: NSPoint(x: origin + side * 0.44, y: origin + side * 0.88))
+                    outline.curve(to: NSPoint(x: origin + side * 0.72, y: origin + side * 0.69),
+                        controlPoint1: NSPoint(x: origin + side * 0.56, y: origin + side * 0.88),
+                        controlPoint2: NSPoint(x: origin + side * 0.71, y: origin + side * 0.86))
+                    outline.curve(to: NSPoint(x: origin + side * 0.84, y: origin + side * 0.45),
+                        controlPoint1: NSPoint(x: origin + side * 0.84, y: origin + side * 0.69),
+                        controlPoint2: NSPoint(x: origin + side * 0.93, y: origin + side * 0.56))
+                    outline.curve(to: NSPoint(x: origin + side * 0.72, y: origin + side * 0.23),
+                        controlPoint1: NSPoint(x: origin + side * 0.90, y: origin + side * 0.38),
+                        controlPoint2: NSPoint(x: origin + side * 0.88, y: origin + side * 0.25))
+                    outline.curve(to: NSPoint(x: origin + side * 0.50, y: origin + side * 0.18),
+                        controlPoint1: NSPoint(x: origin + side * 0.71, y: origin + side * 0.14),
+                        controlPoint2: NSPoint(x: origin + side * 0.59, y: origin + side * 0.11))
+                    outline.move(to: NSPoint(x: origin + side * 0.50, y: origin + side * 0.81))
+                    outline.line(to: NSPoint(x: origin + side * 0.50, y: origin + side * 0.18))
+                    outline.move(to: NSPoint(x: origin + side * 0.23, y: origin + side * 0.48))
+                    outline.curve(to: NSPoint(x: origin + side * 0.39, y: origin + side * 0.37),
+                        controlPoint1: NSPoint(x: origin + side * 0.40, y: origin + side * 0.58),
+                        controlPoint2: NSPoint(x: origin + side * 0.22, y: origin + side * 0.31))
+                    outline.move(to: NSPoint(x: origin + side * 0.77, y: origin + side * 0.48))
+                    outline.curve(to: NSPoint(x: origin + side * 0.61, y: origin + side * 0.37),
+                        controlPoint1: NSPoint(x: origin + side * 0.60, y: origin + side * 0.58),
+                        controlPoint2: NSPoint(x: origin + side * 0.78, y: origin + side * 0.31))
+                    outline.lineWidth = max(0.8, side * 0.07 * weightFactor)
+                    outline.lineCapStyle = .round
+                    outline.lineJoinStyle = .round
+                    NSColor.white.setStroke()
+                    outline.stroke()
                 } else if name == "cpu" {
                     let chip = NSBezierPath(roundedRect: NSRect(x: origin + side * 0.22,
                         y: origin + side * 0.22, width: side * 0.56, height: side * 0.56),
@@ -310,6 +616,23 @@ public enum Design {
                     chevron.lineJoinStyle = .round
                     NSColor.white.setStroke()
                     chevron.stroke()
+                } else if name == "arrow.up.forward.app" {
+                    let app = NSBezierPath()
+                    app.move(to: NSPoint(x: origin + side * 0.68, y: origin + side * 0.52))
+                    app.line(to: NSPoint(x: origin + side * 0.68, y: origin + side * 0.16))
+                    app.line(to: NSPoint(x: origin + side * 0.16, y: origin + side * 0.16))
+                    app.line(to: NSPoint(x: origin + side * 0.16, y: origin + side * 0.68))
+                    app.line(to: NSPoint(x: origin + side * 0.52, y: origin + side * 0.68))
+                    app.move(to: NSPoint(x: origin + side * 0.44, y: origin + side * 0.47))
+                    app.line(to: NSPoint(x: origin + side * 0.86, y: origin + side * 0.86))
+                    app.move(to: NSPoint(x: origin + side * 0.56, y: origin + side * 0.86))
+                    app.line(to: NSPoint(x: origin + side * 0.86, y: origin + side * 0.86))
+                    app.line(to: NSPoint(x: origin + side * 0.86, y: origin + side * 0.56))
+                    app.lineWidth = max(0.8, side * 0.08 * weightFactor)
+                    app.lineCapStyle = .round
+                    app.lineJoinStyle = .round
+                    NSColor.white.setStroke()
+                    app.stroke()
                 } else if name == "folder" {
                     let folder = NSBezierPath()
                     folder.move(to: NSPoint(x: origin + side * 0.1,

@@ -524,19 +524,36 @@ open class NSView: NSResponder, NSLayoutItem {
 
     open func updateConstraints() {}
 
+    /// Match AppKit's explicit constraint flush used when a stack changes orientation.
+    /// The Linux stack updates its constraints synchronously; solving the subtree here also
+    /// gives a newly activated span constraint the vertical arrangement to attach to.
+    open func updateConstraintsForSubtreeIfNeeded() {
+        _ = layoutSubtreeIfNeeded()
+    }
+
     /// Solve dirty constraint islands in this subtree. A frame-placed descendant fixes its own
     /// rectangle, so its internal constraints can be solved separately from its parent's tree.
     /// AppKit runs this from the window update cycle; the Linux host also calls it before input
     /// geometry is read.
     @discardableResult
     open func layoutSubtreeIfNeeded() -> LayoutEngine.Diagnosis? {
-        let boundaries = LayoutEngine.independentDescendants(of: self)
-        var diagnosis = layoutIslandIfNeeded(boundaries: boundaries)
-        for boundary in boundaries {
-            guard let childDiagnosis = boundary.layoutSubtreeIfNeeded() else { continue }
-            if diagnosis == nil || (diagnosis?.solved == true && !childDiagnosis.solved) {
-                diagnosis = childDiagnosis
+        var diagnosis: LayoutEngine.Diagnosis?
+        // A layout() callback may change the constraints after learning its solved width.
+        // Re-solve that change before returning geometry to input and accessibility callers.
+        for _ in 0..<4 {
+            let boundaries = LayoutEngine.independentDescendants(of: self)
+            let islandDiagnosis = layoutIslandIfNeeded(boundaries: boundaries)
+            if let islandDiagnosis, diagnosis == nil ||
+                (diagnosis?.solved == true && !islandDiagnosis.solved) {
+                diagnosis = islandDiagnosis
             }
+            for boundary in boundaries {
+                guard let childDiagnosis = boundary.layoutSubtreeIfNeeded() else { continue }
+                if diagnosis == nil || (diagnosis?.solved == true && !childDiagnosis.solved) {
+                    diagnosis = childDiagnosis
+                }
+            }
+            if !needsLayout && boundaries.allSatisfy({ !$0.needsLayout }) { break }
         }
         return diagnosis
     }
@@ -547,8 +564,18 @@ open class NSView: NSResponder, NSLayoutItem {
         let diagnosis = LayoutEngine.layoutIsland(self, boundaries: boundaries)
         let excluded = Set(boundaries.map(ObjectIdentifier.init))
         clearNeedsLayout(excluding: excluded)
+        if diagnosis.solved { callLayout(excluding: excluded) }
         updateTrackingAreasInSubtree()
         return diagnosis
+    }
+
+    private func callLayout(excluding boundaries: Set<ObjectIdentifier>) {
+        func visit(_ view: NSView) {
+            if view !== self && boundaries.contains(ObjectIdentifier(view)) { return }
+            view.layout()
+            for child in view.subviews { visit(child) }
+        }
+        visit(self)
     }
 
     private func clearNeedsLayout(excluding boundaries: Set<ObjectIdentifier>) {
@@ -584,9 +611,13 @@ open class NSView: NSResponder, NSLayoutItem {
         defer {
             if self === window?.contentView { window?.refreshCursorIfNeeded() }
         }
+        _ = layoutSubtreeIfNeeded()
+        renderLaidOut(in: context)
+    }
+
+    private func renderLaidOut(in context: NSGraphicsContext) {
         guard !isHidden, alphaValue > 0 else { return }
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            _ = layoutIslandIfNeeded()
             context.saveGraphicsState()
             defer { context.restoreGraphicsState() }
 
@@ -616,7 +647,6 @@ open class NSView: NSResponder, NSLayoutItem {
             }
             let deviceToLayer = mask.map { _ in context.transform.inverted() }
 
-            layout()
             if let background = layer?.backgroundColor {
                 background.setFill()
                 NSBezierPath(rect: bounds).fill()
@@ -637,7 +667,7 @@ open class NSView: NSResponder, NSLayoutItem {
             }
             let dirtyRect = visibleRect
             if !dirtyRect.isEmpty { draw(dirtyRect) }
-            for subview in subviews { subview.render(in: context) }
+            for subview in subviews { subview.renderLaidOut(in: context) }
             if let mask, let deviceToLayer {
                 context.endMaskedGroup { x, y in
                     let point = CGPoint(x: x, y: y).applying(deviceToLayer)
@@ -936,10 +966,12 @@ public enum NSAccessibility {
 
     public enum Role: String, Hashable, Sendable {
         case image
+        case progressIndicator
         case staticText
         case textArea
         case textField
         case button
+        case checkBox
         case radioButton
         case radioGroup
         case table

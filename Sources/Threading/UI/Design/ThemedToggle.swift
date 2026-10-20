@@ -137,7 +137,7 @@ final class ThemedToggle: ThemedControl {
     private var animationPhase: CGFloat = 1
     private var animationFrom: CGFloat = 0
     private var animationTarget: CGFloat = 0
-    private var animationStart: CFTimeInterval = 0
+    private var animationStart: TimeInterval = 0
     private var animationDuration: TimeInterval = 0
     private var animatesNextStateChange = false
 
@@ -217,7 +217,7 @@ final class ThemedToggle: ThemedControl {
         animationFrom = knobProgress
         animationTarget = target
         animationDuration = duration
-        animationStart = CACurrentMediaTime()
+        animationStart = animationClock()
         animationPhase = 0
         startDriver()
     }
@@ -225,7 +225,7 @@ final class ThemedToggle: ThemedControl {
     /// One frame of travel, split from the tick so tests can drive the clock by hand. Starting
     /// from the *drawn* position rather than an endpoint is what keeps a rapid re-click smooth:
     /// the knob turns around mid-track instead of jumping to either end first.
-    func advanceAnimation(now: CFTimeInterval) {
+    func advanceAnimation(now: TimeInterval) {
         guard animationPhase < 1 else { return }
         let phase = min(1, CGFloat((now - animationStart) / animationDuration))
         animationPhase = phase
@@ -237,8 +237,34 @@ final class ThemedToggle: ThemedControl {
         needsDisplay = true
     }
 
+    private func animationClock() -> TimeInterval {
+        #if os(Linux)
+        ProcessInfo.processInfo.systemUptime
+        #else
+        CACurrentMediaTime()
+        #endif
+    }
+
+    #if os(Linux)
+    private func startDriver() {
+        guard fallbackTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.advanceAnimation(now: self.animationClock())
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        fallbackTimer = timer
+    }
+
+    private func stopDriver() {
+        fallbackTimer?.invalidate()
+        fallbackTimer = nil
+    }
+    #else
     @objc private func tick() {
-        advanceAnimation(now: CACurrentMediaTime())
+        advanceAnimation(now: animationClock())
     }
 
     private func startDriver() {
@@ -268,6 +294,7 @@ final class ThemedToggle: ThemedControl {
         fallbackTimer?.invalidate()
         fallbackTimer = nil
     }
+    #endif
 
     /// A driver retains its target, so a toggle leaving the window lands its knob and stops
     /// rather than animating unseen — or, timer-driven, never deallocating.

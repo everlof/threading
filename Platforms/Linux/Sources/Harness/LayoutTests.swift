@@ -18,8 +18,10 @@ enum LayoutTests {
 
         pinnedRowInUnflippedParent()
         pinnedRowInFlippedParent()
+        scrollBreathingRemainsInsidePinnedViewport()
         fixedFrameChildKeepsOwnSizeInsideLargerRow()
         frameDrivenSubtreeLaysOutIndependently()
+        layoutCallbackCanReviseConstraintsBeforeReturningGeometry()
         ancestorConstraintKeepsItsDescendantInTheSameSolve()
         measuredBaselinesTrackSolvedHeight()
         centredBox()
@@ -47,6 +49,39 @@ enum LayoutTests {
     }
 
     // MARK: - Cases
+
+    private static func scrollBreathingRemainsInsidePinnedViewport() {
+        let root = Box(frame: NSRect(x: 0, y: 0, width: 240, height: 480))
+        let header = Box(frame: .zero)
+        let scroll = NSScrollView(frame: .zero)
+        scroll.contentInsets = NSEdgeInsets(top: 4, left: 0, bottom: 0, right: 0)
+        for view in [header, scroll] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: root.topAnchor),
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            header.heightAnchor.constraint(equalToConstant: 40),
+            scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+        ])
+        LayoutEngine.layout(root)
+        expect("pinned sidebar scroll", scroll.frame,
+               NSRect(x: 0, y: 0, width: 240, height: 440))
+        expect("breathing inside scroll", scroll.contentView.frame,
+               NSRect(x: 0, y: 0, width: 240, height: 436))
+
+        root.frame.size.height = 300
+        LayoutEngine.layout(root)
+        expect("resized pinned sidebar scroll", scroll.frame,
+               NSRect(x: 0, y: 0, width: 240, height: 260))
+        expect("resized breathing inside scroll", scroll.contentView.frame,
+               NSRect(x: 0, y: 0, width: 240, height: 256))
+    }
 
     /// AppKit's y grows upward, so a row pinned 8 from the top of a 100-tall parent and 24 tall
     /// has its *origin* at 100 - 8 - 24 = 68. Getting this backwards is the classic port bug.
@@ -132,6 +167,30 @@ enum LayoutTests {
         if second?.solved != true { failures.append("clean parent skipped dirty row") }
         expect("resized frame boundary moves its child", icon.frame,
                NSRect(x: 122, y: 14, width: 12, height: 12))
+    }
+
+    /// Mac callers use layoutSubtreeIfNeeded before reading input bounds. A view whose layout()
+    /// selects constraints from its solved width must settle in that call, before any draw.
+    private static func layoutCallbackCanReviseConstraintsBeforeReturningGeometry() {
+        let root = Box(frame: NSRect(x: 0, y: 0, width: 100, height: 80))
+        let row = AdaptiveBox(frame: .zero)
+        root.addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            row.topAnchor.constraint(equalTo: root.topAnchor),
+            row.heightAnchor.constraint(equalToConstant: 30)
+        ])
+
+        root.layoutSubtreeIfNeeded()
+        expect("layout callback narrow", row.indicator.frame.width, 20)
+        root.frame.size.width = 200
+        root.layoutSubtreeIfNeeded()
+        expect("layout callback wide", row.indicator.frame.width, 80)
+        root.frame.size.width = 100
+        root.layoutSubtreeIfNeeded()
+        expect("layout callback narrow again", row.indicator.frame.width, 20)
     }
 
     /// A constraint installed above a frame boundary can reference a deeper view. In that
@@ -481,6 +540,31 @@ enum LayoutTests {
 
     final class FlippedBox: Box {
         override var isFlipped: Bool { true }
+    }
+
+    final class AdaptiveBox: Box {
+        let indicator = Box(frame: .zero)
+        private let indicatorWidth: NSLayoutConstraint
+
+        override init(frame: NSRect) {
+            indicatorWidth = indicator.widthAnchor.constraint(equalToConstant: 20)
+            super.init(frame: frame)
+            indicator.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(indicator)
+            NSLayoutConstraint.activate([
+                indicator.leadingAnchor.constraint(equalTo: leadingAnchor),
+                indicator.topAnchor.constraint(equalTo: topAnchor),
+                indicator.heightAnchor.constraint(equalToConstant: 10),
+                indicatorWidth
+            ])
+        }
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func layout() {
+            let width: CGFloat = bounds.width >= 150 ? 80 : 20
+            if indicatorWidth.constant != width { indicatorWidth.constant = width }
+        }
     }
 
     final class IntrinsicBox: Box {

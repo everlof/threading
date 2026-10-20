@@ -424,10 +424,7 @@ private final class ThemedAlertPanel: NSPanel {
 @MainActor
 private final class ThemedAlertContentView: NSView, ThemedComponent {
     private enum Layout {
-        static let minimumContentWidth: CGFloat = 360
         static let maximumTextWidth: CGFloat = 500
-        static let iconSize: CGFloat = 30
-        static let minimumCopyWidth = minimumContentWidth - iconSize - Design.Spacing.inset
         static let checkboxHeight: CGFloat = Design.Size.chipHeight
     }
 
@@ -504,7 +501,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
                 1,
                 bounds.width
                     - (2 * Design.Spacing.large)
-                    - Layout.iconSize
+                    - ThemedAlertLayout.iconSize
                     - Design.Spacing.inset
                     - requesterInsets
             )
@@ -522,32 +519,22 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         // copy column so an accessory that establishes the alert width cannot make the labels
         // measure at 500pt and then clip when compressed to the 360pt dialog.
         let requesterInsets: CGFloat = usesClassicRequester ? 8 : 0
-        titleLabel.preferredMaxLayoutWidth = Layout.minimumCopyWidth - requesterInsets
+        titleLabel.preferredMaxLayoutWidth = ThemedAlertLayout.minimumCopyWidth - requesterInsets
 
         messageLabel.applyFont(usesClassicRequester ? .controlRegular : .body)
         messageLabel.maximumNumberOfLines = 0
-        messageLabel.preferredMaxLayoutWidth = Layout.minimumCopyWidth - requesterInsets
+        messageLabel.preferredMaxLayoutWidth = ThemedAlertLayout.minimumCopyWidth - requesterInsets
         messageLabel.isHidden = alert.informativeText.isEmpty
 
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.setAccessibilityElement(false)
-        NSLayoutConstraint.activate([
-            iconView.widthAnchor.constraint(equalToConstant: Layout.iconSize),
-            iconView.heightAnchor.constraint(equalToConstant: Layout.iconSize)
-        ])
+        NSLayoutConstraint.activate(ThemedAlertLayout.iconConstraints(iconView))
 
-        let copy = NSStackView(views: [titleLabel, messageLabel])
-        copy.orientation = .vertical
-        copy.alignment = .leading
-        copy.spacing = Design.Spacing.small
-        copy.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let copy = ThemedAlertLayout.copyStack(title: titleLabel, message: messageLabel)
         copyStack = copy
 
-        let heading = NSStackView(views: [iconView, copy])
-        heading.orientation = .horizontal
-        heading.alignment = .top
-        heading.spacing = Design.Spacing.inset
+        let heading = ThemedAlertLayout.heading(icon: iconView, copy: copy)
 
         let messageSection = ThemedAlertRequesterMessageWellView(contentView: heading)
         requesterMessageWell = messageSection
@@ -567,20 +554,13 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         }
         sections.append(makeButtonRow())
 
-        let stack = NSStackView(views: sections)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.large
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        let stack = ThemedAlertLayout.sectionStack(sections)
         sectionStack = stack
         requesterTitleBand.isHidden = !usesClassicRequester
         addSubview(requesterTitleBand)
         addSubview(stack)
 
-        let modernTop = stack.topAnchor.constraint(
-            equalTo: topAnchor,
-            constant: Design.Spacing.large
-        )
+        let modernTop = ThemedAlertLayout.modernTopConstraint(stack, in: self)
         let requesterTop = stack.topAnchor.constraint(
             equalTo: requesterTitleBand.bottomAnchor,
             constant: Design.Spacing.small
@@ -590,12 +570,8 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         modernStackTopConstraint = modernTop
         requesterStackTopConstraint = requesterTop
 
-        NSLayoutConstraint.activate([
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.large),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.large),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.large),
-            stack.widthAnchor.constraint(greaterThanOrEqualToConstant: Layout.minimumContentWidth),
-            messageSection.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        NSLayoutConstraint.activate(ThemedAlertLayout.contentConstraints(
+            stack, in: self, widthPeers: sections) + [
             requesterTitleBand.topAnchor.constraint(equalTo: topAnchor, constant: 1),
             requesterTitleBand.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 1),
             requesterTitleBand.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
@@ -603,9 +579,6 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
                 equalToConstant: WindowChromeAppearance.resolve()?.bandHeight ?? 18
             )
         ])
-        for section in sections.dropFirst() {
-            section.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        }
 
         setAccessibilityRole(.group)
         setAccessibilityLabel(alert.messageText)
@@ -725,7 +698,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
             iconView.image = NSImage(
                 systemSymbolName: symbolName,
                 accessibilityDescription: nil
-            )?.withSymbolConfiguration(Design.Symbol.configuration(Layout.iconSize, weight: .medium))
+            )?.withSymbolConfiguration(Design.Symbol.configuration(ThemedAlertLayout.iconSize, weight: .medium))
             iconView.contentTintColor = symbolColor
         }
         requesterTitleBand.isHidden = !usesClassicRequester

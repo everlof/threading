@@ -1,4 +1,5 @@
 """Installed saved-agent header Actions: mounted rows, input, AT-SPI and clipboard."""
+import json
 import os
 from pathlib import Path
 import sqlite3
@@ -100,6 +101,28 @@ def menu():
     return item if item is not None and item.get_child_count() == 2 else None
 
 
+def prompt_with_id(identity):
+    desktop = Atspi.get_desktop(0)
+    for index in range(desktop.get_child_count()):
+        candidate = desktop.get_child_at_index(index)
+        if candidate.get_name() != 'Threading Linux' or candidate.get_process_id() == process.pid:
+            continue
+        frame = candidate.get_child_at_index(0)
+        for child_index in range(frame.get_child_count()):
+            panel = frame.get_child_at_index(child_index)
+            if panel.get_accessible_id() == identity:
+                return panel
+    return None
+
+
+def rename_prompt():
+    return prompt_with_id('linux.prompt.rename-session')
+
+
+def close_prompt():
+    return prompt_with_id('linux.prompt.close-session')
+
+
 def clipboard():
     return subprocess.check_output(['xclip', '-selection', 'clipboard', '-o'],
                                    text=True, timeout=3)
@@ -183,9 +206,115 @@ try:
     assert 'SESSION_ACTION_COPIED copySessionID ' + session_id in log_path.read_text()
     assert 'SESSION_ACTION_COPIED copyProjectPath ' + session_id in log_path.read_text()
     assert input_log.read_bytes() == initial_input, 'menu input reached the live agent PTY'
+
+    projects = next(item for item in children()
+                    if item.get_role_name() == 'list' and item.get_name() == 'Projects')
+    session = next(projects.get_child_at_index(index)
+                   for index in range(projects.get_child_count())
+                   if projects.get_child_at_index(index).get_accessible_id() == session_id)
+    assert session.get_action_iface().do_action(0)
+    xdo('windowfocus', '--sync', window, 'key', 'shift+F10')
+    row_menu = eventually(lambda: next((item for item in children()
+        if item.get_role_name() == 'list' and item.get_name() == 'Session actions'), None),
+        'row menu on live session')
+    rename = next(row_menu.get_child_at_index(index)
+                  for index in range(row_menu.get_child_count())
+                  if row_menu.get_child_at_index(index).get_name() == 'Rename Session…')
+    assert rename.get_action_iface().do_action(1)
+    prompt = eventually(rename_prompt, 'live session rename prompt')
+    field = next(prompt.get_child_at_index(index)
+                 for index in range(prompt.get_child_count())
+                 if prompt.get_child_at_index(index).get_accessible_id() == 'linux.prompt.session-name')
+    assert field.get_editable_text_iface().set_text_contents('Renamed live session')
+    confirm = next(prompt.get_child_at_index(index)
+                   for index in range(prompt.get_child_count())
+                   if prompt.get_child_at_index(index).get_name() == 'Rename')
+    assert confirm.get_action_iface().do_action(0)
+    eventually(lambda: child('linux.page-title').get_name() == 'Renamed live session',
+               'active pane header followed durable rename')
+    with sqlite3.connect(store / 'threading.db') as database:
+        payload, = database.execute('SELECT data FROM session WHERE id=?', (session_id,)).fetchone()
+        assert json.loads(payload)['customTitle'] == 'Renamed live session'
+    assert input_log.read_bytes() == initial_input, 'rename input reached live agent PTY'
+    screenshot('session-actions-renamed-header.png')
+
+    def session_row():
+        listing = next(item for item in children()
+                       if item.get_role_name() == 'list' and item.get_name() == 'Projects')
+        return next((listing.get_child_at_index(index)
+                     for index in range(listing.get_child_count())
+                     if listing.get_child_at_index(index).get_accessible_id() == session_id), None)
+
+    def open_close():
+        row = eventually(session_row, 'saved row before Close Session')
+        assert row.get_action_iface().do_action(0)
+        xdo('windowfocus', '--sync', window, 'key', 'shift+F10')
+        opened = eventually(lambda: next((item for item in children()
+            if item.get_role_name() == 'list' and item.get_name() == 'Session actions'), None),
+            'row menu before Close Session')
+        close = next((opened.get_child_at_index(index)
+                      for index in range(opened.get_child_count())
+                      if opened.get_child_at_index(index).get_name() == 'Close Session'), None)
+        assert close is not None
+        assert close.get_action_iface().do_action(1)
+        return eventually(close_prompt, 'Close Session confirmation')
+
+    confirmation = open_close()
+    assert confirmation.get_name() == 'Close “Renamed live session”?', confirmation.get_name()
+    assert all(confirmation.get_child_at_index(index).get_role_name() != 'text'
+               for index in range(confirmation.get_child_count()))
+    cancel = next(confirmation.get_child_at_index(index)
+                  for index in range(confirmation.get_child_count())
+                  if confirmation.get_child_at_index(index).get_name() == 'Cancel')
+    bounds = cancel.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+    assert bounds.width > 0 and bounds.height > 0, bounds
+    subprocess.run(['import', '-window', 'root', str(Path(evidence) / 'session-close-confirm.png')],
+                   check=True, timeout=5)
+    assert cancel.get_action_iface().do_action(0)
+    eventually(lambda: 'SESSION_CLOSE_CANCELLED id=' + session_id in log_path.read_text(),
+               'Close Session cancellation')
+    assert input_log.read_bytes() == initial_input, 'confirmation input reached live agent PTY'
+
+    confirmation = open_close()
+    confirm = next(confirmation.get_child_at_index(index)
+                   for index in range(confirmation.get_child_count())
+                   if confirmation.get_child_at_index(index).get_name() == 'Close Session')
+    assert confirm.get_action_iface().do_action(0)
+    eventually(lambda: 'SESSION_CLOSED id=' + session_id in log_path.read_text(),
+               'confirmed Close Session')
+    assert session_row() is not None, 'Close Session removed the saved row'
+    with sqlite3.connect(store / 'threading.db') as database:
+        assert database.execute('SELECT COUNT(*) FROM session WHERE id=?',
+                                (session_id,)).fetchone()[0] == 1
+    daemon = str(Path(binary).with_name('threading-ptyd'))
+    def agent_stopped():
+        result = subprocess.run([daemon, 'sessions', '--json', '--socket', endpoint],
+                                check=True, capture_output=True, text=True, timeout=5)
+        return any(item['id'] == session_id and item.get('exit') is not None
+                   for item in json.loads(result.stdout))
+    eventually(agent_stopped, 'daemon child exited after Close Session')
+    assert input_log.read_bytes() == initial_input, 'Close Session sent input to agent PTY'
+    dormant = eventually(lambda: next((item for item in children()
+        if item.get_role_name() == 'panel' and item.get_name() == 'Session placeholder'), None),
+        'selected dormant session pane')
+    labels = [dormant.get_child_at_index(index).get_name()
+              for index in range(dormant.get_child_count())]
+    assert 'Renamed live session ended' in labels, labels
+    assert any('No saved conversation was found' in name for name in labels), labels
+    assert child('linux.page-title') is not None, 'dormant pane lost the Mac page header'
+    selected = session_row()
+    assert selected is not None and selected.get_state_set().contains(Atspi.StateType.SELECTED), \
+        'closing changed the saved row selection'
+    screenshot('session-close-dormant.png')
+    resume = next(dormant.get_child_at_index(index)
+                  for index in range(dormant.get_child_count())
+                  if dormant.get_child_at_index(index).get_name() == 'Start Again')
+    assert resume.get_action_iface().do_action(0), 'dormant action refused'
+    eventually(lambda: next((item for item in children()
+        if item.get_role_name() == 'terminal'), None), 'dormant button reopened the session')
     xdo('windowfocus', '--sync', window, 'key', 'alt+F4')
     assert process.wait(timeout=6) == 0
-    print('PASS saved-session Actions: production header/menu, pointer, keyboard, AT-SPI, exact clipboard, live PTY isolation',
+    print('PASS saved-session Actions: header/menu, rename, Close, dormant pane, resume, PTY isolation',
           flush=True)
 finally:
     if process.poll() is None:

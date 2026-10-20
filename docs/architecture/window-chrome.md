@@ -70,6 +70,34 @@ remain host-owned, with shared Design controls and no new extension slot. This l
 incremental Linux contract: theme-authored welcomes, the remaining prompt footer options and
 project-switch draft reset still differ from the complete Mac composer.
 
+The composer Interface chip follows the Mac surface toggle for providers that support both
+terminal and native conversation UI. It uses the existing themed chip and bounded menu,
+with keyboard and AT-SPI focus in the footer loop. The selected surface remains host-owned:
+the Linux host validates the exact project and account on a bounded worker, commits a fresh
+native session under the store lock, and mounts a conversation pane with its opening brief.
+One pending creation reserves a runtime slot and keeps the submit action disabled until its
+receipt arrives. The window polls only while that receipt is outstanding. A later project,
+identity, surface or draft change cannot let the receipt steal the newer view. The committed
+session and first turn remain available in the saved catalogue. The terminal choice keeps the
+existing PTY path.
+This adds no extension presentation slot; the theme supplies chip and menu presentation while
+the host owns identity, process admission, persistence and destination selection.
+
+The opening Speed chip uses the same host-owned session field on both Linux surfaces.
+Its three choices save nil, false or true in the session record. A supported Codex model
+receives a model-specific `service_tier` and `features.fast_mode` for Fast; Standard sends
+`service_tier="default"`. Claude Opus receives a private per-session `--settings` file, and
+the native stream also sends `apply_flag_settings` when it starts. The account catalogue
+and project settings are read on bounded workers; the chip and its three-row menu are
+theme-authored views with AT-SPI actions. Linux currently resolves nil from the provider's
+own settings because the Mac Settings ▸ Chats speed preference has no Linux surface yet.
+The native reply now uses a `ChipView` in its `PromptChrome` footer and three production
+`ThemedMenuRowView` choices. The retained pane publishes only the mounted chip and open rows
+through AT-SPI, with window-pixel bounds and the active session UUID. The host validates that
+UUID again before opening or choosing a row. The speed value is persisted on the session worker;
+Claude applies an explicit value over its live control channel and Codex resolves it on the next
+turn. Inheritance is recorded for the next launch and leaves an active provider untouched.
+
 The Linux house-theme welcome uses the shared `ComposerGreeting` calendar/selection policy and
 `ThreadingMarkView` geometry. A fresh form picks once; typing and changing its destination or
 identity do not reroll the welcome. `ComposerWelcomeLayout` owns the Mac/Linux mark size, reading
@@ -89,6 +117,22 @@ Height comes from the editor's cached TextKit layout, with no separate text meas
 or pointer callbacks. The focus callback's supplied state drives the border; reading the window's
 responder inside that callback observes the old responder during its transition. This is shared
 presentation within the existing host-owned composer, not a new extension slot.
+
+The Linux opening column now uses a retained `NSStackView` with the Mac composer's bottom pin,
+720-point width cap, 32-point side bounds, chip row, prompt width and trailing action row. The
+two shells now activate those column anchors and the low-priority pane-width measurement through
+the same `PromptChrome.constrainOpeningColumn` function, so the cap and column priorities
+cannot drift between implementations. The host updates only the prompt's height constraint from
+the cached TextKit and attachment height;
+the SDL bitmap still supplies the root viewport frame. The hero fills the constrained room above
+the column and its own mark and greeting use the Mac vertical-stack arrangement. The host still
+anchors bounded menus to their chips. The attachment rail, editor and footer now use the same
+`PromptChrome` stack setup and sizing constraints as macOS `PromptView`; the host pins that stack
+inside the surface with the Mac footer insets. A
+short viewport tightens the column's bottom inset and spacing so its controls remain usable at
+the Linux window's 180-pixel floor. The installed composer journey checks that floor alongside
+normal and tall sizes; an attached image raises the minimum until its required 80-point rail fits.
+The 2× native-creation journey checks the column in the window's scaled pixel budget.
 
 The Linux opening footer now carries the real permission chip inside that same prompt surface.
 The editor and footer share `PromptChrome` anatomy without increasing the 116/180-point limits.
@@ -330,7 +374,7 @@ The header's leading control is the **page's name** (`MainWindowController.pageT
 a mark, the current workspace page — session or composer — and the `⋯` that acts on it.
 Deliberately one name, not a strip: a page here swaps the whole workspace, so a row of tabs
 would be a second session switcher duplicating the sidebar (see `sessions.md`, "Why Sessions
-Are Not Tabs"). It is inked from the backdrop and capped by `SessionTitleDefaults.maxWidth`.
+Are Not Tabs"). It is inked from the backdrop and capped by `PageTitleView.maximumWidth`.
 
 **It was a tab, and every part of that grammar promised something the window does not do.**
 A single chip drawn as a *selected tab* says it is one of a set with the rest just out of view;
@@ -878,6 +922,16 @@ edge overlays the status indicator and hover actions in one slot, crossfading vi
 the slot expands before the two actions appear and contracts after they leave, so invisible
 controls do not permanently tax every title while visible targets never overhang their hit-tested
 parent.
+
+`SidebarRowDefaults.constrainContent` now installs the same leading pin, trailing-slot
+inequality, vertical centers and trailing inset in the Mac session/terminal cells and their
+Linux mounted rows. Mac and Linux also configure the session's outer content stack and lazy
+attention label through the same helpers. The fixed-width caption follows the compressible
+icon/title stack, and the independent trailing slot keeps its 20-point resting width for activity
+and hover actions. The Linux saved-session picker once drew `Snoozed` in a separate navigator
+layer: the title could obey its slot constraint and still overlap that unrelated text. The picker
+now mounts the caption in the content stack and hides it on reuse or expiry, rather than changing
+the slot's width or replacing the shared content view.
 
 ### A project's chats, five at a time
 

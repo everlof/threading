@@ -32,6 +32,7 @@ final class ACPStreamSession:
     private(set) var isComposerCapabilityCatalogReady = false
 
     private(set) var isRunning = false
+    var hasActiveTurn: Bool { isRunning && isTurnInFlight }
     var canSend: Bool {
         isRunning && acceptsInput && !isTurnInFlight && pendingPrompt == nil
     }

@@ -1911,6 +1911,20 @@ authority:
    transcript. Evidence, not configuration, and marked `(last used)` rather than `(default)` for
    the same reason `ClaudeAccountLastRunModel`'s answer is.
 
+The Linux composer and native reply now use the same last-run distinction. Their account
+catalogue worker examines at most five recent Claude project directories and ten recent entries
+per project, then reads at most 128 KiB from the newest transcript's tail. A directory with over
+4,096 entries contributes no candidate. Only a configured mode may replace the inherit row; a
+transcript mode labels its ordinary row `(last used)`, and choosing it pins that posture. The chip
+continues to say "Agent's Setting" until a governing setting or an explicit choice exists.
+For a running native Claude chat, Linux also reads that chat's own transcript after the process
+has appended beyond its prelaunch length. Stream events coalesce into one delayed worker scan;
+an unchanged file length avoids reparsing, and each changed-file read caps at 128 KiB from the
+tail. The live observation can name the reply chip where no selected or configured mode does,
+and it replaces the older account-wide `(last used)` row. A configured mode still governs the
+next launch and takes precedence; after the process exits, the live observation stops naming
+the chip.
+
 **The first two state the next launch; the last two only report one, and the difference decides
 what the app may do with the answer.** `Source.governsNextLaunch` is that line — an app-wide
 default *becomes* `--permission-mode`, and the runtime reads its own configuration itself, while
@@ -1959,6 +1973,12 @@ only today; Codex, Grok and OpenCode record nothing equivalent and therefore rep
 values that come back are Claude's own, `default` for Manual included, which is why
 `AgentPermissionMode(externalValue:for:)` exists beside the flag values it inverts. See
 [`git.md`](git.md) for the surface that shows it.
+
+The Mac native reply chip schedules one revalidation after a short stream-output window and
+on interaction-availability changes. `TranscriptFactReader` stats and scans on its utility
+queue, and redraws only when the observed mode changes. The chip reads the cached answer while
+painting and discards that transcript's answer after the process exits; a past run is not the
+next launch's setting, and clearing it does not erase other live conversations' readings.
 
 ### Claude's Remote Control, per conversation
 
@@ -2209,6 +2229,14 @@ this rule closed: the sidebar's Archive once flipped the flag and left the agent
 invisibly, while the remote archive route had discarded the process from the start. Both
 routes now enter the same synchronizer, which stops the agent first. Restoring implies nothing;
 a session comes back dormant.
+
+The Linux preview's bounded `ProjectDatabase.navigationSnapshot` applies that same archived
+filter in its count and recent-row SQL before the `LIMIT`. Filtering only the decoded window
+would let archived rows displace visible conversations, and counting all retained rows would make
+the sidebar badge disagree with the list. The encoded flag is read with a guarded JSON predicate;
+an unrelated malformed row stays detectable rather than disappearing from a partial read. The
+provider's rollout snapshot and three-way reconciliation plan live in the Foundation-only
+`ProviderArchiveState` file, compiled byte-identically by the Mac app and Linux core slice.
 
 **Archiving does not ask. It acts, says so, and offers the way back.** It carried a registered
 confirmation for as long as the interruption was the only thing that could be said about it,

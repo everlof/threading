@@ -50,6 +50,30 @@ final class ScheduledTimePresetsTests: XCTestCase {
         XCTAssertEqual(calendar.component(.day, from: tomorrow.date), 11)
     }
 
+    func testTomorrowStillMeansNextDayBeforeNine() {
+        let calendar = calendar()
+        let now = date(2026, 8, 10, 8, 15, in: calendar)
+        let presets = ScheduledTimePresets.wallClock(now: now, calendar: calendar)
+
+        guard let tomorrow = preset(presets, PresetDefaults.tomorrowID) else {
+            return XCTFail("Tomorrow should be offered before nine")
+        }
+        XCTAssertEqual(calendar.component(.day, from: tomorrow.date), 11)
+        XCTAssertEqual(calendar.component(.hour, from: tomorrow.date), 9)
+    }
+
+    func testMondayMeansNextWeekEvenBeforeNineOnMonday() {
+        let calendar = calendar()
+        let now = date(2026, 8, 10, 8, 15, in: calendar)
+        let presets = ScheduledTimePresets.wallClock(now: now, calendar: calendar)
+
+        guard let monday = preset(presets, PresetDefaults.mondayID) else {
+            return XCTFail("Next Monday should be offered")
+        }
+        XCTAssertEqual(calendar.component(.day, from: monday.date), 17)
+        XCTAssertEqual(calendar.component(.hour, from: monday.date), 9)
+    }
+
     func testTomorrowIsStillNineOClockAcrossTheSpringForwardBoundary() {
         let calendar = calendar()
         // 29 March 2026 is when Europe/Stockholm loses an hour. A preset built by adding 86,400

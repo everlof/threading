@@ -23,6 +23,9 @@ protocol ConversationStreamSession: AnyObject {
     /// Whether the logical conversation is open, not merely whether a turn subprocess exists.
     var isRunning: Bool { get }
     var canSend: Bool { get }
+    /// The provider has accepted a foreground turn that has not settled yet. This remains true
+    /// while a permission or question blocks it, unlike whether Stop is currently available.
+    var hasActiveTurn: Bool { get }
 
     /// Whether the transport will accept a change to *how* the next work is done — model,
     /// reasoning effort, service tier — right now.
@@ -95,6 +98,7 @@ protocol ProviderExecutionReportingConversation: AnyObject {
 protocol ReasoningEffortConfigurableConversation: AnyObject {}
 
 extension ConversationStreamSession {
+    var hasActiveTurn: Bool { false }
     var acceptsConfigurationChange: Bool { false }
 
     /// Defaults so a transport with no host-backed path — and every test double — is unchanged

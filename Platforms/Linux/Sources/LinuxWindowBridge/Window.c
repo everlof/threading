@@ -28,7 +28,7 @@ struct TWWindow {
     char openInIdentity[128];
     int openInEnabled;
     int navigatorPointerRoute, navigatorTracking, navigatorHovered, navigatorSuppressLeftUp;
-    int width, height, terminal, projectNavigation, suppressActivation, explicitSurfaceUpdate;
+    int width, height, terminal, promptMode, projectNavigation, suppressActivation, explicitSurfaceUpdate;
     int composing;
     uint8_t suppressedKeyups[SDL_NUM_SCANCODES];
     uint8_t composingKeyups[SDL_NUM_SCANCODES];
@@ -169,6 +169,7 @@ static TWWindow *tw_open_window(const char *title, int width, int height, int si
     // The themed controls accept their activation click; SDL otherwise consumes it before
     // the shim can route the press. Preserve the ordinary press/release pair on focus entry.
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+    tw_clipboard_prepare();
     tw_startup_trace(trace, started, "sdl-init.begin");
     const int initialized = SDL_Init(SDL_INIT_VIDEO);
     tw_startup_trace(trace, started, "sdl-init.end");
@@ -192,8 +193,11 @@ static TWWindow *tw_open_window(const char *title, int width, int height, int si
     tw_startup_trace(trace, started, "create-window.end");
     if (!w->window) { tw_close(w); return NULL; }
     // Explicit experiment bounds keep the software rasterizer's allocation/work bounded.
-    SDL_SetWindowMinimumSize(w->window, sidebarWidth + 320, 180);
-    SDL_SetWindowMaximumSize(w->window, sidebarWidth + 1280, 900);
+    // A prompt is fitted by AppKit before opening. Do not enlarge a 168pt sheet to the
+    // workspace's 180pt minimum; prompt mode locks the resulting window at its fitted size.
+    const int minimumHeight = fitDisplay || height >= 180 ? 180 : height;
+    SDL_SetWindowMinimumSize(w->window, sidebarWidth + 320, minimumHeight);
+    SDL_SetWindowMaximumSize(w->window, sidebarWidth + 1280, sidebarWidth ? 900 : 960);
     tw_startup_trace(trace, started, "create-renderer.begin");
     w->renderer = SDL_CreateRenderer(w->window, -1, SDL_RENDERER_SOFTWARE);
     tw_startup_trace(trace, started, "create-renderer.end");
@@ -236,7 +240,7 @@ int tw_set_cursor(TWWindow *w, int kind) {
     return 0;
 }
 int tw_present(TWWindow *w, const uint8_t *rgba, int width, int height) {
-    if (!w || w->sidebarWidth || !rgba || width < 1 || width > 1280 || height < 1 || height > 900) return -1;
+    if (!w || w->sidebarWidth || !rgba || width < 1 || width > 1280 || height < 1 || height > 960) return -1;
     if (!w->texture || w->width != width || w->height != height) {
         SDL_DestroyTexture(w->texture);
         w->texture = SDL_CreateTexture(w->renderer, SDL_PIXELFORMAT_RGBA32,
@@ -310,6 +314,14 @@ int tw_present_pane(TWWindow *w, const uint8_t *rgba, int width, int height, int
     }
     if (!*texture || SDL_UpdateTexture(*texture, NULL, rgba, width * 4) != 0) return -1;
     return tw_repaint(w);
+}
+int tw_update_sidebar_region(TWWindow *w, const uint8_t *rgba,
+                             int x, int y, int width, int height) {
+    if (!w || !w->sidebarTexture || !rgba || width < 1 || height < 1 ||
+        x < 0 || y < 0 || x > w->sidebarTextureWidth - width ||
+        y > w->sidebarTextureHeight - height) return -1;
+    SDL_Rect region = {x, y, width, height};
+    return SDL_UpdateTexture(w->sidebarTexture, &region, rgba, width * 4);
 }
 int tw_present_placeholder(TWWindow *w, const uint8_t *rgba, int width, int height) {
     if (!w || !w->sidebarWidth || !w->placeholderMode) return -1;
@@ -479,8 +491,22 @@ int tw_workspace_composer_mode(TWWindow *w, int enabled) {
     const int next = enabled != 0;
     if (w->composerMode == next) return 0;
     w->composerMode = next;
-    if (!next) tw_workspace_editor_focus(w, 0);
+    if (!next) {
+        tw_workspace_editor_focus(w, 0);
+        tw_workspace_minimum_height(w, 180);
+    }
     return 0;
+}
+void tw_workspace_minimum_height(TWWindow *w, int height) {
+    if (!w || !w->sidebarWidth) return;
+    const int minimum = height < 180 ? 180 : height > 900 ? 900 : height;
+    int currentWidth, currentHeight;
+    SDL_GetWindowMinimumSize(w->window, &currentWidth, &currentHeight);
+    if (currentHeight != minimum)
+        SDL_SetWindowMinimumSize(w->window, w->sidebarWidth + 320, minimum);
+    int width, actualHeight;
+    SDL_GetWindowSize(w->window, &width, &actualHeight);
+    if (actualHeight < minimum) SDL_SetWindowSize(w->window, width, minimum);
 }
 void tw_workspace_placeholder_mode(TWWindow *w, int enabled) {
     if (!w || !w->sidebarWidth || w->placeholderMode == (enabled != 0)) return;
@@ -579,12 +605,24 @@ void tw_terminal_mode(TWWindow *w) {
     }
     w->navigatorHovered = 0;
     w->terminal = 1;
+    w->promptMode = 0;
     w->editorFocused = 0;
     w->composing = 0;
     memset(w->suppressedKeyups, 0, sizeof(w->suppressedKeyups));
     SDL_Rect caret = {0, 0, 10, 22};
     SDL_SetTextInputRect(&caret);
     SDL_StartTextInput();
+}
+int tw_prompt_mode(TWWindow *w) {
+    if (!w || w->sidebarWidth) return -1;
+    tw_terminal_mode(w);
+    w->promptMode = 1;
+    int width, height;
+    SDL_GetWindowSize(w->window, &width, &height);
+    SDL_SetWindowMinimumSize(w->window, width, height);
+    SDL_SetWindowMaximumSize(w->window, width, height);
+    SDL_SetWindowResizable(w->window, SDL_FALSE);
+    return 0;
 }
 void tw_project_navigation(TWWindow *w, int enabled) { w->projectNavigation = enabled; }
 void tw_project_mode(TWWindow *w) {
@@ -609,6 +647,10 @@ int tw_clipboard_read(uint8_t *destination, int capacity) {
     if (length <= (size_t)capacity) memcpy(destination, text, length);
     SDL_free(text);
     return length > (size_t)capacity ? -1 : (int)length;
+}
+int tw_clipboard_is_wayland(void) {
+    const char *driver = SDL_GetCurrentVideoDriver();
+    return driver && strcmp(driver, "wayland") == 0;
 }
 int tw_clipboard_write(const uint8_t *source, int length) {
     if (!source || length < 1 || length > 1024 * 1024 || memchr(source, 0, (size_t)length)) return -1;
@@ -663,6 +705,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             if (acceptsFile) {
                 out->kind = 55;
                 out->action = length > 0 && length < sizeof(out->text) ? 0 : 1;
+                SDL_GetMouseState(&out->x, &out->y);
                 if (!out->action) memcpy(out->text, e.drop.file, length + 1);
             }
             SDL_free(e.drop.file);
@@ -932,8 +975,8 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                    (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) &&
                    ((e.key.keysym.sym == SDLK_F10 && (e.key.keysym.mod & KMOD_SHIFT)) ||
                     e.key.keysym.sym == SDLK_APPLICATION)) {
-            // Keyboard access cannot depend on an AT-SPI bus. The host owns the selected
-            // project and validates whether Actions are available for that selection.
+            // Keyboard access cannot depend on an AT-SPI bus. The host resolves the selected
+            // sidebar row and validates the menu target before presenting its actions.
             if (e.type != SDL_KEYDOWN || e.key.repeat) continue;
             out->kind = 29; out->action = 1;
         } else if (e.type == SDL_QUIT) out->kind = 5;
@@ -970,7 +1013,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 out->kind = 33; out->key = row; out->action = 1;
             } else if (e.user.code == 7) {
                 out->kind = 38; out->action = 1;
-            } else if (e.user.code == 8 && w->placeholderMode) {
+            } else if (e.user.code == 8 && w->sidebarWidth) {
                 out->kind = 40; out->action = 1;
             } else if (e.user.code == 9) {
                 out->kind = 42; out->action = 1;
@@ -996,6 +1039,30 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 if (!tw_accessibility_composer_menu_row_identity(row, &kind, &optionIndex,
                                                                   out->text, sizeof(out->text))) continue;
                 out->kind = 51; out->action = kind; out->key = optionIndex;
+            } else if (e.user.code == 15 || e.user.code == 16) {
+                const int row = e.user.code == 15 ? -1 : (int)(intptr_t)e.user.data1;
+                if (!tw_accessibility_conversation_speed_identity(row, out->text,
+                                                                    sizeof(out->text))) continue;
+                out->kind = row < 0 ? 56 : 57;
+                out->key = row;
+            } else if (e.user.code == 17 || e.user.code == 18) {
+                const int kind = e.user.code == 17 ? (int)(intptr_t)e.user.data1
+                    : tw_accessibility_conversation_configuration_menu_kind();
+                const int row = e.user.code == 17 ? -1 : (int)(intptr_t)e.user.data1;
+                if (!tw_accessibility_conversation_configuration_identity(kind, row,
+                    out->text, sizeof(out->text))) continue;
+                out->kind = row < 0 ? 58 : 59;
+                out->action = kind;
+                out->key = row;
+            } else if (e.user.code == 19) {
+                const int row = (int)(intptr_t)e.user.data1;
+                int scope = 0;
+                if (!tw_accessibility_attachment_identity(row, &scope,
+                        out->text, sizeof(out->text))) continue;
+                out->kind = 60; out->action = scope; out->key = row;
+            } else if (e.user.code == 20 && w->promptMode) {
+                out->kind = 61;
+                out->action = (int)(intptr_t)e.user.data1;
             }
         }
         else if (e.type == SDL_WINDOWEVENT) {
@@ -1158,7 +1225,8 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             out->kind = 15; out->x = e.button.x; out->y = e.button.y;
             out->action = e.type == SDL_MOUSEBUTTONUP ? 3 : 1;
             out->modifiers = tw_modifiers(SDL_GetModState());
-        } else if (w->terminal && e.type == SDL_MOUSEMOTION && (e.motion.state & SDL_BUTTON_LMASK)) {
+        } else if (w->terminal && e.type == SDL_MOUSEMOTION &&
+                   ((e.motion.state & SDL_BUTTON_LMASK) || w->promptMode)) {
             out->kind = 17; out->x = e.motion.x; out->y = e.motion.y;
         } else if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
             out->kind = 2; out->x = e.button.x; out->y = e.button.y;
@@ -1170,6 +1238,12 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 SDL_GetMouseState(&out->x, &out->y);
                 out->modifiers = tw_modifiers(SDL_GetModState());
             } else { out->kind = y > 0 ? 3 : 4; out->action = 1; }
+        } else if (w->sidebarWidth && e.type == SDL_KEYDOWN && !e.key.repeat &&
+                   e.key.keysym.sym == SDLK_COMMA &&
+                   (e.key.keysym.mod & (KMOD_CTRL | KMOD_GUI)) &&
+                   !(e.key.keysym.mod & (KMOD_ALT | KMOD_SHIFT))) {
+            out->kind = 62; // Toggle Settings in the standing workspace.
+            w->suppressActivation = SDLK_COMMA;
         } else if (w->suppressActivation && (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP)
                    && e.key.keysym.sym == w->suppressActivation) {
             if (e.type == SDL_KEYUP) w->suppressActivation = 0;

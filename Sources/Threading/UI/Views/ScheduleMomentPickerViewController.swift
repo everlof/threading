@@ -1,184 +1,5 @@
 import AppKit
 
-// MARK: - The Options
-
-/// Which day and which quarter hour may be chosen, and where a freshly opened sheet lands.
-///
-/// Pure, so every rule below is a test rather than something only a screenshot can disprove.
-/// Two facts live here that the surface must not re-decide:
-///
-/// - **A moment already gone is not offered.** `ScheduledMessageStore` refuses `dueAt <= now`
-///   with `.inThePast`, so a list that keeps this morning's nine o'clock in it at four in the
-///   afternoon is a list whose top half answers with a refusal sheet. Today's spent quarter
-///   hours are dropped, and a today with nothing left in it drops out of the day list entirely
-///   rather than sitting there as a day whose times are all gone.
-/// - **`Calendar` places the wall-clock time**, never minutes added to midnight. Adding 570
-///   minutes to the start of a spring-forward Sunday lands at ten o'clock, which is the one
-///   direction that matters for a working-day start; `date(bySettingHour:minute:second:of:)`
-///   answers with the hour the row is named after. The same call resolves the hour a transition
-///   skips to the next real moment, so an unpickable row never becomes an unschedulable send.
-struct ScheduleMomentOptions {
-
-    // MARK: - Values
-
-    /// One day, as the list says it: the name that identifies it, and the date under it.
-    struct Day: Equatable {
-        /// `Today`, `Tomorrow`, or the day's own name.
-        let title: String
-        /// The date itself — `15 Aug` — under the name, because "Saturday" alone is a promise
-        /// somebody has to count on a calendar to check.
-        let detail: String
-        /// The start of that day, in the caller's calendar.
-        let date: Date
-    }
-
-    /// One quarter hour, written in the user's own clock convention — so a 24-hour locale reads
-    /// `09:00` and never `9:00 AM`.
-    struct Time: Equatable {
-        let title: String
-        /// Minutes past midnight. The durable half of a row: a title is a rendering of it.
-        let minutes: Int
-    }
-
-    /// A day and a time, as one answer.
-    struct Selection: Equatable {
-        let dayIndex: Int
-        let minutes: Int
-    }
-
-    // MARK: - Properties
-
-    /// The days with at least one quarter hour still ahead of them, nearest first.
-    let days: [Day]
-
-    private let allTimes: [Time]
-    private let now: Date
-    private let calendar: Calendar
-
-    // MARK: - Initialization
-
-    init(now: Date, calendar: Calendar = .current, locale: Locale = .current) {
-        var calendar = calendar
-        calendar.locale = locale
-        let times = Self.quarterHours(calendar: calendar, locale: locale)
-        self.now = now
-        self.calendar = calendar
-        self.allTimes = times
-
-        // The zone travels with the calendar. A formatter takes the system's own unless told
-        // otherwise, and one reading a date the calendar placed in a different zone names the
-        // day before it — which is a wrong row title in the app and an unrepeatable test.
-        let names = DateFormatter()
-        names.locale = locale
-        names.calendar = calendar
-        names.timeZone = calendar.timeZone
-        names.setLocalizedDateFormatFromTemplate(ScheduleMomentDefaults.dayNameTemplate)
-
-        let dates = DateFormatter()
-        dates.locale = locale
-        dates.calendar = calendar
-        dates.timeZone = calendar.timeZone
-        dates.setLocalizedDateFormatFromTemplate(ScheduleMomentDefaults.dayDetailTemplate)
-
-        let midnight = calendar.startOfDay(for: now)
-        self.days = (0..<ScheduleMomentDefaults.dayCount).compactMap { offset -> Day? in
-            guard let date = calendar.date(byAdding: .day, value: offset, to: midnight) else {
-                return nil
-            }
-            // Only the first day can have run out; every later one is offered whole. Asking the
-            // question of all of them anyway keeps the rule in one place.
-            guard !Self.available(times, on: date, after: now, calendar: calendar).isEmpty else {
-                return nil
-            }
-
-            let title: String
-            switch offset {
-            case 0: title = L10n.string("Today")
-            case 1: title = L10n.string("Tomorrow")
-            default: title = names.string(from: date)
-            }
-            return Day(title: title, detail: dates.string(from: date), date: date)
-        }
-    }
-
-    // MARK: - Public Methods
-
-    /// The quarter hours still ahead on the day at `index`.
-    func times(onDayAt index: Int) -> [Time] {
-        guard days.indices.contains(index) else { return [] }
-        return Self.available(allTimes, on: days[index].date, after: now, calendar: calendar)
-    }
-
-    /// The moment a day and a time name together.
-    func date(dayAt index: Int, minutes: Int) -> Date? {
-        guard days.indices.contains(index) else { return nil }
-        return Self.moment(minutes, on: days[index].date, calendar: calendar)
-    }
-
-    /// Where the sheet opens: nine o'clock on the nearest day that still has it, and otherwise
-    /// the nearest quarter hour that day has left. The morning is the same one the presets aim
-    /// at, so the menu and the sheet agree about when a working day starts; the fallback is
-    /// what keeps an afternoon "Custom time…" from opening on a row it cannot use.
-    var defaultSelection: Selection? {
-        guard !days.isEmpty else { return nil }
-        let available = times(onDayAt: 0)
-        guard let first = available.first else { return nil }
-        let morning = available.first { $0.minutes == ScheduleMomentDefaults.defaultMinutes }
-        return Selection(dayIndex: 0, minutes: (morning ?? first).minutes)
-    }
-
-    // MARK: - Private Methods
-
-    private static func quarterHours(calendar: Calendar, locale: Locale) -> [Time] {
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
-
-        // A fixed reference day rather than today's: the titles are a clock face, and reading
-        // them off a day with a transition in it would name one of them twice.
-        let reference = calendar.startOfDay(for: Date(timeIntervalSince1970: 0))
-        return stride(
-            from: 0,
-            to: ScheduleMomentDefaults.minutesInADay,
-            by: ScheduleMomentDefaults.step
-        ).compactMap { minutes in
-            guard let date = calendar.date(byAdding: .minute, value: minutes, to: reference) else {
-                return nil
-            }
-            return Time(title: formatter.string(from: date), minutes: minutes)
-        }
-    }
-
-    private static func available(
-        _ times: [Time],
-        on day: Date,
-        after now: Date,
-        calendar: Calendar
-    ) -> [Time] {
-        times.filter { time in
-            guard let moment = moment(time.minutes, on: day, calendar: calendar) else {
-                return false
-            }
-            return moment > now
-        }
-    }
-
-    private static func moment(_ minutes: Int, on day: Date, calendar: Calendar) -> Date? {
-        calendar.date(
-            bySettingHour: minutes / 60,
-            minute: minutes % 60,
-            second: 0,
-            of: day,
-            matchingPolicy: .nextTime,
-            repeatedTimePolicy: .first,
-            direction: .forward
-        )
-    }
-}
-
 // MARK: - The Sheet
 
 /// "Custom time…": a day, a quarter hour, and the sentence that says what was chosen.
@@ -325,39 +146,11 @@ final class ScheduleMomentPickerViewController: NSViewController {
         noteLabel.preferredMaxLayoutWidth = ScheduleMomentPickerLayout.sheetWidth
             - 2 * Design.Spacing.pane
 
-        let headings = NSStackView(views: [headingLabel, noteLabel])
-        headings.orientation = .vertical
-        headings.alignment = .leading
-        headings.spacing = Design.Spacing.hairline
-
         summaryLabel.applyFont(.body)
-
-        let stack = NSStackView(views: [headings, makeLists(), summaryLabel, makeFooter()])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.medium
-        stack.setCustomSpacing(Design.Spacing.large, after: headings)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        view.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: Design.Spacing.pane),
-            stack.bottomAnchor.constraint(
-                equalTo: view.bottomAnchor,
-                constant: -Design.Spacing.pane
-            ),
-            stack.leadingAnchor.constraint(
-                equalTo: view.leadingAnchor,
-                constant: Design.Spacing.pane
-            ),
-            stack.trailingAnchor.constraint(
-                equalTo: view.trailingAnchor,
-                constant: -Design.Spacing.pane
-            )
-        ])
-        for child in stack.arrangedSubviews {
-            child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        }
+        ScheduleMomentPickerLayout.attach(
+            headings: ScheduleMomentPickerLayout.headings(headingLabel, noteLabel),
+            lists: makeLists(), summary: summaryLabel, footer: makeFooter(), to: view
+        )
     }
 
     /// The two lists, each under its own name. The captions are what keep a column of `09:00`s
@@ -382,28 +175,10 @@ final class ScheduleMomentPickerViewController: NSViewController {
             accessibilityLabel: ScheduleMomentPickerStrings.timeCaption
         )
 
-        let dayColumn = NSStackView(views: [dayCaption, days])
-        dayColumn.orientation = .vertical
-        dayColumn.alignment = .leading
-        dayColumn.spacing = Design.Spacing.small
-        days.widthAnchor.constraint(equalTo: dayColumn.widthAnchor).isActive = true
-
-        let timeColumn = NSStackView(views: [timeCaption, times])
-        timeColumn.orientation = .vertical
-        timeColumn.alignment = .leading
-        timeColumn.spacing = Design.Spacing.small
-        times.widthAnchor.constraint(equalTo: timeColumn.widthAnchor).isActive = true
-
-        let row = NSStackView(views: [dayColumn, timeColumn])
-        row.orientation = .horizontal
-        row.alignment = .top
-        row.distribution = .fill
-        row.spacing = Design.Spacing.medium
-        dayColumn.widthAnchor.constraint(
-            equalToConstant: ScheduleMomentPickerLayout.dayColumnWidth
-        ).isActive = true
-        timeColumn.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        return row
+        return ScheduleMomentPickerLayout.lists(
+            dayCaption: dayCaption, dayScroll: days,
+            timeCaption: timeCaption, timeScroll: times
+        )
     }
 
     private func makeList(
@@ -430,16 +205,12 @@ final class ScheduleMomentPickerViewController: NSViewController {
         let scrollView = ThemedScrollView()
         scrollView.documentView = table
         scrollView.hasVerticalScroller = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.applySurface(
             fill: Design.Surface.panel,
             radius: .panel,
             border: Design.Surface.border
         )
-        scrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
-        scrollView.heightAnchor.constraint(
-            greaterThanOrEqualToConstant: ScheduleMomentPickerLayout.minimumListHeight
-        ).isActive = true
+        ScheduleMomentPickerLayout.prepareList(scrollView)
         return scrollView
     }
 
@@ -458,12 +229,9 @@ final class ScheduleMomentPickerViewController: NSViewController {
         cancelButton.keyEquivalent = "\u{1b}"
 
         let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let footer = NSStackView(views: [spacer, cancelButton, confirmButton])
-        footer.orientation = .horizontal
-        footer.spacing = Design.Spacing.small
-        return footer
+        return ScheduleMomentPickerLayout.footer(
+            spacer: spacer, cancel: cancelButton, confirm: confirmButton
+        )
     }
 
     // MARK: - Selection
@@ -576,71 +344,6 @@ final class ScheduleMomentPickerViewController: NSViewController {
         onPick?(nil)
     }
 
-    // MARK: - Rows
-
-    /// A day's name over its date, centred in the slot the selection fills.
-    ///
-    /// **The pair is centred by a constraint, not by the stack.** A vertical `NSStackView` built
-    /// from `init(views:)` puts everything in its leading gravity area, which is the top — so the
-    /// two labels sat against the row's top edge with the row's whole spare height left under
-    /// them. Every assertion about this row passed: the ink was there, in the right order, at the
-    /// right size. What it looked like was a selection plate with its text shoved into the top of
-    /// it, and a first row whose name touched the panel's own border. `dayRowHeight` states a
-    /// floor as well as a computed height, so the spare space is real and has to be spent
-    /// deliberately rather than all at one end.
-    private func makeDayRow(_ day: ScheduleMomentOptions.Day) -> NSView {
-        let title = NSTextField(labelWithString: day.title)
-        title.applyFont(.body)
-        title.textColor = Design.Text.label
-
-        let detail = NSTextField(labelWithString: day.detail)
-        detail.applyFont(.subheading)
-        detail.textColor = Design.Text.tertiary
-
-        let labels = NSStackView(views: [title, detail])
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-        labels.translatesAutoresizingMaskIntoConstraints = false
-
-        let cell = NSView()
-        cell.addSubview(labels)
-        NSLayoutConstraint.activate([
-            labels.leadingAnchor.constraint(
-                equalTo: cell.leadingAnchor,
-                constant: Design.Spacing.small
-            ),
-            labels.trailingAnchor.constraint(
-                lessThanOrEqualTo: cell.trailingAnchor,
-                constant: -Design.Spacing.small
-            ),
-            labels.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            // A row that somehow holds more than it was measured for grows the cell honestly
-            // rather than drawing over its neighbour.
-            labels.topAnchor.constraint(greaterThanOrEqualTo: cell.topAnchor),
-            labels.bottomAnchor.constraint(lessThanOrEqualTo: cell.bottomAnchor)
-        ])
-        return cell
-    }
-
-    private func makeTimeRow(_ time: ScheduleMomentOptions.Time) -> NSView {
-        let title = NSTextField(labelWithString: time.title)
-        // Tabular figures: a column of clock faces whose digits shift width is a column that
-        // reads as ragged even though every string is the same length.
-        title.applyFont(.numericBody)
-        title.textColor = Design.Text.label
-
-        let row = NSStackView(views: [title])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.edgeInsets = NSEdgeInsets(
-            top: 0,
-            left: Design.Spacing.small,
-            bottom: 0,
-            right: Design.Spacing.small
-        )
-        return row
-    }
 }
 
 // MARK: - Lists
@@ -659,10 +362,10 @@ extension ScheduleMomentPickerViewController: NSTableViewDelegate {
     ) -> NSView? {
         if tableView === dayTable {
             guard options.days.indices.contains(row) else { return nil }
-            return makeDayRow(options.days[row])
+            return ScheduleMomentPickerRows.makeDayRow(options.days[row])
         }
         guard visibleTimes.indices.contains(row) else { return nil }
-        return makeTimeRow(visibleTimes[row])
+        return ScheduleMomentPickerRows.makeTimeRow(visibleTimes[row])
     }
 
     /// Typing `14` walks to two o'clock, the way typing into a pop-up's list did. The lists are
@@ -696,74 +399,5 @@ extension ScheduleMomentPickerViewController: NSTableViewDelegate {
         }
         minutes = visibleTimes[row].minutes
         refreshSummary()
-    }
-}
-
-// MARK: - Constants
-
-enum ScheduleMomentPickerColumn {
-    static let day = NSUserInterfaceItemIdentifier("ScheduleMomentDayColumn")
-    static let time = NSUserInterfaceItemIdentifier("ScheduleMomentTimeColumn")
-}
-
-@MainActor
-enum ScheduleMomentPickerLayout {
-    static let sheetWidth: CGFloat = 520
-    static let sheetHeight: CGFloat = 460
-    /// Wide enough for `Wednesday` over `17 Sept` without truncating either.
-    static let dayColumnWidth: CGFloat = 180
-    static let minimumListHeight: CGFloat = 240
-    static let minimumDayRowHeight: CGFloat = 44
-    static let minimumTimeRowHeight: CGFloat = 28
-
-    static var dayRowHeight: CGFloat {
-        max(
-            minimumDayRowHeight,
-            Design.Typography.lineHeight(of: Design.Typography.body())
-                + Design.Typography.lineHeight(of: Design.Typography.subheading())
-                + Design.Spacing.hairline
-                + 2 * Design.Spacing.small
-        )
-    }
-
-    static var timeRowHeight: CGFloat {
-        max(
-            minimumTimeRowHeight,
-            Design.Typography.lineHeight(of: Design.Typography.numericBody())
-                + 2 * Design.Spacing.tight
-        )
-    }
-}
-
-enum ScheduleMomentDefaults {
-    static let dayCount = 14
-    static let step = 15
-    static let minutesInADay = 24 * 60
-
-    /// Where the time list opens: the same nine o'clock the presets aim at, so the sheet and
-    /// the menu agree about when a working day starts.
-    static let defaultMinutes = PresetDefaults.morningHour * 60
-
-    static let dayNameTemplate = "EEEE"
-    static let dayDetailTemplate = "dMMM"
-}
-
-enum ScheduleMomentPickerStrings {
-    static var scheduleMessage: String { L10n.string("Schedule Message") }
-    static var cancel: String { L10n.string("Cancel") }
-    static var dayCaption: String { L10n.string("Day") }
-    static var timeCaption: String { L10n.string("Time") }
-    static var nothingToSchedule: String { L10n.string("No time left today.") }
-
-    /// The time zone, then what the caller wanted said. Two facts on one line: a scheduled time
-    /// with no zone beside it is ambiguous, and a Mac that is asleep at nine is not a server.
-    static func note(_ informativeText: String?, locale: Locale = .current) -> String {
-        let zone = L10n.format(
-            "Time zone: %@",
-            TimeZone.current.localizedName(for: .generic, locale: locale)
-                ?? TimeZone.current.identifier
-        )
-        let detail = informativeText ?? L10n.string("Sends while Threading is running.")
-        return L10n.format("%@ · %@", zone, detail)
     }
 }

@@ -193,7 +193,7 @@ def same_shell():
 
 def capture(name):
     destination = Path('out') / (name + '.png')
-    subprocess.run(['import', '-window', window, str(destination)], check=True, timeout=5)
+    subprocess.run(['import', '-window', window, str(destination)], check=True, timeout=10)
     crops = []
     listed, _ = panes()
     selected_id = listed.get_selection_iface().get_selected_child(0).get_accessible_id()
@@ -329,6 +329,26 @@ try:
                 eventually(same_shell, 'picker preserved child and durable titles')
                 key('Tab')
                 title(r'^Threading terminal - SAVED SHELL 1 READY( \[(history cut|restored)\])?$')
+                if missing:
+                    key('q')
+                    eventually(lambda: not any(runtime['id'] == owned[0] and runtime.get('exit') is None
+                                           for runtime in sessions()), 'saved shell exited')
+                    key('ctrl+shift+p')
+                    title('^Threading agents - ' + re.escape(str(project)) + '$')
+                    key('Escape')
+                    title('^Threading experiment - ' + re.escape(str(project)) + '$')
+                    open_saved_terminals(key)
+                    title('^Threading terminals - ' + re.escape(str(project)) + '$')
+                    def dormant_terminal_row():
+                        frame = app.get_child_at_index(0)
+                        listed = next(frame.get_child_at_index(i) for i in range(frame.get_child_count())
+                                      if frame.get_child_at_index(i).get_role_name() == 'list')
+                        row = listed.get_child_at_index(0)
+                        assert row.get_accessible_id() == owned[0].removeprefix('terminal-')
+                        return 'retained' not in row.get_name()
+                    eventually(dormant_terminal_row, 'exited terminal row no longer retained')
+                    subprocess.run(['import', '-window', window, 'out/provider-marks-terminal-exited.png'],
+                                   check=True, timeout=10)
                 key('alt+F4')
                 assert process.wait(timeout=8) == 0
             finally:
@@ -343,7 +363,7 @@ try:
                zip(silhouettes['bundled'], silhouettes['fallback'])), 'provider marks rendered as generic fallback dots'
     assert silhouettes['bundled'][0] != silhouettes['bundled'][1], 'two providers share the same glyph'
     print('PASS installed provider glyphs, selected/unselected states, Unicode titles, full account/ID '
-          'accessibility, live terminal identity, and absent-artwork fallback', flush=True)
+          'accessibility, live/finished terminal identity, and absent-artwork fallback', flush=True)
 finally:
     if process is not None and process.poll() is None:
         process.kill()

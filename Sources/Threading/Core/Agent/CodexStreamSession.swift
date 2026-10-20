@@ -76,6 +76,7 @@ final class CodexStreamSession:
     var sessionTitleSource: AgentTitleSource { .provider }
 
     private(set) var isRunning = false
+    var hasActiveTurn: Bool { isRunning && isTurnInFlight }
     var canSend: Bool {
         isRunning && acceptsInput && !isTurnInFlight && pendingTurn == nil
             && !isCompactionInFlight

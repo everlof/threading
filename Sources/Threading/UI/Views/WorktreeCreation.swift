@@ -27,20 +27,7 @@ enum WorktreeCreation {
     /// checkout of it reaches the same result, which is what lets a repository root hand this
     /// the checkout that stands for it.
     static func requestWorktree(from project: Project) -> URL? {
-        let request = TextPromptRequest(
-            title: L10n.string("New Worktree"),
-            message: L10n.string(
-                "A worktree lets a session run on its own branch without disturbing this checkout."
-            ),
-            confirmTitle: L10n.string("Create"),
-            placeholder: L10n.string("branch name"),
-            fieldSize: NSSize(
-                width: WorktreeCreationDefaults.branchFieldWidth,
-                height: WorktreeCreationDefaults.branchFieldHeight
-            )
-        )
-
-        guard case .text(let branch)? = TextPromptAlert.ask(request) else { return nil }
+        guard case .text(let branch)? = TextPromptAlert.ask(promptRequest) else { return nil }
 
         do {
             guard let destination = GitWorktree.suggestedLocation(
@@ -54,6 +41,21 @@ enum WorktreeCreation {
             present(error)
             return nil
         }
+    }
+
+    static var promptRequest: TextPromptRequest {
+        TextPromptRequest(
+            title: L10n.string("New Worktree"),
+            message: L10n.string(
+                "A worktree lets a session run on its own branch without disturbing this checkout."
+            ),
+            confirmTitle: L10n.string("Create"),
+            placeholder: L10n.string("branch name"),
+            fieldSize: NSSize(
+                width: WorktreeCreationDefaults.branchFieldWidth,
+                height: WorktreeCreationDefaults.branchFieldHeight
+            )
+        )
     }
 
     /// The branch a created worktree stands on, read back from the checkout itself rather than

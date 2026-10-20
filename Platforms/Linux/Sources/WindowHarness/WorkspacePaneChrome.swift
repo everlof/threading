@@ -50,7 +50,15 @@ final class WorkspacePaneChrome {
         target: .splitMenu, glyphMaterialization: .deferred)
     private lazy var openInControl = SplitIconButtonView(
         action: openInAction, chevron: openInChooser)
+    private lazy var openInSlot: NSStackView = {
+        let stack = NSStackView(views: [openInControl])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.distribution = .fill
+        return stack
+    }()
     private(set) var pageIdentity: String
+    private var pageSymbolName: String
     private let menuWindow = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
     private let menuRoot = SessionMenuSurface(frame: .zero)
     private var menuRows: [ThemedMenuRowView] = []
@@ -81,11 +89,16 @@ final class WorkspacePaneChrome {
          showsSessionActions: Bool = false,
          onReveal: @escaping () -> Void) {
         self.pageIdentity = pageIdentity
+        self.pageSymbolName = symbolName
         pageTitle.update(title: pageName, symbolName: symbolName, identity: pageIdentity)
         if let icon { pageTitle.setIcon(icon) }
         pageTitle.onReveal = onReveal
         pageTitle.actionsAnchor.isHidden = !showsSessionActions
         pageTitle.onActions = { [weak self] _ in self?.menuToggleRequested = true }
+        pageTitle.maxWidth = PageTitleView.maximumWidth
+        NSLayoutConstraint.activate([
+            pageTitle.widthAnchor.constraint(lessThanOrEqualToConstant: PageTitleView.maximumWidth)
+        ])
         openInAction.onPress = { [weak self] in
             guard let self else { return }
             self.requestedOpenInID = self.preferredOpenInID
@@ -94,7 +107,7 @@ final class WorkspacePaneChrome {
         openInChooser.presentsMenu = true
         openInChooser.onPress = { [weak self] in self?.openInChooserToggleRequested = true }
         openInControl.isHidden = true
-        let header = PaneHeaderView(leading: [pageTitle], trailing: [openInControl],
+        let header = PaneHeaderView(leading: [pageTitle], trailing: [openInSlot],
                                     margin: .paneEdge)
         headerRoot.addSubview(header)
         NSLayoutConstraint.activate([
@@ -201,8 +214,14 @@ final class WorkspacePaneChrome {
         requestedOpenInID = nil
         chosenOpenInID = nil
         pageIdentity = identity
+        pageSymbolName = "terminal"
         pageTitle.update(title: name, symbolName: "terminal", identity: identity)
         pageTitle.onReveal = onReveal
+        headerNeedsPresentation = true
+    }
+
+    func updatePageName(_ name: String) {
+        pageTitle.update(title: name, symbolName: pageSymbolName, identity: pageIdentity)
         headerNeedsPresentation = true
     }
 
@@ -447,10 +466,8 @@ final class WorkspacePaneChrome {
         headerWidth = width
         headerRoot.frame = NSRect(x: 0, y: 0, width: CGFloat(width) / WorkspaceDisplay.scale,
                                   height: PaneHeaderView.bandHeight)
-        let openInWidth = Design.Size.toolbarButtonWidth + Design.Size.splitMenuWidth
-            + PaneHeaderView.itemSpacing
-        pageTitle.maxWidth = max(0, headerRoot.bounds.width
-            - 2 * PaneHeaderView.contentInset - openInWidth)
+        // This is the SDL bitmap viewport. PaneHeaderView's shared constraints divide its
+        // width between the page title and the optional trailing control.
         let bitmap = Bitmap(width: width, height: Self.headerPixelHeight,
                             background: LinuxTheme.components("terminal.background"))
         headerRoot.render(in: NSGraphicsContext(bitmap: bitmap, scale: WorkspaceDisplay.scale))

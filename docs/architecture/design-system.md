@@ -20,7 +20,82 @@ black after a dark-mode switch. The native provider-mark journey measures select
 every row title in both appearances; recording
 a tint or inspecting the ancestor background is insufficient.
 
+Saved Linux session rows pass selection and dormancy to the same Design content view as the
+macOS row. A retained pane is not proof that its provider is active: terminal-backed rows read
+the process's replaceable/exited state, and native conversation rows read launch and stream
+liveness. Only scheduled rows stay undimmed without a live provider. Both platforms take the
+non-template dormant mark opacity from `SidebarRowDefaults`; durable attention words sit in
+the shared title stack rather than the trailing activity slot. The Linux host invalidates the
+navigator when either provider type exits, including when it is no longer the active pane.
+Linux now paints the active-turn arc and pending-permission dot in that trailing slot. The
+status mount and its content use the Mac row's exact constraints from `SidebarRowDefaults`:
+the mark is centred in the trailing 20-point column with the same 12-point bounds. A visible
+working mark is rasterized only in its solved rectangle and updates the retained SDL sidebar
+texture there, rather than rebuilding the whole navigator at animation cadence. Linux still
+needs the Mac hover controls and its other status silhouettes for background work, unread
+attention and usage-limit stops.
+
+The saved-session picker used the same constrained content but gave each outer row a 22-point
+host frame, six points shorter than the Mac sidebar cell. It now takes its row height and stride
+from `SidebarDefaults.rowHeight` (28 points), as the ordinary Linux outline and Mac table do.
+`navigatorRowRect` still assigns the bitmap viewport rectangles; the contents and status mark
+inside each mounted row use the shared `NSLayoutConstraint` declarations. At 2×, a selected
+saved row occupies 56 physical pixels and a 480-pixel-high navigator mounts seven rows.
+The picker cell itself begins six points inside that viewport, but its selection capsule must
+follow the ordinary sidebar row's column-relative `SidebarDensity.selectionInsetX`, one-point
+vertical inset and theme control corner. The row derives the remaining local inset from its
+actual viewport origin; that keeps the capsule at the same 10-point column margin at the
+opening width without moving constrained title or status content. The separate action and account
+lists keep their own menu-row treatment.
+
+The Linux outline scroll view now uses the Mac sidebar's header-to-scroll and side-edge constraints.
+`ThemedScrollView.contentBreathing` passes the shared top inset through the Linux `NSScrollView`
+shim, so the inset stays inside the navigator well instead of shortening the scroll view's host
+frame. The SDL shell still supplies its window and bitmap viewport size, while AppKit constraints
+place the scroll view and the shared row components inside that root. Menu overlay origins and
+recycled table-row rectangles remain viewport coordinates; they do not replace a component's
+internal constraints. The Linux sidebar ground follows the same root-edge rule as macOS: the
+backdrop occupies the whole column, a constrained clip exposes only the header band, and the
+opaque navigator well starts at the header's bottom edge. The full-column gradient keeps its
+coordinate space without recalculating three child frames on every resize.
+The row, text, and menu overlay layers are likewise pinned to the navigator root on all four
+edges. The outline's disclosure glyph is centred on its cell with a constrained leading offset
+that changes with indentation. These are parent relationships, so a root resize or row reuse
+must let the shim solve them. The outer SDL viewport and recycled outline-row rectangles still
+arrive as frames; macOS's themed menu presenter also assigns measured menu-row frames inside its
+viewport. Keeping those frame boundaries does not duplicate a shared component's layout.
+
+The Linux session row now uses the shared constrained two-control hover slot. Its anchored menu
+mounts production `ThemedMenuRowView` items over the standing outline. The menu layer must sit
+above the header as well as the outline: in a short window a menu grows upward across that band,
+and leaving the header above it lets title text paint through the menu. Menu rows and shared
+`SeparatorView` rules use `ThemedMenuRowPlan` heights; only the range fitting the viewport is
+mounted, while selection and keyboard scrolling retain the full command list. The Open in fold
+uses the same bounded GIO catalogue and worker launcher as the pane control, with the row's
+project identity checked before launch. The hover `⋯`, secondary click, and Shift+F10 on a
+selected session all open that one row-owned menu, as on macOS; project rows retain their
+project-owned menu. The menu's origin and its row rectangles are viewport placement, while the
+row contents keep the Mac component constraints.
+The row menu now uses the same Snooze wall-clock moments as macOS. Its Linux host owns the
+persisted visibility overlay, one process-wide deadline map, worker-side expiry reconciliation,
+and exact-session wake receipts. The shared menu rows draw the choices; no snooze timer or
+database read is attached to a recycled row. Several other session actions remain open.
+The custom-time picker now shares the Mac day/time options, row content, and the exact
+`NSStackView`/`NSLayoutConstraint` declaration in `ScheduleMomentPickerLayout`. The Linux host
+supplies the outer SDL sheet size and event route; the AppKit shim sizes each table document to
+its constrained scroll viewport. Menu and viewport rectangles remain host placement rather
+than a second implementation of the sheet's internal layout. Standalone SDL windows admit the
+sheet's 920 physical pixels at 2× without changing the workspace's 900-pixel height bound.
+
 The Linux navigator uses the outline's existing identity index for every visible-row lookup.
+Repository roots use that same outline projection: only added checkouts appear beneath the root,
+the checkout uses the shared project-row branch/path presentation, and a removed checkout can
+stay grouped by its saved repository identity. The catalogue is built off actor, while the
+outline projects lightweight identities and mounts visible rows. A repository root has its own
+selection and hover identity even when its controls target a representative checkout.
+Its accessible `+` and actions keep that stable root identity while dispatching to the current
+representative checkout. Import reveals a folded repository before resolving selection, so the
+composer follows the newly added checkout.
 Its former second projection allowed only one expanded project and could attach child selection
 to that project rather than to the child's stable owner. Expansion remains host-owned: each
 project, including an empty one, can open independently. Disclosure clicks preserve unrelated
@@ -103,6 +178,27 @@ at unchanged width/text; no provider/project-sized tree or work is added to poin
 The app greeting is selected once from the shared calendar policy, whose daypart is the same
 portable grammar used by theme welcomes. Linux currently paints the house-theme static form;
 this does not implement theme-authored greetings, captions, alternate marks or motion.
+
+The Linux New Worktree and Rename Session questions use `LinuxThemedTextPromptView` in this
+design boundary. `ThemedAlertLayout` builds the copy, heading and section stacks and declares
+the modern alert's icon, top, edge, minimum-width and section-width constraints once for that
+view and the Mac `ThemedAlert`. The Linux SDL window takes its fitted size from the solved
+component. The prompt paints the informational
+title, optional message, one themed field and ordered themed actions of `TextPromptAlert`.
+The host owns the modal event loop and durable work; the Linux bridge publishes the actual
+constrained field, title and button bounds through AT-SPI. Appearance stays in the component
+boundary while repository and session behavior remain host-owned.
+The Linux compatibility target now compiles the production `ThemedCheckbox` and `ThemedToggle`
+for the checked Threading material, including the switch's timer-driven interaction.
+`SettingsAdaptiveControlRow`, `SettingsCard`, and `SettingsPageCanvasLayout` are shared Design
+sources. The Linux Settings detour mounts the General confirmation toggles inside that constrained
+canvas and returns to the previous pane through Done or the Settings shortcut. The Close prompt
+offers its remembered checkbox; both it and Settings write the same persisted preference. The
+host owns routing, focus and persistence while the components own their internal layout. The
+existing project sidebar still surrounds this initial Settings pane; the Mac Settings sidebar and
+its other destinations remain to be ported. The Linux `NSView.layoutSubtreeIfNeeded()` shim runs
+the solved tree's `layout()` callbacks and re-solves callback-changed constraints before geometry
+is read or pixels are drawn, as AppKit does for the adaptive row.
 
 `ThemedControl` supplies accessibility hit testing for its drawn, cell-free controls. AppKit's
 default `NSControl` implementation returns the cell; without one, a button could appear in the
@@ -994,8 +1090,10 @@ its point size/weight and applies actual tint and source alpha; the supported pa
 ink. Radial gradients interpolate once per device pixel under the inherited path clip, rather
 than accumulating translucent concentric fills. The opening composer mounts the shared
 `ModelEffortPickerContentView` and matrix; both hosts use the same presentation factory for
-inherited rows and effort columns. Mac retains native Auto Layout alignment and legacy-theme
-pixel rounding inside this shared body; Linux positions its children using the same metrics.
+inherited rows and effort columns. Both hosts run the same Auto Layout constraints inside this
+shared body. The Linux popup host pins the content on all four edges; only the popup anchor and
+viewport are host-sized. The matrix viewport keeps its natural width and height at high priority,
+so a bounded popup can compress the scroll area without conflicting with its required edges.
 The Linux host owns anchoring, dismissal, account admission and launch. Its existing menu
 surface is still a chrome approximation, not the complete Mac popover silhouette. Visible
 matrix cells expose their clipped bounds and distinct selected/focused/enabled state; the
@@ -1371,9 +1469,20 @@ focus and Return/⌘Return behavior; Threading retains text admission, submissio
 `PromptChrome` also owns the opening column's 720-point cap and 116-point prompt minimum, used
 by the Mac controller and Linux host. Linux's transparent editor sits inside the shared field
 surface, so an empty document cannot shrink the visible field; its cached used-text height feeds
-the same bounded growth policy. `PromptChrome.contentFrames` gives the frame-based Linux host
-the same 12-point horizontal inset, 10-point vertical inset and gap, and 26-point footer within
-the existing height allowance. Its permission chip uses the shared `PermissionModeLabels`
+the same bounded growth policy. `PromptChrome.configureContentStack` and
+`contentSizingConstraints` now supply the same vertical attachment/editor/footer stack and size
+equations to macOS `PromptView` and both Linux composers. Their host constraints pin the stack
+inside the field with the same 12-point side and 10-point footer insets. When an image is
+attached, the Linux workspace raises its window minimum to fit the shared 80-point rail and
+required gaps instead of asking that constraint tree to fit inside its ordinary 180-pixel floor.
+The bounded image previews use the Mac horizontal `NSStackView` inside their scroll document,
+and the remove control is pinned to each tile's top and trailing edges; the component still
+sets the scroll document's viewport frame.
+`ConversationPaneLayout` declares the transcript, status line and reply-column constraints
+once for the Mac controller and Linux conversation pane. Each host supplies its own top and
+bottom anchors: Mac uses the pane safe area, while the Linux bitmap root supplies its bounds.
+The Mac-only rails and overlays keep their additional constraints in the controller.
+Its permission chip uses the shared `PermissionModeLabels`
 mark/inherit wording and `AgentPermissionMode` titles and descriptions. The remaining opening
 footer controls are separate parity work. The choice presenter measures the fixed seven-value
 permission list once when opened and mounts at most six shared rows; its chip coordinates are
@@ -4184,3 +4293,14 @@ ancestors, enclosing clip views and `ThemeParticleHold`; there is no per-view sa
 The Motion page uses the normal Settings kit for its host-only consent/source/retry rows.
 Long permission and privacy explanations live behind the section help button. Capture and
 public signal authority are described in [`audio-spectrum.md`](audio-spectrum.md).
+
+## Linux sidebar background-work status
+
+The Linux session row uses the same 12-point trailing status slot and
+`SidebarRowDefaults.constrainSessionStatusContent` declarations as the Mac row. A Claude
+`background_tasks_changed` event restates its complete task set. Once the foreground turn ends,
+the row presents `readyWithBackgroundWork` as a static accent dot, sized by the same
+`SidebarRowDefaults.sessionBackgroundDotSize` as the Mac indicator. Pending user input and an
+active foreground turn take precedence. An empty task restatement removes the dot; a newly
+launched provider stream clears any prior count. Only mounted rows paint the mark, and the
+background state does not start the activity animation patch timer.

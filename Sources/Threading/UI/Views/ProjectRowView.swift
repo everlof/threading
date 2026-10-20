@@ -370,12 +370,7 @@ final class ProjectRowView: NSTableCellView, ThemeDerivedContent {
         iconView.contrastGround = { [weak self] in self?.rowGround() ?? Design.Surface.background }
         rowVisuals.translatesAutoresizingMaskIntoConstraints = false
         addSubview(rowVisuals)
-        NSLayoutConstraint.activate([
-            rowVisuals.leadingAnchor.constraint(equalTo: leadingAnchor),
-            rowVisuals.trailingAnchor.constraint(equalTo: trailingAnchor),
-            rowVisuals.topAnchor.constraint(equalTo: topAnchor),
-            rowVisuals.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
+        rowVisuals.pin(to: self)
         rowVisuals.onActionPress = { [weak self] _ in self?.hoverButtonClicked() }
         rowVisuals.prepareForExternalContent()
         rowVisuals.installContentContainer(contentContainer)

@@ -34,6 +34,7 @@ clang -shared -fPIC -Wall -Wextra -Werror tests/gtk_present_delay.c -ldl -o out/
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --project-row-layout-fixture
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --session-row-layout-fixture
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --terminal-row-layout-fixture
+timeout 60 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --settings-row-contract
 timeout 120 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --app-event-contract
 # Exercise the same Release emulator/client modules before leaving the build container.
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product NativeAgentProcessHarness
@@ -113,12 +114,20 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/project_actions_smoke.py:/project_actions_smoke.py:ro" \
   -v "$PWD/tests/project_create_menu_smoke.py:/project_create_menu_smoke.py:ro" \
   -v "$PWD/tests/composer_smoke.py:/composer_smoke.py:ro" \
+  -v "$PWD/tests/composer_checkout_smoke.py:/composer_checkout_smoke.py:ro" \
+  -v "$PWD/tests/composer_attachment_smoke.py:/composer_attachment_smoke.py:ro" \
+  -v "$PWD/tests/gtk_file_drag_source.py:/gtk_file_drag_source.py:ro" \
   -v "$PWD/tests/composer_permissions_smoke.py:/composer_permissions_smoke.py:ro" \
   -v "$PWD/tests/composer_models_smoke.py:/composer_models_smoke.py:ro" \
+  -v "$PWD/tests/composer_surface_smoke.py:/composer_surface_smoke.py:ro" \
   -v "$PWD/tests/document_ui_smoke.py:/document_ui_smoke.py:ro" \
   -v "$PWD/tests/short_user_row_smoke.py:/short_user_row_smoke.py:ro" \
   -v "$PWD/tests/native_workspace_smoke.py:/native_workspace_smoke.py:ro" \
   -v "$PWD/tests/native_permission_smoke.py:/native_permission_smoke.py:ro" \
+  -v "$PWD/tests/native_activity_smoke.py:/native_activity_smoke.py:ro" \
+  -v "$PWD/tests/native_background_activity_smoke.py:/native_background_activity_smoke.py:ro" \
+  -v "$PWD/tests/archived_navigation_smoke.py:/archived_navigation_smoke.py:ro" \
+  -v "$PWD/tests/session_rename_smoke.py:/session_rename_smoke.py:ro" \
   -v "$PWD/tests/native_conversation/providers.py:/native-conversation-providers.py:ro" \
   -v "$PWD/tests/user_bubble_smoke.py:/user_bubble_smoke.py:ro" \
   -v "$PWD/tests/automatic_rows_smoke.py:/automatic_rows_smoke.py:ro" \
@@ -130,6 +139,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/add_project_button_smoke.py:/add_project_button_smoke.py:ro" \
   -v "$PWD/tests/actions_smoke.py:/actions_smoke.py:ro" \
   -v "$PWD/tests/session_actions_smoke.py:/session_actions_smoke.py:ro" \
+  -v "$PWD/tests/session_close_unmounted_smoke.py:/session_close_unmounted_smoke.py:ro" \
   -v "$PWD/tests/open_in_smoke.py:/open_in_smoke.py:ro" \
   -v "$PWD/tests/actions_mark_contract.py:/actions_mark_contract.py:ro" \
   -v "$PWD/tests/saved_terminal_child.py:/saved_terminal_child.py:ro" \

@@ -445,15 +445,8 @@ final class PromptView: NSView, ThemedComponent {
         submitButton.setAccessibilityIdentifier("composer.prompt.submit")
         submitButton.translatesAutoresizingMaskIntoConstraints = false
 
-        contentStack.orientation = .vertical
-        contentStack.alignment = .leading
-        contentStack.spacing = Design.Spacing.medium
-        contentStack.detachesHiddenViews = true
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
-        contentStack.addArrangedSubview(contextRail)
-        contentStack.addArrangedSubview(attachmentScrollView)
-        contentStack.addArrangedSubview(scrollView)
-        contentStack.addArrangedSubview(footerRow)
+        PromptChrome.configureContentStack(contentStack,
+            views: [contextRail, attachmentScrollView, scrollView, footerRow])
 
         // The row takes the stack's own step rather than a tighter one. Closed up to `small` it
         // sat nearer the text than the box's padding held it off its own edges, and the two
@@ -507,17 +500,12 @@ final class PromptView: NSView, ThemedComponent {
                 equalTo: leadingAnchor,
                 constant: Design.Spacing.inset
             ),
-            attachmentScrollView.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
-            attachmentScrollView.heightAnchor.constraint(
-                equalToConstant: Design.Size.promptAttachmentThumbnail
-            ),
-            scrollView.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
-            footerRow.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
-            footerRow.heightAnchor.constraint(equalToConstant: Design.Size.chipHeight),
 
             submitButton.widthAnchor.constraint(equalToConstant: PromptViewDefaults.submitSize),
             submitButton.heightAnchor.constraint(equalToConstant: PromptViewDefaults.submitSize)
-        ] + submitPinnedConstraints)
+        ] + PromptChrome.contentSizingConstraints(stack: contentStack,
+            attachments: attachmentScrollView, editor: scrollView, footer: footerRow)
+            + submitPinnedConstraints)
 
         contentTrailingBesideSubmit = contentStack.trailingAnchor.constraint(
             equalTo: submitButton.leadingAnchor,

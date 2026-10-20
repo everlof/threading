@@ -79,5 +79,5 @@ enum AgentIconDefaults {
 
     /// Dims a non-template brand mark for a dormant row, standing in for the tertiary
     /// tint that dims the SF Symbols beside it.
-    static let dormantAlpha: CGFloat = 0.5
+    static let dormantAlpha: CGFloat = SidebarRowDefaults.dormantBrandAlpha
 }

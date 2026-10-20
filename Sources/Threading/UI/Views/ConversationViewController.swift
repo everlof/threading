@@ -473,6 +473,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     private var selectedSubagentID: String?
     private var subagentTranscriptLoads = SubagentTranscriptLoadCache()
     private var transcriptRecheckGeneration: [String: Int] = [:]
+    private var observedPermissionModeRefreshScheduled = false
     let customizationLookup: ComponentCustomizationHost.Lookup
     private let appEvents = AppEventObservations()
 
@@ -1444,17 +1445,16 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }
 
     private func setupConstraints() {
-        NSLayoutConstraint.activate([
-            // Normally pinned to the safe area, which the toolbar insets. A standing limit
-            // ribbon swaps this for `transcriptBelowLimitRibbon` instead.
-            transcriptBelowPaneTop,
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(
-                equalTo: statusRow.topAnchor,
-                constant: -Design.Spacing.small
-            ),
-
+        NSLayoutConstraint.activate(ConversationPaneLayout.constraints(
+            in: view,
+            transcript: scrollView,
+            status: statusRow,
+            composer: promptContentContainer,
+            transcriptTop: transcriptBelowPaneTop,
+            composerBottom: view.safeAreaLayoutGuide.bottomAnchor,
+            columnCap: composerColumnCap,
+            columnWidth: composerColumnWidth
+        ) + [
             // Directly above the box, below the status line. The two lines answer different
             // questions and belong on different sides of that boundary: the status line is the
             // *turn* talking — the orb, the word, what the last one cost — and reads with the
@@ -1491,47 +1491,6 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             ),
             limitEscapeStrip.topAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.topAnchor
-            ),
-
-            // Both edges pinned, not one: the line is a single truncating label now, and a row
-            // free to size itself to its content is what let the controls it used to carry
-            // cluster against the leading edge instead of reaching the pane's trailing one.
-            //
-            // Inset from the *box* rather than from the pane, because the box is no longer the
-            // pane's width: the narration starts on the same vertical as the text under it, and
-            // both sit on the transcript's column. Aligned by ink rather than by frame.
-            statusRow.leadingAnchor.constraint(
-                equalTo: promptContentContainer.leadingAnchor,
-                constant: Design.Spacing.inset
-            ),
-            statusRow.trailingAnchor.constraint(
-                equalTo: promptContentContainer.trailingAnchor,
-                constant: -Design.Spacing.inset
-            ),
-            statusRow.bottomAnchor.constraint(
-                equalTo: promptContentContainer.topAnchor,
-                constant: -Design.Spacing.small
-            ),
-
-            // The reply box stands on a *stated* column, the way the transcript's rows do: the
-            // cap and the insets are required, and `updateComposerColumnWidth` states the width
-            // the pane's current size leaves for it. Deliberately not an equality to the pane's
-            // own width — see `ConversationDefaults.statedColumnPriority` for the two ways
-            // that constraint fails, one of them by resizing the pane.
-            promptContentContainer.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            composerColumnCap,
-            composerColumnWidth,
-            promptContentContainer.leadingAnchor.constraint(
-                greaterThanOrEqualTo: view.leadingAnchor,
-                constant: Design.Spacing.inset
-            ),
-            promptContentContainer.trailingAnchor.constraint(
-                lessThanOrEqualTo: view.trailingAnchor,
-                constant: -Design.Spacing.inset
-            ),
-            promptContentContainer.bottomAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.bottomAnchor,
-                constant: -Design.Spacing.inset
             ),
 
             // Anchored to the *pane*, not to the column. The column is centred, so a rail
@@ -1620,6 +1579,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 )
             }
             self.handle(event)
+            self.scheduleObservedPermissionModeRefresh()
         }
         if let asking = stream as? QuestionAskingConversation {
             asking.onQuestion = { [weak self] request, answer in
@@ -1634,6 +1594,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             guard let self else { return }
             self.submitPendingInitialPromptIfReady()
             self.refreshConversationControls()
+            self.scheduleObservedPermissionModeRefresh()
             // Availability is the one signal every transport has for "the turn ended", however
             // it ended, so it is where the queue drains rather than off a terminal event some
             // provider might not send. Mode first: `flushOutboxIfReady` no-ops unless the
@@ -3489,6 +3450,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// Kept internal so shipping-host renders can cross the same exit boundary as the stream
     /// instead of reproducing its hidden-composer result by reaching into the view hierarchy.
     func handleExit(_ status: Int32) {
+        if let session = currentSession {
+            ObservedPermissionMode.forget(for: session, in: project)
+        }
         clearStreaming()
         restorePendingInitialPromptToComposer()
         // The process that owned those tasks is gone, and nothing will report them ending.
@@ -3871,13 +3835,38 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         )
     }
 
+    /// Stream output can arrive a character at a time. Admit one transcript check per short
+    /// window, then let the reader stat and scan its capped tail off the main thread. The
+    /// availability edge also catches a final mode record after the last output event.
+    private func scheduleObservedPermissionModeRefresh() {
+        guard !observedPermissionModeRefreshScheduled,
+              !isReplaying,
+              stream.isRunning,
+              currentSession?.kind.supports(.transcriptPermissionModeRecord) == true
+        else { return }
+
+        observedPermissionModeRefreshScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(350)) { [weak self] in
+            guard let self else { return }
+            self.observedPermissionModeRefreshScheduled = false
+            guard self.stream.isRunning, let session = self.currentSession else { return }
+            let sessionID = session.id
+            ObservedPermissionMode.revalidate(for: session, in: self.project) { [weak self] _ in
+                guard let self,
+                      self.stream.isRunning,
+                      self.currentSession?.id == sessionID
+                else { return }
+                self.refreshConversationControls()
+            }
+        }
+    }
+
     /// What this conversation runs in when it has pinned nothing of its own.
     ///
     /// The observed source is this session's own transcript, which is the one thing that can
     /// answer for a conversation whose login configures no mode — and it is read from memory
-    /// only. `refreshConversationControls()` runs on every streamed event, so a scan here would
-    /// be a file read per event; the background re-read belongs to the surfaces that already own
-    /// one, and this picks up whatever they have found.
+    /// only. `refreshConversationControls()` runs on every streamed event; the coalesced stream
+    /// observer above asks the background reader to update that cache.
     ///
     /// Offered only while the agent is *running*, because that is the whole of what
     /// `observedInThisConversation` claims: the posture in force now. Past the exit the same

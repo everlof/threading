@@ -16,6 +16,7 @@ enum SidebarDefaults {
     static let projectCompactRowHeight: CGFloat = 30
     static let headingRowHeight: CGFloat = 32
     static let indentationPerLevel: CGFloat = 14
+    static let collapsedRepositoriesKey = "sidebarCollapsedRepositories"
     static let tightIndentationPerLevel: CGFloat = 6
     static let relaxedDensityWidth: CGFloat = 240
     static let tightDensityWidth: CGFloat = 180

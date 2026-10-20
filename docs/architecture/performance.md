@@ -595,6 +595,13 @@ python3 Platforms/Linux/tests/raster_bounds/run.py \
 
 `THREADING_LINUX_STARTUP_TRACE=1` on the native window runner records separate SDL initialization,
 window/renderer creation, accessibility startup, raster, Pango and first presentation spans.
+The 2026-10-20 sidebar constraint port kept the 240-point navigator's 1× and 2× pixels exact
+against the preceding native captures. In the current startup fixture, the packaged build flags
+(`-c release --static-swift-stdlib -Xswiftc -enable-testing`) rendered the 1× navigator in
+20–21 ms and the 2× navigator in 62–63 ms. The Debug build took roughly 330–390 ms in the same
+fixture, while its measured constraint solve was 1.4 ms. Comparing those different build modes
+would have misidentified the constraint port as a raster regression; the Release observations are
+single runs, not a stable frame-time bound.
 The original native startup and selected-terminal restoration scenarios passed a subsequent
 frozen-runner run with unchanged deadlines. This does not establish a stable launch-time bound.
 The separate Debug raster comparison reached its 600-second reference-process deadline under

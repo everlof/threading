@@ -44,6 +44,8 @@ if [[ ${THREADING_WAYLAND_CAIRO_PLUGIN:-0} == 1 ]]; then
 fi
 export THREADING_WAYLAND_EXPECTED_PLUGIN_DIR=${LIBDECOR_PLUGIN_DIR:-/opt/threading-linux-preview/libdecor-cairo-only}
 test "$(dpkg-query -W -f='${Status}' threading-linux-preview)" = 'install ok installed'
+test -x /usr/bin/wl-paste
+test -x /usr/bin/wl-copy
 test -z "$(command -v swift || true)"
 cc -shared -fPIC -O2 -Wall -Wextra -o /tmp/wayland_capture.so \
   /wayland_capture.c -ldl -lSDL2

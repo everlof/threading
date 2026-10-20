@@ -1,11 +1,16 @@
 import AppKit
 import Foundation
+@testable import CoreSlice
 
 // Link the exact native source and row resolver against the shim, with only the store's
 // bounded value shape supplied here. Expansion and viewport mounting are real NSOutlineView.
 struct ProjectSnapshot {
     struct SavedRuntime { let id: String }
     let id: String
+    var name: String { id }
+    let path = ""
+    let isScratchpad = false
+    let lastKnownRepositoryIdentity: String? = nil
     let recentAgents: [SavedRuntime]
     let recentTerminals: [SavedRuntime]
 }
@@ -13,6 +18,7 @@ struct ProjectSnapshot {
 enum SidebarDefaults {
     static let rowHeight: CGFloat = 28
     static let projectCompactRowHeight: CGFloat = 30
+    static let headingRowHeight: CGFloat = 32
 }
 
 @main
@@ -29,6 +35,7 @@ enum Fixture {
         source.projects = projects
         source.projectIndexes = Dictionary(uniqueKeysWithValues:
             projects.enumerated().map { ($0.element.id, $0.offset) })
+        source.rebuildRepositories(catalogue: .empty)
         let outline = NSOutlineView(frame: .zero)
         outline.dataSource = source
         outline.delegate = source
@@ -84,6 +91,7 @@ enum Fixture {
         source.projects = reordered
         source.projectIndexes = Dictionary(uniqueKeysWithValues:
             reordered.enumerated().map { ($0.element.id, $0.offset) })
+        source.rebuildRepositories(catalogue: .empty)
         outline.reloadData()
         rows = SidebarVisibleRows(outline: outline, projects: reordered,
                                   projectIndexes: source.projectIndexes)
@@ -106,6 +114,28 @@ enum Fixture {
         precondition(rows.navigate(.right, from: empty) == empty && outline.isItemExpanded(empty))
         precondition(rows.navigate(.right, from: empty) == empty, "Right on an empty project entered its sibling")
         print("PASS outline Left/Right: expand, open-project no-op, parent, collapse, empty and leaf boundaries")
+
+        let repositoryIdentity = "/virtual/repo/.git"
+        let checkout = LinuxGitCheckout(root: "/virtual/repo", identity: repositoryIdentity,
+                                        repositoryIdentity: repositoryIdentity, branch: "main")
+        let checkouts = Dictionary(uniqueKeysWithValues: reordered.map { ($0.id, checkout) })
+        source.rebuildRepositories(catalogue: LinuxGitCheckoutCatalog(checkouts: checkouts,
+            projectIDsByRepository: [repositoryIdentity: reordered.map(\.id)]))
+        let repository = source.roots[0]
+        precondition(source.roots.count == 1 && repository.kind == .repository)
+        outline.restoreExpandedItems([repository])
+        rows = SidebarVisibleRows(outline: outline, projects: reordered,
+                                  projectIndexes: source.projectIndexes)
+        precondition(rows.totalCount == 5_101, "repository projection duplicated checkouts")
+        let nested = NavigatorOutlineItem(projectID: reordered[2_500].id, projectIndex: 2_500)
+        precondition(rows.index(of: nested) == 2_501)
+        precondition(rows.navigate(.left, from: nested) == repository,
+                     "Left on a checkout did not select its repository")
+        outline.collapseItem(repository)
+        precondition(rows.totalCount == 1 && rows.index(of: nested) == nil)
+        precondition(outline.mountedViewCount <= 19,
+                     "grouped repository materialized hidden checkout cells")
+        print("PASS repository outline: 5,100 added checkouts, stable parent navigation, viewport-only cells")
         print("PASS native outline row resolver: 5,100 projects, 2,048 bounded children, independent/empty expansion, stable selection after reorder, viewport-only views")
     }
 }

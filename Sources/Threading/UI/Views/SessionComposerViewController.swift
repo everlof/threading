@@ -704,56 +704,12 @@ final class SessionComposerViewController: NSViewController {
         view.addSubview(heroStack)
         view.addLayoutGuide(heroRegion)
 
-        // The column fills the pane up to its cap, rather than inheriting its width from
-        // whichever row happens to be widest. It used to inherit it, and the widest row was the
-        // chips — so moving three of them into the box would have quietly narrowed the box they
-        // moved into.
-        //
-        // Stated against the *pane* rather than as 720, which matters more than it looks: a
-        // constant width would also become the pane's minimum, since a fitting size honours an
-        // optional constraint wherever nothing opposes it, and the window would have refused to
-        // narrow past a number that is a maximum. Read from the pane it says only "as wide as
-        // there is room for", and the `contentWidth` cap beside it is what stops it there.
-        let measure = stack.widthAnchor.constraint(
-            equalTo: view.widthAnchor,
-            constant: -Design.Spacing.pane * 2
-        )
-        measure.priority = ComposerDefaults.columnMeasurePriority
+        // The Mac and Linux opening shells share the column's cap, pane-width measurement,
+        // hugging priority and edge pins. The prompt grows upward from the pane's bottom edge.
+        PromptChrome.constrainOpeningColumn(
+            stack, in: view, prompt: promptContentContainer, actionRow: actionRow)
 
-        // `setHuggingPriority`, not `setContentHuggingPriority`: a stack view hugs its content
-        // through its **own** property, and the content one it inherits from `NSView` leaves
-        // that untouched at its default 250. That is above the measurement, so the column went
-        // on hugging its widest row and the measurement never applied — the box sat at 415
-        // points in a 1454-point pane, with the chips inside it crushed against each other,
-        // while every constraint here read as though it were filling the pane.
-        stack.setHuggingPriority(
-            ComposerDefaults.columnHuggingPriority,
-            for: .horizontal
-        )
-
-        // The composer hangs from the pane's bottom edge — the shape every chat product has
-        // taught: input below, room above. The prompt grows upward from here.
         NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            stack.bottomAnchor.constraint(
-                equalTo: view.bottomAnchor,
-                constant: -Design.Spacing.pane
-            ),
-            measure,
-            stack.widthAnchor.constraint(lessThanOrEqualToConstant: ComposerDefaults.contentWidth),
-            stack.leadingAnchor.constraint(
-                greaterThanOrEqualTo: view.leadingAnchor,
-                constant: Design.Spacing.pane
-            ),
-            stack.trailingAnchor.constraint(
-                lessThanOrEqualTo: view.trailingAnchor,
-                constant: -Design.Spacing.pane
-            ),
-            promptContentContainer.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            // The action row spans the column, which is what puts the send on the same edge the
-            // box ends at rather than wherever its own two buttons happen to end.
-            actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
-
             // The hero floats in whatever room the composer leaves above itself.
             heroRegion.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             heroRegion.bottomAnchor.constraint(equalTo: stack.topAnchor),
@@ -3172,12 +3128,12 @@ enum ComposerDefaults {
     /// dragged narrower than 415 — the divider stopped dead well short of its floor, and carrying
     /// on shut the column instead. Under the split view's own priorities the same measurement can
     /// only ever answer "as wide as there is room for".
-    static let columnMeasurePriority = NSLayoutConstraint.Priority(240)
+    static let columnMeasurePriority = PromptChrome.openingColumnMeasurePriority
 
     /// Below `columnMeasurePriority`, so the column goes on filling the pane rather than hugging
     /// its widest row — which is what a stack does the moment its own hugging outranks the
     /// measurement, and is the narrowing that measurement exists to prevent.
-    static let columnHuggingPriority = NSLayoutConstraint.Priority(1)
+    static let columnHuggingPriority = PromptChrome.openingColumnHuggingPriority
 
     /// Below `columnMeasurePriority`: a narrow pane shortens the location breadcrumb before it
     /// abandons the column measurement or breaks the pane insets. The identity chip remains the

@@ -8169,3 +8169,1225 @@ conversation arrival, model/effort launch values and gallery coverage. Repositor
 checks and the full app/test-target compilation pass. The full-suite recording failures and
 unrun iOS suite in §220 remain explicit limitations; this focused run does not close them.
 All rebase integration work is committed before returning to the requested pause.
+
+## 222. Account-scoped model visibility in the Linux composer, 2026-10-19
+
+The Mac opening-composer picker keeps a hidden-model set per provider-qualified account. Its
+matrix exposes a hide affordance for nonselected model rows, and a footer restores the hidden
+catalogue rows. The Linux shell already mounted the shared matrix, but omitted both callbacks
+and the footer; the Mac `model-effort-picker-system-light.png` evidence and the Linux
+`out/parity-rebase-runtime-remaining/models/codex-keyboard-grid.png` made the gap visible.
+
+The Linux composer now loads account visibility beside the bounded catalogue on the existing
+serial worker. A compact `model-visibility.json` under the Linux support directory holds at
+most 128 accounts and 256 hidden model identifiers per account, with a 1 MiB read/write cap.
+The host filters the 512-option picker projection, preserves the account default and explicit
+selection, counts only hidden identifiers still in the current catalogue, and wires the shared
+matrix's hide callback and the shared content view's footer. Hide and Show all dismiss the
+picker and return typing focus. The worker serializes writes with catalogue reads and the host
+admits only one pending visibility mutation. The picker and chrome remain shared Design views;
+the host owns account identity, persistence and launch admission.
+
+The first native visibility run reached the hide row and trapped on pointer hover. The shared
+matrix requests `eye.slash`, which the Linux diagnostic symbol service did not recognize. The
+failure was a platform-glyph gap, not a catalogue failure; its failing run is
+`out/parity-model-visibility-focused2`. The Linux symbol service now draws that glyph. The
+focused source rerun passes hide, restart with the model still hidden, Show hidden models,
+restoration and exact launch (`out/parity-model-visibility-fixed/models.log`). Its real-shell
+footer and restored-grid PNGs were inspected. The composer journey and all 14 permission cases
+pass in the same runner. The dark picker capture now waits for dark pixels instead of accepting
+only a theme log message; the inspected `codex-selected-ultra-dark.png` in the earlier full
+run is genuinely dark. The first seven existing model cases passed there before the missing
+glyph interrupted the eighth.
+
+The visible footer was exercised by pointer. The follow-up source X11 journey in
+`out/parity-footer-a11y` also publishes it as a button in the bounded model panel, moves focus
+from the grid with Tab and back with Shift-Tab, activates it with Space after a restart, then
+hides and restores a model again through its AT-SPI action. Its inspected focused capture shows
+the shared button's focus ring. The model-row hide affordance was exercised by physical pointer
+movement and click, including a captured hover state in the installed rerun below.
+
+The release WindowHarness build, both vendor identity checks, all 12 Python runner contracts,
+theme boundary check and whitespace check pass. Speed, surface, attachments, last-used choice
+restoration and full popover chrome remain opening-composer parity work.
+
+`package-app.sh` built the Ubuntu arm64 archive and `.deb` from this dirty source tree with the
+recorded revision and dirty generation (`out/parity-model-visibility-package.log`). A separate
+Ubuntu 24.04 container installed the `.deb` without Swift or repository sources and passed the
+focused visibility journey from `/opt/threading-linux-preview/bin` in
+`out/parity-model-visibility-installed.log`. Its captured hover glyph, hidden footer and
+restored grid under `out/bundle-smoke/model-visibility.qgrcLgwF/models` were inspected. This
+is a focused installed check, not the complete bundle smoke, a Wayland run or a 2× matrix run.
+The increment is uncommitted at this pause checkpoint; the previous requested mainline rebase
+and its commit remain intact.
+
+The footer accessibility follow-up built the release host with the package's testing flag and
+passed the focused source X11 journey in `out/parity-footer-a11y`. The same journey passed from a
+freshly built static `.deb` in a Swift-free Ubuntu 24.04 arm64 container
+(`out/parity-footer-package.log`, `out/parity-footer-installed.log`, and
+`out/bundle-smoke/model-visibility.R8QwxiTg/models`). Its installed focused footer image was
+inspected. The C bridge publishes the footer as a button, while the panel stays capped at 128
+visible accessibility children. The complete bundle runner, Wayland, 2× matrix interactions and
+the remaining composer controls have not been checked in this follow-up.
+
+## 223. The opening composer can create a native conversation, 2026-10-19
+
+The Mac opening footer offers an Interface choice for Codex and Claude, with each provider's
+terminal UI and `Native (Experimental)` as the two options. Linux already restored saved native
+sessions through its conversation pane, but every fresh composer submission still created a PTY.
+The new footer chip uses the shared `ChipView` and bounded choice menu. The C accessibility
+bridge exposes it as an Interface combo box and places it in the existing keyboard loop.
+
+A native submission reserves one of the eight workspace slots, then validates the exact
+project, account and explicit model selection and commits a native session on a bounded worker.
+Its receipt adds the ordinary saved row, mounts `WorkspaceConversationPane`, and sends the
+captured opening brief through `NativeWorkspaceSession`. The terminal choice retains its
+existing creation path. A failed admission leaves the draft in the composer. The first live
+journey exposed a missing worker-receipt wakeup; the SDL loop now polls while that creation is
+pending, then returns to its ordinary wait. The Docker bind mount retained an older timestamp
+for an edited Swift file, so an apparent second failure was an unchanged binary; touching the
+source in the build container forced the intended recompilation.
+
+`tests/composer_surface_smoke.py` passes from the source build for Codex at 1× and 2× and for
+Claude at 1×. It uses the real X11/AT-SPI shell, selects the native Interface row, confirms the
+saved `nativeUI` record, checks one exact Unicode opening turn at the fake Codex app-server or
+Claude stream peer, waits for the prepared reply, and rejects a terminal frame. The existing
+terminal `composer_smoke.py` passes with the expanded
+focus loop. The release build, theme-boundary check, Python syntax checks and `git diff --check`
+pass. The static Ubuntu arm64 `.deb` also passes the focused Codex journey at both scales and
+the Claude journey at 1× in a
+Swift-free installed runtime. Its package SHA-256 is
+`1c3e7c052934c90e6b24f0c7d9fc88a7264944cb4644f1834f91fe5d4394ed98`.
+The final installed `out/parity-composer-surface-installed/{codex-1x,codex-2x,claude-1x}`
+captures were inspected,
+including the trailing Interface chip and completed native replies. The complete bundle runner,
+Wayland and the remaining speed/attachment/draft parity are still open.
+
+## 224. Opening Speed choice reaches both Linux session surfaces, 2026-10-19
+
+The Mac composer offers a three-state Speed choice for supported Codex models and Claude Opus.
+Linux now mounts a themed `gauge`/`bolt.fill` chip beside model and permissions, with a bounded
+three-row menu and an AT-SPI combo box. The selected `Bool?` is saved with the session. Fast
+uses the Codex model's validated Fast service tier and enables `features.fast_mode`; Standard
+explicitly sends the default tier. Claude gets a private per-session `--settings` file with
+`fastMode`, and a native Claude stream also sends `apply_flag_settings`. The two Codex launch
+paths use one tier resolver so startup and `turn/start` agree. Catalogue and settings reads stay
+on bounded workers. Project-specific Claude settings are included when resolving the chip's
+inherited title. The existing composer remains host-owned; no extension slot was added.
+
+The focused source X11 journeys passed for Codex and Claude at 1× on both terminal and native
+surfaces, plus Codex native at 2×. They selected Speed through AT-SPI, verified the three rows,
+the saved `fastMode`, exact provider flags or native turn/control request, and a completed native
+first turn. The final source rebuild and existing Codex/Claude Interface journeys passed.
+
+The static Ubuntu 24.04 arm64 package is
+`out/threading-linux-preview-ubuntu24.04-arm64.deb` (SHA-256
+`abe7572e4032cf2cdcec59645bd766dce79e9a6e09f821296e57aaf99c5fc0f9`). All four
+Speed journeys passed from this installed package at 1×, and Codex native passed at 2×, in a
+fresh Swift-free container as an unprivileged user. The installed Speed menu, Claude selected
+chip and 2× compact composer screenshots in `out/parity-speed-installed` were inspected. The
+installed terminal journeys also switched back to inherited Fast before choosing Standard. The
+560×180 footer chips stay within their bounds; their labels shorten at that minimum width.
+The theme-boundary check, Python and shell syntax checks, and `git diff --check` pass.
+
+Linux has no app-wide Settings ▸ Chats speed choice, so its inherited row says **Follow Agent
+Setting** and resolves directly from provider settings. The Mac general-setting layer, live
+in-conversation speed switching, attachments and remaining composer presentation are still
+parity work. Speed-specific resume behavior, the complete bundle runner and Wayland were not
+exercised in this increment.
+
+## 225. Native reply Speed choice applies to live turns, 2026-10-19
+
+The Mac reply composer carries a Speed chip after model, mode and effort. Linux's native
+conversation pane now mounts the production `ChipView` and three production menu rows for
+supported Codex and Claude models. It saves the optional override on the session's serial
+worker. Claude first acknowledges an explicit `apply_flag_settings` request on its live stream;
+Codex's retained app-server reads the new service tier for the next `turn/start`. Choosing
+**Follow Agent Setting** records nil for the next launch and leaves the active process at its
+current speed, with a visible notice. The menu and selected chip use theme-owned drawing.
+The host keeps session identity, transport admission, persistence and choice timing.
+
+The AT-SPI chip and rows publish their actual window-pixel bounds and the active conversation
+UUID. A queued action is checked against the mounted node and UUID before it reaches the pane.
+The first implementation used event kinds 52/53, which already mean worker wake and physical
+Right; the press was silently consumed after SDL dequeued it. Dedicated kinds 56/57 fixed the
+collision. The rendered menu accepts both AT-SPI choice actions and a real pointer click.
+
+Focused source X11 journeys passed for Codex and Claude at 1× and Codex at 2×. Each opened a
+Fast native session, selected Standard, checked durable `fastMode=false`, sent a second turn,
+selected inheritance, checked the cleared override, and sent a third turn. Codex sent
+`serviceTier=default` on both later turns; Claude acknowledged the live Standard flag and sent
+no reset request for inheritance. Screenshots were inspected from the real shell, including
+the 2× menu and the notice beneath the transcript.
+
+The rebuilt static Ubuntu 24.04 arm64 package is
+`out/threading-linux-preview-ubuntu24.04-arm64.deb` (SHA-256
+`ab45e4d6ce220d9894b540e7841cd8120e489d2d83bd249bbf1b1b0b8d418208`). The same
+three journeys passed from the installed package in a fresh Swift-free container as an
+unprivileged user. Installed captures in `out/parity-live-installed` were inspected at 1× and
+2×. The first install attempt stopped before the UI with `x11 not available`; a second clean
+install with an explicit Xvfb display precheck passed. The exact cause of the first display
+failure is unverified. The theme-boundary check, Python and shell syntax checks, and
+`git diff --check` pass.
+
+The Mac app-wide Settings ▸ Chats inheritance layer, the other native reply configuration
+chips, attachments and remaining conversation chrome still need Linux parity work. The full
+bundle runner, Wayland and a speed-specific restored-session journey were not exercised here.
+
+## 226. Native reply Model and Effort choices, 2026-10-20
+
+The Mac reply composer presents Model and Effort separately. Linux now mounts those production
+chips ahead of Speed. Its retained session reads the same account catalogue as the opening
+composer on a bounded worker, respects hidden models, and keeps at most six themed menu rows
+mounted while keyboard focus pages through a larger catalogue. The current and default model
+remain selectable. Codex saves the chosen model and effort for the next app-server `turn/start`;
+Claude acknowledges `set_model` on its live control channel before saving. Switching to a model
+without Fast support explicitly turns Fast off, and an effort the new model does not support
+returns to the model default. Claude's reply Effort chip stays hidden because its transport has
+no live effort control. AT-SPI exposes the mounted chips and rows, with actions validated against
+the active conversation UUID. Session identity, transport requests and persistence stay
+host-owned; the popup uses only Design controls.
+
+The first real shell run found that Linux lacked diagnostic artwork for the Mac's `brain` symbol.
+That symbol now has a bounded native glyph. A compact 560×180 capture then showed the send
+control at the previous wide-window x coordinate, beyond the pane. The constrained vertical
+content stack had kept the wide footer frame after the shrink. Positioning the reply editor and
+footer with the same `PromptChrome.contentFrames` used by the opening composer, while retaining
+the production footer stack and the Mac chip compression priorities, brought the send point to
+x=527 at 1× and x=1054 in the 1120-pixel 2× window. The journey asserts those bounds.
+
+Focused source X11 journeys passed for Codex at 1× and Claude at 2× after the layout fix.
+The final static Ubuntu 24.04 arm64 package is
+`out/threading-linux-preview-ubuntu24.04-arm64.deb` (SHA-256
+`55f5d52415fd596e818e24809e60b9d26be6e2b0aa32e728ffb0029e64a5d4b6`). In a fresh
+Swift-free installed container, Codex and Claude passed `configuration-live` at 1× and 2× as an
+unprivileged user; the existing `speed-live` journey passed for both at 1×. The configuration
+journey checked a 14-model catalogue with only six mounted rows, End/Home paging, exact saved
+model and effort, Claude's live model control, Fast reset, the next provider turn and rendered
+reply. Installed captures in `out/parity-configuration-installed` were inspected. The theme
+boundary, shell/Python syntax and whitespace checks pass.
+
+Linux still needs the reply Mode chip, attachments and context meter, app-wide speed inheritance,
+and the remaining conversation chrome. The complete bundle runner and Wayland were not exercised
+in this increment.
+
+## 227. Opening model and effort follow the last accepted chat per account, 2026-10-20
+
+Mac restores the opening composer's last accepted model and effort for the exact account. Linux
+now writes that choice on the serial catalogue worker only after a terminal or native session
+record commits. A fresh composer and an account switch load the saved choice with the bounded
+catalogue; an absent or hidden model is rejected, and accepting Auto for both clears an older
+explicit choice. The host owns the account-qualified file with a 128-entry limit, while the
+existing themed model picker remains the presentation surface.
+
+The source X11 Codex terminal journey passed choice, restart, account switch and Auto clearing;
+the existing account journey passed. The native journey passed exact model and effort in the
+committed record and app-server launch, followed by restoration in a fresh project with the
+same account data directory. Both journeys passed again from a Swift-free Ubuntu 24.04 arm64
+`.deb` as an unprivileged user. The installed saved and cleared composer captures and the
+native restored capture were inspected. The focused Mac run passed 42 tests, and the theme
+boundary, main-actor latency, Python syntax and whitespace checks passed. These are focused
+shipping journeys, not a complete bundle or Wayland sweep.
+
+## 228. Native reply context and status placement match Mac, 2026-10-20
+
+Mac places narration above the reply box and keeps the newest context reading beside Send.
+Linux had already decoded provider turn metrics but did not retain them for its native pane;
+it also placed the Ready line below the box. `NativeWorkspaceSession` now retains the newest
+context tokens and optional window from live and replayed turn boundaries. The reply footer
+uses the shared `TurnStatusText` formatter: a Codex window becomes a percentage with warning
+ink above 90%, and Claude's reading is an absolute count. A later turn without usage leaves
+the reading intact. The status line now sits above the box. The bounded AT-SPI projection
+publishes the full context text and actual bounds, including when the compact footer shortens
+the visible label. The existing prompt chrome remains host-owned session presentation.
+
+Source X11 journeys passed Codex's absent → 95% → retained reading and Claude's absent → 610
+tokens → retained reading. Codex passed light, dark and 560×180 captures, and the existing
+configuration journey passed at compact width after the status move. The saved Codex native
+journey wrote a token-count transcript record, restarted the app, restored `95% context` and
+retained it through the next provider turn. That replay journey and both live provider journeys
+passed again from the installed static `.deb` in a clean Swift-free Ubuntu 24.04 arm64 container
+as an unprivileged user. Installed light, dark, compact, Claude and replay captures were
+inspected. The package SHA-256 is
+`840f0464a78a1711a972ff48369b1758300e444a32fe697f5b7edd5af9210120`.
+The full bundle runner, Wayland and the Mac app-wide Chats settings inheritance are still open.
+
+## 229. Linux prompt image drops reach opening and native sessions, 2026-10-20
+
+Mac shows a removable image thumbnail while composing and adds its quoted file path only at
+submission. Linux previously sent every SDL file drop to project import, even over the prompt.
+Kind 55 now carries pointer coordinates. Drops over the navigator retain the directory-import
+worker; drops over either prompt enter one Design attachment strip. It prepares at most 32 images
+serially off the UI thread, refusing files above 32 MiB, source dimensions above 8192, or more
+than 40 million source pixels, and returns at most 128×128 RGBA preview pixels. A cleared draft
+invalidates queued work. The ordinary 80-point tile has a visible remove action; at the 560×180
+minimum window its preview height compresses so the remove action stays reachable. Files that
+cannot be previewed become literal quoted paths in the editor. Image-only submissions send the
+same quoted path spelling as Mac, for both terminal launches and Codex/Claude native replies.
+Attachment admission and submission remain host-owned behavior of the existing protected
+composer surfaces.
+
+The real Xdnd source journey passed opening image drop, empty-text submit, pointer removal,
+reattachment and exact terminal-agent argument. The live Codex and Claude native journeys each
+passed a second provider turn containing only the quoted image path. All three journeys passed
+again as an unprivileged user from a static Ubuntu 24.04 arm64 `.deb` installed in a Swift-free
+container. The final package repeated those three journeys after the decoder's read loop gained
+an independent byte ceiling for a file that grows after `fstat`. Installed normal, minimum-window,
+2× Codex and Claude reply captures were inspected;
+the existing installed sidebar journey still passed directory drop, ordinary-file refusal and
+duplicate identity. Theme boundary, main-actor latency, shell/Python syntax and whitespace
+checks passed. The package SHA-256 is
+`648b484936a19485658f16260cc8628593cc5cfdb14d70d3a8bd83828c9308a0`.
+Clipboard image paste, movie posters, session-owned file custody, accessible thumbnail actions,
+the complete bundle runner and Wayland remain open.
+
+## 230. X11 clipboard images reach both Linux composers, 2026-10-20
+
+Mac accepts pasted file URLs and PNG/TIFF image data into the prompt attachment rail. Linux's
+SDL2 clipboard bridge exposed only text, so Ctrl+V in the opening and native composers could not
+reach the image strip. The Linux host now asks the X11 `CLIPBOARD` owner for a local `text/uri-list`
+first, then PNG or TIFF data. A separate display connection on a serial worker handles the
+selection protocol, including `INCR` chunks, with a 32 MiB ceiling and 1.2-second timeout per
+target. Xlib threading is initialized before SDL opens the display. At most four conversions can
+be pending per composer; the submission action waits for the selected conversion and thumbnail
+decode. Raw bytes go to a private 0600 temporary file and then through the same bounded Design
+thumbnail path as Xdnd. Unsupported formats preserve ordinary text paste. A cleared draft
+invalidates a pending conversion, and a stale completed file is removed. The host still owns
+clipboard admission and submission; this adds no extension presentation surface.
+
+The standalone X11 contract transferred and compared a 2.1 MB `INCR` payload and URI list. A
+fresh Swift-free Ubuntu 24.04 arm64 container installed the static `.deb` with its explicit
+`libx11-6` dependency. As an unprivileged user, the installed opening composer passed drop,
+file-URL paste, text fallback, PNG paste, removable preview and image-only terminal launch; the
+submitted temporary PNG matched the original byte for byte. Installed Codex and Claude native
+conversations each passed a dropped-image second turn and pasted-PNG third turn with exact
+provider prompt and PNG bytes. The opening and both native pasted-preview captures were visually
+inspected from the real window. Theme boundary, main-actor latency, shell/Python syntax and
+whitespace checks passed. Package SHA-256:
+`1f2ebf6c2bbd8b04e9ff3f5ed9f09dc6da47d40184fad2242dd926eb0f709323`.
+
+Wayland image paste, TIFF end-to-end exercise, session-owned temporary-file custody and accessible
+thumbnail actions remain. An intervening editor change while a clipboard owner stalls can also
+place fallback plain text at the current caret rather than its original keypress position.
+
+## 231. Linux image thumbnails have accessible Remove actions, 2026-10-20
+
+The Mac attachment tile presents its image and close control as separate accessible elements.
+Linux drew the same visible control, but the manually projected AT-SPI tree omitted the entire
+attachment rail. The bounded Design strip now supplies the visible tile and Remove bounds for
+both opening and native composers. The host projects at most 32 image nodes with separate named
+push buttons, and routes each press through the existing attachment identity and current
+composer scope. Removing a tile retires its AT-SPI action; an old button cannot remove a later
+image in the same slot. Admission and removal remain host-owned behavior of the existing
+protected composer surface; no extension presentation API changed.
+
+The source and installed Ubuntu 24.04 arm64 `.deb` journeys passed Xdnd, file-URL and raw-PNG
+paste, accessible removal, a later paste after using the retired button, and exact image-only
+submission. The installed Codex and Claude native journeys each passed accessible removal and a
+subsequent image reply. All three installed pasted-preview captures were inspected from the real
+shell. Theme boundary, main-actor latency, Python syntax and whitespace checks passed. The
+package SHA-256 is
+`26911ba3f08b4958b4f2966e37d25dc004ba9e0b0352e623e56801fbd2cca777`.
+
+Wayland image paste, TIFF end-to-end exercise, session-owned temporary-file custody and delayed
+text-paste ordering remain. The broader Linux layout and visual system are still short of 1:1
+Mac parity.
+
+## 232. Match the composer theme before comparing, and hand TIFF over as PNG, 2026-10-20
+
+The Linux preview uses `AppThemeStyles.threading`, so the existing Mac System-theme composer
+image was the wrong visual reference. The Mac composer evidence now includes Threading light and
+dark at tall, short, scheduled and empty states. A real installed Linux pane was captured at the
+same 900×640 logical size as the Mac tall fixture. Inspection shows the shared 720-point prompt
+box is already positioned and sized closely; the most visible structural gaps are the missing
+managed-worktree row above it and curfew/schedule actions beside Start. The new Mac captures are
+unbaselined evidence and were not approved as regression baselines.
+
+Mac's pasteboard path decodes TIFF and writes PNG before it names the image in a prompt. Linux
+previously wrote the TIFF bytes to a `.tiff` file, leaving provider support to chance. The X11
+worker now decodes TIFF through GdkPixbuf and streams PNG encoding into a callback capped at
+32 MiB. It refuses oversized source dimensions, then writes the same private `.png` path used
+for raw PNG paste. The opening and Codex/Claude source and installed journeys passed TIFF paste,
+preview, image removal or submission, and the native provider's `.png` path with matching
+decoded pixels. The three installed TIFF preview captures were inspected from the real shell.
+The Mac composer evidence test, theme boundary, main-actor latency, Python syntax and whitespace
+checks passed. The static Ubuntu 24.04 arm64 package SHA-256 is
+`a21aa0b455cf0224f8199cc9b38f37b9e4c36f58dd2420126f165112dc2d6f3e`.
+
+The managed-worktree and time controls still require their host behaviors on Linux. Wayland
+image paste, session-owned temporary-file custody and delayed text-paste ordering also remain.
+
+## 233. Delayed X11 text paste keeps its keypress selection, 2026-10-20
+
+The opening and native composers ask an X11 clipboard owner for file URLs and images on a
+worker before falling back to plain text. That owner can hold each selection request for up to
+1.2 seconds. Previously, if the user moved the caret or typed while it answered, the fallback
+called `paste` at the *current* caret. The pasted words could land after later typing instead of
+at the point where Paste was pressed.
+
+The shared paste path now captures the selected UTF-16 range at the keypress and rebases it over
+intervening edits outside that range. Typing at the original caret follows the paste in input
+order. If an edit replaced the selected text, or repeated characters make the changed side of
+the caret ambiguous, it refuses that delayed fallback rather than replacing an unrelated span.
+After insertion, a later caret move remains active, shifted past the inserted text when needed,
+so the next keystroke follows the user's most recent cursor action.
+Attachment conversion, its generation guard and its serial worker are unchanged. The focused
+Foundation fixture covers Unicode offsets and every short two-character string through single
+insertions and deletions.
+
+A real X11 clipboard owner held each unsupported image/URI request for 300 ms while the
+installed composer moved its caret to the end or beginning and typed. Both installed journeys
+put the delayed text at the original selection and kept the later caret for another keystroke;
+their captures in
+`out/parity-paste-anchor-caret-installed` were inspected. The existing source and installed image
+attachment journeys also passed. Theme boundary, main-actor latency, Python syntax and
+whitespace checks passed. The rebuilt static Ubuntu 24.04 arm64 `.deb` SHA-256 is
+`90af794396842bf18881836301c6d1757b426ff705648b0a56fc5f6136ac0330`.
+
+An edit through the selected text cannot be replayed in original order without an editor edit
+log; that fallback is left unapplied. Wayland image paste, session-owned temporary-file custody,
+the managed-worktree row and time controls remain separate parity work.
+
+## 234. Wayland composer image paste reaches the agent, 2026-10-20
+
+The X11 clipboard reader added for composer images cannot read a Wayland compositor's selection.
+The active SDL video driver now chooses the native clipboard route at the Paste keypress. X11
+keeps its separate Xlib selection connection; Wayland asks the packaged `wl-paste` client for
+the same three exact targets: local file URIs, PNG and TIFF. Each request runs on the existing
+serial clipboard worker, with no shell, a 32 MiB output ceiling, a 1.2-second deadline and
+child termination/reaping on timeout or oversize. The Ubuntu package declares `wl-clipboard`
+so the installed app has that client. Both routes then use the same image validation, TIFF-to-PNG
+conversion, attachment preview and submission path. Clipboard admission and session submission
+remain host-owned behavior of the existing composer surface.
+
+In a fresh Swift-free Ubuntu 24.04 arm64 install under headless Weston, the real Wayland
+keyboard pasted a file URI, TIFF and raw PNG into the opening composer. All three produced image
+previews; URI and TIFF removal retired their rails, and TIFF's removable image was named `.png`.
+The raw PNG remained attached for Start Session, and the launched agent received its exact
+bytes at the private `.png` path. The compositor capture in
+`out/wayland-smoke.FFrg9jwg/composer/capture/pasted.png` was inspected. The same static package
+passed the installed X11 delayed-text, URI, TIFF, PNG and image-only submission journey. Its
+SHA-256 is `800973bee58d36ad0d8a37d85112004d14e5277dac83ddca9354f9cd08f954d7`.
+
+The Wayland journey covers the opening composer; a native reply's Wayland clipboard ingress,
+movie posters and session-owned temporary-file custody remain unverified or unimplemented. The
+managed-worktree row, time controls and broader visual differences from Mac remain open.
+
+## 235. The composer can launch in an added sibling checkout, 2026-10-20
+
+Mac's location chip distinguishes where a new session runs from switching the composer to a
+different project. Linux's chip previously named only the selected project; its menu navigated
+projects, and every launch used that project's folder. The Linux chip now shows the Git branch
+discovered at window open, lists this checkout and other added worktrees of the same repository,
+and puts project navigation behind **Switch Project…**. Choosing a sibling leaves the draft,
+provider and model choices in place. Terminal and native creation both route the process,
+settings lookup, saved record and selected sidebar row to that sibling. Both records capture the
+branch read from Git. The worker checks the
+checkout identity and branch again before committing either kind of session, so a removed or
+switched checkout is refused instead of silently launching elsewhere.
+
+Git control files are read directly on a worker, including linked-worktree `.git` pointers;
+each read has a 4 KiB cap. The worker groups projects by repository, so main-thread composer
+refresh only visits siblings, not the complete project list. The bounded existing chip/menu
+surface remains host-owned: it decides execution location, while the shared Design controls
+still draw it. Linux does not yet create a new worktree from this menu or watch `HEAD` for an
+external branch switch while the composer remains open.
+
+The installed Ubuntu 24.04 arm64 X11 shell tests `composer_checkout_smoke.py` and
+`composer_surface_smoke.py ... codex checkout` passed: the former preserved the draft while
+selecting a sibling, verified the agent's cwd, SQLite owner and saved branch; the latter
+completed a native provider turn from that sibling, captured `feature` as its branch and selected
+its saved row. The installed checkout menu, selected composer and first native reply captures
+were inspected. The static package SHA-256 is
+`5771235599dcf83444ff9f7d93162421b255e284dd77d981b05fbf8b4e8557fd`.
+The installed broad composer journey also passed after its AT-SPI test reacquired the editor
+node across resize and menu publications; it verified the unchanged plain-project launch,
+Unicode editing, paste, focus loop and rendered prompt. Theme boundary, main-actor latency,
+Python/shell syntax and whitespace checks passed.
+
+## 236. Added checkout projects now sit beneath repository roots, 2026-10-20
+
+The Linux navigator previously projected every project as a top-level row. It now groups every
+added Git project beneath a stable repository root, even when only one checkout is present;
+plain folders and the scratchpad remain standalone. Grouping uses the live checkout catalogue
+and the project's persisted `lastKnownRepositoryIdentity`, so a removed worktree stays in the
+same group with the production unavailable-checkout warning. A checkout row uses the shared
+branch/path presentation, retaining the full path in its tooltip and accessibility name. The
+repository root borrows an available checkout for its icon and actions, preferring the main
+working tree. Root expansion is a user preference and flushes on a bounded worker before the
+window processes a quit; project expansion still uses its exact SQLite row write. Row selection,
+hover and Left/Right navigation use outline identities, and the existing viewport projection
+still mounts only visible cells.
+This extends the existing `sidebar.project-row@1` presentation; no new extension surface is
+needed. Repository membership, selection, commands and the availability mark remain host-owned.
+
+The Git control-file reader is shared by the window and CLI importer through the recorded
+CoreSlice vendor manifest. The importer writes repository identity when a project is added; the
+production and vendored navigation DTOs now expose that saved value. The Linux row's explicit
+compression priorities keep the branch legible before truncating its quiet path, and the
+portable symbol boundary draws the same warning triangle used by the Mac missing-checkout row.
+Both fixes came from inspecting the real shell against the
+`sidebar-worktree-light` and `sidebar-worktree-unavailable-light` Mac evidence baselines.
+
+The source X11 journey passed with two live checkouts, a removed saved worktree, a standalone
+folder, pointer and keyboard repository folding across an app restart, a preserved composer
+draft, and a terminal
+launch whose cwd, owner and branch match the selected sibling. The 5,100-project outline fixture
+still mounted 18 cells, and its grouped 5,100-checkout case kept parent navigation and viewport
+mounting bounded. The Ubuntu 24.04 arm64 static package was installed in a runtime
+container without the source tree or Swift; its terminal and native Codex checkout journeys
+passed, and their rendered screenshots were inspected. The package SHA-256 is
+`e9a74adf2203124f6541ef135d3957ad844465005b3728f59eccffed1e83616c`.
+The installed non-Git multi-project outline journey also passed its independent disclosures,
+selection, keyboard traversal, restart and busy-store rollback in both appearances.
+Theme, architecture, main-actor latency, vendor, Python syntax and whitespace checks passed.
+The repository root still lacks Mac's **New Worktree…** command; broader shell chrome and
+composer controls remain separate parity work.
+
+## 237. New worktrees can be created from both Linux entry points, 2026-10-20
+
+The macOS composer location menu and repository root `+` use one worktree creation flow. Linux
+now places **New Worktree…** after the live checkout choices and at the end of the repository
+creation menu. Both routes ask for a branch, make a sibling directory using the Mac naming rule,
+run `git worktree add -b`, verify that the result belongs to the same repository, import it, and
+select it. Git and import run on a worker; Git is bounded by a 15-second process-group timeout.
+The composer draft survives the new destination. The GTK branch prompt carries the Mac wording
+and Create/Cancel actions but remains a visual parity gap against Mac's themed text prompt.
+
+The installed journey found an outline ownership bug: importing into a folded repository
+selected the new project only until the next outline projection, which fell back to the old
+repository representative. Import now reveals the repository before resolving the selected
+checkout. The repository accessibility row also publishes its visible `+` and actions while
+keeping a stable repository row ID; activating either control passes the current representative
+project ID through the existing exact-target route.
+
+The installed Ubuntu 24.04 arm64 package passed `composer_checkout_smoke.py` with both creation
+routes, saved project paths, destination and draft assertions, plus the existing sibling launch,
+missing-checkout and fold/restart checks. `project_create_menu_smoke.py` passed separately for
+ordinary project rows. The real-shell checkout menu and selected new worktree screenshots were
+inspected. Package SHA-256:
+`a685c5c15379af61b1f6dcba3ff603030aacf5276627475dc76c64dcbc46f4a0`.
+The shared themed prompt, live branch watching, managed workspace row and scheduling controls
+remain Linux parity work at this checkpoint.
+
+## 238. Open Linux windows follow external branch switches, 2026-10-20
+
+Mac keeps its checkout presentation current when Git changes `HEAD`. The Linux catalogue was
+read only during project discovery, leaving an open composer chip and checkout row on a stale
+branch. A single inotify worker now watches the Git metadata directories of added checkouts,
+including linked worktrees. Git replaces `HEAD` through a rename, so the watcher observes the
+directory rather than the old file inode. It re-reads only affected checkouts on its worker,
+coalesces changes by project ID, and wakes SDL through the existing worker event. Branch-only
+changes update the bounded composer choices and mounted row; identity or availability changes
+request full worker discovery. Registration re-reads the catalogue to close the discovery gap.
+
+The installed Ubuntu 24.04 arm64 X11 journey passed both New Worktree entry points, the
+repository New Chat submenu return, import/reveal, and an external `git switch -c` while the
+composer remained open. AT-SPI observed the new branch in the chip and checkout row, with the
+main checkout unchanged. The selected live-branch screenshot was inspected. The GTK text prompt
+remains visibly different from Mac's shared themed prompt; managed workspace and scheduling
+controls remain separate Linux parity work. The installed package SHA-256 is
+`65816f1850b8a553d445e1ddb3eb8c04b80aa0fdbf9eee5d2ee7ee911f1a9f40`.
+
+## 239. New Worktree uses an app-owned themed prompt on Linux, 2026-10-20
+
+The GTK entry dialog had the right worktree wording but looked unrelated to Mac's
+`TextPromptAlert`. Linux now opens a separate fixed-size prompt process that draws the same
+informational title/message structure with the shared `ThemedTextField` and `ThemedButton`
+components. The visible view lives in `Sources/Threading/UI/Design/`; the host owns modal
+input blocking, the bounded answer, Git validation and import. Return, Escape, pointer actions,
+clipboard text and IME use the Linux window bridge. The prompt exposes a dialog, single-line
+editable field, and Create/Cancel buttons through AT-SPI, with edits and actions returning to
+the same host path as keyboard input.
+
+The installed Ubuntu 24.04 arm64 package passed `themed_prompt_smoke.py` in light and dark,
+including keyboard submission/cancellation and AT-SPI field edits and button activation.
+`composer_checkout_smoke.py` passed both creation entry points, preserved the draft, and
+continued to pass the external branch-switch check. Both prompt captures and the selected
+checkout in the installed app were inspected. Theme, architecture, main-actor latency, Python
+syntax and whitespace checks passed. Package SHA-256:
+`5af9c97c188c5294b407d1525d06b837616f825b3d68c4f90099ba2f638c3a69`.
+
+The prompt uses the same design tokens and control components, but its SDL window still needs a
+direct Mac panel comparison for exact silhouette, positioning and window-stack behavior. The
+managed-workspace row, scheduling controls and broader chrome remain Linux parity work.
+
+## 240. The worktree prompt follows the shared alert constraints, 2026-10-20
+
+The first Linux prompt positioned its icon, labels, field and buttons with absolute frames.
+That duplicated the Mac alert's geometry inside a Design component even though the Linux
+AppKit shim already implements `NSStackView`, `NSLayoutConstraint` and fitting size. The prompt
+now uses the Mac alert's content structure: a vertical title/message stack beside the 30-point
+icon slot, followed by a full-width field and a trailing action row, all pinned to a 360-point
+minimum content column with Design spacing. The SDL window takes its size from the resulting
+`fittingSize`; the root bitmap frame is the only frame the host supplies. Button accessibility
+rectangles are converted from their nested stacks into that root's coordinates.
+
+The installed Ubuntu 24.04 arm64 package passed the themed prompt smoke at 1× and 2× in both
+appearances, including keyboard and AT-SPI submit/cancel. The real Linux prompt captures were inspected
+beside the Mac Threading-theme alert evidence: both are 400 points wide, while Linux currently
+fits to 203 points high and Mac to 200. Their controls and copy align closely; the remaining
+three-point difference appears in fitted content metrics and needs measurement of the shim's
+font and labels. The theme boundary and whitespace checks passed.
+
+The same audit found two larger shell-level divergences. `WorkspacePlaceholderPane` positions
+the opening composer's column, editor, action and chips with frames where the Mac
+`SessionComposerViewController` uses stacks and constraints. `WorkspaceConversationPane`
+positions its scroll viewport, status and reply composer with frames where the Mac
+`ConversationViewController` constrains its outer layout. Those controllers are not yet shared
+with the Linux host. Menus, attachment tiles, virtualized row slots and the bitmap viewport
+also use frames for placement; they are separate from the static content constraints discussed
+here. Moving the two pane shells toward the Mac constraint structure needs a bounded solver
+cost check because conversation size and update frequency scale with transcript activity.
+
+The greeting inside the opening composer was another bounded component-level example:
+`ComposerWelcomeView` placed its mark and text manually. It now uses the Mac hero's vertical
+stack, centered on both axes with the same 12-point gap and a 40-point mark constraint.
+The host still gives the hero its available viewport region and chooses whether it fits.
+The installed composer journey passed after this change, including resize, editor focus,
+Unicode input, project/provider choices and launch. Its real 480-point and 640-point shell
+captures were inspected, and the theme boundary remained clean.
+
+## 241. The opening composer column uses the Mac constraint structure, 2026-10-20
+
+`WorkspacePlaceholderPane` previously calculated frames for the composer surface, destination
+chips, submit button and hero on every presentation. The root still takes its viewport frame
+from SDL, but a retained `NSStackView` now owns the column's bottom pin, centered 720-point cap,
+32-point side bounds and medium-spaced chip/prompt/action sections. The prompt width and action
+row follow that column through anchors. A single height constraint takes the editor's cached
+TextKit and attachment measurement; the hero is pinned to the space above the column. The
+destination row has the Mac location-chip compression rule, stable identity width and a flexible
+trailing spacer. Converting the attachment drop target into root coordinates was necessary once
+the surface became a nested arranged view.
+
+The installed Ubuntu 24.04 arm64 composer journey passed after this change with normal, tall,
+180-pixel compact and 560-pixel minimum-width windows, including keyboard focus, multiline
+Unicode and clipboard input, accessibility edits, choices and exact launch. The compact capture
+shows the greeting hidden and the editor and submit action visible; the narrow capture shows
+the column and footer compressed within the pane. The installed 2× native-composer journey also
+passed and its opening capture was inspected. The general 2× composer smoke's fixed 720-point
+assertion is inapplicable because the workspace has a 1,280-physical-pixel content ceiling;
+at 2× the actual logical pane is narrower. The 2× native journey checks that real size. The
+theme boundary, Python syntax and whitespace checks passed. Internal editor/footer placement,
+the conversation pane's outer frame layout and theme-authored welcome behavior remain parity
+work.
+
+## 242. The native conversation pane follows the Mac outer constraints, 2026-10-20
+
+`WorkspaceConversationPane` previously assigned full-width frames to the scroll view, status
+label and reply composer on every presentation. The Mac controller gives those peers distinct
+relationships. Linux now pins the scroll viewport to the pane edges and above the status, aligns
+the status to the reply box's text inset, and centers the composer above the bottom inset. The
+composer takes a stated width under the same 400-priority rule and reading-width-plus-padding
+cap as Mac, while its cached TextKit measurement updates one height constraint. The viewport
+document remains outside this root constraint island through the scroll view's document-view
+boundary; visible conversation rows keep their existing recycling and width contracts. The
+status now uses the Mac subheading and tertiary-ink roles with a truncating line.
+
+The installed Ubuntu 24.04 arm64 native workspace journey passed at 1× and 2×: a growing and
+resetting reply, pointer send, Unicode and multiline turns, retained draft, pane switch, dark
+appearance, durable thread identity, restart replay and same-thread resume. Real ready, first
+reply and dark shell captures were inspected. At the default 1× 1120-pixel window the reply
+box is 752 pixels wide and centered at x=304; the 2× pixel-budgeted pane gives it 592 pixels
+at x=504. The installed smoke now asserts both cases against the default Mac column cap and
+pane insets. Package SHA-256:
+`209b5374adb42b6a6f25ba3c2a81ad5265fa963d7b85b6960673f3f884e3c521`.
+Theme boundary, Python syntax and whitespace checks passed. The inner prompt
+editor/footer still use frame placement, and the Linux pane has not gained Mac's minimap,
+scheduled rail or extension presentations.
+
+## 243. Both Linux prompts share the Mac content constraints, 2026-10-20
+
+The opening and native reply hosts no longer assign frames to the editor, attachment rail or
+footer. `PromptChrome.configureContentStack` and `contentSizingConstraints` now supply macOS
+`PromptView` and both Linux hosts with the same vertical stack behavior and five attachment,
+editor and footer size equations. Each host pins its stack inside the field with the same
+12-point side and 10-point footer insets. Cached TextKit height still changes only the outer
+field height constraint. The opening footer's Mac compression priorities let model and mode
+labels yield before the trailing surface choice; the reply footer keeps its send control inside
+the constrained row.
+
+An 80-point image rail plus the required prompt gaps and footer cannot fit at the Linux
+window's usual 180-pixel height floor. The workspace now raises its native minimum while an
+attachment is present and restores the 180-pixel floor when it is removed or the pane changes.
+The bridge also corrects a resize that bypasses the window manager's advertised minimum, as
+the X11 smoke does. The image rail itself now uses the Mac horizontal `NSStackView` with fixed
+80-point tiles and a top/trailing constrained remove control. Its scroll document still takes
+a viewport frame, as Mac's does; preview positions are stack-owned.
+
+The installed Ubuntu 24.04 arm64 package passed the opening composer journey at normal,
+560-pixel wide and 180-pixel tall sizes, the native workspace journey at 1× and 2×, and the
+native image reply journey at 1× and 2×. After the horizontal rail change, the installed opening image
+journey passed Xdnd, URI-list, TIFF, raw PNG, remove and exact provider bytes. It also
+verified a two-image row, reflow after removing one, the attached minimum, and return to the
+180-pixel floor; `out/attachment-pair-final/image-attached-pair.png` and
+`out/attachment-stack-final-opening/image-attached-compact.png` were inspected. The final
+native image captures at `out/attachment-stack-final-native/native-image-attached.png` and
+`out/attachment-stack-final-2x-retake/native-image-attached.png` were inspected. The 2× TIFF
+test initially clicked the footer because its last editor offset was unscaled; the corrected
+test passed the same installed package. Package SHA-256:
+`faa86aab8404cdc318fde8cc6801bd5d547e3ad4db55a237b1e713dbb5749411`.
+
+Targeted macOS evidence tests passed for `session-composer-layout` and
+`native-chat-showcase`; the Threading light short/tall composer captures were inspected.
+The native showcase report has four changed tool-state baselines, also changed in prior
+reports from October 6; none was accepted here. The theme boundary, Python syntax and
+whitespace checks passed. Remaining frame writes in these Linux pane hosts set the SDL root
+viewport, popup placement, bounded visible menu rows and the scroll table document width.
+They do not position static prompt children. The Linux native pane still lacks Mac's minimap,
+scheduled rail and extension presentations.
+
+## 244. The opening column uses one Mac/Linux constraint declaration, 2026-10-20
+
+The previous migration put both prompt interiors on `PromptChrome` constraints but left the
+opening column's outer equations copied into two hosts. `PromptChrome.constrainOpeningColumn`
+now installs the same center, bottom, pane-width measurement, 720-point cap, side bounds,
+prompt width and action-row width for Mac and Linux. The measurement retains priority 240 and
+the stack its priority-1 horizontal hugging. Linux keeps a reference to the returned bottom
+constraint for its 180-pixel compact-window policy; the SDL bitmap still sets the root
+viewport size. The first consolidation lowered the UI-structure ratchet from 3232 to 3224
+controller constraint sites.
+
+The installed Ubuntu 24.04 arm64 composer journey passed with keyboard focus, multiline and
+accessibility editing, scrolling, choices, narrow and compact resizes, and an exact agent launch.
+Its normal, 560-pixel narrow and 180-pixel compact shell captures were inspected. The package
+SHA-256 is `89083e26c6983b0593ab18fbb50941ea357795c2cfe9be8fb5619f5c1d233043`.
+The architecture and theme boundary checks passed. The targeted macOS
+`session-composer-layout` evidence test passed; its 49 rendered PNGs are pixel-identical to
+the preceding targeted run, and the Threading light tall/short results were inspected.
+The new captures remain unbaselined review evidence.
+
+The frame audit found no remaining static prompt-child frame assignment in the Linux opening
+or reply pane hosts. Their imperative frames size the SDL root viewport, transient menus and
+bounded visible menu rows. The scroll attachment document also takes a viewport frame, as on
+Mac. It found another duplicated layout in `Specimen.Row`: Linux had framed the shared
+`ThemedProjectRowView` visual while Mac pinned it to its cell on all four edges. The visual now
+owns one `pin(to:)` declaration called by both hosts. Linux adjusts only its outline gutter
+constants when they change, preserving viewport-bounded row reuse and avoiding redundant
+solves. Moving Mac's pins into Design lowered the UI-structure ratchet again to 3219 sites.
+
+The final installed package passed the project-row `+` menu journey, including exact project
+identity, disabled manager choice, nested chat creation and terminal creation. Its menu capture
+was inspected. The installed composer journey also passed again; its normal screenshot has
+pixel-identical sidebar and prompt regions to the pre-migration capture. The macOS
+`sidebar-session-rows` evidence tests passed and the Threading light outline was inspected.
+Those 50 captures are unbaselined review evidence. Final package SHA-256:
+`873afcdfcb4f56d4331273e88aa370447308ce9c6ea617c0183b6e2dc25f10cc`.
+
+Session and terminal row wrappers still take host-calculated frames despite their shared
+constrained content. Their Mac cells give the content leading and center-Y anchors plus a
+trailing inequality against host-owned action slots, which requires porting the row host's
+slot structure rather than simply replacing a frame setter.
+
+## 245. Session and terminal content use the Mac row constraints, 2026-10-20
+
+`SidebarRowDefaults.constrainContent` now declares the five outer relationships once for the
+Mac session/terminal cells and the Linux mounted rows: content leading and center Y, content
+trailing at least one spacing step before the trailing slot, and the slot's trailing edge and
+center Y. The Linux row retains the shared `ThemedSessionRowContentView` or
+`ThemedTerminalRowContentView` and updates only its outline-gutter constraint constants during
+recycling. The session and terminal layout fixtures pass, including a long Unicode session
+title beside an expanded status slot. The UI-structure ratchet fell from 3219 to 3207
+constraint sites.
+
+The installed 2× provider journey exposed a separate old frame path after this migration. The
+saved-session picker still placed `Snoozed` in the navigator text layer using
+`SavedAgentRowLayout`, while its shared title reserved only the row's empty 20-point slot. The
+title could satisfy its own trailing constraint and still overlap that unrelated text. The
+picker now mounts the status inside the same constrained trailing slot as outline rows, and the
+unused frame calculator is removed. The slot grows to 64 points for diagnostic status text;
+the absent-provider-artwork mark remains visible.
+
+The installed Ubuntu 24.04 arm64 provider journey passed provider marks, selected/unselected
+states, long Unicode titles, complete accessible account/ID labels, live terminal identity and
+missing-artwork fallback. Its final `out/sidebar-final-verified/out/provider-marks-idle-snoozed.png`
+and `provider-marks-fallback-claude-selected.png` captures were inspected at 2×: title and
+status no longer overlap. The installed independent-project outline journey passed expansion,
+selection, keyboard traversal and restart in both appearances; its
+`out/sidebar-final-outline-verified/out/both-expanded-beta-selected.png` capture was inspected.
+Targeted macOS `sidebar-session-rows` evidence tests passed, and the long-title
+capture was inspected. Theme-boundary, UI-structure and whitespace checks passed. Final package
+SHA-256: `d4140776e0d7e7ffd43867cd9c372c99e1f93b5bf45d3021611dcf76c3a3172b`.
+
+At this checkpoint the Linux slot still presented diagnostic status text and lacked the Mac
+cell's activity mark and hover actions. The label placement is corrected in the next entry.
+
+## 246. Durable attention follows the Mac title stack, 2026-10-20
+
+The Mac row does not put `Snoozed`, `Woke` or `Scheduled` in its activity/action slot. It lazily
+adds a caption after the compressible icon/title view in `rowContentStack`, with required
+horizontal hugging and compression. `SidebarRowDefaults.configureSessionContentStack` and
+`configureAttentionLabel` now state that arrangement and label priority once for Mac and Linux.
+The Linux mounted session wraps `ThemedSessionRowContentView` in the same outer stack, creates
+its attention label only when text is present, and hides it when the row is reused or the snooze
+expires. The independent trailing slot stays at the Mac 20-point resting width. Selected labels
+use selection secondary ink; unselected labels use tertiary ink.
+
+The installed Ubuntu 24.04 arm64 provider journey passed selected/unselected artwork,
+long Unicode names, snooze expiry, full account/ID accessibility, live terminal identity and
+missing-artwork fallback. The 2×
+`out/attention-stack-provider/out/provider-marks-idle-snoozed.png`,
+`provider-marks-idle-expired.png` and `provider-marks-fallback-claude-selected.png` captures were
+inspected. The installed native-workspace journey passed three turns, terminal switch, dark
+appearance, restart and same-thread resume; its
+`out/attention-stack-native/captures/native-ready.png` sidebar is pixel-identical
+to the pre-change installed capture. The long-title/recycled-row fixture and theme, structure
+and whitespace gates passed. Targeted macOS `sidebar-session-rows` evidence passed all four
+tests, and its 50 PNGs are decoded-pixel-identical to the prior targeted report; the scheduled
+caption capture was inspected. Final package SHA-256:
+`0a2e64ced19803830171b5da24bc6fa0dd4fc94175e7817681d15989e6dbe18d`.
+
+Linux still lacks the Mac activity marks and hover-action controls in the trailing slot. The
+saved picker also shows `Retained` as diagnostic text because it has no provider activity
+observer; that semantic gap remains separate from this layout migration.
+
+## 247. The model picker shares its Mac constraints, 2026-10-20
+
+The frame audit found one remaining platform split inside a shared Design component:
+`ModelEffortPickerContentView` declared its title, scroll viewport and optional footer with
+constraints on Mac but assigned their frames in `layout()` on Linux. Both now execute the same
+constraint declaration. The Linux popup pins the content to its frame-sized menu surface and
+deactivates those four pins before removing a picker on dismissal or refresh.
+
+The first direct port exposed a real bounded-window case: a 600-model catalogue could not open
+because its 336-point preferred scroll height was required even when the host popup had less
+room. The shared constraints now cap the viewport at its natural width and height and prefer
+that size at high priority, allowing the scroll area to compress while keeping the title,
+footer and outer edges required. The ordinary Mac popover retains its natural size. The
+matrix document's frame remains scroll-owned on both platforms.
+
+The final installed Ubuntu 24.04 arm64 package passed the large-catalogue keyboard and
+horizontal-scroll journey and the repeated-open hidden-model/footer journey, including
+focus, restart, restoration and exact launch. The large-catalogue capture was decoded-pixel
+identical to the previous installed build; the final footer capture was decoded-pixel
+identical to the pre-cleanup capture and was visually inspected. The targeted Mac
+`model-effort-picker` rendered test passed and its system-light image was inspected. Its old
+accepted baselines are at a different capture scale, so this run was treated as review
+evidence rather than a baseline update. Theme boundary, UI structure and whitespace checks
+passed. The installed `WindowHarness` matches the rebuilt binary by SHA-256. Package SHA-256:
+`efa1c07d528cb383763a65dc63868f11fdc5ee0a722c0a2ce0d42503158d0afd`.
+
+Remaining direct frame writes in the inspected Linux shell set SDL bitmap/viewports,
+scroll documents, transient popup bounds and bounded menu rows. macOS's shared menu document
+also lays out its row slots by frame. The older `Specimen.Row` project-control frame path is
+outside the production outline, which mounts `ThemedProjectRowView` and its constrained
+controls; it remains legacy code to remove rather than a source of current screen geometry.
+
+## 248. Saved row dormancy follows live provider state, 2026-10-20
+
+The shared row content already knew how to tint a dormant session, but the Linux host never
+passed it that state. The saved picker also appended `Retained` as a diagnostic caption where
+Mac shows only durable `Scheduled`, `Woke` and `Snoozed` attention beside the title. Linux now
+uses the shared selection/dormancy policy and the same 0.5 opacity for non-template dormant
+provider marks. Scheduled rows keep their ordinary ink, as on Mac. Neither the picker nor the
+production outline puts the diagnostic word into the constrained title stack.
+
+Counting cached runtimes as active was a second false signal. An exited terminal may remain
+cached for selection and a native conversation lives in a different cache. The row projection
+now reads the terminal's process state or the native stream's launch/running state. The host
+invalidates its navigator on those lifecycle transitions rather than waiting for another user
+event. A real native-exit journey exposed why that invalidation initially did not arrive:
+`PTYHostPipeLink` queued its hosted-child exit on `DispatchQueue.main`, which the SDL event
+loop does not service. The link now calls its consumer from its callback path, as the local
+child route already does; each stream uses its existing UI delivery to cross to the owner.
+
+The final installed Ubuntu 24.04 arm64 provider journey passed selected/unselected artwork,
+snooze expiry, Unicode title truncation, accessible identity, dark appearance and missing
+artwork fallback. It also exited a retained saved shell and confirmed that its terminal row
+no longer claimed `retained`. The installed 2× native workspace journey passed three turns,
+pane switch, dark appearance, restart and resume, then killed the live provider. Without a
+click, its saved row lost the `retained` accessibility suffix, the pane rendered
+`Agent exited (143)`, and the session record stored exit code 143. The real idle/snoozed,
+exited terminal and exited native
+captures were inspected. The shared Mac sidebar evidence passed all four targeted tests. Its
+50 PNGs are byte-identical to the previous run; the dormant and scheduled captures were
+inspected. Mac `PTYHostPipeSessionTests` passed all 15 hosted-child cases after the callback
+change.
+The session-row layout fixture, vendor source equality, theme boundary, UI structure,
+Python syntax and whitespace checks passed. Installed `WindowHarness` matches the rebuilt
+binary by SHA-256. Package SHA-256:
+`43124fcf654e99f115b955d94f3c680def793d0ad372082b435e52378e130548`.
+
+The Linux trailing slot still lacks Mac's provider activity mark and hover-action controls.
+The outer SDL viewport, scroll documents, popup bounds and bounded visible menu rows retain
+their frame ownership; the inspected static content uses the shared constraint declarations.
+
+## 249. The optional Open In header control collapses like the Mac stack, 2026-10-20
+
+The next frame audit found a manual width cap on Linux's production `PageTitleView`. The Mac
+header puts its optional Open In control in an `NSStackView`; hiding it removes its arranged
+slot. Linux instead handed that control directly to `PaneHeaderView` and subtracted its full
+width from the title even when no external app was available. Removing only the subtraction
+changed no pixels: the still-constrained hidden control kept occupying 54 points. Linux now
+mounts the same split control in a one-item stack, so the shared `PaneHeaderView` constraints
+resolve the title against the control's actual visible width. Mac also gives the title an
+intrinsic 360-point cap and a matching width constraint. That metric now lives on the shared
+`PageTitleView`, and both hosts use those two declarations. The SDL header root still takes
+the bitmap viewport frame; it does not assign frames to either child.
+
+An installed Ubuntu 24.04 arm64 run with a long terminal name measured the title at 236 points
+inside a 560-pixel window before the change, both with and without Open In. Afterward the
+hidden-control title was 290 points, while the visible-control title remained 236 points.
+At 960 pixels both states now stop at Mac's 360-point cap instead of extending past it. Open In
+kept its previous control geometry, and the 560-pixel visible-control screenshot was
+decoded-pixel identical to the baseline. The final wide and narrow captures were inspected:
+the name uses the previously blank space in a narrow pane and obeys the cap in a wide pane.
+The before/after Linux captures are in `.build/linux-header-parity/`. The installed Open In
+journey passed primary and chooser presses, app-icon rendering, paging, exact checkout
+launches, last-used preference and stale-checkout refusal. Theme boundary, UI structure and
+whitespace checks passed. The macOS Debug app build and standalone PageTitleView fixture passed.
+The targeted `design-system-components` evidence test passed; its PageTitleView light and dark
+captures were inspected and are decoded-pixel identical to the earlier gallery run. That report
+also has four changes in other components and many gallery captures without baselines; no
+baseline was updated in this pass (`.build/ui-evidence-reports/20261020-102826-64692/`).
+Final package SHA-256:
+`f64d1043370194f8d57887ffdc24db097af222bd662fd00ed0c52b87c6ec7e98`.
+
+This audit still distinguishes component geometry from viewport placement: the live header,
+prompt, project and session content use shared constraints; the host sizes the SDL bitmap,
+scroll documents, popup bounds and visible menu rows. The Mac menu document also positions its
+bounded rows by frame. The old specimen-only project-control frame path does not feed the live
+outline. The Linux session trailing slot still lacks the Mac activity mark and hover actions.
+
+## 250. Session status-slot geometry is the same constraint code on both hosts, 2026-10-20
+
+A follow-up frame audit confirmed that the live sidebar's project, session and terminal content
+already uses shared constraint declarations. The remaining frame assignments in that path size
+the SDL viewport, scroll documents, popups and bounded visible menu rows; the Mac menu document
+also positions rows by frame. The standalone specimen's hand-placed project controls do not
+feed the production outline. One component detail was still Mac-only: the four constraints
+placing the session activity mark within its trailing slot.
+
+`SidebarRowDefaults.constrainSessionStatus` now owns those four declarations. The Mac row calls
+it in place of its local copies; Linux mounts a status view in the same fixed trailing slot and
+calls that exact helper. The 12-point mark size has one definition in `SidebarRowDefaults`,
+which the Mac indicator default references. This establishes geometry only: Linux does not yet
+paint an activity mark or expose the Mac hover controls, because its host still needs truthful
+activity state and functional row actions. Only mounted session rows allocate the new view.
+
+The Linux release build and installed `--session-row-layout-fixture` passed; that fixture
+checks the solved status rectangle against the outer column and verifies long-title reuse.
+The installed Ubuntu arm64 provider-row journey passed selected/unselected artwork, Unicode
+title truncation, accessible identity, dark appearance, snooze expiry, terminal exit and absent
+artwork fallback. Its light and dark shell captures were inspected in
+`.build/linux-session-slot/`. The installed `WindowHarness` SHA-256 matched the builder's
+binary; the package SHA-256 is
+`c1bcc251e82a10792b620885bc0ca44595308c04503cf5ba114b1733279d65df`.
+The macOS Debug build and targeted `sidebar-session-rows` evidence tests passed. All 50
+sidebar-row captures were decoded-pixel identical to the preceding targeted run, and the
+working-at-rest and hovered captures were inspected. This selection has 50 images without
+accepted baselines; none was accepted in this pass. Theme boundary, UI structure and whitespace
+checks passed.
+
+## 251. Native session activity uses the shared slot and a bounded animation patch, 2026-10-20
+
+The native Linux session row now distinguishes loading, an explicit in-flight provider turn,
+pending user permission/question and idle. Codex, Claude and ACP expose `hasActiveTurn` from
+their existing turn bookkeeping through the shared conversation protocol; an attached provider
+process alone does not imply work. The pending decision takes precedence over an in-flight turn.
+Only visible non-idle rows mount `ThemedSessionActivityMark`. Both hosts pin status content with
+`SidebarRowDefaults.constrainSessionStatusContent`, using the Mac row's four declarations. The
+Linux mark sits inside the already shared trailing status-slot constraints.
+
+The first installed animation ran at roughly 53–60 ms per full sidebar raster frame under the
+Ubuntu arm64 test container. The final host hides each visible working mark for the occasional
+full navigator raster, retains the solved 12-point rectangle's background, and updates only
+that rectangle in the SDL sidebar texture at 24 frames per second. A fixed mark is painted once
+under reduced motion. This leaves viewport sizing in the host and component geometry in the
+shared constraint solver. No provider-sized or hidden rows are built for the animation.
+
+The packaged `WindowHarness` and the installed binary both hash to
+`176a44649f2d7d49e16751068549ef4537fef71d8f7701e43cbcce9786699b8a`; the package
+hash is `72a8bb469bedf38a4edf964ff9eb207fdad6f9592301133592965e724c0d7669`. The
+installed Ubuntu arm64 session-row fixture passed. A real saved native Codex session in the
+installed shell passed light and dark UI journeys: two working screenshots had different mark
+pixels while the full sidebar frame count stayed flat, and a provider permission request
+replaced the arc with a filled dot. The same two journeys are wired into the packaged bundle
+smoke run. All four screenshots were inspected in `.build/`. The
+macOS `sidebar-session-rows` evidence tests passed, and all 50 captured images were decoded-
+pixel identical to the preceding run; no baseline was accepted. Theme boundary, UI structure,
+vendored-core and whitespace checks passed. The Mac row's hover actions and its other activity
+states remain open parity work.
+
+## 252. Saved-session picker rows use the shared sidebar height, 2026-10-20
+
+The live saved-session picker mounted shared, constraint-laid-out session content in 22-point
+outer row frames. The ordinary Linux outline and macOS sidebar both use
+`SidebarDefaults.rowHeight` (28 points). This was a host geometry mismatch, not a missing
+constraint inside the component: `navigatorRowRect` sizes the bounded SDL/AT-SPI viewport
+rows, while `SidebarRowDefaults.constrainContent`, `constrainSessionStatus`, and
+`constrainSessionStatusContent` solve the content and mark positions on both platforms. The
+picker now takes both its frame height and stride from `SidebarDefaults.rowHeight`.
+
+The installed Ubuntu arm64 shell shows a 56-pixel selected row at 2× and mounts seven rows
+in a 480-pixel-high navigator. I inspected its selected-title and working-activity captures
+in `.build/session-titles-28.png` and `.build/native-working-height-final.png`. The installed
+title/deep-selection, agent-catalogue, terminal-catalogue, and native-activity journeys pass;
+the activity journey covers an animated provider turn and a pending-permission dot. The title
+journey exposed an Escape routing bug: a composer that existed but lacked focus consumed the
+second Escape after the picker closed. Escape now checks `!sidebarFocused` before asking that
+composer to defocus. The agent-catalogue test's old assertion also assumed a deliberately
+refused spawn stayed retained; it now expects the persisted saved row without a live runtime.
+
+The installed session-row fixture, theme boundary, UI structure, vendored-core, Python syntax,
+and whitespace checks pass. Builder and installed `WindowHarness` both hash to
+`fc5da5f12ad7a0c7ff4c91d4f461fb675a407c0fda93b67fec1b58e81813814e`; the package
+hash is `14d08a9751f965d2bc3d0507a898ad580f16341653a8b6024269b165b4165864`. Mac
+sidebar evidence from the previous pass established the 28-point row height and its 50 images
+were unchanged there; this pass did not rebuild or re-capture macOS. Mac hover actions and the
+remaining activity states are still open parity work.
+
+## 253. Saved-runtime selection uses the sidebar capsule silhouette, 2026-10-20
+
+The ordinary Linux outline already paints selected session rows through the shared
+`SidebarHoverRowView`, but the separate saved-runtime picker drew its selected `Specimen.Row`
+over the entire host rectangle with a fixed five-point corner. Installed shell evidence put that
+orange rectangle at x=12…467 and y=86…141 physical pixels in a 480-pixel sidebar. The matched
+Mac Threading-theme and ordinary Linux outline capsules begin at x=20, end at x=459, and inset
+one point vertically from the 28-point row.
+
+Picker session and terminal rows now derive their local selection inset from the same
+`SidebarDensity.selectionInsetX` that `SidebarHoverRowView` uses, accounting for the picker's
+six-point viewport origin. They draw the capsule with `SidebarRowDefaults.hoverHighlightInsetY`
+and the theme's fitted control radius. The row frame remains the bounded SDL/AT-SPI viewport,
+and its content and status views keep their shared constraints. Action and account list rows
+retain their distinct menu treatment. Only mounted picker rows compute this constant-time
+geometry; animation still updates only the activity mark's small texture region.
+
+The installed Ubuntu arm64 working capture at `.build/native-working-capsule-final.png` and
+saved-terminal capture at `.build/terminal-catalogue-capsule-final.png` were inspected. The
+agent row's selected fill bounds are x=20…459 and y=88…139, the same 440×52-pixel core
+rectangle as the ordinary Linux outline and Mac Threading-theme selected row at 2×. Their
+corner contours differ by a pixel at the very tips in the Mac and Linux captures. The installed
+native activity journey still passes animated working and pending-permission states; the
+installed title, agent-catalogue and terminal-catalogue journeys also pass with seven visible
+picker rows. The session-row layout fixture and theme-boundary, UI-structure, and whitespace
+checks pass. The builder and installed `WindowHarness` hash to
+`50da2aa3adba1be1e16c09349450249046687f1d2884f4385e6744afe8d95f64`; the package
+hash is `73b24a09c40080d5b54d206c939ee265f8ec297e5d43b6814c5982dbc5388d91`.
+Mac source was unchanged and was not rebuilt in this pass. Mac hover actions and the remaining
+activity states are still open parity work.
+
+## 254. Claude background work keeps the saved row marked after the turn, 2026-10-20
+
+The Mac sidebar has a distinct `readyWithBackgroundWork` state: a four-point filled dot while
+Claude can accept another prompt but still has live background tasks. The Linux row previously
+went idle as soon as the foreground turn finished, even though its Claude stream already emitted
+`backgroundWork` events. `NativeWorkspaceSession` now records the most recent full task count
+from those events and ranks pending user input, loading, and foreground work ahead of the
+background state. A new stream clears the previous count. Its visible row paints a static dot
+with the same `SidebarRowDefaults.sessionBackgroundDotSize` used by the Mac indicator, centered
+in the existing shared constraint-laid-out status slot. The background state does not schedule
+the working arc's animation patch.
+
+The installed Ubuntu arm64 Claude journey passed in light and dark themes: the accessible saved
+row reported background work after the turn, a visible dot appeared in its trailing slot,
+remained pixel-still, and disappeared after the provider restated an empty task list. I inspected
+the active and cleared shell captures in `.build/native-background-active-light.png`,
+`.build/native-background-cleared-light.png`, `.build/native-background-active-dark.png`, and
+`.build/native-background-cleared-dark.png`. The existing installed Codex journey still passed
+its working arc and pending-permission dot. The installed session-row fixture passed. The builder
+and installed `WindowHarness` hash to
+`7736f3ceb0413311b81913960743206ea6d9ff985c655a44baf63e5e50ec3b5a`; the package hash
+is `ae3b343c1d45898f8b8dad04a25f9c3e1c5e2c76fdfb3be15eb05838146e353d`.
+
+The Mac hover Archive control is still open: its action is a two-system transaction through
+`ProviderArchiveSync`, which Linux does not compile yet. Showing the button before that behavior
+exists would make the parity surface misleading.
+
+The targeted macOS `sidebar-session-rows` evidence run passed all four tests. Of its 50 captures,
+38 are decoded-pixel identical to the preceding run; the other 12 full-window captures rendered
+at 1× instead of the previous 2× backing scale. Their layouts were inspected, including the
+Threading light outline, and no change was seen beyond capture scale. No baseline was accepted.
+Theme-boundary, UI-structure, Python syntax, and whitespace checks passed.
+
+## 255. Archived conversations leave Linux navigation before its row cap, 2026-10-20
+
+The Mac sidebar excludes archived sessions, but Linux's indexed navigator counted every
+retained session and selected the most recent 512 before decoding. An installed-shell fixture
+with five saved sessions showed both archived identities as ordinary visible rows. That same
+test failed against the previous package at its exact accessible-row assertion.
+
+`ProjectDatabase.navigationSnapshot` now applies one guarded archived predicate to its count
+and recent-row queries. The SQL filters before `LIMIT`, so archived conversations cannot crowd
+out visible ones. Legacy sessions without an `archived` key remain visible. A malformed unrelated
+payload remains in the count instead of being silently hidden by a partial read; the full graph
+loader still diagnoses it. An exact `sessionRecord` read retains archived conversations. The
+provider rollout snapshot and three-way reconciliation plan were moved byte-for-byte from
+`ProviderArchiveSync` into Foundation-only `ProviderArchiveState.swift`, which the macOS app and
+Linux CoreSlice compile from the same source. Session-row customization remains at
+`sidebar.session-row@1`; selection, activity, and actions stay host-owned.
+
+The Linux core contracts pass for archived counts, newest visible rows after the cap, durable
+archived records, and active/archived/absent/ambiguous provider rollouts. The targeted macOS
+database case and all ten `ProviderArchiveSyncTests` pass. The installed Ubuntu arm64 journey
+passes with only the three unarchived fixture rows in the AT-SPI list; its shell screenshot was
+inspected at `.build/archive-navigation-installed.png`. The installed 5,100-project / 1,024-
+terminal outline regression also passes. On the Release 5,100-session storage fixture, the
+bounded navigator measures 12.7 ms median / 14.5 ms maximum with the archive filter, compared
+with the earlier 8.1 / 8.7 ms; the matched full-graph read is 40.7 / 48.6 ms. This is a measured
+4.6 ms median cost on a worker, not a claim about window launch time. The builder and installed
+`WindowHarness` hash to `7e2ce2f2b5ae7daa3a2f84a4dafe586b4d0523e7a589dddba386f7a059ee4719`;
+the package hash is `8a6a59b4bf8aad7327a80885f8eb817399601270f6015b99a00949d6ff2bb53c`.
+
+The hover Archive control and Settings restore path remain open. Linux has the provider-state
+rules now, but still needs the stop barrier, account-routed provider command, durable transaction,
+Undo, and restored-row presentation before exposing Archive as an action.
+
+## 256. Linux Snooze has durable deadlines and native activity wakes, 2026-10-20
+
+The session row menu now offers Snooze and Unsnooze beside Pin and Archive. Mac and Linux use
+`SnoozeWallClockMoments` for the same rounded hour, next-day morning and next-Monday dates; the
+shared calculation also corrects the pre-9 AM case where the Mac menu named today's 9 AM as
+"Tomorrow" or this Monday as next Monday. Mac's targeted preset suite passed all 24 tests.
+The Linux menu still needs the custom-time picker and the remaining session actions.
+
+Linux's one off-thread snooze coordinator checks the exact session and project under the store
+lock before each write. A startup pass materializes deadlines missed while the app was closed;
+the host keeps one map of remaining deadlines and sends only due IDs to a batched indexed write.
+Clock changes are rechecked at most a second later. A new native permission or question wakes
+the session early; a turn completion spends the snooze only if that outcome was pending when
+Snooze was chosen. Visiting a Woke session clears its durable receipt. Terminal-backed sessions
+still need their provider-neutral important-activity edges before their snooze behavior fully
+matches macOS.
+
+The installed Ubuntu arm64 journey passed right click and keyboard menu entry, preset Snooze,
+Unsnooze, an expired deadline at startup, a deadline while the app remained open, wake receipt
+rendering and acknowledgement on visit, then Pin and Archive. Its Snooze preset and selected
+Snoozed-row captures at `out/archive-archive-ui21/` were inspected. A native Codex fixture
+passed working-to-approval activity while snoozed; the permission woke it with an
+`approvalRequested` receipt, and the `out/native-snooze-ui2/native-woke-on-approval.png` capture
+was inspected. The Linux Release build, byte-identical CoreSlice verification, theme boundary,
+Python syntax and whitespace checks passed.
+
+## 257. The conversation pane's standing constraints have one declaration, 2026-10-20
+
+The Linux conversation pane already used anchors, but it restated the Mac controller's
+transcript, status-line and reply-column relationships. `ConversationPaneLayout` now declares
+those constraints once under `UI/Design/`; the Mac controller and Linux host both call it.
+Each supplies the appropriate pane edge anchors, so Mac's safe area and Linux's SDL bitmap
+root remain honest host boundaries. Mac-only rails and overlays add their own constraints.
+The UI structure ratchet fell from 3,196 to 3,186 constraint sites, and its checked-in ceiling
+was lowered to match.
+
+The Linux Release binary passed the installed native activity journey after this extraction;
+its real permission/reply shell capture at `out/native-pane-layout-ui2/native-awaiting-user.png`
+was inspected. The installed and builder binary hashes match at
+`2eaf7d4851a09ca003af5ac008fb2aa4927cfbb30430f839af96cfa5f9840344`.
+The normal macOS Debug app build passed with the reduced UI structure ceiling. Theme boundary,
+vendored CoreSlice equality and whitespace checks also passed. This extraction keeps the prior
+Mac equations; the post-extraction visual inspection in this pass was on the installed Linux
+shell.
+
+## 258. The custom Snooze picker reuses the Mac constraints, 2026-10-20
+
+The Linux session menu now offers `Custom time…` through the shared valid-day and quarter-hour
+policy. The Mac and Linux sheet bodies call one `ScheduleMomentPickerLayout` declaration for
+their heading, list columns, minimum scroll heights, footer and root-edge constraints. Their day
+and time rows use the same constrained content. A scan of 29 frame reads/writes in the Linux
+window harness found the remaining writes at SDL root/bitmap bounds, positioned menu overlays
+and recycled rows, scroll documents, or diagnostic fixtures. A manual table-width assignment
+in the new picker was redundant with the `NSTableView` shim and was removed.
+
+The child SDL window now enables prompt input routing before waiting for events. Its standalone
+bound allows the Mac sheet's exact 520×460-point size at 2× (1040×920 physical pixels), while
+the workspace remains bounded at 900 physical pixels high. The picker starts keyboard navigation
+in the Time column, matching the Mac sheet's first responder; a column switch and Down then
+select Tomorrow. The parent checks the returned moment against the exact session before its
+existing durable Snooze write.
+
+The targeted Mac picker suite passed all 11 tests and rendered four live themes; its system-light
+PNG was inspected. The installed Linux 1× sheet passed pointer selection, and the installed
+keyboard path selected Tomorrow. The installed 2× session-menu journey passed custom Snooze,
+verified a future quarter-hour in SQLite and the Snoozed row, then Unsnooze, Pin and Archive.
+The 1040×920 sheet and Tomorrow-selection captures at
+`out/archive-picker-shared-constraints4/` were inspected. The theme boundary, UI structure
+ratchet (3,170 sites), vendored CoreSlice equality, Python syntax and whitespace checks passed.
+The builder and installed `WindowHarness` hashes match at
+`c48deb85b3bb8232e994b6e21a9f7b20f4411463afb2b4b5e70e391542496a32`.
+Other session actions and terminal-backed important-activity Snooze wakes remain open parity work.
+
+## 259. Session renaming follows the Mac prompt and naming policy, 2026-10-20
+
+The Linux row menu now offers **Rename Session…** through the existing one-field themed prompt.
+The prompt preloads the custom name, accepts a blank name to resume following the agent, and
+offers **Use Agent's Name** when a custom name exists. Its field and buttons are Design controls.
+`ThemedAlertLayout` now declares the modern alert's icon, top, edge, minimum-width and section
+width constraints once; the Mac alert and Linux prompt both activate that declaration. The
+accessibility bridge reads the prompt's actual constrained label, field and button bounds, so
+its advertised rectangles do not assume a scale or restate positions.
+The Mac Rename sheet rendered at 400×168 points. Linux's constrained view also fitted at
+400×168, but the generic SDL window constructor imposed a 180-point minimum and prompt mode
+then locked that enlarged window. The constructor now respects an explicitly requested height
+below 180 for a non-workspace window; workspace's 180-point minimum stays in force. The installed
+rename journey asserts the exact 400×168-point prompt window at both display scales.
+
+The durable mutation runs on a worker under the exact-session store lock. `SessionHistoryTitle`
+shares the Mac visible-name and placeholder policy with Linux, so a changed name records the
+same searchable history and an unnamed session does not invent a prior name. The bounded row
+snapshot cannot silently replace a longer stored custom title when the prompt's unchanged
+visible prefix is submitted. The parent updates the row and active pane header only after the
+save succeeds.
+
+The installed 1× and 2× X11 journeys passed the exact 400×168-point window assertion,
+row-menu activation, Unicode input, SQLite persistence, previous-name history, the clear
+action, and blank confirmation. Their real-shell captures at `out/rename-session/` were
+inspected beside the 400×168 Mac sheet render from `SessionRenamePromptRenderTests`.
+The existing worktree prompt passed light/dark keyboard and AT-SPI regression after the
+SDL sizing fix. The installed 2× session-menu
+regression also passed preset and custom Snooze, Unsnooze, Pin, and Archive. The builder and
+installed `WindowHarness` hashes match at
+`a27fc12ff4720f3774891a243181d6995fdca8233de6abe3acd37e8b8eb5642c`.
+The rename journey is mounted into the installed bundle smoke at both scales.
+An installed live-agent fixture then renamed the selected row while its PTY stayed active. The
+header and row both displayed the saved name, the database held the same custom title, and the
+agent received no prompt or menu input. Its shell capture at
+`out/rename-session/active-pane-renamed-header.png` was inspected.
+
+## 260. Constraint audit and active-session Close, 2026-10-20
+
+The frame audit followed the live Linux opening, conversation, header, sidebar and alert trees.
+Their standing content uses the same production `NSLayoutConstraint` declarations as macOS:
+`PromptChrome`, `ConversationPaneLayout`, `SidebarRowDefaults`,
+`ThemedProjectRowView.pin(to:)`, `ScheduleMomentPickerLayout` and `ThemedAlertLayout`.
+Remaining frame writes in those paths size SDL bitmap roots, outline row slots, scroll documents,
+floating popup bounds and bounded visible menu rows. The Mac menu document also positions its
+row slots by frame. One old `NavigatorTextRow` path still calculated hardcoded label rectangles,
+but no call site ever appended a row to it. That dead path was removed; the live outline already
+mounts the shared constrained project, session and terminal content views.
+
+The active agent's row menu now offers **Close Session**. Its warning confirmation uses the
+shared alert content constraints and Design controls. A worker revalidates the exact saved
+session under the store lock, asks the PTY host to stop the child, and leaves the database row
+for resume. Cancel leaves the process running. The installed 2× AT-SPI journey passed both
+choices, checked the daemon's exit and retained SQLite row, and found no prompt input in the
+agent PTY. The final installed static `WindowHarness` and builder binary match at SHA-256
+`d705f627325d26e4d7cef16c38d3994caf459bc9776b7ec628e7713c4800298e`.
+Its real-shell capture at `out/session-close/session-close-confirm-final-2x.png` was inspected.
+The targeted Mac render test passed and its 400×194-point sheet capture at
+`out/session-close/session-close-prompt-mac.png` was inspected alongside it. Theme boundary,
+UI structure and whitespace checks passed.
+
+The next installed 2× journey mounted the production `SessionPlaceholderView` under the page
+header after Close. The view now owns the same four mounting constraints on both hosts; macOS
+passes its content guide and Linux passes its below-header render root. The journey kept the
+saved row selected, published the solved title and action bounds to AT-SPI, and reopened the
+terminal through **Start Again**. Its inspected real-shell capture is
+`out/session-close/session-close-dormant-final-2x.png`; the installed static binary matches the
+builder at SHA-256 `0785dff8cb6b54ac2482af9c4c2b1226e9ca824c17256ce1fee59bfbf2f1037a`.
+The journey also caught a blank heading for custom-renamed sessions: both hosts now use the
+session's displayed name when composing the dormant title. The targeted macOS hosted-shell
+render passed with an empty raw title and the same custom name; its full-window capture at
+`out/session-close/session-close-dormant-mac.png` was inspected beside the Linux capture.
+The captures use different themes and viewport sizes, so they establish the matching content
+and constrained placement rather than a pixel diff. The Mac sheet includes a remembered
+“Don't ask again” checkbox, while Linux's roughly 400×150-point dialog omits it.
+
+An installed 2× follow-up right-clicked a saved row while its child ran detached in the daemon
+and no terminal was mounted. One bounded off-thread daemon survey added **Close Session** to
+that open menu; the worker wake delivered the result without polling the UI loop. The Close
+worker revalidated the exact saved row, stopped the daemon child, and retained the row without
+mounting its terminal or sending menu input to the PTY. The inspected shell capture is
+`out/session-close/session-close-unmounted-menu-2x.png`. The existing mounted Close/rename/
+dormant/resume journey also passed against the same installed static binary, SHA-256
+`93bf9986f17a189a8b304f2c8c74588748b2e4583e1ca7610eb7779dd3a98134`.

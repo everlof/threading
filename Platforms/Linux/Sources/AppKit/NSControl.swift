@@ -9,6 +9,12 @@ public typealias Selector = () -> Void
 /// by a themed control's keyboard and accessibility activation.
 @MainActor
 open class NSControl: NSView {
+    public enum StateValue: Int, Sendable {
+        case mixed = -1
+        case off = 0
+        case on = 1
+    }
+
     open var font: NSFont?
     open var isEnabled = true {
         didSet { if isEnabled != oldValue { needsDisplay = true } }
