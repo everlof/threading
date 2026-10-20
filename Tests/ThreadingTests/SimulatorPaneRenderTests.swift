@@ -334,6 +334,12 @@ final class SimulatorPaneRenderTests: XCTestCase {
             }
         }
 
+        let previousLibraryTheme = AppThemeLibrary.current
+        let previousAppAppearance = NSApp.appearance
+        defer {
+            AppThemeLibrary.installResolved(previousLibraryTheme)
+            NSApp.appearance = previousAppAppearance
+        }
         let helpThemes: [(String, AppTheme, NSAppearance.Name)] = [
             ("light", .system, .aqua), ("dark", .system, .darkAqua),
             ("cyberpunk", try XCTUnwrap(AppThemeLibrary.stock.first { $0.name == "Cyberpunk" }), .darkAqua),
@@ -345,10 +351,15 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 ("missing", SimulatorScenarioHelpViewController.Status.missing(helpFile)),
                 ("loaded", .loaded(helpFile, scenarios: 3, problems: 0)),
             ] {
-                AppThemePalette.set(.system)
+                // Exercise the product's complete transition, including cache generation and
+                // AppThemeDidChange, rather than replacing only its palette snapshot.
+                AppThemeLibrary.installResolved(.system)
+                NSApp.appearance = NSAppearance(named: .aqua)
+                AppThemeRefresh.systemAppearanceDidChange()
                 let help = SimulatorScenarioHelpViewController(status: status)
                 let drawing = try XCTUnwrap(NSAppearance(named: appearance))
-                help.view.appearance = drawing
+                let initialDrawing = try XCTUnwrap(NSAppearance(named: .aqua))
+                help.view.appearance = initialDrawing
                 help.view.layoutSubtreeIfNeeded()
                 help.view.setFrameSize(help.view.fittingSize)
                 help.view.layoutSubtreeIfNeeded()
@@ -356,17 +367,30 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 // text on the surface it ships on rather than on a transparent sheet.
                 let ground = NSView(frame: help.view.bounds)
                 ground.wantsLayer = true
-                ground.appearance = drawing
+                ground.appearance = initialDrawing
                 ground.addSubview(help.view)
                 // Themed controls bind their geometry updates when attached to a window.
                 // Keep the same lifecycle as the popover without showing a test window.
                 let window = NSWindow(contentRect: ground.bounds, styleMask: [.borderless],
                                       backing: .buffered, defer: false)
-                window.appearance = drawing
+                window.appearance = initialDrawing
                 window.contentView = ground
                 defer { withExtendedLifetime(window) {} }
+                // Prime AppKit's text layout in light mode before switching the same labels.
+                initialDrawing.performAsCurrentDrawingAppearance {
+                    ground.layer?.backgroundColor = Design.Surface.floating.cgColor
+                }
+                let initialBitmap = try XCTUnwrap(ground.bitmapImageRepForCachingDisplay(in: ground.bounds))
+                ground.cacheDisplay(in: ground.bounds, to: initialBitmap)
                 // Switch after construction: a frozen font otherwise looks correct on first load.
-                AppThemePalette.set(theme)
+                AppThemeLibrary.installResolved(theme)
+                if theme.id == AppThemeID.system {
+                    NSApp.appearance = drawing
+                    AppThemeRefresh.systemAppearanceDidChange()
+                }
+                help.view.appearance = drawing
+                ground.appearance = drawing
+                window.appearance = drawing
                 AppThemeRefresh.repaint(help.view)
                 // Match ThemedPopover.reposition after a live font/material change.
                 help.view.layoutSubtreeIfNeeded()
@@ -397,14 +421,14 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 }
                 let bitmap = try XCTUnwrap(ground.bitmapImageRepForCachingDisplay(in: ground.bounds))
                 ground.cacheDisplay(in: ground.bounds, to: bitmap)
-                assertReadableStatus(statusLabel, in: ground, bitmap: bitmap)
+                assertReadableStatus(statusLabel, in: ground, bitmap: bitmap, context: "\(state)-\(name)")
                 try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
                     to: Render.directory.appendingPathComponent("simulator-scenarios-help-\(state)-\(name).png"))
             }
         }
     }
 
-    private func assertReadableStatus(_ label: NSTextField, in ground: NSView, bitmap: NSBitmapImageRep) {
+    private func assertReadableStatus(_ label: NSTextField, in ground: NSView, bitmap: NSBitmapImageRep, context: String) {
         let rect = label.convert(label.bounds, to: ground)
         let scaleX = CGFloat(bitmap.pixelsWide) / ground.bounds.width
         let scaleY = CGFloat(bitmap.pixelsHigh) / ground.bounds.height
@@ -417,8 +441,12 @@ final class SimulatorPaneRenderTests: XCTestCase {
             return
         }
         var readablePixels = 0
+        var assignedInk: NSColor?
+        var expectedInk: NSColor?
         ground.effectiveAppearance.performAsCurrentDrawingAppearance {
             let background = Design.Surface.floating
+            assignedInk = label.textColor?.usingColorSpace(.sRGB)
+            expectedInk = Design.Text.secondary.usingColorSpace(.sRGB)
             for y in top..<bottom {
                 for x in left..<right {
                     guard let ink = bitmap.colorAt(x: x, y: y),
@@ -429,7 +457,8 @@ final class SimulatorPaneRenderTests: XCTestCase {
             }
         }
         XCTAssertGreaterThanOrEqual(readablePixels, Render.minimumReadableStatusPixels,
-                                    "The scenario status has no readable foreground after the theme switch")
+                                    "The scenario status has no readable foreground in \(context); "
+                                        + "assigned \(String(describing: assignedInk)), expected \(String(describing: expectedInk))")
     }
 
     /// Runs async work to completion while the run loop turns, as the rest of these synchronous

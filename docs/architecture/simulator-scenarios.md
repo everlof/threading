@@ -112,6 +112,14 @@ when the theme or appearance changes. The popover then fits the current typograp
 theme-switch render check covers readable status pixels and unclipped reference terms and action
 labels under System, Cyberpunk and Swiss Minimalist.
 
+The mutable status field needs a concrete role color resolved in its own effective appearance.
+In the full render class, AppKit kept drawing black text after a light-to-dark switch even while
+the field's dynamic `textColor` reported the correct light components. Status and feedback now
+resolve their role when updated and reapply it through the root's `ThemeDerivedContent` hook.
+The fixture primes the same labels in light mode, then uses `installResolved` and the system
+appearance handler so both color-cache generations and control measurements follow the shipping
+transition. A palette-only replacement omitted those notifications and left button widths stale.
+
 A scenario with steps shows a `PaneNoticeView` band between the header and the devices, pushing
 them down: the scenario's title, “Step 2 of 4: Payment accepted”, and Back, Next and Play (Pause
 while playing; Play at the last step starts over), with ✕ to close the scenario, which leaves the

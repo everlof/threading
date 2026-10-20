@@ -96,7 +96,7 @@ final class SimulatorScenarioHelpViewController: NSViewController {
             self.statusLabel.reapplyRecordedFont()
             self.feedback.reapplyRecordedFont()
             self.apply(self.status)
-            self.feedback.textColor = Design.Text.secondary
+            Self.applyTextColor(Design.Text.secondary, to: self.feedback)
         }
 
         let exampleTitle = NSTextField(labelWithString: L10n.format("Example: %@", SimulatorScenarioDefaults.relativePath))
@@ -119,7 +119,7 @@ final class SimulatorScenarioHelpViewController: NSViewController {
         copyExampleButton.setAccessibilityIdentifier(Identifiers.copyExample)
         copyPromptButton.setAccessibilityIdentifier(Identifiers.copyPrompt)
         feedback.applyFont(.caption)
-        feedback.textColor = Design.Text.secondary
+        Self.applyTextColor(Design.Text.secondary, to: feedback)
         let actions = NSStackView(views: [primaryButton, copyExampleButton, copyPromptButton, feedback])
         actions.spacing = Design.Spacing.small
         actions.alignment = .centerY
@@ -184,7 +184,7 @@ final class SimulatorScenarioHelpViewController: NSViewController {
         case .loaded(_, _, let problems): problem = problems > 0
         default: problem = false
         }
-        statusLabel.textColor = problem ? Design.Status.warning : Design.Text.secondary
+        Self.applyTextColor(problem ? Design.Status.warning : Design.Text.secondary, to: statusLabel)
     }
 
     var feedbackForTesting: String { feedback.stringValue }
@@ -258,6 +258,15 @@ final class SimulatorScenarioHelpViewController: NSViewController {
         label.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return label
+    }
+
+    /// A mutable text field can retain resolved ink in its text layout even after its dynamic
+    /// color reports the new theme. The root's refresh hook reapplies these concrete role colors
+    /// whenever the theme or effective appearance changes.
+    private static func applyTextColor(_ color: NSColor, to label: NSTextField) {
+        label.effectiveAppearance.performAsCurrentDrawingAppearance {
+            label.textColor = color.usingColorSpace(.sRGB) ?? color
+        }
     }
 
     private static func fitReference(_ grid: NSGridView, terms: [NSTextField], details: [NSTextField]) {
