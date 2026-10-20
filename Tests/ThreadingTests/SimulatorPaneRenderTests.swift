@@ -926,6 +926,36 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 try XCTUnwrap(browserBitmap.representation(using: .png, properties: [:])).write(
                     to: Render.directory.appendingPathComponent("device-log-shell-bluetooth-browser-\(name).png")
                 )
+                // Exercise WebKit's real new-window delegate in the shipping dialog. This is
+                // still only the synthetic fixture; Apple pages are never scripted or captured.
+                var childOpened = false
+                web.evaluateJavaScript("""
+                    const child = window.open('about:blank', 'synthetic-sign-in');
+                    child.document.write(document.documentElement.outerHTML);
+                    child.document.close();
+                    true;
+                    """) { value, error in
+                    XCTAssertNil(error)
+                    childOpened = value as? Bool == true
+                }
+                eventually { childOpened && web.isHidden }
+                let child = try XCTUnwrap(web.superview?.subviews.compactMap { $0 as? WKWebView }
+                    .first { $0 !== web && !$0.isHidden })
+                eventually { !child.isLoading }
+                dialogContent.layoutSubtreeIfNeeded()
+                XCTAssertEqual(child.bounds.size, web.bounds.size)
+                XCTAssertTrue(dialogContent.bounds.contains(child.convert(child.bounds, to: dialogContent)))
+                dialog.displayIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+                let childImage = try XCTUnwrap(CGWindowListCreateImage(
+                    .null, .optionIncludingWindow, CGWindowID(dialog.windowNumber),
+                    [.boundsIgnoreFraming, .nominalResolution]
+                ))
+                try XCTUnwrap(NSBitmapImageRep(cgImage: childImage).representation(using: .png, properties: [:])).write(
+                    to: Render.directory.appendingPathComponent("device-log-shell-bluetooth-sign-in-child-\(name).png")
+                )
+                child.evaluateJavaScript("window.close()")
+                eventually { !web.isHidden && child.superview == nil }
                 let cancel = try XCTUnwrap(find("bluetooth-profile-cancel", in: browser))
                 XCTAssertTrue(cancel.accessibilityPerformPress())
                 XCTAssertTrue(download.isAccessibilityEnabled())

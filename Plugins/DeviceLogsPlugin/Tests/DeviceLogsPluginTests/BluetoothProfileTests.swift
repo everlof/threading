@@ -68,12 +68,29 @@ final class BluetoothProfileTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: copied), bytes)
         XCTAssertEqual(try String(contentsOf: device), "exact-phone")
         let args = try String(contentsOf: arguments).split(separator: "\n").map(String.init)
-        XCTAssertEqual(Array(args.prefix(6)), ["profile", "install", "--udid", "exact-phone", "--no-color", "--"])
+        XCTAssertEqual(Array(args.prefix(6)), ["--no-color", "profile", "install", "--udid", "exact-phone", "--"])
         let staged = try XCTUnwrap(args.last)
         XCTAssertNotEqual(staged, input.path)
         XCTAssertFalse(FileManager.default.fileExists(atPath: staged))
         XCTAssertFalse(FileManager.default.fileExists(atPath: URL(fileURLWithPath: staged).deletingLastPathComponent().path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: input.path))
+    }
+
+    func testOptionalInstalledToolAcceptsProfileCommandBeforeContactingAPhone() throws {
+        guard let tool = ProcessInfo.processInfo.environment["THREADING_BLUETOOTH_PROFILE_TOOL_FIXTURE"] else {
+            throw XCTSkip("Set THREADING_BLUETOOTH_PROFILE_TOOL_FIXTURE to check the installed CLI parser.")
+        }
+        var arguments = BluetoothProfileInstaller.arguments(
+            deviceID: "threading-test-no-device", profilePath: "/unused/synthetic.mobileconfig"
+        )
+        // Help exits in the real parser before device discovery or profile installation. Keep
+        // every production option before it: a fake executable cannot catch misplaced flags.
+        arguments.insert("--help", at: arguments.count - 2)
+        let result = try XCTUnwrap(BoundedDeviceLogCommand.runResult(
+            tool, arguments, deadline: 15, includeStandardError: true, maximumOutputBytes: 32_768
+        ))
+        XCTAssertEqual(result.exitStatus, 0, result.output)
+        XCTAssertTrue(result.output.contains("PROFILES"))
     }
 
     func testInstallerReportsRejectionAndBoundsSilentChild() throws {

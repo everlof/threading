@@ -27,9 +27,13 @@ final class BluetoothProfileDownloadView: NSView, WKNavigationDelegate, WKUIDele
         static let screenMargin: CGFloat = 80
         static let transferTimeout: UInt64 = 60_000_000_000
         static let interruptedByPolicy = 102
+        static let maximumSignInWindows = 2
     }
 
     let webView: WKWebView
+    private let browserContent = NSView()
+    private var signInWindows: [WKWebView] = []
+    var presentedWebView: WKWebView { signInWindows.last ?? webView }
     private let origin = NSTextField(labelWithString: "developer.apple.com")
     private let onComplete: (Result<URL, Error>) -> Void
     private var download: WKDownload?
@@ -73,7 +77,7 @@ final class BluetoothProfileDownloadView: NSView, WKNavigationDelegate, WKUIDele
         let footer = NSStackView(views: [remembered, forget])
         footer.spacing = Design.Spacing.small
         footer.alignment = .centerY
-        let content = NSStackView(views: [toolbar, webView, footer])
+        let content = NSStackView(views: [toolbar, browserContent, footer])
         content.orientation = .vertical
         content.spacing = Design.Spacing.small
         content.translatesAutoresizingMaskIntoConstraints = false
@@ -85,11 +89,12 @@ final class BluetoothProfileDownloadView: NSView, WKNavigationDelegate, WKUIDele
             content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.medium),
             toolbar.widthAnchor.constraint(equalTo: content.widthAnchor),
             footer.widthAnchor.constraint(equalTo: content.widthAnchor),
-            webView.widthAnchor.constraint(equalTo: content.widthAnchor),
+            browserContent.widthAnchor.constraint(equalTo: content.widthAnchor),
         ])
         toolbar.setContentHuggingPriority(.required, for: .vertical)
         footer.setContentHuggingPriority(.required, for: .vertical)
-        webView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        browserContent.setContentHuggingPriority(.defaultLow, for: .vertical)
+        mount(webView)
         setAccessibilityIdentifier("bluetooth-profile-browser")
     }
 
@@ -113,6 +118,7 @@ final class BluetoothProfileDownloadView: NSView, WKNavigationDelegate, WKUIDele
         guard !finished, !clearingSignIn, !handingOffDownload, download == nil else { return }
         clearingSignIn = true
         forget.isEnabled = false
+        closeSignInWindows(from: 0)
         webView.stopLoading()
         webView.isHidden = true
         BluetoothProfileWebsiteData.forget(in: webView.configuration.websiteDataStore) { [weak self] in
@@ -140,9 +146,8 @@ final class BluetoothProfileDownloadView: NSView, WKNavigationDelegate, WKUIDele
         deadline?.cancel()
         deadline = nil
         progressObservation = nil
-        webView.stopLoading()
-        webView.navigationDelegate = nil
-        webView.uiDelegate = nil
+        closeSignInWindows(from: 0)
+        retire(webView)
         // Cancellation completion precedes deletion: WebKit may still be writing the file.
         if let download {
             let partial = destination
@@ -199,6 +204,7 @@ final class BluetoothProfileDownloadView: NSView, WKNavigationDelegate, WKUIDele
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard webView === presentedWebView else { return }
         origin.stringValue = webView.url?.host ?? "developer.apple.com"
     }
 
@@ -226,10 +232,53 @@ final class BluetoothProfileDownloadView: NSView, WKNavigationDelegate, WKUIDele
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if action.targetFrame == nil, allowsURL(action.request.url) {
-            webView.load(action.request)
+        guard !finished, !clearingSignIn, action.targetFrame == nil,
+              signInWindows.count < Metrics.maximumSignInWindows,
+              allowsURL(action.request.url) || action.request.url?.absoluteString == "about:blank" else { return nil }
+        // WebKit must create the requested browsing context from its supplied configuration.
+        // Loading the request in the opener destroys the page waiting for Apple's callback.
+        // Returning the child also lets WebKit carry POST bodies and window.opener itself.
+        let child = WKWebView(frame: .zero, configuration: configuration)
+        child.navigationDelegate = self
+        child.uiDelegate = self
+        presentedWebView.isHidden = true
+        signInWindows.append(child)
+        mount(child)
+        window?.makeFirstResponder(child)
+        return child
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        guard let index = signInWindows.firstIndex(where: { $0 === webView }) else { return }
+        closeSignInWindows(from: index)
+        window?.makeFirstResponder(presentedWebView)
+    }
+
+    private func mount(_ browser: WKWebView) {
+        browser.translatesAutoresizingMaskIntoConstraints = false
+        browserContent.addSubview(browser)
+        NSLayoutConstraint.activate([
+            browser.leadingAnchor.constraint(equalTo: browserContent.leadingAnchor),
+            browser.trailingAnchor.constraint(equalTo: browserContent.trailingAnchor),
+            browser.topAnchor.constraint(equalTo: browserContent.topAnchor),
+            browser.bottomAnchor.constraint(equalTo: browserContent.bottomAnchor),
+        ])
+    }
+
+    private func retire(_ browser: WKWebView) {
+        browser.navigationDelegate = nil
+        browser.uiDelegate = nil
+        browser.stopLoading()
+    }
+
+    private func closeSignInWindows(from index: Int) {
+        for child in signInWindows[index...] {
+            retire(child)
+            child.removeFromSuperview()
         }
-        return nil
+        signInWindows.removeSubrange(index...)
+        presentedWebView.isHidden = false
+        origin.stringValue = presentedWebView.url?.host ?? "developer.apple.com"
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {

@@ -493,6 +493,14 @@ could clip the bottom of Apple's form in a short log pane.
 Apple's authentication redirect returns to the download automatically. Navigation/download
 redirects admit HTTPS Apple domains only, with the current origin shown above the page. This
 view has no agent bridge, injected scripts, credential export, diagnostics or network capture.
+Apple-requested child windows use WebKit's supplied configuration and stay inside the same
+dialog, preserving `window.opener`, POST bodies and the shared isolated website store. Never
+replay a new-window request in its opener: that destroys the page waiting for the authentication
+callback and can leave the user signing in repeatedly. The newest child fills the browser area;
+closing it restores its opener. There are at most two child windows, even if a page requests more,
+and Cancel, Forget Sign-In and completion retire all of them. A loopback WebKit test exercises a
+POST into a child, its cookie, the opener callback and the resulting authenticated download;
+another stresses ten popup requests against the two-window limit. Neither test uses Apple accounts.
 On macOS 14+, a stable, named `WKWebsiteDataStore` retains Apple's cookies and website data across
 reopening and app restarts, separately from the shared Browser and every project website store.
 On macOS 13, one shared nonpersistent store retains sign-in only until Threading quits. WebKit
@@ -514,13 +522,17 @@ authentication URLs, NSError user info or server-supplied descriptions.
 plain plist metadata, checks `com.apple.bluetooth.logging` and an absolute removal date, and
 stages those exact bytes privately. These checks identify the profile type, not signing trust;
 iOS owns the signature and consent presentation. The explicit install action pins the selected
-hardware UDID and invokes `pymobiledevice3 profile install --udid … --no-color -- …`, using the
+hardware UDID and invokes `pymobiledevice3 --no-color profile install --udid … -- …`, using the
 host-managed path or fixed local tool paths. Never use silent installation, supervise a phone,
 bundle Apple's profile, or expose this mutation to agent tools. Once sending starts it finishes
 for that exact phone even if the pane is hidden. An acknowledgement is reported as **sent**, not
 installed; the owner finishes in Settings and restarts the phone per Apple's instructions.
 Tool absence, rejection and an unconfirmed transfer have distinct guidance. Capture is
 phone-wide HCI traffic, not an app-PID stream or a promiscuous radio sniffer.
+`--no-color` is a root CLI option, not an option of `profile install`. Placing it after the
+subcommand fails before any phone connection; a fake installer that merely records arguments
+cannot verify that grammar. `THREADING_BLUETOOTH_PROFILE_TOOL_FIXTURE` opts the real installed
+parser into the regression suite with `--help`, which exits before discovery or installation.
 
 The worker reads microsecond PCAP link type 201, validating lengths, direction, byte order and
 EOF. It emits value rows for HCI commands/events, ACL/L2CAP, complete ATT messages and SCO.

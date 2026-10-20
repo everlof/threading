@@ -4329,8 +4329,9 @@ requires **iPhone Tooling** from Threading's **Settings → Advanced**, or a loc
 The primary **Send certificate to this iPhone** button lets you choose Apple's downloaded
 Bluetooth logging `.mobileconfig` file and sends it directly to the selected iPhone, which shows
 its installation prompt. Apple sign-in opens in a separate, larger dialog so it remains usable
-even when the logs pane is short. On macOS 14 and later, its dedicated website storage remembers
-Apple sign-in across app restarts; on macOS 13, it remembers sign-in until Threading quits.
+even when the logs pane is short. Additional Apple sign-in windows stay inside that dialog and
+return to the previous page when they close. On macOS 14 and later, its dedicated website storage
+remembers Apple sign-in across app restarts; on macOS 13, it remembers sign-in until Threading quits.
 Apple may still ask you to sign in again. **Forget Sign-In** in that dialog clears the remembered
 Apple session and reloads the sign-in page. This storage is separate from the agent-controlled
 Browser. Download errors explain network failures, Apple HTTP responses or unexpected files

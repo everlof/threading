@@ -723,8 +723,9 @@ capture lifetime, packet parsing limits, local history and agent source selectio
 Threading and its bundled plugin. This adds no safe-extension presentation slot or data authority.
 Its profile setup and dedicated Apple sign-in view are host-only too: the host retains the
 official download origin, isolated remembered authentication state and its Forget Sign-In control,
-screen-bounded sign-in presentation, exact-phone install action, file and
-process bounds, iOS consent handoff and cleanup. Themes style controls; agents receive no profile
+screen-bounded sign-in presentation (including at most two Apple-requested child windows),
+exact-phone install action, file and process bounds, iOS consent handoff and cleanup.
+Themes style controls; agents receive no profile
 installation action or access to this authentication browser.
 The Regular Logs/Bluetooth tab choice is host-owned as well: the workspace owns the two-reader
 limit, demand lifetime, per-stream history and filters, and the selected stream for agent tools.

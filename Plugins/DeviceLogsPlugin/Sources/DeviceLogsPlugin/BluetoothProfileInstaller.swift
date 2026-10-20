@@ -69,7 +69,7 @@ enum BluetoothProfileInstaller {
     }
 
     static func arguments(deviceID: String, profilePath: String) -> [String] {
-        ["profile", "install", "--udid", deviceID, "--no-color", "--", profilePath]
+        ["--no-color", "profile", "install", "--udid", deviceID, "--", profilePath]
     }
 
     private static func readProfile(_ url: URL) throws -> Data {

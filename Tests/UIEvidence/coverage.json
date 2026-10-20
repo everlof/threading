@@ -610,7 +610,8 @@
         "Workspace tab drag landing marker",
         "Bluetooth HCI and ATT packets",
         "Bluetooth profile setup",
-        "Dedicated Apple sign-in dialog with a tall synthetic form and reachable sign-in action"
+        "Dedicated Apple sign-in dialog with a tall synthetic form and reachable sign-in action",
+        "Apple-requested child sign-in window contained in that dialog, returning to its opener"
       ],
       "matrix": {
         "themes": [
