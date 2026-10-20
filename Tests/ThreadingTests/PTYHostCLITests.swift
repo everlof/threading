@@ -1075,6 +1075,9 @@ private final class CLIWireClient: @unchecked Sendable {
             let count = buffer.withUnsafeMutableBytes {
                 CLIPlatform.read(descriptor, $0.baseAddress, $0.count)
             }
+            // A CLI child exiting can interrupt this reader with SIGCHLD. That leaves the
+            // socket open; closing it here would turn the fixture's live watcher into a detach.
+            if count < 0 && errno == EINTR { continue }
             guard count > 0 else {
                 condition.lock()
                 closed = true

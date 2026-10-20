@@ -782,14 +782,19 @@ must equal `scripts/linux/ptyd-expected-skips.txt` (today the three launchd `sta
 for the kit), so a case that starts skipping, or a listed one that starts running, fails the lane.
 Delete the runner when the pinned toolchain has the fix.
 
-**Under x86_64 emulation the watchdog cannot tell that hang from a real one.** Docker Desktop's
-emulated `linux/amd64` gives LLDB no frames — every thread's backtrace is empty — so a case caught
-in the harness deadlock is held to the 180-second limit and reported failed instead of retried.
-Measured on 2026-09-17: two of five `--arch amd64` runs failed one unchanged `ThreadingPTYHostKit`
-value test this way, and the runs either side passed all of it. Rerun an emulated failure whose
-backtrace is empty before believing it; native `arm64` classifies every hang. The same emulation
-also closed a test process's own open socket when that process launched a child, which is why
-`testASecondDaemonRefusesAStateDirectoryAnotherDaemonOwns` holds no watcher across its launch.
+**Under x86_64 emulation LLDB can return empty frames.** At the ordinary 180-second limit, the
+watchdog asks Swift's own crash handler for a backtrace with `SIGABRT`, bounded to five seconds,
+then kills the test's process group as before. It retries only when the crashing main thread
+shows `awaitUsingExpectation`; an empty trace, an ordinary test-body frame, or that symbol on a
+different thread still fails. A slow valid test keeps its full original allowance. Core dumps
+are disabled so the diagnostic cannot fill the build disk. This recovered the otherwise
+uninspectable setup deadlock on 2026-10-20 without accepting a test that had not run.
+
+The same emulation also exposed interrupted reads when a test process launched a child. On
+2026-10-20 the CLI
+fixture's reader returned `EINTR` during that launch and treated it as EOF, closing its own
+watcher and making both text and JSON session listings report `detached`. Both raw test-client
+readers now retry `EINTR`, as their writers already did; the daemon was not closing the socket.
 
 ## Availability and launch ownership
 

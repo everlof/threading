@@ -1754,6 +1754,7 @@ private final class PTYHostTestClient: @unchecked Sendable {
             let count = buffer.withUnsafeMutableBytes {
                 DaemonTestPOSIX.read(descriptor, $0.baseAddress, $0.count)
             }
+            if count < 0 && errno == EINTR { continue }
             guard count > 0 else {
                 condition.lock()
                 closed = true

@@ -27,7 +27,10 @@
 # again, at most `attempts` times, and every retry is printed and counted. Any other case still
 # running at `limit_seconds` fails with its backtrace, and so does a case that deadlocks every
 # attempt. Every wait in these suites is individually bounded well below `limit_seconds`, so a real
-# hang cannot pass as the harness one. Five attempts rather than three because two consecutive
+# hang cannot pass as the harness one. Under x86_64 emulation LLDB can return empty frames; at
+# the same 180-second limit, ask Swift's crash handler for a bounded backtrace before killing
+# the process. Only an awaitUsingExpectation frame on the crashing main thread permits a retry.
+# Five attempts rather than three because two consecutive
 # deadlocks of one case were observed in a single run; the frame check, not the count, is what
 # keeps a real hang out. Remove this runner when the upstream issue is fixed in the toolchain
 # `scripts/test-ptyd-linux.sh` pins.
@@ -37,6 +40,10 @@ readonly probe_seconds=10
 readonly limit_seconds=180
 readonly attempts=5
 readonly deadlock_frame="awaitUsingExpectation"
+readonly crash_trace_seconds=5
+
+# A diagnostic abort must not leave an unbounded core file beside the test bundle.
+ulimit -c 0
 
 expected_skips_file=""
 if [[ "${1:-}" == "--expected-skips" ]]; then
@@ -75,11 +82,21 @@ backtrace() {
   lldb --batch -p "$1" -o "thread backtrace all" 2>&1 | grep -E 'thread #|frame #'
 }
 
+runtime_harness_deadlock() {
+  awk '
+    /^Thread 0 .*crashed:$/ { main_thread = 1; next }
+    /^Thread [0-9]+/ { main_thread = 0 }
+    main_thread && /^[[:space:]]*[0-9]+.*awaitUsingExpectation/ { found = 1 }
+    END { exit !found }
+  ' "${log}"
+}
+
 for case_name in "${cases[@]}"; do
   attempt=1
   while true; do
     # Its own session, so a failure can end the daemon and every child a test started with it.
-    setsid "${bundle}" "${case_name}" >"${log}" 2>&1 &
+    SWIFT_BACKTRACE=enable=yes,interactive=no,threads=all,color=no \
+      setsid "${bundle}" "${case_name}" >"${log}" 2>&1 &
     pid=$!
     started=${SECONDS}
     probed=0
@@ -98,6 +115,20 @@ for case_name in "${cases[@]}"; do
       if (( elapsed >= limit_seconds )); then
         outcome="timeout"
         trace="$(backtrace "${pid}")"
+        if ! grep -Eq 'frame #[0-9]+:[[:space:]]*[^[:space:]]' <<<"${trace}"; then
+          # External ptrace cannot unwind the translated stack. The guest runtime can.
+          # Wait until the ordinary timeout: a valid slow test keeps its full allowance.
+          kill -ABRT "${pid}" 2>/dev/null
+          crash_started=${SECONDS}
+          while (( SECONDS - crash_started < crash_trace_seconds )); do
+            runtime_harness_deadlock && break
+            kill -0 "${pid}" 2>/dev/null || break
+            sleep 0.2
+          done
+          if runtime_harness_deadlock; then
+            outcome="deadlock"
+          fi
+        fi
         break
       fi
       sleep 0.2
