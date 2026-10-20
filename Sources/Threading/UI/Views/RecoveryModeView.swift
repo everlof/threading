@@ -93,6 +93,8 @@ enum RecoveryModeCopy {
         case .extensionsStarted: return L10n.string("Starting extensions")
         case .mcpListenerStarted: return L10n.string("Starting the tool listener")
         case .selectedSessionRestored: return L10n.string("Restoring your session")
+        case .nativePluginLoadStarted: return L10n.string("Loading a native plugin")
+        case .nativePluginLoadFinished: return L10n.string("Native plugin loaded")
         case .stable: return L10n.string("Running normally")
         }
     }

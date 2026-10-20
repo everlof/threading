@@ -29,6 +29,91 @@ final class PanelCommandTests: HostedStoreTestCase {
         XCTAssertEqual(registry.command(id: id)?.id, id)
     }
 
+    func testManagedSectionCommandsRemainAvailableBeforeInstallation() throws {
+        let registry = CommandRegistry()
+        registry.replaceNativePluginBundles([])
+        let regular = try XCTUnwrap(registry.command(id: "panel.deviceLogs"))
+        let bluetooth = try XCTUnwrap(registry.command(id: "panel.bluetoothLogs"))
+        XCTAssertEqual(regular.panelTarget, .nativePluginSection(
+            identifier: NativePluginManagedOffer.deviceLogs.identifier,
+            section: NativePluginManagedOffer.DeviceLogsSection.regular
+        ))
+        XCTAssertEqual(bluetooth.panelTarget, .nativePluginSection(
+            identifier: NativePluginManagedOffer.deviceLogs.identifier,
+            section: NativePluginManagedOffer.DeviceLogsSection.bluetooth
+        ))
+        XCTAssertTrue(regular.isEditable)
+        XCTAssertTrue(bluetooth.isEditable)
+    }
+
+    func testIndependentNativePluginDeclaresSectionsAndCommands() throws {
+        let bundle = URL(fileURLWithPath: "/tmp/IndependentNotes.bundle")
+        let identifier = "example.notes"
+        let plist: [String: Any] = [
+            "CFBundleIdentifier": identifier,
+            "ThreadingPaneSections": [
+                "schemaVersion": 1,
+                "sections": [
+                    ["id": "notes", "title": "Notes", "command": [
+                        "title": "Open notes", "symbol": "note.text", "detail": "Session notes"
+                    ]],
+                    ["id": "history", "title": "History", "command": [
+                        "title": "Note history", "symbol": "clock"
+                    ]]
+                ]
+            ]
+        ]
+        let pane = try XCTUnwrap(NativePluginPaneDiscovery.descriptor(
+            in: plist, bundleURL: bundle, verifiedInstalledIdentity: nil
+        ))
+        let registry = CommandRegistry()
+        registry.replaceNativePluginBundles([bundle], paneDescriptors: [pane])
+        let notes = try XCTUnwrap(registry.command(id: PanelCommands.nativePluginSectionID(
+            identifier: identifier, section: "notes"
+        )))
+        XCTAssertEqual(notes.title, "Open notes")
+        XCTAssertEqual(notes.detail, "Session notes")
+        XCTAssertEqual(notes.panelTarget, .nativePluginSection(identifier: identifier, section: "notes"))
+        XCTAssertNil(registry.command(id: PanelCommands.nativePluginID(bundle)))
+        XCTAssertTrue(pane.contains("history"))
+        registry.replaceNativePluginBundles([])
+        XCTAssertNil(registry.command(id: notes.id))
+    }
+
+    func testPaneDeclarationRejectsUnknownVersionAndDuplicateSections() {
+        let bundle = URL(fileURLWithPath: "/tmp/IndependentNotes.bundle")
+        let section = ["id": "notes", "title": "Notes"]
+        let base: [String: Any] = ["CFBundleIdentifier": "example.notes"]
+        var unknown = base
+        unknown["ThreadingPaneSections"] = ["schemaVersion": 2, "sections": [section]]
+        XCTAssertNil(NativePluginPaneDiscovery.descriptor(
+            in: unknown, bundleURL: bundle, verifiedInstalledIdentity: nil
+        ))
+        var duplicate = base
+        duplicate["ThreadingPaneSections"] = ["schemaVersion": 1, "sections": [section, section]]
+        XCTAssertNil(NativePluginPaneDiscovery.descriptor(
+            in: duplicate, bundleURL: bundle, verifiedInstalledIdentity: nil
+        ))
+    }
+
+    func testBuiltDeviceLogsDeclaresItsManagedSections() throws {
+        let plugins = try XCTUnwrap(Bundle.main.builtInPlugInsURL)
+        let bundle = plugins.appendingPathComponent("DeviceLogsPlugin.bundle")
+        let pane = try XCTUnwrap(NativePluginPaneDiscovery.inventory(
+            bundled: [bundle], installed: []
+        ).first)
+        XCTAssertEqual(pane.pluginIdentifier, NativePluginManagedOffer.deviceLogs.identifier)
+        XCTAssertEqual(pane.sections.map(\.identifier), ["regular", "bluetooth"])
+        XCTAssertEqual(pane.sections.compactMap(\.command).count, 2)
+    }
+
+    func testNavigatorOnlyPluginDoesNotOfferAnEmptyPaneCommand() {
+        let registry = CommandRegistry()
+        let navigator = URL(fileURLWithPath: "/tmp/T3NavigatorPlugin.bundle")
+        registry.replaceNativePluginBundles([navigator])
+        XCTAssertNil(registry.command(id: PanelCommands.nativePluginID(navigator)))
+    }
+
     func testExtensionPanelsRegisterAutomaticallyAndDisappearWhenDisabled() throws {
         let registry = CommandRegistry()
         registry.replaceExtensionCommands(extensionIdentifier: "example", extensionName: "Example",

@@ -33,6 +33,8 @@ extension PersistedPanel {
         return "m:\(tab.simulatorDeviceID ?? "automatic")"
       case .realDevice: return "p:\(tab.physicalDeviceID ?? "automatic")"
       case .deviceLog: return "l"
+      case .nativePlugin:
+        return "p:\(tab.pluginIdentifier ?? "")/\(tab.mode ?? "")"
       case .extensionPanel:
         return "e:\(tab.extensionIdentifier ?? "")/\(tab.extensionPanelID ?? "")"
       case .compare:
@@ -95,6 +97,8 @@ extension PersistedPanel {
         detail =
           "a live log stream from a booted simulator or a paired iPhone (the user is "
           + "watching os_log and stdout from the app under development)"
+      case .nativePlugin:
+        detail = "native plugin pane \"\(tab.title ?? tab.pluginIdentifier ?? "Plugin")\""
       case .extensionPanel:
         detail = "extension panel \"\(tab.title ?? "Panel")\""
       case .compare:

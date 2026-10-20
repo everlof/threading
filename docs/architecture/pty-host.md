@@ -704,6 +704,9 @@ and both from the static binary below: the app's remote-host setup (`RemoteHostI
 publishes) and the controller host bundle (`scripts/build-controller-host.sh`, whose
 `install-host.py` writes `threading-ptyd.service` and starts it only with `--start`). Both build the
 daemon through `scripts/linux/build-ptyd-static.sh` and run the daemon suite against that file.
+Every app release verifies that its component pin still matches all component inputs and that
+both architectures' public downloads match the compiled hashes; see
+[the release prerequisite](releasing.md#remote-host-components-are-a-release-prerequisite).
 
 - **One program, one shim.** Every call whose *spelling* differs is in `PTYHostPlatform.swift`
   (`PTYHostPOSIX`), and the calls Swift cannot make portably on Linux — `forkpty`, the

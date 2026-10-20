@@ -44,6 +44,50 @@ setup does not upload tokens to GitHub. Never track `.sentryclirc`, `sentry.prop
 before the quality gate and again before any public ref moves. The iOS Fastlane lane performs the
 same upload from the exact archive Apple receives, using the separate `threading-ios` project.
 
+## Remote host components are a release prerequisite
+
+Every stable, beta and nightly app must pin a published Linux daemon and MCP bridge for both
+`arm64` and `amd64`. `scripts/check_remote_components.py` verifies the committed
+`RemoteHostComponentManifest.swift` before any notarized archive, independently of
+`THREADING_SKIP_RELEASE_CHECKS`. The local release driver also runs it before pushing refs;
+the tagged and nightly publishers repeat it immediately before uploading the app.
+
+The gate compares Git input trees at the component release's source commit and the app's HEAD.
+It follows local Swift package dependencies transitively, includes the Linux toolchain and build
+recipes, and follows the daemon tests' source symlinks. Added and deleted files count; dirty or
+untracked inputs refuse publication. An unfamiliar dependency declaration fails closed until the
+inventory supports it. An app-only commit can reuse the existing component release. A changed
+component input requires a new one, even when its wire protocol version stayed the same.
+
+The gate then downloads all four assets from the public URLs the app uses and checks compressed
+size, compressed SHA-256 and decompressed binary SHA-256 against the compiled manifest. Download
+and decompression have fixed size limits. A missing, private, draft, truncated or replaced asset
+stops the release. `--local` checks source freshness without network access; it is for diagnosis,
+not publication. Ordinary CI runs the gate's isolated regression tests without requiring every
+development commit to have published components.
+
+Prepare components **before tagging the app**:
+
+1. Commit the component sources and publish that source commit to the outer repository through
+   an explicitly authorized push. Component publishing never pushes Git refs.
+2. Run `scripts/publish_remote_components.sh`. It builds and tests both Linux architectures,
+   checks that HEAD and all inputs stayed unchanged, publishes the four compressed binaries and
+   measured Swift manifest, verifies the public downloads, then installs the manifest locally.
+3. Commit the regenerated manifest, then use the normal app release driver.
+
+The manifest commit changes no component input, so this does not require a second component
+build. The publisher reuses an already-current pin after verifying its downloads. If an upload
+completed but local manifest installation was interrupted, rerunning recovers the published
+manifest and verifies its assets without rebuilding or overwriting that release. All component
+releases are prereleases with `--latest=false`, so they cannot displace the stable app release
+serving Sparkle's `/latest/download/appcast.xml`. Old component assets remain immutable because
+installed app versions still reference them.
+
+`--no-upload` remains a local build/manifest experiment; `--skip-build` is permitted only with
+that flag. Neither is evidence that the public downloads exist. The first release after adding
+this gate requires refreshed components; the September 18 pin predates subsequent daemon,
+bridge and shared-package changes.
+
 ## Distribution signing is not a build setting
 
 The obvious move is to pin `CODE_SIGN_IDENTITY[sdk=macosx*] = "Developer ID Application"` in the
@@ -521,6 +565,20 @@ nobody. `scripts/tests/test_release_tag_policy.py` runs both directions.
 
 ### The feed is seeded, not rebuilt
 
+**Updates are immediately eligible for every user.** Stable, beta and nightly feeds carry no
+phased rollout interval. Most releases deliver fixes to the people already waiting for them;
+the former one-day interval between Sparkle's seven groups withheld those fixes for days.
+`generate_appcast.sh` supplies no rollout option and removes old rollout metadata from a seeded
+feed before Sparkle signs it. The former `THREADING_SPARKLE_PHASED_ROLLOUT_INTERVAL` override is
+retired. Automatic polling and the user's install choice still apply; a manual update check
+can fetch a newly published version immediately.
+
+To remove a delay from an already-published feed, download and verify the signed appcast, use
+`scripts/remove_appcast_rollout.py` to remove only its rollout elements, then re-sign and verify
+it with Threading's Sparkle account before replacing the same release's `appcast.xml` asset.
+Verify the public download after upload. Enclosure signatures, archive URLs, versions, dates and
+release notes must remain unchanged; no app rebuild is needed.
+
 `generate_appcast.sh` used to delete the appcast and keep one version. That is right for the
 nightly feed — a rolling release clobbers its assets, so an item for last Tuesday would point at
 a URL now serving a different zip — and wrong for a channelled one: publish stable 0.2.1, then
@@ -573,7 +631,8 @@ a tampered one is rejected rather than installed.
 
 ### The proxy helper's source
 
-`threading-proxyd` is GPL-3.0-only, and Threading.app carries it without its source. Until
+`threading-proxyd` is GPL-3.0-only. The on-demand `ProxyPlugin.bundle` carries it without its
+source; Threading.app carries the legal notices. Until
 2026-10-18 the bundle held the whole `Targets/ProxyHost` tree as `Resources/ProxySource`: 16.8 MB
 of a 63.1 MB download, nearly all of it the five upstream archives the helper is built from,
 carried by every download and every update. GPLv3 §6(d) allows offering the corresponding source
@@ -594,9 +653,9 @@ goes on the same release:
   upstream license texts the binary needs (MIT, BSD, ISC, Apache-2.0, Zlib) travel in
   `Legal/ProxyHost/`: `embed_legal_notices.sh` copies them, and `check_bundled_licenses.sh`
   compares them byte for byte with `Targets/ProxyHost/third_party/licenses`.
-- The one file of that tree the app needs at run time, `tools/apple_certificate.py` — the trust
-  command `traffic_certificate` hands an agent — is copied to `Resources/ProxyTools/` by
-  `embed_proxy_helper.sh`.
+- The one file of that tree needed at run time, `tools/apple_certificate.py` — the trust command
+  `traffic_certificate` hands an agent — is copied into the signed `ProxyPlugin.bundle` under
+  `Contents/Resources/ProxyTools/` by `embed_proxy_helper.sh`.
 
 The rest of Threading's GPL-3.0 source has always been offered this way: from the public
 repository, never from the bundle. `scripts/tests/test_proxy_source_distribution.py`, run by
@@ -697,11 +756,13 @@ signed export, and `ci.sh` never archives. The auto-installer runs the same meas
 line, so a release-time failure is diagnosed by reading which commits moved the number rather than
 by bisecting builds. `--report` and `--summary` never fail and work on any bundle.
 
-The first baseline was seeded from the auto-installer's profiled export of `884de6e3e`, thinned,
-and on 2026-10-18 re-measured from that bundle with the proxy-source layout applied (its
-`measuredFrom` says exactly how); the first `release.sh` export should replace it. The tests are
-`scripts/tests/test_bundle_size.py`, run by `ci.sh`. What is being done about the size itself is
-the [bundle diet plan](../feature-drafts/bundle-diet.md).
+The first baseline was seeded from the auto-installer's profiled export of `884de6e3e` and given
+the proxy-source layout on 2026-10-18. The 2026-10-20 baseline measures a local Developer ID
+Release archive/export at `477a299e8` with the shared plugin runtime change still uncommitted:
+103.42 MB on disk and 42.50 MB compressed, after arm64 thinning and the complete signing sweep.
+Its `measuredFrom` records that provenance; the first clean `release.sh` export should replace it.
+The tests are `scripts/tests/test_bundle_size.py`, run by `ci.sh`. What is being done about the
+size itself is the [bundle diet plan](../feature-drafts/bundle-diet.md).
 
 ## The export is verified before it is uploaded
 
@@ -766,6 +827,13 @@ both version numbers, so a developer-shell value cannot leak into the shipping g
 Packaging uses `ditto -c -k --keepParent --sequesterRsrc`, not `zip`. Sparkle unpacks with the
 same tool, and only `ditto` preserves the symlinks and extended attributes inside a signed
 bundle; a `zip`-ed app fails its own signature check on the other side.
+
+For a notarized release, `native_plugin_staging.py` resets its staging directory and copies
+every top-level `.bundle` from the Developer ID export. It removes exactly that set from the app
+before re-signing it, leaving app extensions alone. A bundle added between staging and removal
+stops the release. The generated archive directory is reset too, so a previous build cannot
+publish an archive for a removed plugin. `package_native_plugins.py` then signs the manifest for
+the staged bundles; adding another first-party native plugin does not need a new pruning rule.
 
 `--notarize` is opt-in and needs a stored credential profile, so the script never uploads by
 accident:
@@ -1226,8 +1294,8 @@ Three rules, in the order they get used:
    the new capability arrives to hosts that already have it.
 3. **`minimumSupported` rises last, in its own release, with nothing else riding along** —
    and only after the App Store has delivered the iOS build that speaks the newer version,
-   adoption has actually happened, and the Mac side's phased Sparkle rollout (a day per
-   phase) has completed. Dropping an old path is never urgent, so this step never has a
+   adoption has actually happened on both apps. Immediate eligibility in the Mac feed is not
+   proof that installed Macs have updated. Dropping an old path is never urgent, so this step never has a
    deadline; if it feels urgent, something upstream skipped rule 2.
 
 `RemoteProtocolTests.testProtocolVersionsChangeOnlyThroughTheReleasingChecklist` pins both

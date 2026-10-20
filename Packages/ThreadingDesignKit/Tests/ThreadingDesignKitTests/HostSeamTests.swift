@@ -57,6 +57,27 @@ final class HostSeamTests: XCTestCase {
         XCTAssertNotEqual(before, after, "the same NSColor answers the theme installed later")
     }
 
+    @MainActor
+    func testInstallingTheSameThemeForTwoPluginsPostsOneChange() throws {
+        let original = AppThemePalette.current
+        let next = try XCTUnwrap(AppThemeStyles.all.first { $0 != original })
+        let changed = expectation(description: "the shared palette changed once")
+        changed.assertForOverFulfill = true
+        let observer = NotificationCenter.default.addObserver(
+            forName: AppThemeDidChange.name,
+            object: nil,
+            queue: nil
+        ) { _ in changed.fulfill() }
+        defer {
+            NotificationCenter.default.removeObserver(observer)
+            AppThemePalette.install(original)
+        }
+
+        AppThemePalette.install(next)
+        AppThemePalette.install(next)
+        wait(for: [changed], timeout: 0.1)
+    }
+
     /// `DesignSettings` names five values and the host supplies them. Text size is the one with
     /// visible consequences everywhere, so it stands in for the rest.
     @MainActor

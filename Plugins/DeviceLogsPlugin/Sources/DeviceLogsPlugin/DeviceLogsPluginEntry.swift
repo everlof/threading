@@ -192,7 +192,8 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 summary: """
                     Open the Bluetooth tab and select packet capture for one paired iPhone in this chat's Device Logs pane. Regular Logs keeps capturing while Bluetooth is selected. Requires its exact hardware UDID, external idevicebtlogger (brew install libimobiledevice), and Apple's Bluetooth logging profile on the phone. Captures phone-wide HCI traffic, not an app's text logs or an over-the-air sniffer. Use visible/search/time_range to read the selected tab's packet summaries and bounded raw hex. Starting is not proof of received packets; visible reports reader status. Rescan in the pane after connecting a phone or installing tools. Switching log tabs keeps both streams running; hiding the whole Device Logs pane stops both.
                     """,
-                inputSchemaJSON: #"{"type":"object","properties":{"device_id":{"type":"string","description":"Exact paired iPhone hardware UDID."}},"required":["device_id"]}"#
+                inputSchemaJSON: #"{"type":"object","properties":{"device_id":{"type":"string","description":"Exact paired iPhone hardware UDID."}},"required":["device_id"]}"#,
+                paneSectionToReveal: "bluetooth"
             ),
         ]
     }

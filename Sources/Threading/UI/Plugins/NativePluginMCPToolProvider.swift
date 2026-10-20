@@ -37,7 +37,8 @@ final class NativePluginMCPToolProvider: MCPExternalToolProvider {
             // One group per plugin, not per open pane: two chats watching two devices offer the
             // same tools, and listing them twice would read as two different capabilities.
             guard seen.insert(identifier).inserted else { return nil }
-            guard let declared = loaded.plugin.pluginTools, !declared.isEmpty else { return nil }
+            let declared = loaded.tools
+            guard !declared.isEmpty else { return nil }
             return MCPExternalToolGroup(
                 id: identifier,
                 title: declared.first?.title ?? identifier,
@@ -83,6 +84,15 @@ final class NativePluginMCPToolProvider: MCPExternalToolProvider {
             ))
             return true
         }
+        guard let declaredTool = match.tools.first(where: {
+            $0.name == parsed.tool
+        }) else {
+            completion(MCPExternalToolResponse(
+                text: "\(parsed.short) does not declare a tool named \(parsed.tool).",
+                isError: true
+            ))
+            return true
+        }
         guard let invoke = match.plugin.invokeTool else {
             completion(MCPExternalToolResponse(
                 text: "\(parsed.short) declares tools but does not implement invocation.",
@@ -90,11 +100,14 @@ final class NativePluginMCPToolProvider: MCPExternalToolProvider {
             ))
             return true
         }
-        // Device Logs opens without its Bluetooth tab, so a capture the agent starts brings that
-        // tab up first; otherwise its packets would be recorded where nobody can see them.
-        if match.plugin.pluginIdentifier == NativePluginCatalog.deviceLogsIdentifier,
-           parsed.tool == NativePluginCatalog.DeviceLogsSection.bluetoothTool {
-            NativePluginRuntime.shared.revealBluetoothLog?(sessionID)
+        if let section = declaredTool.paneSectionToReveal {
+            guard match.controller.revealToolSection(section) else {
+                completion(MCPExternalToolResponse(
+                    text: "\(parsed.short) cannot reveal its \(section) pane section.",
+                    isError: true
+                ))
+                return true
+            }
         }
         // A tool answers when its own work does — a store query completes on the queue that owns
         // the store — so the reply arrives on whatever thread the plugin used. Hop rather than

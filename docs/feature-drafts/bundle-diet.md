@@ -1,7 +1,16 @@
 # Bundle diet: measure, stop the copies, then load features on demand
 
-Status: agreed plan. Step 0 (the size ratchet) is implemented 2026-10-17 and step 1a (the proxy
-helper's source out of the bundle) 2026-10-18; everything after it is not started.
+Status: agreed plan. Step 0 (the size ratchet) is implemented 2026-10-17, step 1a (the proxy
+helper's source out of the bundle) 2026-10-18, and step 1b (one shared plugin runtime)
+2026-10-20. Step 2 now moves T3 Navigator and Device Logs from the notarized release app to
+signed on-demand archives. Both have install rows in Extensions Settings; a first-party pane
+listed in the shared managed-offer catalogue also installs from its own missing-bundle view.
+The pane-section host now shares one plugin instance per bundle and session, with Device Logs as
+its first tenant. First-party section identifiers and titles are declared once in the managed
+offer catalogue and drive panel, dock, drawer and saved-route validation. The Devices pilot has
+moved its Simulator helper into a third on-demand bundle;
+the network proxy helper and setup script now live in a fourth.
+Step 1c's matched speed gate rejected `-Osize` for now; the rest of step 3 remains to do.
 Planned: 2026-10-17.
 
 ## The problem
@@ -70,7 +79,7 @@ WebRTC and Sparkle `x86_64`); that is fixed in step 0 and was never the product.
 release does, and appends each build's size to `history.log`. The durable contract is in
 [`releasing.md`](../architecture/releasing.md#the-bundle-size-ratchet).
 
-### 1. Wins that cost no feature (~22 MB of the 63 MB download)
+### 1. Size opportunities that do not remove features
 
 - **a. `ProxySource` out of the bundle** (−16.8 MB compressed) — **implemented 2026-10-18.**
   The helper's dependencies (MIT, BSD, ISC, Apache-2.0, Zlib) require their notices, not their
@@ -81,18 +90,40 @@ release does, and appends each build's size to `history.log`. The durable contra
   chose this over keeping the tree (every download pays) and over waiting for the proxy to become
   an on-demand plugin (step 3). The contract is in
   [`releasing.md`](../architecture/releasing.md#the-proxy-helpers-source).
-- **b. One shared plugin runtime** (−~10 MB on disk, −~4 MB compressed today; every later plugin
-  costs only its own code). Build `ThreadingDesignKit` and its dependency closure as one
-  dynamic framework, embedded in `Contents/Frameworks` and **linked only by plugins**. What
-  [`plugins.md`](../architecture/plugins.md) rejected was linking the kit *into the app*, which
-  makes `Design` exist twice in one module; this never touches the app's compile. To check first:
-  `Seam/HostSeam.swift`'s static state (`ThemeManager`, `AppThemeLibrary`) becomes shared between
-  plugins, which is believed benign because every plugin receives the same encoded theme; the
-  126 host/kit class-name duplicates remain as today. This is the prerequisite for step 3 — without
-  it the program grows the app.
-- **c. `-Osize`** (−19% `__text` measured on 2026-08-22, ~−9 MB on disk today). Still gated on a
-  `scripts/profile_threading.sh full` sweep showing no interaction regression; the decision
-  record's verdict stands, the prize has doubled.
+- **b. One shared plugin runtime — implemented 2026-10-20.** `ThreadingDesignKit` and its
+  statically linked dependency closure are one dynamic framework in `Contents/Frameworks`,
+  linked by both bundled plugins and **not** by the app executable. A separately installed plugin
+  uses the package's static `ThreadingDesignKitStandalone` product so its private Swift ABI travels
+  with that build. The two bundled plugins receive the same encoded theme; a duplicate delivery
+  now posts one shared theme-change notification. Host/kit class-name duplicates remain across
+  two images rather than three. The exported Developer ID archive, thinned to arm64, measured
+  8.96 MB less on disk and 4.04 MB less compressed for DesignKit plus the two plugins than the
+  previous two plugin bundles. The complete app measured 103.42 MB / 42.50 MB, down 8.62 MB /
+  3.90 MB from the step-1a baseline; other app changes between those revisions account for the
+  difference between the two comparisons. The shared 11.22 MB framework is now a fixed cost;
+  each additional bundled plugin pays for its own code and resources. The signing and hosted
+  loading checks passed. See [`plugins.md`](../architecture/plugins.md) for the build boundary.
+- **c. `-Osize`** (−19% `__text` measured on 2026-08-22). A second arm64 Developer ID archive,
+  thinned and exported with `XCODE_XCCONFIG_FILE` forcing `-Osize` for every Swift target, passed
+  `codesign --verify --deep --strict`. Against the step-1b `-O` export its app executable is
+  7,949,056 bytes smaller, DesignKit is 881,104 bytes smaller, Device Logs is 159,744 bytes
+  smaller, and T3 Navigator is 14,576 bytes smaller. The complete app measured 94.22 MB on disk
+  and 40.11 MB compressed, compared with 103.42 / 42.50 MB for the prior export. The whole-bundle
+  comparison also includes a changed helper grouping, so it is not a clean attribution to the
+  flag. **The flag remains off.** Matched `scripts/profile_threading.sh full` interaction
+  sweeps on 2026-10-20 completed against the same source and app-hosted fixtures: 116 ordered
+  `THREADING_PERF` records under each setting, plus a sample and three Instruments traces.
+  Across seven project-sidebar fixture sizes, `-Osize` made tree construction 27% slower,
+  cold reload 24% slower, and same-shape refresh 30% slower at the median. The range for
+  same-shape refresh was 28–32% slower. Settings search stayed effectively even
+  (95.09 versus 95.23 ms), and the median ratio over all timing fields was +1.9%, but the
+  repeated sidebar regression fails the interaction gate. The runs were sequential, so thermal
+  state was not alternated; a later alternating sidebar experiment could reopen the decision.
+  The flag is not enabled in the shipping build.
+  Twelve alternating, fresh-home launches of the two signed exports gave median first-frame times
+  of 996 ms (`-O`) and 1,052 ms (`-Osize`). The paired median difference was +30 ms, with five of
+  twelve pairs faster under `-Osize`; this did not establish an interaction cost. The earlier
+  failed full-sweep attempt was superseded by the completed matched run above.
 
 ### 2. One on-demand install path, built once
 
@@ -114,6 +145,22 @@ record's own reopen condition. Shape:
   [`crash-recovery.md`](../architecture/crash-recovery.md).
 - `Pymobiledevice3Installation.swift` is the in-repo precedent for consent and atomic rollback.
 
+A local release-shaped Developer ID export with both native bundles removed measured **101.21 MB
+on disk / 41.66 MB compressed**, down 2.21 / 0.84 MB from the step-1b baseline. The app's deep
+signature passed; the two separately notarized, stapled archives passed the Swift managed-receipt
+gate against that exact app and its signed manifest. A complete clean-tree release run and remote
+publication have not yet been exercised, so the size baseline stays at the last shipping export.
+The release now stages and removes the export's full native `.bundle` set, resetting stale staged
+copies and refusing a changed set; the next first-party bundle can use the same shipping path.
+The Devices pilot exercised that generic path with three bundles in a local arm64 Developer ID
+archive/export. After staging and removing all three plugins, the app passed deep signature and
+helper-entitlement checks and measured **101.02 MB on disk / 41.59 MB compressed**. The separately
+notarized, stapled Devices archive was 156,570 bytes. A signed manifest admitted it against that
+exact exported host, and the Simulator launcher selected its resolved version path. Changing one
+byte in the nested helper made both the managed receipt and launcher refuse it. This was a local
+release-shaped probe, not a clean-tree release or publication; its size is not a like-for-like
+attribution against the prior export.
+
 ### 3. Move the features that bring a heavy payload with them
 
 One pilot, then by payload:
@@ -127,40 +174,82 @@ One pilot, then by payload:
 3. Smaller: the network proxy (~1 MB of helper now that its source is published separately), Linked Workrooms,
    theme authoring, and the component gallery (~1.5% of the binary, shipped to every user).
 
+The Devices pilot has started: `DevicesPlugin.bundle` now carries the Simulator helper, and the
+app target no longer embeds a second copy. Its managed install offer uses the same signed manifest
+and Settings path as Device Logs and T3. The host verifies the exact managed build and nested
+helper, then launches the resolved version rather than a replaceable symlink. The device panes,
+Android backend and physical-iPhone code still live in the host and remain to be moved.
+
+The network proxy's portable helper and certificate setup script now build into
+`ProxyPlugin.bundle`. The app's direct copies are removed. The host verifies the signed managed
+receipt, nested helper identity and signing team before launching a pinned version path; the host
+still owns capture leases, client consent and CA private keys. The Settings install row uses the
+same release manifest path as the other first-party bundles. A local arm64 Developer ID export
+with all four plugins staged and removed measured **99.95 MB on disk / 41.11 MB compressed**.
+The Proxy archive was separately notarized and stapled, measured **587,923 bytes**, and passed
+the signed-manifest receipt against that exact host. The launcher selected the resolved version's
+helper; changing the signed setup script made both the receipt and launcher reject it. This was a
+local release-shaped probe, not a clean-tree release or remote publication, and its size is not a
+like-for-like attribution against the earlier Devices probe.
+
 Expect 10–15 MB off the main binary in total, plus WebRTC. The boundaries are worth as much as
 the bytes.
 
 ## Growing the extension surface
 
-The moves need seams in the **first-party native tier**, not the public one. A native plugin can
-contribute today: a display-pane tab, pane sections, the workspace navigator, `apply(theme:)`, and
-MCP tools that are offered only while that chat has the pane open; its context is four strings
-(`sessionID`, `projectID`, `projectName`, `checkoutPath`). Device Logs reaches further only
-through branches hard-coded to `deviceLogsIdentifier` (drawer placement, `device_log_prepare`,
-the logs button).
+For each feature, use the public sandboxed extension API when it can meet the feature's
+performance and interaction needs; use the native tier only when it cannot. Features we move to
+native plugins must exercise the **same published PluginKit capabilities that an independently
+authored native plugin can use**. First-party status changes distribution and trust:
+Threading can sign, notarize and offer its own exact-build archives without another approval.
+It must not grant our plugins a private presentation, command or lifecycle API that an approved
+plugin cannot use. Privileged operations remain host-owned and need explicit, capability-scoped
+broker requests rather than a private host object or executable path.
 
-The pilot needs, and so adds: command-registry contributions, Settings pages, MCP tools
-independent of pane visibility, a startup/background lifecycle, a host-services broker
-(session/project reads, notifications), and the drawer as a declared placement. Each replaces a
-hard-coded branch, which is the argument for doing it.
+A native plugin can contribute today: a restorable pane tab in panel, dock or drawer, pane
+sections, the workspace navigator, `apply(theme:)`, and MCP tools that are offered only while
+that chat has the pane open; its context is four strings
+(`sessionID`, `projectID`, `projectName`, `checkoutPath`). A tool can now declare a host-registered
+pane section to reveal before invocation, instead of the MCP router recognizing a particular
+Device Logs tool name. The drawer can retain a verified plugin pane and rebind its callbacks after
+a move. Installed section registration and panel commands now come from versioned plugin metadata
+for both first-party and external bundles. Before installation, Device Logs' stable command
+aliases still come from its managed offer. Contextual panel/drawer routes remain in that offer.
+The device button names
+the Device Logs route and passes its selected device ID; `device_log_prepare` and that button still
+have feature-specific entry points.
 
-These seams stay **internal**: first-party plugins are same-team and lockstep, so the seams can
-change every release and promise nothing to outside authors. The public, stable surface remains
-the safe tier, whose growth is a separate track. The customization audit's "host-only" verdicts
-(simulators, proxy, browser, Usage) are about keeping authority away from untrusted code; a
-signed in-process first-party plugin does not move that authority, so they do not block step 3.
+That is not full parity yet. External plugins can declare separate tabs and commands through
+`ThreadingPaneSections`, and Device Logs is the first bundled consumer. Contextual routes and
+Device Logs' direct host-selected iPhone tool path remain private seams. Threading owns tab
+placement, command identity/conflicts, restore validation and invocation. The first-party offer
+retains the information needed to show an install action **before its bundle exists**; the
+installed declaration must agree with it.
+
+Next, put general native-plugin actions, Settings contributions, pane-independent MCP tools,
+bounded background lifecycle and host services (session/project reads, notifications) behind
+public, versioned contracts with explicit capability and user-approval rules. Build our moved
+features against those contracts and test an independently built plugin with the same declaration.
+An external author also needs an in-app install and update path for a signed, notarized archive;
+the present manual bundle copy does not meet the simple-install goal. The first-party signed
+release manifest and automatic trust remain a distribution policy, not a separate feature API.
+The safe Wasm tier remains the crash-isolated option for untrusted code. The customization audit's
+"host-only" verdicts (simulators, proxy, browser, Usage) keep authority and truth in Threading;
+plugins may request bounded host actions only where the public contract and consent allow it.
 
 ## Non-goals
 
 - Shrinking by deleting features, or by lowering quality (stripping is already complete).
-- Opening the native tier to third parties. It remains first-party; installed third-party
-  bundles keep today's explicit approval.
+- Automatically trusting third-party native code. An external plugin needs explicit approval
+  for the exact build even when it uses the same PluginKit capabilities as Threading's plugins.
 - On-demand Mac resources in general — the decision record's rejection stands for loose files.
 
 ## Evidence that should change this plan
 
-- Step 1b measured: if the shared framework saves materially less than ~10 MB, the per-plugin
-  cost model in step 3 is wrong and has to be re-derived before any feature moves.
+- Step 1b measured: the shared framework saved 8.96 MB on disk and 4.04 MB compressed across
+  the moved components, close to the forecast. Recheck the fixed runtime cost before moving a
+  feature that needs a different dependency closure; a first-party on-demand plugin must be built
+  against the exact host build to use its shared framework.
 - A licensing read that the proxy helper's source must travel inside the bundle after all — then
   the proxy becomes the natural second move in step 3, because the archives move with it.
 - `-Osize` passing the profile sweep changes step 1's total, not its order.

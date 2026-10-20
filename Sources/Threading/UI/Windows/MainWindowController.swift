@@ -1344,9 +1344,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard let self else { return done(.failure(LaunchRecoveryStrings.chatNotCreated)) }
             self.proposeConversationRepair(arguments, for: sessionID, completion: done)
         }
-        NativePluginRuntime.shared.revealBluetoothLog = { [weak self] sessionID in
-            self?.agentToolCoordinator.revealBluetoothLog(for: sessionID)
-        }
         SupervisionActionRegistry.shared.register(.init(
             spawn: { [weak self] plan, brief, sideChatParentID, managerID in
                 guard let self else {
@@ -1707,51 +1704,96 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         DisplayPaneWidth.stored = width
     }
 
-    /// Keeps the live device in the right panel and reveals its one Device Logs reader below it.
-    /// The tab itself moves rather than being copied: a second plugin instance would start a
-    /// second child process against the same firehose and split the session's recorded history.
+    /// The device controls name a first-party route; its declared placement is applied by the
+    /// window that owns the tabs, rather than by the device pane or plugin presentation.
     private func openDeviceLogsInDrawer(for sessionID: SessionID, deviceID: String) {
         guard sessionID == currentSessionID else { return }
+        guard openManagedPluginPane(
+            identifier: NativePluginManagedOffer.deviceLogs.identifier,
+            routeID: NativePluginManagedOffer.DeviceLogsRoute.fromDevice,
+            arguments: ["deviceID": deviceID], for: sessionID
+        ) else { SystemAlert.refuse(); return }
+    }
+
+    /// Opens one declared first-party pane route. An existing tab keeps its chosen dock or drawer;
+    /// otherwise a drawer route moves the panel's new tab, never copies its plugin instance.
+    @discardableResult
+    func openManagedPluginPane(
+        identifier: String,
+        routeID: String,
+        arguments: [String: String],
+        for sessionID: SessionID
+    ) -> Bool {
+        guard sessionID == currentSessionID,
+              let offer = NativePluginManagedOffer.all.first(where: { $0.identifier == identifier }),
+              let route = offer.paneRoute(routeID),
+              let bundleURL = NativePluginCatalog.restoredPaneBundle(
+                identifier: offer.identifier, bundleName: offer.bundleName
+              ) else { return false }
+
+        switch route.placement {
+        case .panel:
+            guard let plugin = displayPaneController.activateNativePlugin(
+                bundleURL: bundleURL, section: route.section, for: sessionID
+            ) else { return false }
+            plugin.activate(arguments: arguments)
+            if displayPaneController.tabs(for: sessionID).contains(where: {
+                guard case .nativePlugin(let candidate) = $0.body else { return false }
+                return candidate === plugin
+            }) {
+                displayPaneController.showSessionTabs(sessionID)
+                setDisplayPaneVisible(true)
+            }
+            return true
+        case .drawer:
+            return openManagedPluginInDrawer(
+                bundleURL: bundleURL, section: route.section,
+                arguments: arguments, for: sessionID
+            )
+        }
+    }
+
+    private func openManagedPluginInDrawer(
+        bundleURL: URL,
+        section: String,
+        arguments: [String: String],
+        for sessionID: SessionID
+    ) -> Bool {
         let drawer = containerViewController.drawerHostController
         for host in workspaceDock.hosts {
             if let existing = host.tabs(for: sessionID).first(where: {
                 if case let .nativePlugin(plugin) = $0.body {
-                    return plugin.bundleURL == NativePluginCatalog.deviceLogsBundle
-                        && plugin.paneSection == NativePluginCatalog.DeviceLogsSection.regular
+                    return plugin.bundleURL == bundleURL && plugin.paneSection == section
                 }
                 return false
             }), case let .nativePlugin(plugin) = existing.body {
-                plugin.activate(arguments: ["deviceID": deviceID])
+                plugin.activate(arguments: arguments)
                 _ = host.activateTab(id: existing.id, for: sessionID)
                 revealBrowserHost(host.hostID, for: sessionID)
-                return
+                return true
             }
         }
 
         if let existing = drawer.tabs(for: sessionID).first(where: {
             guard case .nativePlugin(let plugin) = $0.body else { return false }
-            return plugin.bundleURL == NativePluginCatalog.deviceLogsBundle
-                && plugin.paneSection == NativePluginCatalog.DeviceLogsSection.regular
+            return plugin.bundleURL == bundleURL && plugin.paneSection == section
         }), case .nativePlugin(let plugin) = existing.body {
-            plugin.activate(arguments: ["deviceID": deviceID])
+            plugin.activate(arguments: arguments)
             _ = drawer.activateTab(id: existing.id, for: sessionID)
             containerViewController.openShellDrawer()
-            return
+            return true
         }
 
-        guard let plugin = displayPaneController.activateDeviceLog(for: sessionID) else {
-            SystemAlert.refuse()
-            return
-        }
-        plugin.activate(arguments: ["deviceID": deviceID])
+        guard let plugin = displayPaneController.activateNativePlugin(
+            bundleURL: bundleURL, section: section, for: sessionID
+        ) else { return false }
+        plugin.activate(arguments: arguments)
         guard let tabID = displayPaneController.tabs(for: sessionID).first(where: {
             guard case .nativePlugin(let candidate) = $0.body else { return false }
             return candidate === plugin
-        })?.id else {
-            SystemAlert.refuse()
-            return
-        }
+        })?.id else { return false }
         moveTab(tabID, from: .displayPanel, to: .drawer)
+        return drawer.tabs(for: sessionID).contains { $0.id == tabID }
     }
 
     // MARK: - Header Inset
@@ -3252,6 +3294,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// once, after both panes exist. Finding a browser across those panes is
     /// `browserResolver`'s job, not a hook installed here.
     private func configurePeerTabs(_ source: DisplayPaneController) {
+        source.onNativePluginToolReveal = { [weak self, weak source] sessionID in
+            guard let self, let source else { return }
+            _ = self.agentToolCoordinator.revealBrowserPane(
+                for: sessionID, hostID: source.hostID
+            )
+        }
         source.onOpenDeviceLogs = { [weak self] session, device in
             self?.openDeviceLogsInDrawer(for: session, deviceID: device)
         }
@@ -3327,6 +3375,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         containerViewController.drawerHostController.sessionBrowserCount =
             displayPaneController.sessionBrowserCount
+        containerViewController.drawerHostController.onNativePluginToolReveal = { [weak self] sessionID in
+            _ = self?.agentToolCoordinator.revealBrowserPane(for: sessionID, hostID: .drawer)
+        }
 
         displayPaneController.dragOutDestination = { [weak self] tabID, windowPoint in
             guard let self, let point = screenPoint(windowPoint, in: displayPaneController.view)

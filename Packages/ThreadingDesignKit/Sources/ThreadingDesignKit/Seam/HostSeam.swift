@@ -25,9 +25,16 @@ public enum AppThemePalette {
         return theme
     }
 
-    /// Called by the host when a plugin loads, and again on every theme change.
+    /// Called by the host when a plugin loads, and again on every theme change. Several plugins
+    /// receive the same theme, so only the first delivery needs to notify the shared framework.
     public static func install(_ theme: AppTheme) {
-        storage.lock(); Self.theme = theme; storage.unlock()
+        storage.lock()
+        guard Self.theme != theme else {
+            storage.unlock()
+            return
+        }
+        Self.theme = theme
+        storage.unlock()
         NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
     }
 

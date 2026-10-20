@@ -11,7 +11,7 @@ install review has to say plainly which of the two a thing is.
 ## What you need
 
 This package, and nothing else. `Examples/HelloPanePlugin` is the proof: one dependency, one
-source file, one build command.
+Swift source file, an optional metadata plist, and one build command.
 
 Threading's bundled native plugins additionally link `ThreadingDesignKit` so their rows are drawn
 by the same components as the rest of the window. That package is not published yet, so external
@@ -49,10 +49,43 @@ A host may reveal the same singleton pane again with more specific string argume
 optional `activatePane(context:)` hook when the pane can be re-targeted without rebuilding its view;
 plugins without it keep their existing presentation unchanged.
 
+### Pane sections and commands
+
+Add `ThreadingPaneSections` to a plist and pass it to the build script with `--metadata`. The
+first section uses `makePaneView(context:)`; later sections use the optional
+`makePaneSectionView(identifier:)`. Each section may publish a panel command:
+
+```xml
+<dict>
+  <key>ThreadingPaneSections</key>
+  <dict>
+    <key>schemaVersion</key><integer>1</integer>
+    <key>sections</key><array>
+      <dict>
+        <key>id</key><string>overview</string>
+        <key>title</key><string>Overview</string>
+        <key>command</key><dict>
+          <key>title</key><string>Open overview</string>
+          <key>symbol</key><string>rectangle.grid.1x2</string>
+        </dict>
+      </dict>
+    </array>
+  </dict>
+</dict>
+```
+
+`Examples/HelloPanePlugin/PaneMetadata.plist` is a complete example. A section ID is a stable
+ASCII token containing letters, numbers, `.`, `_` or `-`; it becomes part of the command's
+shortcut identity. The optional command `detail` is shown in the palette. Threading validates
+at most eight sections in a 64 KiB plist, binds the declaration to the signed bundle identity,
+and owns the command shortcut, panel placement and tab restoration. Invalid declarations are
+ignored as a whole. This plist schema is versioned separately from the binary plugin API.
+
 ## Building one
 
 ```sh
-Tools/build-plugin.sh path/to/MyPlugin --identifier com.example.myplugin --install
+Tools/build-plugin.sh path/to/MyPlugin --identifier com.example.myplugin \
+  --metadata path/to/PaneMetadata.plist --install
 ```
 
 Three of the steps it performs are not guessable, and each fails by blaming something else:

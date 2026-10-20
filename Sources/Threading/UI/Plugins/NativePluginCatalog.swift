@@ -27,15 +27,35 @@ enum NativePluginCatalog {
         [PluginLoader.PluginIdentity: VerifiedCandidate] = [:]
     private static var mappedIdentityByPluginIdentifier:
         [String: PluginLoader.PluginIdentity] = [:]
+    private static var crashQuarantinedBuilds: Set<NativePluginLoadQuarantine.Identity> = []
+
+    static func prepareCrashQuarantine(from read: LaunchLedgerRead) {
+        crashQuarantinedBuilds = NativePluginLoadQuarantine.blockedBuilds(in: read)
+    }
+
+    static func isCrashQuarantined(identifier: String, codeKey: String) -> Bool {
+        crashQuarantinedBuilds.contains(.init(identifier: identifier, codeKey: codeKey))
+    }
+
+    /// A retry is an explicit user decision. A completed load writes the matching ledger finish
+    /// and clears the quarantine on the next launch; another crash leaves a new unmatched start.
+    static func retryCrashQuarantined(identifier: String) {
+        crashQuarantinedBuilds = crashQuarantinedBuilds.filter {
+            $0.identifier != identifier
+        }
+    }
 
     struct VerifiedCandidate: @unchecked Sendable {
         let bundle: PluginLoader.VerifiedBundle
         let bundleURL: URL
+        let bundleIdentifier: String
         let isBundled: Bool
+        let isManaged: Bool
     }
 
-    /// Whether an installed plugin may run, which is the user's decision rather than a list of
-    /// teams we happen to trust.
+    /// Whether a manually installed plugin may run, which is the user's decision rather than a
+    /// list of teams we happen to trust. A first-party managed install instead proves its signed
+    /// release manifest, exact host build and notarized code in `verify`.
     ///
     /// It was an allowlist holding Threading's own signing team and nothing else, which meant the
     /// tier was closed by construction: we could ship plugins and nobody else could, and a platform
@@ -49,12 +69,10 @@ enum NativePluginCatalog {
     /// revocable, which is the same shape the device-log tap uses for the same reason.
     static var approvals: NativePluginApprovalStore { .shared }
 
-    /// `~/Library/Application Support/Threading/Plugins`. Bundles are dropped in by hand today;
-    /// an install flow is a later slice and needs its own review copy.
+    /// `~/Library/Application Support/Threading/Plugins`. Manual bundles and atomically
+    /// published first-party symlinks share this one bounded inventory.
     nonisolated static var directory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Threading", isDirectory: true)
-            .appendingPathComponent("Plugins", isDirectory: true)
+        NativePluginManagedPaths.directory
     }
 
     /// The plugins Threading ships inside itself.
@@ -107,18 +125,47 @@ enum NativePluginCatalog {
     /// tool has to mean something specific. That is the remaining first-party coupling in this
     /// tier, and it is a constant rather than a mechanism: nothing here treats the plugin it names
     /// differently from any other, and a third-party plugin reached the same way would work.
-    static let deviceLogsIdentifier = "codes.threading.plugin.devicelogs"
+    nonisolated static let deviceLogsIdentifier = NativePluginManagedOffer.deviceLogs.identifier
+    nonisolated static let t3NavigatorIdentifier = NativePluginManagedOffer.t3Navigator.identifier
 
-    static var deviceLogsBundle: URL? { bundledPlugin(identifier: deviceLogsIdentifier) }
+    nonisolated static func isReservedFirstPartyIdentity(
+        identifier: String,
+        bundleName: String
+    ) -> Bool {
+        NativePluginManagedOffer.all.contains {
+            $0.identifier == identifier || $0.bundleName == bundleName
+        }
+    }
 
-    /// The Device Logs pane's two tabs. They share one plugin instance, its discovery and its
-    /// readers, but each opens on its own command: one action never produces two tabs.
-    enum DeviceLogsSection {
-        static let regular = "regular"
-        static let bluetooth = "bluetooth"
-        /// The plugin tool that starts a packet capture. Its rows appear only in the Bluetooth
-        /// tab, and a plugin cannot ask the host for a tab, so the host opens it before the call.
-        static let bluetoothTool = "bluetooth"
+    /// A stable address even before the on-demand bundle arrives. Its pane presents an install
+    /// state when the link is absent; after activation the same tab can reload at this URL.
+    static var deviceLogsBundle: URL? {
+        bundledPlugin(identifier: deviceLogsIdentifier)
+            ?? directory.appendingPathComponent(
+                NativePluginManagedOffer.deviceLogs.bundleName, isDirectory: true
+            )
+    }
+
+    /// Rebuilds a saved pane route without reading plugin metadata or trusting a saved path.
+    /// The loader checks the bundle's current identity and signature before it maps any code.
+    static func restoredPaneBundle(identifier: String, bundleName: String) -> URL? {
+        guard bundleName.hasSuffix(".bundle"),
+              bundleName == (bundleName as NSString).lastPathComponent else { return nil }
+        if let offer = NativePluginManagedOffer.all.first(where: { $0.identifier == identifier }) {
+            guard bundleName == offer.bundleName else { return nil }
+            // Debug embeds first-party bundles for local tests. Release prunes all of them after
+            // export. Both addresses are fixed by the build, so restoration does no file work.
+            #if DEBUG
+            return Bundle.main.bundleURL.appendingPathComponent(
+                "Contents/PlugIns", isDirectory: true
+            ).appendingPathComponent(offer.bundleName, isDirectory: true)
+            #else
+            return directory.appendingPathComponent(offer.bundleName, isDirectory: true)
+            #endif
+        }
+        guard !isReservedFirstPartyIdentity(identifier: identifier, bundleName: bundleName)
+        else { return nil }
+        return directory.appendingPathComponent(bundleName, isDirectory: true)
     }
 
     /// Whether a bundle is one of ours, and so already covered by the app's signature.
@@ -184,10 +231,40 @@ enum NativePluginCatalog {
             let loader = verifiedBundledLocation
                 ? PluginLoader.sealedByHostBundle()
                 : PluginLoader.signatureAndDecision()
+            let verified = try loader.verify(bundleAt: bundle)
+            let identity = verified.identity
+            guard let bundleIdentifier = identity?.bundleIdentifier
+                ?? Bundle(url: bundle)?.bundleIdentifier else {
+                return .failure(.unreadableBundle(path: bundle.path))
+            }
+            let isManaged = !verifiedBundledLocation && identity.map {
+                NativePluginManagedReceipt.approves(
+                    bundle: bundle,
+                    identifier: $0.bundleIdentifier,
+                    team: $0.team,
+                    codeDirectoryHash: $0.cdHash
+                )
+            } == true
+            if !verifiedBundledLocation, !isManaged,
+               let identifier = identity?.bundleIdentifier,
+               isReservedFirstPartyIdentity(
+                    identifier: identifier, bundleName: bundle.lastPathComponent
+               ) {
+                return .failure(.buildChanged(identifier: identifier))
+            }
+            if !verifiedBundledLocation,
+               NativePluginManagedReceipt.isManagedLocation(bundle),
+               !isManaged {
+                return .failure(.buildChanged(
+                    identifier: identity?.bundleIdentifier ?? bundle.lastPathComponent
+                ))
+            }
             return .success(VerifiedCandidate(
-                bundle: try loader.verify(bundleAt: bundle),
+                bundle: verified,
                 bundleURL: bundle,
-                isBundled: verifiedBundledLocation
+                bundleIdentifier: bundleIdentifier,
+                isBundled: verifiedBundledLocation,
+                isManaged: isManaged
             ))
         } catch let failure as PluginLoadFailure {
             return .failure(failure)
@@ -213,7 +290,10 @@ enum NativePluginCatalog {
     ) -> Result<ThreadingNativePlugin, PluginLoadFailure> {
         do {
             if candidate.isBundled {
-                return .success(try candidate.bundle.load())
+                return .success(try loadGuarded(
+                    identifier: candidate.bundleIdentifier,
+                    codeKey: BuildFingerprint.current.token
+                ) { try candidate.bundle.load() })
             }
             guard let identity = candidate.bundle.identity else {
                 return .failure(.signatureInvalid(status: errSecInvalidData))
@@ -221,11 +301,21 @@ enum NativePluginCatalog {
             if let expectedInstalledIdentity, identity != expectedInstalledIdentity {
                 return .failure(.buildChanged(identifier: identity.bundleIdentifier))
             }
-            guard approvals.decision(for: identity) == true else {
+            guard candidate.isManaged || approvals.decision(for: identity) == true else {
                 return .failure(.notApproved(identifier: identity.bundleIdentifier))
             }
+            let crashKey = NativePluginLoadQuarantine.Identity(
+                identifier: identity.bundleIdentifier, codeKey: identity.cdHash
+            )
+            guard !candidate.isManaged || !crashQuarantinedBuilds.contains(crashKey) else {
+                return .failure(.quarantined(identifier: identity.bundleIdentifier))
+            }
             if let mapped = mappedInstalledCandidates[identity] {
-                return .success(try mapped.bundle.load(approving: { _ in true }))
+                return .success(try loadGuarded(
+                    identifier: identity.bundleIdentifier,
+                    codeKey: identity.cdHash,
+                    tracksCrash: candidate.isManaged || mapped.isManaged
+                ) { try mapped.bundle.load(approving: { _ in true }) })
             }
             if let mappedIdentity = mappedIdentityByPluginIdentifier[identity.bundleIdentifier],
                mappedIdentity != identity {
@@ -241,12 +331,36 @@ enum NativePluginCatalog {
             // construction succeeds or reports a named refusal.
             mappedInstalledCandidates[identity] = candidate
             mappedIdentityByPluginIdentifier[identity.bundleIdentifier] = identity
-            return .success(try candidate.bundle.load(approving: { _ in true }))
+            return .success(try loadGuarded(
+                identifier: identity.bundleIdentifier,
+                codeKey: identity.cdHash,
+                tracksCrash: candidate.isManaged
+            ) { try candidate.bundle.load(approving: { _ in true }) })
         } catch let failure as PluginLoadFailure {
             return .failure(failure)
         } catch {
             return .failure(.unreadableBundle(path: candidate.bundleURL.path))
         }
+    }
+
+    private static func loadGuarded(
+        identifier: String,
+        codeKey: String,
+        tracksCrash: Bool = true,
+        _ construct: () throws -> ThreadingNativePlugin
+    ) throws -> ThreadingNativePlugin {
+        guard tracksCrash else { return try construct() }
+        let identity = NativePluginLoadQuarantine.Identity(
+            identifier: identifier, codeKey: codeKey
+        )
+        guard !crashQuarantinedBuilds.contains(identity) else {
+            throw PluginLoadFailure.quarantined(identifier: identifier)
+        }
+        LaunchLedger.shared.record(.nativePluginLoadStarted, detail: identity.ledgerDetail)
+        defer {
+            LaunchLedger.shared.record(.nativePluginLoadFinished, detail: identity.ledgerDetail)
+        }
+        return try construct()
     }
 
     /// Whether the ground the plugin will draw on is dark.

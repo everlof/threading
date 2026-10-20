@@ -75,11 +75,17 @@ CoreSimulator device                no Simulator.app window required
 ```
 
 The helper speaks a versioned, length-bounded protocol over an inherited Unix socket. It opens no
-listener and accepts no arbitrary executable or path command. The app verifies the embedded
-helper's exact location, signing identifier and team before launch; the helper verifies its direct
-Threading parent and Apple signatures before loading CoreSimulator and the active Xcode's
-SimulatorKit. The hello exchange binds the process to one exact UDID and refuses incompatible
-protocol or private API versions. Extension companions do not gain this authority:
+listener and accepts no arbitrary executable or path command. It now travels in the first-party
+Devices native plugin, which the release delivers on demand. The app accepts its exact path in a
+development bundle or a managed installed version whose signed manifest matches this host. The
+managed bundle receives strict recursive code validation; the helper's signing identity and team
+are checked before launch in either case.
+The resolved version path is used for the process, so an install symlink replacement cannot change
+the executable after admission. Without Devices, the public screenshot fallback remains available
+and Extensions Settings offers installation. The helper verifies its direct Threading parent and
+Apple signatures before loading CoreSimulator and the active Xcode's SimulatorKit. The hello
+exchange binds the process to one exact UDID and refuses incompatible protocol or private API
+versions. Extension companions do not gain this authority:
 safe-extension sandboxing and ExtensionKit v1 remain unchanged.
 
 The default live codec is real-time H.264 through VideoToolbox at 30 fps with two-second keyframes;

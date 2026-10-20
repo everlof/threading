@@ -39,19 +39,22 @@ final class ShellCommandPolicyCorpusTests: XCTestCase {
 
     /// Nothing in the corpus that writes may be admitted. A blunt check on the obvious
     /// destroyers, because the corpus is real and unreviewed — it is a net, not a proof.
+    ///
+    /// Checked on the words that run rather than the text: `rg -n 'curl|URLSession'` is a search
+    /// that mentions `curl`, and a quoted operator no longer refuses it.
     func testNothingDestructiveInTheCorpusIsAdmitted() throws {
         let commands = try Self.realShellCommands()
         try XCTSkipIf(commands.count < 100, "No Codex rollout corpus on this machine")
 
-        let destructive = ["rm ", "rm -", "mv ", "chmod", "chown", "npm i", "cargo build",
-                           "curl", "git commit", "git push", "git checkout", "> ", ">>"]
+        let destructive: Set<String> = ["rm", "mv", "chmod", "chown", "npm", "cargo", "curl"]
+        let writingGit: Set<String> = ["commit", "push", "checkout"]
 
         for command in commands where ShellCommandPolicy.isReadOnly(command) {
-            for marker in destructive {
-                XCTAssertFalse(
-                    command.contains(marker),
-                    "admitted a command containing '\(marker)': \(command)"
-                )
+            for segment in ShellCommandPolicy.segments(ofVettable: command) ?? [] {
+                let words = segment.words
+                XCTAssertFalse(destructive.contains(words[0]), "admitted \(words[0]): \(command)")
+                XCTAssertFalse(words[0] == "git" && words.count > 1 && writingGit.contains(words[1]),
+                               "admitted git \(words[1]): \(command)")
             }
         }
     }

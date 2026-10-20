@@ -31,10 +31,4 @@ extension AgentToolCoordinator {
         }
     }
 
-    /// Opens the Bluetooth tab before the plugin's `bluetooth` tool starts a capture, so the
-    /// packets the agent asked for arrive somewhere the user can watch them.
-    func revealBluetoothLog(for sessionID: SessionID) {
-        displayPaneController.activateBluetoothLog(for: sessionID)
-        revealDisplayPane(for: sessionID)
-    }
 }

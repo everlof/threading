@@ -1,6 +1,6 @@
 import Foundation
 
-/// Receives the host's theme and puts it in force for this process's copy of the design system.
+/// Receives the host's theme and puts it in force for the plugins' shared design framework.
 ///
 /// The host and a plugin each compile their own `AppTheme`, so the value cannot simply be passed:
 /// they are the same source but two types in two binaries. It travels encoded instead, which is

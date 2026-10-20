@@ -86,10 +86,16 @@ after a relaunch registers again where `TriggerRuntime` publishes it. It is drop
 reports the run is no longer active, so a person who keeps working in that chat gets the ordinary
 cards back. `PermissionBroker.decide` asks it before anything else and answers at once:
 allowed with the rule and revision named, or denied with a reason the agent can act on. A command
-line is split the way `ShellCommandPolicy` splits it, and every segment must be read-only or match
-a rule, so a chain cannot carry a second command past a rule naming the first; redirection,
-substitution and backgrounding are refused outright. A call that would raise a macOS permission
-prompt is refused even under full permission, because nobody is there to answer the dialog.
+line is read the way the shell reads it (`ShellWords`): split only at unquoted operators, with
+quotes and escapes removed from arguments. Every segment must be read-only or match a rule, so a
+chain cannot carry a second command past a rule naming the first; unquoted redirection,
+substitution (inside double quotes too), subshells, brace expansion and backgrounding are refused
+outright. The line used to be split at every `|`, `;` and `&` and refused for any `<`, `>` or `$`,
+quoted or not. In a chat that only raised a card; here a refusal is final, and wordy's issue
+triage stopped at needsHuman in 29 of 34 runs (2026-10-06 to 20) on `rg 'a|b'` searches, `jq`
+filters and `check.py 'lastSeen:>…'` lookups that its allow-list named. A call that would raise a
+macOS permission prompt is refused even under full permission, because nobody is there to answer
+the dialog.
 
 The authority is the approved revision, never the project folder: `.claude/settings*.json` can be
 checked into a repository, and letting it decide would let a clone widen what an approved
@@ -402,6 +408,7 @@ daemon reading the spec's run fields as `TriggerProbeRunSpec` (same JSON shape).
 - `UI/Windows/MainWindowTriggerTools.swift` — built-in MCP application actions
 - `Models/AutomationPermissionPolicy.swift` — the unattended permission policy and its rule grammar
 - `Core/Agent/UnattendedRunPermissions.swift` — per-session registration and the broker's decisions
+- `Core/Agent/ShellWords.swift` — a command line read into simple commands and words as the shell reads it
 
 ## Project-owned automations
 

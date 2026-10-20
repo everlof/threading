@@ -11,10 +11,12 @@ let package = Package(
     name: "ThreadingDesignKit",
     platforms: [.macOS(.v13)],
     products: [
-        // Static: a plugin carries its own copy of the design system. The host has one compiled
-        // into the app already, and the two never exchange a component — only an encoded theme —
-        // so there is nothing to share and a self-contained bundle is the simpler artifact.
-        .library(name: "ThreadingDesignKit", targets: ["ThreadingDesignKit"]),
+        // Native plugins share this framework. The app compiles its own design sources and must
+        // only embed this product, never link it into its executable.
+        .library(name: "ThreadingDesignKit", type: .dynamic, targets: ["ThreadingDesignKit"]),
+        // A separately installed plugin cannot assume the host has this exact private Swift ABI.
+        // The standalone recipe keeps its own code until the on-demand path pins plugin builds.
+        .library(name: "ThreadingDesignKitStandalone", type: .static, targets: ["ThreadingDesignKit"]),
         .library(name: "ThreadingDesignKitExample", targets: ["ThreadingDesignKitExample"]),
     ],
     dependencies: [
@@ -30,13 +32,6 @@ let package = Package(
         .package(path: "../Vendor/BorderBeamKit"),
         .package(path: "../Vendor/ThinkingOrbs"),
         .package(path: "../Vendor/LabelMorph"),
-        // The diff/syntax model the app links the same way; Design's syntax roles come from it.
-        // Keep this remote too: a sibling checkout makes clean clones non-reproducible and can
-        // silently override the app's pinned package during Xcode graph resolution.
-        .package(
-            url: "https://github.com/everlof/NativeDiffKit.git",
-            .upToNextMinor(from: "0.1.1")
-        ),
     ],
     targets: [
         .target(
@@ -48,7 +43,6 @@ let package = Package(
                 .product(name: "BorderBeamKit", package: "BorderBeamKit"),
                 .product(name: "ThinkingOrbs", package: "ThinkingOrbs"),
                 .product(name: "LabelMorph", package: "LabelMorph"),
-                .product(name: "NativeDiffCore", package: "NativeDiffKit"),
             ],
             path: "Sources/ThreadingDesignKit",
             swiftSettings: [

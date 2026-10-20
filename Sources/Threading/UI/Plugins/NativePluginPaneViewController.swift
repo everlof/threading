@@ -29,44 +29,164 @@ final class NativePluginPaneViewController: NSViewController {
     private let appEvents = AppEventObservations()
     private let loadPlugin: ((URL) -> Result<ThreadingNativePlugin, PluginLoadFailure>)?
     private let verifyPlugin: VerifyPlugin
-    /// A host-selected capability for the bundled Device Logs tenant. Third-party plugins do not
-    /// receive Threading's managed executable merely because they share this loading tier.
+    private let managedOffer: NativePluginManagedOffer?
+    /// A saved tab can name a different bundle at the same install filename after an update.
+    /// Check its verified identity before the principal class is mapped.
+    private let expectedBundleIdentifier: String?
+    private let expectedInstalledIdentity: PluginLoader.PluginIdentity?
+    /// A host-selected capability for verified first-party Device Logs. Third-party plugins do
+    /// not receive Threading's managed executable merely because they share this loading tier.
     private let managedIPhoneToolPath: String?
     /// Plugin-specific routing attached to the latest reveal. Kept separately from placement so
     /// changing a target cannot rewrite the session/project identity the host owns.
     private var activationArguments: [String: String]
     private var verifiedCandidate: NativePluginCatalog.VerifiedCandidate?
+    private(set) var verifiedBundleIdentifier: String?
     private var loadTask: Task<Void, Never>?
+    private var onDemandInstallable = false
+    private var isInstallingOnDemand = false
     var onTitleChange: (() -> Void)?
+    /// Installed by the pane host, so a tool reveals its section in the window and dock that
+    /// actually own this loaded plugin instance.
+    var onRevealSection: ((String) -> Bool)?
     private(set) var paneSection: String?
+    private var paneSectionTitle: String?
     private var sectionOwner: NativePluginPaneViewController?
     private var sectionObservers: [UUID: () -> Void] = [:]
+    private var sectionChildren: [UUID: WeakPane] = [:]
     private let sectionObserverID = UUID()
     private var visibilityGeneration = 0
     private final class WeakPane {
         weak var value: NativePluginPaneViewController?
         init(_ value: NativePluginPaneViewController) { self.value = value }
     }
-    private static var deviceLogOwners: [SessionID: WeakPane] = [:]
+    private struct SectionOwnerKey: Hashable {
+        let bundlePath: String
+        let sessionID: SessionID
+        let identity: PluginLoader.PluginIdentity?
+    }
+    private static var sectionOwners: [SectionOwnerKey: WeakPane] = [:]
+    private static var sectionOwnerInsertions = 0
 
-    /// Both stream tabs share the verified plugin instance, registration and capture workspace.
-    static func deviceLogs(bundleURL: URL, sessionID: SessionID, section: String = "regular")
-        -> NativePluginPaneViewController {
-        deviceLogOwners = deviceLogOwners.filter { $0.value.value != nil }
-        let owner: NativePluginPaneViewController
-        if let existing = deviceLogOwners[sessionID]?.value { owner = existing }
-        else {
-            owner = NativePluginPaneViewController(bundleURL: bundleURL, owningSessionID: sessionID,
-                managedIPhoneToolPath: Pymobiledevice3ManagedTool.executable().path,
-                activationArguments: ["hostPaneSections": "true", "stream": "regular"])
-            owner.paneSection = "regular"
-            deviceLogOwners[sessionID] = WeakPane(owner)
+    /// Resolves signed static metadata from the worker's cache without inspecting a bundle on main.
+    static func forBundle(
+        _ bundleURL: URL,
+        sessionID: SessionID,
+        section: String? = nil,
+        expectedIdentifier: String? = nil
+    ) -> NativePluginPaneViewController? {
+        if let pane = CommandRegistry.shared.nativePluginPane(at: bundleURL) {
+            let selected = section ?? pane.primarySection
+            guard pane.contains(selected) else { return nil }
+            let managedSections = NativePluginManagedOffer.paneOffer(at: bundleURL)?.paneSections ?? []
+            let titles = Dictionary(uniqueKeysWithValues: pane.sections.map { declared in
+                let localizedKey = managedSections.first {
+                    $0.identifier == declared.identifier
+                }?.titleKey
+                return (declared.identifier, localizedKey.map { L10n.string($0) } ?? declared.title)
+            })
+            return sectioned(
+                bundleURL: bundleURL, sessionID: sessionID, section: selected,
+                primarySection: pane.primarySection, titles: titles,
+                managedIPhoneToolPath: pane.pluginIdentifier == NativePluginManagedOffer.deviceLogs.identifier
+                    ? Pymobiledevice3ManagedTool.executable().path : nil,
+                expectedBundleIdentifier: expectedIdentifier ?? pane.pluginIdentifier,
+                expectedInstalledIdentity: pane.verifiedInstalledIdentity
+            )
         }
-        guard section == "bluetooth" else { return owner }
-        let sibling = NativePluginPaneViewController(bundleURL: bundleURL, owningSessionID: sessionID)
-        sibling.paneSection = "bluetooth"
+        let managedOffer = NativePluginManagedOffer.paneOffer(at: bundleURL)
+        if managedOffer?.paneSections.isEmpty == false,
+           CommandRegistry.shared.hasScannedNativePlugin(at: bundleURL) {
+            return nil // Installed first-party sections must agree with their signed declaration.
+        }
+        guard let offer = managedOffer,
+              let primarySection = offer.primaryPaneSection else {
+            guard section == nil else { return nil }
+            return NativePluginPaneViewController(
+                bundleURL: bundleURL, owningSessionID: sessionID,
+                expectedBundleIdentifier: expectedIdentifier
+            )
+        }
+        let selectedSection = section ?? primarySection
+        guard offer.containsPaneSection(selectedSection) else { return nil }
+        let titles = Dictionary(uniqueKeysWithValues: offer.paneSections.map {
+            ($0.identifier, $0.title)
+        })
+        return sectioned(
+            bundleURL: bundleURL,
+            sessionID: sessionID,
+            section: selectedSection,
+            primarySection: primarySection,
+            titles: titles,
+            managedIPhoneToolPath: offer.identifier == NativePluginManagedOffer.deviceLogs.identifier
+                ? Pymobiledevice3ManagedTool.executable().path : nil,
+            expectedBundleIdentifier: expectedIdentifier ?? offer.identifier
+        )
+    }
+
+    /// Sections of one pane share the verified plugin instance and its live resources. The host
+    /// supplies their visible names; the plugin supplies the views behind the section ids.
+    static func sectioned(
+        bundleURL: URL,
+        sessionID: SessionID,
+        section: String,
+        primarySection: String,
+        titles: [String: String],
+        managedIPhoneToolPath: String? = nil,
+        expectedBundleIdentifier: String? = nil,
+        expectedInstalledIdentity: PluginLoader.PluginIdentity? = nil
+    ) -> NativePluginPaneViewController {
+        // Session count is unbounded. Reap dead weak entries in batches rather than walking the
+        // whole owner table whenever a user opens another section tab.
+        if sectionOwnerInsertions >= 64 {
+            sectionOwners = sectionOwners.filter { $0.value.value != nil }
+            sectionOwnerInsertions = 0
+        }
+        let key = SectionOwnerKey(
+            bundlePath: bundleURL.standardizedFileURL.path,
+            sessionID: sessionID,
+            identity: expectedInstalledIdentity
+        )
+        let selectedSection = titles[section] == nil ? primarySection : section
+        let owner: NativePluginPaneViewController
+        if let existing = sectionOwners[key]?.value {
+            owner = existing
+        } else {
+            var arguments = ["hostPaneSections": "true"]
+            if managedIPhoneToolPath != nil { arguments["stream"] = primarySection }
+            owner = NativePluginPaneViewController(bundleURL: bundleURL, owningSessionID: sessionID,
+                managedIPhoneToolPath: managedIPhoneToolPath,
+                expectedBundleIdentifier: expectedBundleIdentifier,
+                expectedInstalledIdentity: expectedInstalledIdentity,
+                activationArguments: arguments)
+            owner.paneSection = primarySection
+            owner.paneSectionTitle = titles[primarySection]
+            sectionOwners[key] = WeakPane(owner)
+            sectionOwnerInsertions += 1
+        }
+        guard selectedSection != primarySection else { return owner }
+        let sibling = NativePluginPaneViewController(
+            bundleURL: bundleURL, owningSessionID: sessionID,
+            expectedBundleIdentifier: expectedBundleIdentifier,
+            expectedInstalledIdentity: expectedInstalledIdentity
+        )
+        sibling.paneSection = selectedSection
+        sibling.paneSectionTitle = titles[selectedSection]
         sibling.sectionOwner = owner
+        owner.sectionChildren[sibling.sectionObserverID] = WeakPane(sibling)
         return sibling
+    }
+
+    /// A section can be docked elsewhere while its shared owner keeps the plugin loaded. Route a
+    /// tool to that section's actual tab host, falling back to the owner's host for a new tab.
+    func revealToolSection(_ identifier: String) -> Bool {
+        let owner = sectionOwner ?? self
+        if let sibling = owner.sectionChildren.values.first(where: {
+            $0.value?.paneSection == identifier
+        })?.value {
+            return sibling.onRevealSection?(identifier) == true
+        }
+        return owner.onRevealSection?(identifier) == true
     }
 
     override func viewDidAppear() {
@@ -91,6 +211,8 @@ final class NativePluginPaneViewController: NSViewController {
         guard let owner = sectionOwner, let paneSection else { return }
         loaded = owner.loaded
         refusal = owner.refusal
+        onDemandInstallable = owner.onDemandInstallable
+        isInstallingOnDemand = owner.isInstallingOnDemand
         view.subviews.forEach { $0.removeFromSuperview() }
         if let pane = loaded?.makePaneSectionView?(identifier: paneSection) {
             install(pane)
@@ -103,11 +225,14 @@ final class NativePluginPaneViewController: NSViewController {
     /// than pointing at a path.
     var pluginIdentifier: String? { loaded?.pluginIdentifier }
 
+    /// A signed static declaration can persist its route before the pane maps plugin code.
+    var declaredBundleIdentifier: String? { expectedBundleIdentifier }
+
     /// What the tab calls it. Verified bundle metadata replaces the filename once inspection
     /// finishes, so a refusal is still named without rereading a mutable install path on main.
     var displayName: String {
-        if let paneSection { return L10n.string(paneSection == "bluetooth" ? "Bluetooth" : "Device Logs") }
-        return verifiedCandidate?.bundle.displayName ?? L10n.string("Plugin")
+        if let paneSectionTitle { return paneSectionTitle }
+        return verifiedCandidate?.bundle.displayName ?? managedOffer?.name ?? L10n.string("Plugin")
     }
 
     struct ApprovalRequest: Equatable {
@@ -135,6 +260,8 @@ final class NativePluginPaneViewController: NSViewController {
         bundleURL: URL,
         owningSessionID: SessionID?,
         managedIPhoneToolPath: String? = nil,
+        expectedBundleIdentifier: String? = nil,
+        expectedInstalledIdentity: PluginLoader.PluginIdentity? = nil,
         activationArguments: [String: String] = [:],
         resolveStore: @escaping () -> ProjectStore? = { ProjectStore.shared },
         loadPlugin: ((URL) -> Result<ThreadingNativePlugin, PluginLoadFailure>)? = nil,
@@ -147,7 +274,10 @@ final class NativePluginPaneViewController: NSViewController {
     ) {
         self.bundleURL = bundleURL
         self.owningSessionID = owningSessionID
+        self.managedOffer = NativePluginManagedOffer.at(bundleURL)
         self.managedIPhoneToolPath = managedIPhoneToolPath
+        self.expectedBundleIdentifier = expectedBundleIdentifier
+        self.expectedInstalledIdentity = expectedInstalledIdentity
         self.activationArguments = activationArguments
         self.resolveStore = resolveStore
         self.loadPlugin = loadPlugin
@@ -169,6 +299,7 @@ final class NativePluginPaneViewController: NSViewController {
                 loaded?.setPaneSectionPresented?(identifier: paneSection, presented: false)
             }
             sectionOwner?.sectionObservers.removeValue(forKey: sectionObserverID)
+            sectionOwner?.sectionChildren.removeValue(forKey: sectionObserverID)
             NativePluginRuntime.shared.deregister(self)
         }
     }
@@ -196,11 +327,16 @@ final class NativePluginPaneViewController: NSViewController {
 
         let bundleURL = bundleURL
         let verifyPlugin = verifyPlugin
+        let managedOffer = managedOffer
         loadTask = Task { [weak self] in
-            let verification = await Task.detached(priority: .userInitiated) {
-                verifyPlugin(bundleURL)
+            let (canInstall, verification) = await Task.detached(priority: .userInitiated) {
+                (
+                    Self.canInstallOnDemand(at: bundleURL, offer: managedOffer),
+                    verifyPlugin(bundleURL)
+                )
             }.value
             guard let self, !Task.isCancelled else { return }
+            onDemandInstallable = canInstall
             switch verification {
             case .failure(let failure):
                 finish(.failure(failure))
@@ -211,7 +347,17 @@ final class NativePluginPaneViewController: NSViewController {
     }
 
     private func load(_ candidate: NativePluginCatalog.VerifiedCandidate) {
-        let previousDisplayName = displayName
+        if let expectedBundleIdentifier,
+           candidate.bundleIdentifier != expectedBundleIdentifier {
+            finish(.failure(.buildChanged(identifier: expectedBundleIdentifier)))
+            return
+        }
+        if let expectedInstalledIdentity,
+           candidate.bundle.identity != expectedInstalledIdentity {
+            finish(.failure(.buildChanged(identifier: expectedBundleIdentifier ?? bundleURL.lastPathComponent)))
+            return
+        }
+        verifiedBundleIdentifier = candidate.bundleIdentifier
         let result = NativePluginCatalog.load(candidate)
 
         // Mapping reserves one canonical candidate for an installed identity. Reopened panes may
@@ -227,8 +373,10 @@ final class NativePluginPaneViewController: NSViewController {
         } else {
             verifiedCandidate = nil
         }
-        if displayName != previousDisplayName { onTitleChange?() }
         finish(result)
+        // A manual plugin has no trusted identifier to persist until verification finishes.
+        // Notify the host even for an approval refusal whose visible title stayed the same.
+        onTitleChange?()
     }
 
     private func requiresApproval(
@@ -305,8 +453,18 @@ final class NativePluginPaneViewController: NSViewController {
     /// handed the project folder would read the wrong tree for every draft-worktree session, which
     /// presents as stale content rather than as a wrong path.
     private func placement() -> NativePluginPlacement {
+        let toolPath: String?
+        if let candidate = verifiedCandidate,
+           candidate.isBundled || candidate.isManaged,
+           (candidate.bundle.identity?.bundleIdentifier
+                ?? Bundle(url: candidate.bundleURL)?.bundleIdentifier)
+                == NativePluginCatalog.deviceLogsIdentifier {
+            toolPath = managedIPhoneToolPath
+        } else {
+            toolPath = nil
+        }
         guard let owningSessionID else {
-            return NativePluginPlacement(pymobiledevice3Path: managedIPhoneToolPath)
+            return NativePluginPlacement(pymobiledevice3Path: toolPath)
         }
         let store = resolveStore()
         let project = store?.project(forSessionID: owningSessionID)
@@ -315,7 +473,7 @@ final class NativePluginPaneViewController: NSViewController {
             projectID: project?.id,
             projectName: project?.name,
             checkoutPath: store?.workingDirectory(forSessionID: owningSessionID),
-            pymobiledevice3Path: managedIPhoneToolPath
+            pymobiledevice3Path: toolPath
         )
     }
 
@@ -331,10 +489,20 @@ final class NativePluginPaneViewController: NSViewController {
     }
 
     private func refusalView(_ failure: PluginLoadFailure) -> NSView {
-        let label = NSTextField(wrappingLabelWithString: L10n.format(
-            "This plugin was not loaded: %@",
-            failure.description
-        ))
+        let offer = managedOffer
+        let canInstall = onDemandInstallable && Self.isRepairableInstallFailure(failure)
+        let message: String
+        if onDemandInstallable, let offer, case .quarantined = failure {
+            message = L10n.format("%@ is paused after a crash while loading.", offer.name)
+        } else if canInstall, let offer {
+            message = L10n.format(
+                "%@ is available as a download or update of about %@.",
+                offer.name, offer.approximateDownloadSize
+            )
+        } else {
+            message = L10n.format("This plugin was not loaded: %@", failure.description)
+        }
+        let label = NSTextField(wrappingLabelWithString: message)
         label.alignment = .center
         label.textColor = Design.Text.secondary
         label.applyFont(.detail())
@@ -352,7 +520,34 @@ final class NativePluginPaneViewController: NSViewController {
         // A gate with nothing that opens it is a locked door. "Not approved" is the one refusal the
         // user can answer, so it is the one that comes with a way to answer it — here, where they
         // are already looking, rather than in a settings page they would have to be told about.
-        if case .notApproved = failure {
+        if case .quarantined = failure {
+            let retry = ThemedButton()
+            retry.title = L10n.string("Retry This Plugin")
+            retry.emphasis = .primary
+            retry.target = self
+            retry.action = #selector(retryCrashQuarantinedPlugin)
+            retry.translatesAutoresizingMaskIntoConstraints = false
+            host.addSubview(retry)
+            NSLayoutConstraint.activate([
+                retry.topAnchor.constraint(equalTo: label.bottomAnchor, constant: Design.Spacing.medium),
+                retry.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            ])
+        } else if canInstall, let offer {
+            let install = ThemedButton()
+            install.title = isInstallingOnDemand
+                ? L10n.string("Installing…")
+                : L10n.format("Install %@…", offer.name)
+            install.isEnabled = !isInstallingOnDemand
+            install.emphasis = .primary
+            install.target = self
+            install.action = #selector(installOnDemandPlugin)
+            install.translatesAutoresizingMaskIntoConstraints = false
+            host.addSubview(install)
+            NSLayoutConstraint.activate([
+                install.topAnchor.constraint(equalTo: label.bottomAnchor, constant: Design.Spacing.medium),
+                install.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            ])
+        } else if case .notApproved = failure {
             let allow = ThemedButton()
             allow.title = L10n.string("Allow This Plugin…")
             allow.emphasis = .primary
@@ -366,6 +561,76 @@ final class NativePluginPaneViewController: NSViewController {
             ])
         }
         return host
+    }
+
+    private nonisolated static func isRepairableInstallFailure(_ failure: PluginLoadFailure) -> Bool {
+        switch failure {
+        case .unreadableBundle, .signatureInvalid, .buildChanged:
+            return true
+        case .noPrincipalClass, .wrongProtocol, .apiVersionMismatch, .capabilityUnavailable,
+                .notApproved, .quarantined:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    private nonisolated static func canInstallOnDemand(
+        at bundleURL: URL,
+        offer: NativePluginManagedOffer?
+    ) -> Bool {
+        guard offer != nil else { return false }
+        if NativePluginManagedPaths.ownedVersion(
+            for: bundleURL, in: NativePluginManagedPaths.directory
+        ) != nil { return true }
+        return !FileManager.default.fileExists(atPath: bundleURL.path)
+            && (try? FileManager.default.destinationOfSymbolicLink(
+                atPath: bundleURL.path
+            )) == nil
+    }
+
+    @objc private func retryCrashQuarantinedPlugin() {
+        let owner = sectionOwner ?? self
+        guard case .quarantined(let identifier) = owner.refusal else { return }
+        NativePluginCatalog.retryCrashQuarantined(identifier: identifier)
+        owner.reloadPresentation()
+    }
+
+    @objc private func installOnDemandPlugin() {
+        let owner = sectionOwner ?? self
+        guard owner.onDemandInstallable,
+              let offer = owner.managedOffer,
+              owner.refusal.map(Self.isRepairableInstallFailure) == true,
+              !owner.isInstallingOnDemand else { return }
+        owner.isInstallingOnDemand = true
+        if let refusal = owner.refusal {
+            owner.view.subviews.forEach { $0.removeFromSuperview() }
+            owner.install(owner.refusalView(refusal))
+            owner.sectionObservers.values.forEach { $0() }
+        }
+        Task { @MainActor [weak owner] in
+            do {
+                _ = try await NativePluginManagedInstaller.install(
+                    identifier: offer.identifier
+                )
+                owner?.isInstallingOnDemand = false
+                owner?.reloadPresentation()
+            } catch {
+                guard let owner else { return }
+                owner.isInstallingOnDemand = false
+                if let refusal = owner.refusal {
+                    owner.view.subviews.forEach { $0.removeFromSuperview() }
+                    owner.install(owner.refusalView(refusal))
+                    owner.sectionObservers.values.forEach { $0() }
+                }
+                if let window = owner.view.window {
+                    let alert = ThemedAlert(error: error)
+                    alert.messageText = L10n.format("Couldn’t Install %@", offer.name)
+                    alert.informativeText = error.localizedDescription
+                    alert.beginSheetModal(for: window)
+                }
+            }
+        }
     }
 
     /// Asks, records, and reloads if the answer was yes.

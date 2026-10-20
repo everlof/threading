@@ -76,9 +76,10 @@ final class ProxyCaptureTests: XCTestCase {
 
     @MainActor
     func testBundledHelperCapturesRealHTTPAndKeepsSessionsSeparate() async throws {
-        let configuration = ProxyProcess.Configuration.bundled
-        let service = ProxyCaptureService(configuration: .init(executable: configuration.executable, setupScript: configuration.setupScript,
-            temporaryRoot: FileManager.default.temporaryDirectory, authority: { throw ProxyProcess.Failure.message("HTTP capture must not access Keychain") }), center: NotificationCenter())
+        let configuration = ProxyProcess.Configuration.bundled.withAuthority {
+            throw ProxyProcess.Failure.message("HTTP capture must not access Keychain")
+        }
+        let service = ProxyCaptureService(configuration: configuration, center: NotificationCenter())
         defer { service.stopAll() }
         let owner = SessionID(), other = SessionID()
         let started = await service.call(.start(TrafficStartArguments(hosts: [], bodyLimit: 65536, upstreamCA: nil, listenAddress: "127.0.0.1", clientAddress: "127.0.0.1")), for: owner)
@@ -115,10 +116,9 @@ final class ProxyCaptureTests: XCTestCase {
 
     @MainActor
     func testBundledTLSHelperAcceptsHostIssuedLeavesAndExportsOnlyPublicMaterial() async throws {
-        let bundled = ProxyProcess.Configuration.bundled
+        let bundled = ProxyProcess.Configuration.bundled.withAuthority { try Self.authority() }
         let center = NotificationCenter()
-        let service = ProxyCaptureService(configuration: .init(executable: bundled.executable, setupScript: bundled.setupScript,
-            temporaryRoot: FileManager.default.temporaryDirectory, authority: { try Self.authority() }), center: center)
+        let service = ProxyCaptureService(configuration: bundled, center: center)
         defer { service.stopAll() }
         let owner = SessionID()
         let started = try Self.object(await service.call(.start(TrafficStartArguments(hosts: ["localhost", "127.0.0.1"], bodyLimit: nil, upstreamCA: nil)), for: owner))
@@ -129,8 +129,13 @@ final class ProxyCaptureTests: XCTestCase {
         let path = try XCTUnwrap(cert["certificate_path"] as? String)
         let directory = URL(fileURLWithPath: path).deletingLastPathComponent()
         let profile = try XCTUnwrap(cert["profile_path"] as? String)
-        // The trust command handed to the agent runs a script the bundle has to carry.
+        // The trust command keeps a verified script with this capture, even if the installed
+        // plugin version is replaced before the agent runs it.
         let setupScript = try XCTUnwrap((cert["macos_setup_argv"] as? [String])?.dropFirst().first)
+        XCTAssertEqual(
+            URL(fileURLWithPath: setupScript).deletingLastPathComponent().resolvingSymlinksInPath(),
+            directory.resolvingSymlinksInPath()
+        )
         let inspection = try await Task.detached {
             (try FileManager.default.contentsOfDirectory(atPath: directory.path),
              (try PropertyListSerialization.propertyList(from: Data(contentsOf: URL(fileURLWithPath: profile)), format: nil) as? [String: Any])?["PayloadType"] as? String,
@@ -138,7 +143,7 @@ final class ProxyCaptureTests: XCTestCase {
         }.value
         XCTAssertFalse(inspection.0.contains { $0.hasSuffix(".key") })
         XCTAssertEqual(inspection.1, "Configuration")
-        XCTAssertTrue(inspection.2, "\(setupScript) is not in the bundle")
+        XCTAssertTrue(inspection.2, "\(setupScript) is not readable")
         center.post(SessionArchivedStateDidChange(sessionID: owner, isArchived: true))
         let status = try Self.object(await service.call(.status, for: owner))
         XCTAssertEqual(status["capture"] as? String, "not_started")

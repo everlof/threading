@@ -5,6 +5,101 @@ import XCTest
 
 @MainActor
 final class BrowserAnnotationEditingTests: XCTestCase {
+    func testAgentInteractionsKeepVisiblePageContentInPlace() throws {
+        let (browser, host, window) = try fixture(width: 760)
+        defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }
+        try installOverflowPage(browser)
+
+        let clicked = try performBrowserAction {
+            try await browser.agentClick(ref: nil, selector: "#visible-action")
+        }
+        XCTAssertTrue(clicked.ok, clicked.message)
+        try assertOverflowPageHasNotMoved(browser)
+
+        let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] ?? NSTemporaryDirectory())
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try writeImage(host.view, browser: browser, to: directory.appendingPathComponent("browser-agent-visible-target.png"))
+
+        _ = try script(browser, "document.querySelector('#page').scrollTo(0, 0); window.scrollTo(0, 0)")
+        let typed = try performBrowserAction {
+            try await browser.agentType(
+                ref: nil, selector: "#visible-input", text: "Ada", slowly: false, submit: false
+            )
+        }
+        XCTAssertTrue(typed.ok, typed.message)
+        try assertOverflowPageHasNotMoved(browser)
+
+        _ = try script(browser, "document.querySelector('#page').scrollTo(0, 0); window.scrollTo(0, 0)")
+        let checked = try performBrowserAction {
+            try await browser.agentSetChecked(ref: nil, selector: "#visible-check", checked: true)
+        }
+        XCTAssertTrue(checked.ok, checked.message)
+        try assertOverflowPageHasNotMoved(browser)
+    }
+
+    func testAgentInteractionStillRevealsAnOffscreenTargetInNestedOverflow() throws {
+        let (browser, _, window) = try fixture(width: 760)
+        defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }
+        try installOverflowPage(browser)
+        let clicked = try performBrowserAction {
+            try await browser.agentClick(ref: nil, selector: "#offscreen-action")
+        }
+        XCTAssertTrue(clicked.ok, clicked.message)
+        XCTAssertEqual(try script(browser, "document.body.dataset.clicked") as? String, "offscreen")
+        XCTAssertGreaterThan(try XCTUnwrap(script(browser, "document.querySelector('#page').scrollLeft") as? Double), 0)
+        XCTAssertGreaterThan(try XCTUnwrap(script(browser, "document.querySelector('#page').scrollTop") as? Double), 0)
+    }
+
+    private func performBrowserAction(
+        _ operation: @escaping @MainActor () async throws -> BrowserActionOutcome
+    ) throws -> BrowserActionOutcome {
+        let completed = expectation(description: "agent interaction")
+        var result: Result<BrowserActionOutcome, Error>?
+        let action = Task { @MainActor in
+            do { result = .success(try await operation()) }
+            catch { result = .failure(error) }
+            completed.fulfill()
+        }
+        defer { action.cancel() }
+        // Let the bridge's own deadline produce its diagnostic before the fixture times out.
+        wait(for: [completed], timeout: BrowserDefaults.agentBridgeTimeout + 1)
+        return try XCTUnwrap(result).get()
+    }
+
+    private func installOverflowPage(_ browser: BrowserViewController) throws {
+        // Application shells often clip overflow even though their descendants can scroll it
+        // programmatically. Centering an already-visible control strands the whole page there.
+        _ = try script(browser, """
+            document.body.innerHTML = `
+              <main id="page" style="height:300px;overflow:hidden;padding:0">
+                <section style="position:relative;width:1400px;height:1000px">
+                  <h1 style="position:absolute;left:28px;top:20px">Users and permissions</h1>
+                  <p style="position:absolute;left:28px;top:80px">Keep the page in place while using visible controls.</p>
+                  <button id="visible-action" style="position:absolute;top:170px">Invite user</button>
+                  <input id="visible-input" aria-label="Name" style="position:absolute;top:225px;width:120px">
+                  <input id="visible-check" aria-label="Permission" type="checkbox" style="position:absolute;top:265px">
+                  <button id="offscreen-action" style="position:absolute;left:1100px;top:800px"
+                    onclick="document.body.dataset.clicked='offscreen'">Hidden action</button>
+                </section>
+              </main>`;
+            const page = document.querySelector('#page');
+            for (const id of ['visible-action', 'visible-input', 'visible-check']) {
+              document.getElementById(id).style.left = `${page.clientWidth - 170}px`;
+            }
+            window.scrollTo(0, 0);
+            """)
+    }
+
+    private func assertOverflowPageHasNotMoved(
+        _ browser: BrowserViewController, file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        let offsets = try script(browser, """
+            [document.querySelector('#page').scrollLeft, document.querySelector('#page').scrollTop,
+             window.scrollX, window.scrollY]
+            """) as? [Double]
+        XCTAssertEqual(offsets, [0, 0, 0, 0], "An interaction must not scroll an already-visible control", file: file, line: line)
+    }
+
     func testBrowserCanvasContainmentPreservesThePageScrollPosition() throws {
         let (browser, host, window) = try fixture(width: 760)
         defer { browser.webView.stopLoading(); window.orderOut(nil); window.contentViewController = nil }

@@ -11,6 +11,7 @@ let package = Package(
     products: [
         .library(
             name: "ThreadingExtensionKit",
+            type: .static,
             targets: ["ThreadingExtensionKit"]
         ),
         .plugin(

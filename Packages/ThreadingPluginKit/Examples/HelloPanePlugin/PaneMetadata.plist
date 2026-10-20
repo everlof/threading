@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>ThreadingPaneSections</key>
+    <dict>
+        <key>schemaVersion</key><integer>1</integer>
+        <key>sections</key>
+        <array>
+            <dict>
+                <key>id</key><string>hello</string>
+                <key>title</key><string>Hello</string>
+                <key>command</key>
+                <dict>
+                    <key>title</key><string>Open Hello Pane</string>
+                    <key>symbol</key><string>hand.wave</string>
+                </dict>
+            </dict>
+        </array>
+    </dict>
+</dict>
+</plist>

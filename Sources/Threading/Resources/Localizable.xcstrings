@@ -838,6 +838,17 @@
         }
       }
     },
+    "%@ is available as a download or update of about %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ kan hämtas eller uppdateras (cirka %@)."
+          }
+        }
+      }
+    },
     "%@ is close to its own limit now." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -978,6 +989,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ har slut till %@."
+          }
+        }
+      }
+    },
+    "%@ is paused after a crash while loading." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ pausades efter en krasch vid inläsning."
           }
         }
       }
@@ -5842,6 +5864,17 @@
         }
       }
     },
+    "About %@ download" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ca %@ att hämta"
+          }
+        }
+      }
+    },
     "Abstract contracts are represented by a concrete live example rather than fake controls." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8914,6 +8947,17 @@
         }
       }
     },
+    "Another copy occupies the plugin location" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En annan kopia finns redan på tilläggets plats"
+          }
+        }
+      }
+    },
     "Another host already connects to %@." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8932,6 +8976,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En annan deltagare"
+          }
+        }
+      }
+    },
+    "Another plugin occupies this location. Remove it before installing." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett annat tillägg finns redan på den här platsen. Ta bort det före installationen."
           }
         }
       }
@@ -13702,6 +13757,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kontrollerar start- och viloinställningar…"
+          }
+        }
+      }
+    },
+    "Checking this app version" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollerar den här appversionen"
           }
         }
       }
@@ -19117,6 +19183,28 @@
         }
       }
     },
+    "Couldn’t Install %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att installera %@"
+          }
+        }
+      }
+    },
+    "Couldn’t Install Device Logs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att installera Enhetsloggar"
+          }
+        }
+      }
+    },
     "Couldn’t Move Chat" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21451,6 +21539,39 @@
         }
       }
     },
+    "Device Logs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhetsloggar"
+          }
+        }
+      }
+    },
+    "Device Logs is available as a download or update of about 0.7 MB." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhetsloggar kan hämtas eller uppdateras (cirka 0,7 MB)."
+          }
+        }
+      }
+    },
+    "Device Logs is paused after a crash while loading." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhetsloggar pausades efter en krasch vid inläsning."
+          }
+        }
+      }
+    },
     "Device Options" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21475,6 +21596,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enhetsverktygsfält"
+          }
+        }
+      }
+    },
+    "Device and Bluetooth logs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhets- och Bluetoothloggar"
           }
         }
       }
@@ -21571,6 +21703,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enheten är inte tillgänglig"
+          }
+        }
+      }
+    },
+    "Devices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enheter"
           }
         }
       }
@@ -27739,6 +27882,17 @@
         }
       }
     },
+    "HTTP and TLS traffic capture" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Insamling av HTTP- och TLS-trafik"
+          }
+        }
+      }
+    },
     "HTTPS certificates are not enabled for this tailnet." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29184,6 +29338,17 @@
         }
       }
     },
+    "Included" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingår"
+          }
+        }
+      }
+    },
     "Included extensions could not be read" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29191,6 +29356,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inkluderade tillägg kunde inte läsas"
+          }
+        }
+      }
+    },
+    "Included with Threading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingår i Threading"
           }
         }
       }
@@ -29603,6 +29779,28 @@
         }
       }
     },
+    "Install Device Logs…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera Enhetsloggar…"
+          }
+        }
+      }
+    },
+    "Install Devices in Extensions Settings for live Simulator control." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera Enheter i tilläggsinställningarna för att styra simulatorn direkt."
+          }
+        }
+      }
+    },
     "Install Latest" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29621,6 +29819,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Installera hanterad klient…"
+          }
+        }
+      }
+    },
+    "Install Network Proxy in Extensions Settings to capture traffic." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera Nätverksproxy under Tillägg i inställningarna för att samla in trafik."
           }
         }
       }
@@ -29920,6 +30129,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Installerad på %@."
+          }
+        }
+      }
+    },
+    "Installed for this app version" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installerat för den här appversionen"
           }
         }
       }
@@ -32784,6 +33004,17 @@
         }
       }
     },
+    "Loading a native plugin" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läser in ett inbyggt tillägg"
+          }
+        }
+      }
+    },
     "Loading release notes…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35225,6 +35456,28 @@
         }
       }
     },
+    "Native plugin loaded" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inbyggt tillägg inläst"
+          }
+        }
+      }
+    },
+    "Native plugins" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inbyggda tillägg"
+          }
+        }
+      }
+    },
     "Native session row" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35408,6 +35661,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nätverk"
+          }
+        }
+      }
+    },
+    "Network Proxy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nätverksproxy"
           }
         }
       }
@@ -41658,6 +41922,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pausad"
+          }
+        }
+      }
+    },
+    "Paused after a crash while loading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pausat efter en krasch vid inläsning"
           }
         }
       }
@@ -48178,6 +48453,17 @@
         }
       }
     },
+    "Retry This Plugin" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Försök ladda tillägget igen"
+          }
+        }
+      }
+    },
     "Retry audio capture" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48229,6 +48515,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Försök igen utan att lämna Inställningar. Befintliga startlänkar förses inte med behörighet."
+          }
+        }
+      }
+    },
+    "Retry…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Försök igen…"
           }
         }
       }
@@ -57899,6 +58196,28 @@
         }
       }
     },
+    "T3 Native Threads" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "T3 Native Threads"
+          }
+        }
+      }
+    },
+    "T3 workspace navigator" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "T3-navigator för arbetsytan"
+          }
+        }
+      }
+    },
     "TCC" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60855,6 +61174,17 @@
         }
       }
     },
+    "The download did not match Threading’s signed plugin release." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nedladdningen stämde inte med Threadings signerade tilläggsutgåva."
+          }
+        }
+      }
+    },
     "The download did not match the approved checksum." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -60873,6 +61203,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "De nedladdade Linux-komponenterna är inte de som den här versionen förväntar sig."
+          }
+        }
+      }
+    },
+    "The downloaded plugin could not be unpacked." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att packa upp det hämtade tillägget."
           }
         }
       }
@@ -62355,6 +62696,72 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bilden sparas i projektet under det namn du ger den. Agenten kan senare jämföra sidan mot den."
+          }
+        }
+      }
+    },
+    "The plugin code does not match the signed release manifest." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tilläggets kod stämmer inte med det signerade utgåvemanifestet."
+          }
+        }
+      }
+    },
+    "The plugin download failed. Check your connection and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att hämta tillägget. Kontrollera anslutningen och försök igen."
+          }
+        }
+      }
+    },
+    "The plugin is not signed and notarized by Threading." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillägget är inte signerat och notariserat av Threading."
+          }
+        }
+      }
+    },
+    "The plugin release manifest contains an invalid download." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tilläggsutgåvans manifest innehåller en ogiltig nedladdning."
+          }
+        }
+      }
+    },
+    "The plugin release manifest could not be read." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tilläggsutgåvans manifest kunde inte läsas."
+          }
+        }
+      }
+    },
+    "The plugin release manifest has an invalid signature." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tilläggsutgåvans manifest har en ogiltig signatur."
           }
         }
       }
@@ -64261,6 +64668,17 @@
         }
       }
     },
+    "The verified plugin could not be activated." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det verifierade tillägget kunde inte aktiveras."
+          }
+        }
+      }
+    },
     "The visual subtree is replaced; the surrounding host shell remains native." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -65698,6 +66116,17 @@
         }
       }
     },
+    "This app build does not offer plugin downloads." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här appversionen erbjuder inga nedladdningar av tillägg."
+          }
+        }
+      }
+    },
     "This baseline was captured by the user, so only the user can replace or remove it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -66605,6 +67034,28 @@
         }
       }
     },
+    "This plugin is not available for this app version." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillägget finns inte för den här appversionen."
+          }
+        }
+      }
+    },
+    "This plugin release is for a different app build." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här tilläggsutgåvan hör till en annan appversion."
+          }
+        }
+      }
+    },
     "This plugin was not loaded: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -67263,6 +67714,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading kunde inte bygga GitHub-adressen."
+          }
+        }
+      }
+    },
+    "Threading could not check the plugin’s code requirement." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kunde inte kontrollera tilläggets kodkrav."
           }
         }
       }
@@ -70424,6 +70886,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdatera iPhone-verktyg…"
+          }
+        }
+      }
+    },
+    "Update needed · about %@ download" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdatering krävs · ca %@ att hämta"
           }
         }
       }
@@ -76242,6 +76715,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "iOS-simulator"
+          }
+        }
+      }
+    },
+    "iOS Simulator live control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Livestyrning av iOS-simulatorn"
           }
         }
       }

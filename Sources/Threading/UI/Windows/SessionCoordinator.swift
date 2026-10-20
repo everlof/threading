@@ -1712,7 +1712,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             message: L10n.format("%@ isn’t installed", kind.displayName),
             detail: [
                 L10n.format(
-                    "Threading couldn’t find %@ on your login shell’s PATH.",
+                    "The selected %@ installation is unavailable.",
                     kind.executableName
                 ),
                 L10n.string("Your brief is still here.")

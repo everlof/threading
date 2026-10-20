@@ -371,7 +371,7 @@ final class NativePluginNavigatorRenderTests: HostedStoreTestCase {
         AppThemePalette.set(fixture.theme)
         content.appearance = NSAppearance(named: fixture.appearance)
         // Evidence changes the palette without posting the production theme event. Deliver the
-        // same fresh payload the host sends in production so the plugin's private DesignKit copy
+        // same fresh payload the host sends in production so the plugins' shared DesignKit image
         // installs the exact current theme before either tree is repainted.
         host.loaded?.apply(theme: NativePluginCatalog.theme())
         AppThemeRefresh.repaint(content)

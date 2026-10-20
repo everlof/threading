@@ -16,12 +16,65 @@ it for the tester: what to try, and what is known to be rough. When the stable r
 own section describes the whole change, not the difference since the last beta; nobody on stable
 saw the betas.
 
+## [0.9.0]
+
+### Added
+
+- Install and update supported coding agents directly from Threading, with a managed local
+  installation or your own executable.
+- Install optional Device Logs, Devices, network proxy and T3 Navigator components from
+  Extensions settings. Features you have used fetch their matching components after an update.
+
+### Changed
+
+- A smaller app download shares native plugin libraries and downloads optional components when
+  needed.
+- Updates are available to everyone as soon as they are published, without a phased rollout.
+- Remote Linux host components are refreshed with this release and verified before every future
+  app release.
+
+### Fixed
+
+- Browser actions reveal offscreen controls without unnecessarily scrolling visible page content.
+- Automation command permissions correctly handle quoted and escaped arguments.
+- Remote Claude chats recover expired sign-ins when restarted.
+- Bluetooth profile installation and the Apple sign-in handoff are more reliable.
+- Settings navigation and plugin tabs preserve their layout and saved placement more reliably.
+
 ## [0.8.0]
+
+### Added
+
+- **Develop browser extensions in Threading.** Create a starter extension, build and reload it,
+  inspect its pages and background events, and run declared checks from a Web Extensions tab.
+- **Explore Bluetooth traffic from a connected iPhone.** Capture packets alongside device logs,
+  follow transactions and streams, define app-specific packet formats, and review firmware
+  update timelines.
+- **Open app scenarios across the Simulator workspace.** A project can declare debug app states
+  and step through a flow on its iOS and Android devices together.
+- **Ask people through Linked Workrooms.** With your approval, an agent can invite a named person
+  to answer structured questions; their replies return to the chat as mail. Chats can also hand
+  bounded tasks to nested subagents.
+- Upload files through the browser, choose download destinations, copy a browser screenshot, and
+  open a new browser tab with Command-T.
+
+### Changed
+
+- Select and copy text across messages in a native chat. Give the chat or display panel more
+  space by dragging their divider.
+- Arrange Simulator devices side by side or in nested panes, with actions on each device's own
+  menu. Device Logs and Bluetooth Logs now open as separate tabs.
 
 ### Fixed
 
 - Add Login finds installed agent tools even when the login shell prints a startup greeting or
   defines an alias for the tool.
+- Browser actions and captures continue to work while Threading is hidden. Conversation and
+  workspace panes resize more reliably.
+- Bluetooth captures continue while hidden, log readers stop when Threading quits, and Bluetooth
+  profile downloads recover more reliably.
+- Improved iPhone terminal entry, attachment comparison, and chat controls when using a paired
+  device.
 
 ## [0.7.0]
 

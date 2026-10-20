@@ -587,13 +587,7 @@ actor SimulatorLiveStreamCoordinator: SimulatorLiveStreamCoordinating {
         guard hasCapacity else {
             throw SimulatorLiveStreamError.streamLimit(maximum: maximum)
         }
-        guard let helperURL = SimulatorHelperLocation.bundledExecutable(in: bundle),
-              FileManager.default.isExecutableFile(atPath: helperURL.path) else {
-            throw SimulatorLiveStreamError.helperUnavailable(
-                "This Threading build does not contain the direct Simulator helper."
-            )
-        }
-        try SimulatorHelperTrust.verify(executableURL: helperURL, bundle: bundle)
+        let helperURL = try SimulatorHelperTrust.availableExecutable(in: bundle)
         let developerDirectory = try SimulatorDeveloperDirectory.active()
         let token = try budget.withLock { try $0.reserve() }
         let budget = budget

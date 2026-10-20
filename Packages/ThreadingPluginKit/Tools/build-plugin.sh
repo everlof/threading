@@ -2,7 +2,7 @@
 # Builds a SwiftPM package into a loadable Threading plugin bundle.
 #
 #   build-plugin.sh <package-dir> --identifier <bundle-id> [--identity <codesign-identity>]
-#                                 [--install] [--output <dir>]
+#                                 [--install] [--output <dir>] [--metadata <plist>]
 #
 # The contract in ThreadingPluginKit is not enough on its own to produce a bundle Threading will
 # load. Three of the steps below are not guessable, and each one fails in a way that blames the
@@ -10,10 +10,8 @@
 #
 #   * the product is linked `-bundle`, not as a plain dylib;
 #   * `NSPrincipalClass` names the @objc class, not the Swift type;
-#   * the dependency's install name must be rewritten to the framework the host already has
-#     loaded, or dyld maps a second copy of ThreadingPluginKit — and two @objc protocol
-#     declarations in two images are two protocols, so the host refuses the plugin for not
-#     conforming to a protocol it plainly conforms to.
+#   * the contract's install name must resolve to the framework embedded by the host. A second
+#     copy of ThreadingPluginKit would give the @objc protocol a different identity.
 #
 # Signing defaults to ad-hoc. Threading accepts any valid signature, including ad-hoc, and then
 # asks the user whether to run that particular build; a Developer ID is not a requirement to
@@ -25,12 +23,14 @@ identifier="${PLUGIN_IDENTIFIER:-}"
 identity="${PLUGIN_IDENTITY:--}"
 install=false
 output=""
+metadata=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --identifier) identifier="$2"; shift 2 ;;
         --identity)   identity="$2";   shift 2 ;;
         --output)     output="$2";     shift 2 ;;
+        --metadata)   metadata="$2";   shift 2 ;;
         --install)    install=true;    shift ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
         *)  package="$1"; shift ;;
@@ -76,6 +76,23 @@ cat > "${bundle}/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+if [ -n "${metadata}" ]; then
+    python3 - "${metadata}" "${bundle}/Contents/Info.plist" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as source:
+    additions = plistlib.load(source)
+if "ThreadingPaneSections" not in additions:
+    raise SystemExit("metadata has no ThreadingPaneSections")
+with open(sys.argv[2], "rb") as source:
+    info = plistlib.load(source)
+info["ThreadingPaneSections"] = additions["ThreadingPaneSections"]
+with open(sys.argv[2], "wb") as destination:
+    plistlib.dump(info, destination)
+PY
+fi
 
 codesign -s "${identity}" -f -o runtime --timestamp=none "${bundle}" >/dev/null
 echo "built ${bundle}"

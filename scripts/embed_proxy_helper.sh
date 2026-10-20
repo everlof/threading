@@ -1,11 +1,17 @@
 #!/bin/bash
-# Portable source build, owned by the Xcode application build graph; never downloads sources.
+# Portable source build, owned by the first-party ProxyPlugin target; never downloads sources.
 set -euo pipefail
+: "${TARGET_NAME:?TARGET_NAME must be set by Xcode}"
+if [[ "${TARGET_NAME}" != "ProxyPlugin" ]]; then
+  echo "error: proxy payload must be built inside ProxyPlugin before it is signed" >&2
+  exit 1
+fi
 proxy_source="${SRCROOT}/Targets/ProxyHost"
 proxy_build="${DERIVED_FILE_DIR}/ProxyHost"
 proxy_helpers="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Helpers"
 proxy_resources="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
 proxy_tools="${proxy_resources}/ProxyTools"
+proxy_legal="${proxy_resources}/Legal/ProxyHost"
 proxy_cmake="$(command -v cmake || true)"
 if [[ -z "$proxy_cmake" ]]; then
   for candidate in /opt/homebrew/bin/cmake /usr/local/bin/cmake; do
@@ -29,14 +35,17 @@ if [[ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]]; then
   proxy_identity="${EXPANDED_CODE_SIGN_IDENTITY:--}"
   proxy_entitlements="${SRCROOT}/Targets/ProxyHost/threading-proxyd.entitlements"
   if [[ "$proxy_identity" == "-" ]]; then
-    /usr/bin/codesign --force --sign - --options runtime --entitlements "$proxy_entitlements" "$proxy_helpers/threading-proxyd"
+    /usr/bin/codesign --force --sign - --identifier codes.threading.proxyd --options runtime --entitlements "$proxy_entitlements" "$proxy_helpers/threading-proxyd"
   else
-    /usr/bin/codesign --force --sign "$proxy_identity" --options runtime --timestamp --entitlements "$proxy_entitlements" "$proxy_helpers/threading-proxyd"
+    /usr/bin/codesign --force --sign "$proxy_identity" --identifier codes.threading.proxyd --options runtime --timestamp --entitlements "$proxy_entitlements" "$proxy_helpers/threading-proxyd"
   fi
 fi
-# The one source file the app runs. The helper's corresponding source is published beside every
-# download (scripts/release.sh), and its notices are copied by scripts/embed_legal_notices.sh.
+# The one setup script the host names in its response. The helper's corresponding source is
+# published beside the plugin archive (scripts/release.sh), with notices in both distributions.
 cp "$proxy_source/tools/apple_certificate.py" "$proxy_tools/apple_certificate.py"
-# Builds before 2026-10-18 rsynced the whole source tree here; no phase declares it any more, so an
-# incremental build directory would otherwise keep shipping it.
-rm -rf "$proxy_resources/ProxySource"
+# This plugin is a separate download. Keep the binary's license notices in that archive too,
+# even though the host app also indexes them for its licenses view.
+mkdir -p "$proxy_legal"
+cp "$proxy_source/LICENSE" "$proxy_legal/Threading-GPL-3.0.txt"
+cp "$proxy_source/THIRD_PARTY_NOTICES.md" "$proxy_legal/THIRD_PARTY_NOTICES.md"
+cp "$proxy_source/third_party/licenses/"* "$proxy_legal/"

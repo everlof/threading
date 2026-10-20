@@ -65,9 +65,9 @@ final class ProxyClientApprovalTests: XCTestCase {
 
     func testRememberedClientDoesNotWaitBehindAnotherCapturesPrompt() async throws {
         let store = ProxyClientGrantStore(suiteName: "ProxyApprovalTests.\(UUID().uuidString)")
-        let bundled = ProxyProcess.Configuration.bundled
-        let configuration = ProxyProcess.Configuration(executable: bundled.executable, setupScript: bundled.setupScript,
-            temporaryRoot: bundled.temporaryRoot, authority: { try ProxyCaptureTests.authority() })
+        let configuration = ProxyProcess.Configuration.bundled.withAuthority {
+            try ProxyCaptureTests.authority()
+        }
         let service = ProxyCaptureService(configuration: configuration, center: NotificationCenter(), clientGrants: store)
         defer { service.stopAll() }
         let savedArguments = TrafficStartArguments(hosts: [], bodyLimit: nil, upstreamCA: nil, listenAddress: "127.0.0.1")

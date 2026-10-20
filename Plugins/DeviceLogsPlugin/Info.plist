@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key><string>Device logs</string>
+    <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key><string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>NSPrincipalClass</key><string>DeviceLogsPlugin</string>
+    <key>ThreadingPaneSections</key>
+    <dict>
+        <key>schemaVersion</key><integer>1</integer>
+        <key>sections</key>
+        <array>
+            <dict>
+                <key>id</key><string>regular</string>
+                <key>title</key><string>Device Logs</string>
+                <key>command</key>
+                <dict>
+                    <key>title</key><string>Device logs</string>
+                    <key>symbol</key><string>list.bullet.rectangle</string>
+                </dict>
+            </dict>
+            <dict>
+                <key>id</key><string>bluetooth</string>
+                <key>title</key><string>Bluetooth</string>
+                <key>command</key>
+                <dict>
+                    <key>title</key><string>Bluetooth logs</string>
+                    <key>symbol</key><string>antenna.radiowaves.left.and.right</string>
+                    <key>detail</key><string>Capture a paired iPhone's Bluetooth packets</string>
+                </dict>
+            </dict>
+        </array>
+    </dict>
+</dict>
+</plist>

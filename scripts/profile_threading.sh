@@ -46,6 +46,10 @@
 #
 # `full` covers the routine UI regression sweep. `full+` adds the expensive, system-wide and
 # specialist captures used before release or while investigating a persistent regression.
+# Set THREADING_PROFILE_DERIVED_DATA to reuse one Mac build cache across matched sweeps; keep
+# THREADING_PROFILE_OUTPUT separate so each run retains its own measurements. After a successful
+# manual build-for-testing of that exact source and optimization setting, set
+# THREADING_PROFILE_PREBUILT=1 to skip the full sweep's otherwise redundant build check.
 #
 set -euo pipefail
 
@@ -86,6 +90,122 @@ new_run_directory() {
   mkdir -p "${run_directory}"
   echo "${run_directory}"
 }
+
+# Use one build cache for matched optimization runs when requested. Each run still writes its
+# measurements to a separate timestamped directory; only derived objects are reused.
+profile_derived_data() {
+  local output_directory="$1"
+  printf '%s\n' "${THREADING_PROFILE_DERIVED_DATA:-${output_directory}/derived-data}"
+}
+
+# A full sweep runs many fixtures against one unchanged Mac test bundle. Build it once per
+# sweep, then let each fixture use the same product; a later sweep removes this marker first
+# so a different optimization setting or source revision always gets a fresh build check.
+profile_build_for_testing() {
+  local derived_data="$1"
+  shift
+  local marker="${derived_data}/.threading-profile-full-build-ready"
+  if [[ "${THREADING_PROFILE_BUILD_ONCE:-0}" == 1 && -f "$marker" ]]; then
+    local test_bundle="${derived_data}/Build/Products/Debug/Threading.app/Contents/PlugIns/ThreadingTests.xctest"
+    [[ -d "$test_bundle" ]] || {
+      echo "The full sweep's built test bundle is missing: $test_bundle" >&2
+      return 1
+    }
+    return 0
+  fi
+
+  xcodebuild "$@"
+  if [[ "${THREADING_PROFILE_BUILD_ONCE:-0}" == 1 ]]; then
+    touch "$marker"
+  fi
+}
+
+# Every Mac stress bundle above is built as Debug at an explicit DerivedData path. Asking
+# xcodebuild to rediscover TARGET_BUILD_DIR for each fixture repeats package resolution and can
+# take longer than the measured case itself.
+profile_macos_build_directory() {
+  local directory="$1/Build/Products/Debug"
+  [[ -d "${directory}/Threading.app" ]] || {
+    echo "The built Mac test host is missing: ${directory}/Threading.app" >&2
+    return 1
+  }
+  printf '%s\n' "${directory}"
+}
+
+# The Mac tests are app-hosted (`TEST_HOST=Threading.app`). Running their bundle directly with
+# `xcrun xctest` leaves symbols supplied by the app unresolved (LabelMorph is one example).
+# Xcode's test runner launches the real host, while a per-case xctestrun copy carries the opt-in
+# stress variables that the test plan otherwise sanitizes. The selected XCTest suite is the
+# completion signal: Xcode 26 can linger in post-test teardown after every case has passed.
+profile_run_xctest() (
+  [[ "$1" == -XCTest && "$#" == 3 ]] || {
+    echo "Expected -XCTest, a test identifier and its hosted bundle." >&2
+    return 2
+  }
+  local selector="$2"
+  local test_bundle="$3"
+  local suffix="/Debug/Threading.app/Contents/PlugIns/ThreadingTests.xctest"
+  [[ "${test_bundle}" == *"${suffix}" ]] || {
+    echo "Unexpected Mac test bundle: ${test_bundle}" >&2
+    return 2
+  }
+  local products="${test_bundle%"${suffix}"}"
+  local template
+  template="$(find "${products}" -maxdepth 1 -name 'Threading_Threading-Fast_macosx*.xctestrun' -print -quit)"
+  [[ -f "${template}" ]] || {
+    echo "No hosted xctestrun file in ${products}." >&2
+    return 1
+  }
+
+  local scratch run_config log
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/threading-profile-test.XXXXXX")"
+  run_config="${products}/Threading-profile-$(uuidgen).xctestrun"
+  log="${scratch}/xcodebuild.log"
+  mkdir -p "${scratch}/home"
+  trap 'rm -f "${run_config}"; rm -rf "${scratch}"' EXIT
+  python3 - "${template}" "${run_config}" "${scratch}/home" <<'PY'
+import os
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as source:
+    run = plistlib.load(source)
+target = run["TestConfigurations"][0]["TestTargets"][0]
+environment = target["EnvironmentVariables"]
+environment.update({
+    key: value for key, value in os.environ.items()
+    if key.startswith("THREADING_") and not key.startswith("THREADING_PROFILE_")
+})
+environment["CFFIXED_USER_HOME"] = sys.argv[3]
+with open(sys.argv[2], "wb") as destination:
+    plistlib.dump(run, destination)
+PY
+
+  local selected="${selector/./\/}"
+  timeout -k 5 300 xcodebuild \
+    -xctestrun "${run_config}" \
+    -destination "platform=macOS,arch=$(uname -m)" \
+    -parallel-testing-enabled NO \
+    "-only-testing:${selected}" \
+    test-without-building >"${log}" 2>&1 &
+  local runner=$!
+  while kill -0 "${runner}" 2>/dev/null; do
+    if rg -q "Test Suite 'Selected tests' (passed|failed)" "${log}"; then
+      # The test and its metrics are complete; Xcode may still wait indefinitely for teardown.
+      sleep 1
+      kill -TERM "${runner}" 2>/dev/null || true
+      break
+    fi
+    sleep 1
+  done
+  wait "${runner}" || true
+  cat "${log}"
+  if ! rg -qF "Test Suite 'Selected tests' passed" "${log}" \
+      || ! rg -q 'Executed 1 test, with 0 failures' "${log}"; then
+    echo "The hosted stress test did not pass: ${selector}" >&2
+    return 1
+  fi
+)
 
 capture_sample() {
   local seconds="$1"
@@ -428,7 +548,7 @@ prepare_terminal_wire_mac_host() {
   echo "Building the hosted Mac test bundle for the terminal wire lab…"
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -440,17 +560,7 @@ prepare_terminal_wire_mac_host() {
       build-for-testing
   ) 2>&1 | tee "${build_log}"
 
-  terminal_wire_mac_build_directory="$(
-    xcodebuild \
-      -project "${repository_directory}/Threading.xcodeproj" \
-      -scheme Threading \
-      -configuration Debug \
-      -destination "platform=macOS" \
-      -derivedDataPath "${derived_data}" \
-      -showBuildSettings \
-      -json \
-      | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-  )"
+  terminal_wire_mac_build_directory="$(profile_macos_build_directory "${derived_data}")"
   terminal_wire_mac_app="${terminal_wire_mac_build_directory}/Threading.app"
   terminal_wire_test_bundle="${terminal_wire_mac_app}/Contents/PlugIns/ThreadingTests.xctest"
   [[ -d "${terminal_wire_test_bundle}" ]] || {
@@ -660,7 +770,7 @@ run_remote_conversation_stress() {
   local output_directory="$1"
   local row_override="${2:-}"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   local log="${output_directory}/remote-conversation-stress.log"
   if [[ -n "${row_override}" ]] \
       && { [[ ! "${row_override}" =~ ^[0-9]+$ ]] \
@@ -672,7 +782,7 @@ run_remote_conversation_stress() {
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -684,17 +794,7 @@ run_remote_conversation_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -706,7 +806,7 @@ run_remote_conversation_stress() {
     THREADING_REMOTE_CONVERSATION_STRESS_ROWS="${row_override}" \
     DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.RemoteServerIntegrationTests/testStressRemoteConversationCatchUpWhenEnabled \
         "${test_bundle}"
   ) 2>&1 | tee "${log}"
@@ -727,7 +827,7 @@ run_remote_catalogue_stress() {
   local output_directory="$1"
   local session_override="${2:-}"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   local log="${output_directory}/remote-catalogue-stress.log"
   local overriding_xcconfig
   if [[ -n "${session_override}" ]] \
@@ -748,7 +848,7 @@ run_remote_catalogue_stress() {
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -760,17 +860,7 @@ run_remote_catalogue_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -782,7 +872,7 @@ run_remote_catalogue_stress() {
     THREADING_REMOTE_CATALOGUE_STRESS_SESSIONS="${session_override}" \
     DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.RemoteCatalogueScalingTests/testStressOwnerCatalogueFanoutWhenEnabled \
         "${test_bundle}"
   ) 2>&1 | tee "${log}"
@@ -796,9 +886,9 @@ run_remote_catalogue_stress() {
 prepare_git_stress_bundle() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
 
-  xcodebuild \
+  profile_build_for_testing "${derived_data}" \
     -project Threading.xcodeproj \
     -scheme Threading \
     -testPlan Threading-Fast \
@@ -810,17 +900,7 @@ prepare_git_stress_bundle() {
     build-for-testing
 
   local build_directory
-  build_directory="$(
-    xcodebuild \
-      -project Threading.xcodeproj \
-      -scheme Threading \
-      -configuration Debug \
-      -destination "platform=macOS" \
-      -derivedDataPath "${derived_data}" \
-      -showBuildSettings \
-      -json \
-      | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-  )"
+  build_directory="$(profile_macos_build_directory "${derived_data}")"
   git_stress_app="${build_directory}/Threading.app"
   git_stress_test_bundle="${git_stress_app}/Contents/PlugIns/ThreadingTests.xctest"
   [[ -d "${git_stress_test_bundle}" ]] || {
@@ -843,14 +923,14 @@ run_git_stress() {
     THREADING_GIT_STRESS=1 \
     DYLD_LIBRARY_PATH="${git_stress_app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${git_stress_app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.GitReviewViewTests/testStressLargeFileIndexesWhenEnabled \
         "${git_stress_test_bundle}"
 
     THREADING_GIT_MASSIVE_STRESS=1 \
     DYLD_LIBRARY_PATH="${git_stress_app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${git_stress_app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.GitReviewViewTests/testStressMassiveExpandedFileIndexWhenEnabled \
         "${git_stress_test_bundle}"
   ) 2>&1 | tee "${output_directory}/git-review-stress.log"
@@ -887,7 +967,7 @@ run_git_repository_stress() {
     THREADING_GIT_REPOSITORY_STRESS_RUNS="${runs}" \
     DYLD_LIBRARY_PATH="${git_stress_app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${git_stress_app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.GitReviewViewTests/testStressRealRepositoryWhenEnabled \
         "${git_stress_test_bundle}"
   ) 2>&1 | tee "${output_directory}/git-repository-stress.log"
@@ -896,12 +976,12 @@ run_git_repository_stress() {
 run_tools_settings_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   echo "Running deterministic Tools settings render, disclosure and scroll sweep…"
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -913,17 +993,7 @@ run_tools_settings_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -941,7 +1011,7 @@ run_tools_settings_stress() {
       THREADING_TOOLS_SETTINGS_STRESS_THEME="${theme}" \
       DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.SettingsDisclosureRenderTests/testStressToolsPreferencesWhenEnabled \
           "${test_bundle}"
     done
@@ -950,7 +1020,7 @@ run_tools_settings_stress() {
     THREADING_TOOLS_WEBSITE_ACCESS_STRESS_ORIGINS="${THREADING_TOOLS_WEBSITE_ACCESS_STRESS_ORIGINS:-1000}" \
     DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.SettingsDisclosureRenderTests/testStressToolsWebsiteAccessWhenEnabled \
         "${test_bundle}"
 
@@ -958,7 +1028,7 @@ run_tools_settings_stress() {
     THREADING_TOOLS_BROWSER_SIGN_IN_STRESS_ORIGINS="${THREADING_TOOLS_BROWSER_SIGN_IN_STRESS_ORIGINS:-1000}" \
     DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.SettingsDisclosureRenderTests/testStressToolsBrowserSignInWhenEnabled \
         "${test_bundle}"
   ) 2>&1 | tee "${output_directory}/tools-settings-stress.log"
@@ -967,12 +1037,12 @@ run_tools_settings_stress() {
 run_settings_search_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   echo "Running deterministic settings-search result and query-update sweep…"
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -984,17 +1054,7 @@ run_settings_search_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -1006,7 +1066,7 @@ run_settings_search_stress() {
     THREADING_SETTINGS_SEARCH_STRESS_RESULTS="${THREADING_SETTINGS_SEARCH_STRESS_RESULTS:-2048}" \
     DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.SettingsRowLayoutTests/testStressSettingsSearchResultsWhenEnabled \
         "${test_bundle}"
   ) 2>&1 | tee "${output_directory}/settings-search-stress.log"
@@ -1015,12 +1075,12 @@ run_settings_search_stress() {
 run_extensions_preferences_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   echo "Running deterministic Extensions preferences package-ceiling sweep…"
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -1032,17 +1092,7 @@ run_extensions_preferences_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -1061,7 +1111,7 @@ run_extensions_preferences_stress() {
       THREADING_EXTENSIONS_PREFERENCES_STRESS_THEME="${theme}" \
       DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.ExtensionPackageStoreTests/testStressExtensionsPreferencesWhenEnabled \
           "${test_bundle}"
     done
@@ -1087,7 +1137,7 @@ run_archived_settings_stress() {
       THREADING_ARCHIVED_SETTINGS_STRESS_THEME="${theme}" \
       DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.SettingsDisclosureRenderTests/testStressArchivedPreferencesWhenEnabled \
           "${THREADING_STRESS_TEST_BUNDLE}"
     done
@@ -1097,9 +1147,9 @@ run_archived_settings_stress() {
 build_macos_stress_test_bundle() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
 
-  xcodebuild \
+  profile_build_for_testing "${derived_data}" \
     -project Threading.xcodeproj \
     -scheme Threading \
     -testPlan Threading-Fast \
@@ -1111,17 +1161,7 @@ build_macos_stress_test_bundle() {
     build-for-testing
 
   local build_directory
-  build_directory="$(
-    xcodebuild \
-      -project Threading.xcodeproj \
-      -scheme Threading \
-      -configuration Debug \
-      -destination "platform=macOS" \
-      -derivedDataPath "${derived_data}" \
-      -showBuildSettings \
-      -json \
-      | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-  )"
+  build_directory="$(profile_macos_build_directory "${derived_data}")"
   THREADING_STRESS_APP="${build_directory}/Threading.app"
   THREADING_STRESS_TEST_BUNDLE="${THREADING_STRESS_APP}/Contents/PlugIns/ThreadingTests.xctest"
   [[ -d "${THREADING_STRESS_TEST_BUNDLE}" ]] || {
@@ -1142,7 +1182,7 @@ run_launch_ledger_stress() {
     THREADING_LAUNCH_LEDGER_STRESS=1 \
     DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.LaunchLedgerTests/testStressParserAtRetentionCeilingWhenEnabled \
         "${THREADING_STRESS_TEST_BUNDLE}"
   ) 2>&1 | tee "${log}"
@@ -1167,7 +1207,7 @@ run_project_stats_stress() {
     THREADING_PROJECT_STATS_STRESS_COUNT="${projects}" \
     DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.CodeStatsTests/testStressProjectStatsPersistenceWhenEnabled \
         "${THREADING_STRESS_TEST_BUNDLE}"
   ) 2>&1 | tee "${log}"
@@ -1193,7 +1233,7 @@ run_component_gallery_stress() {
     THREADING_COMPONENT_GALLERY_STRESS=1 \
     DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.ThemedControlTests/testComponentGalleryScrollStress \
         "${THREADING_STRESS_TEST_BUNDLE}"
   ) 2>&1 | tee "${output_directory}/component-gallery-stress.log"
@@ -1210,7 +1250,7 @@ run_agent_work_stress() {
     THREADING_AGENT_WORK_STRESS=1 \
     DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.FileActivityMapTests/testAgentWorkProjectionStressBenchmark \
         "${THREADING_STRESS_TEST_BUNDLE}"
   ) 2>&1 | tee "${output_directory}/agent-work-stress.log"
@@ -1247,7 +1287,7 @@ run_chart_stress() {
       THREADING_CHART_STRESS_STACKED="${stacked}" \
       DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.UsageDashboardPerformanceTests/testStressAgentChartPipelineWhenEnabled \
           "${THREADING_STRESS_TEST_BUNDLE}"
     done
@@ -1297,7 +1337,7 @@ run_changed_files_stress() {
         THREADING_CHANGED_FILES_STRESS_LINES="${lines}" \
         DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
         DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
-          xcrun xctest \
+          profile_run_xctest \
             -XCTest ThreadingTests.ChangedFilesCardTests/testStressChangedFilesCardWhenEnabled \
             "${THREADING_STRESS_TEST_BUNDLE}"
       done
@@ -1334,7 +1374,7 @@ run_extension_ui_stress() {
         THREADING_EXTENSION_UI_STRESS_NODES="${count}" \
         DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
         DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
-          xcrun xctest \
+          profile_run_xctest \
             -XCTest ThreadingTests.ExtensionPanelLayoutTests/testStressExtensionPanelWhenEnabled \
             "${THREADING_STRESS_TEST_BUNDLE}"
       done
@@ -1344,7 +1384,7 @@ run_extension_ui_stress() {
         THREADING_EXTENSION_SETTINGS_STRESS_FIELDS="${count}" \
         DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
         DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
-          xcrun xctest \
+          profile_run_xctest \
             -XCTest ThreadingTests.ExtensionPanelLayoutTests/testStressExtensionSettingsWhenEnabled \
             "${THREADING_STRESS_TEST_BUNDLE}"
       done
@@ -1376,7 +1416,7 @@ run_baseline_library_stress() {
         THREADING_BASELINE_LIBRARY_STRESS_COUNT="${count}" \
         DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
         DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
-          xcrun xctest \
+          profile_run_xctest \
             -XCTest ThreadingTests.BrowserBaselineUITests/testStressBaselineLibraryWhenEnabled \
             "${THREADING_STRESS_TEST_BUNDLE}"
       done
@@ -1392,12 +1432,12 @@ run_conversation_stress() {
     log_name="conversation-massive-stress.log"
   fi
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   echo "Running deterministic ${scale} native-conversation sweep…"
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -1409,17 +1449,7 @@ run_conversation_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -1458,7 +1488,7 @@ run_conversation_stress() {
       THREADING_CONVERSATION_STRESS_TURNS="${turns}" \
       DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.ConversationRenderTests/testStressNativeConversationWhenEnabled \
           "${test_bundle}"
     done
@@ -1468,12 +1498,12 @@ run_conversation_stress() {
 run_conversation_active_turn_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   echo "Running deterministic unfolded active-turn sweep…"
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -1485,17 +1515,7 @@ run_conversation_active_turn_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -1524,7 +1544,7 @@ run_conversation_active_turn_stress() {
       THREADING_CONVERSATION_ACTIVE_TOOLS="${tool_count}" \
       DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.ConversationRenderTests/testStressActiveConversationTurnWhenEnabled \
           "${test_bundle}"
     done
@@ -1534,12 +1554,12 @@ run_conversation_active_turn_stress() {
 run_conversation_residency_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   echo "Running deterministic multi-conversation residency sweep…"
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -1551,17 +1571,7 @@ run_conversation_residency_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -1597,7 +1607,7 @@ run_conversation_residency_stress() {
       THREADING_CONVERSATION_RESIDENCY_SHAPE="${shape}" \
       DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.ConversationRenderTests/testStressConversationResidencyWhenEnabled \
           "${test_bundle}"
     done
@@ -1608,12 +1618,12 @@ run_subagent_stress() {
   local output_directory="$1"
   local transcript_path="${2:-}"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   echo "Running deterministic Subagents-pane sweep…"
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -1625,17 +1635,7 @@ run_subagent_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -1647,7 +1647,7 @@ run_subagent_stress() {
     THREADING_SUBAGENT_STRESS_TRANSCRIPT="${transcript_path}" \
     DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.ConversationRenderTests/testStressSubagentTranscriptWhenEnabled \
         "${test_bundle}"
 
@@ -1655,7 +1655,7 @@ run_subagent_stress() {
     THREADING_SUBAGENT_PERSISTENCE_AGENTS="${THREADING_SUBAGENT_PERSISTENCE_AGENTS:-1000}" \
     DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.ConversationRenderTests/testStressSubagentPersistenceWhenEnabled \
         "${test_bundle}"
   ) 2>&1 | tee "${output_directory}/subagent-stress.log"
@@ -1677,12 +1677,12 @@ run_subagent_stress() {
 run_sidebar_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   echo "Running deterministic project-sidebar sweep…"
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -1694,17 +1694,7 @@ run_sidebar_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -1741,7 +1731,7 @@ run_sidebar_stress() {
       THREADING_SIDEBAR_STRESS_REGISTERED_FACT="${THREADING_SIDEBAR_STRESS_REGISTERED_FACT:-}" \
       DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.SidebarTreeBuilderTests/testStressProjectSidebarWhenEnabled \
           "${test_bundle}"
     done
@@ -1751,12 +1741,12 @@ run_sidebar_stress() {
 run_attachment_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   echo "Running deterministic attachment-scan sweep…"
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -1768,17 +1758,7 @@ run_attachment_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -1796,7 +1776,7 @@ run_attachment_stress() {
       THREADING_TERMINAL_READ_STRESS_ROWS="${rows}" \
       DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.TerminalIncrementalScanTests/testStressTerminalBufferReadWhenEnabled \
           "${test_bundle}"
     done
@@ -1835,7 +1815,7 @@ run_attachment_stress() {
       THREADING_ATTACHMENT_STRESS_PATHS="${paths}" \
       DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.SessionAttachmentStoreTests/testStressAttachmentScanWhenEnabled \
           "${test_bundle}"
     done
@@ -1861,7 +1841,7 @@ run_attachment_format_stress() {
       THREADING_ATTACHMENT_FORMAT_STRESS_KIND="${format}" \
       DYLD_LIBRARY_PATH="${THREADING_STRESS_APP}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${THREADING_STRESS_APP}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.SessionAttachmentsLayoutTests/testStressAttachmentFormatPipelineWhenEnabled \
           "${THREADING_STRESS_TEST_BUNDLE}"
     done
@@ -1871,12 +1851,12 @@ run_attachment_format_stress() {
 run_file_tree_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   echo "Running deterministic file-tree sweep…"
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -1888,17 +1868,7 @@ run_file_tree_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -1949,7 +1919,7 @@ run_file_tree_stress() {
       THREADING_FILE_TREE_STRESS_ENTRIES="${entries}" \
       DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
       DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-        xcrun xctest \
+        profile_run_xctest \
           -XCTest ThreadingTests.FileTreeViewTests/testStressFileTreeWhenEnabled \
           "${test_bundle}"
     done
@@ -1960,7 +1930,7 @@ run_window_resize_stress() {
   local output_directory="$1"
   local scale="${2:-routine}"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   local log_name="window-resize-stress.log"
   if [[ "${scale}" == "history-heavy" ]]; then
     log_name="window-resize-history-heavy-stress.log"
@@ -1969,7 +1939,7 @@ run_window_resize_stress() {
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -1981,17 +1951,7 @@ run_window_resize_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -2010,7 +1970,7 @@ run_window_resize_stress() {
     THREADING_WINDOW_RESIZE_STRESS_HISTORY_LINES="${history_lines}" \
     DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.WindowEdgeTests/testStressWholeWindowResizeWhenEnabled \
         "${test_bundle}"
   ) 2>&1 | tee "${output_directory}/${log_name}"
@@ -2019,12 +1979,12 @@ run_window_resize_stress() {
 run_display_pane_stress() {
   local output_directory="$1"
   local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
-  local derived_data="${output_directory}/derived-data"
+  local derived_data="$(profile_derived_data "${output_directory}")"
   echo "Running Codex TUI display-pane transition sweep…"
 
   (
     cd "${repository_directory}"
-    xcodebuild \
+    profile_build_for_testing "${derived_data}" \
       -project Threading.xcodeproj \
       -scheme Threading \
       -testPlan Threading-Fast \
@@ -2036,17 +1996,7 @@ run_display_pane_stress() {
       build-for-testing
 
     local build_directory
-    build_directory="$(
-      xcodebuild \
-        -project Threading.xcodeproj \
-        -scheme Threading \
-        -configuration Debug \
-        -destination "platform=macOS" \
-        -derivedDataPath "${derived_data}" \
-        -showBuildSettings \
-        -json \
-        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
-    )"
+    build_directory="$(profile_macos_build_directory "${derived_data}")"
     local app="${build_directory}/Threading.app"
     local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
     [[ -d "${test_bundle}" ]] || {
@@ -2058,7 +2008,7 @@ run_display_pane_stress() {
     THREADING_DISPLAY_PANE_STRESS_CYCLES="${THREADING_DISPLAY_PANE_STRESS_CYCLES:-3}" \
     DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
     DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
-      xcrun xctest \
+      profile_run_xctest \
         -XCTest ThreadingTests.WindowEdgeTests/testStressDisplayPaneTransitionBesideCodexWhenEnabled \
         "${test_bundle}"
   ) 2>&1 | tee "${output_directory}/display-pane-stress.log"
@@ -2660,6 +2610,18 @@ case "${command}" in
     seconds="${2:-15}"
     target="${3:-Threading}"
     output_directory="$(new_run_directory "${command}")"
+    full_derived_data="$(profile_derived_data "${output_directory}")"
+    if [[ "${THREADING_PROFILE_PREBUILT:-0}" == 1 ]]; then
+      test_bundle="${full_derived_data}/Build/Products/Debug/Threading.app/Contents/PlugIns/ThreadingTests.xctest"
+      [[ -d "${test_bundle}" ]] || {
+        echo "The prebuilt Mac test bundle is missing: ${test_bundle}" >&2
+        exit 1
+      }
+      touch "${full_derived_data}/.threading-profile-full-build-ready"
+    else
+      rm -f "${full_derived_data}/.threading-profile-full-build-ready"
+    fi
+    THREADING_PROFILE_BUILD_ONCE=1
 
     run_git_stress "${output_directory}"
     run_chart_stress "${output_directory}"

@@ -74,14 +74,12 @@ final class ExtensionsSettingsRenderTests: XCTestCase {
         ]
         for (name, theme, appearanceName) in renders {
             AppThemePalette.set(theme)
-            let data = try XCTUnwrap(
-                pageImage(
-                    store: store,
-                    connectionStore: connectionStore,
-                    appearance: appearanceName
-                ),
-                "no Extensions image for \(name)"
+            let rendered = pageImage(
+                store: store,
+                connectionStore: connectionStore,
+                appearance: appearanceName
             )
+            let data = try XCTUnwrap(rendered, "no Extensions image for \(name)")
             try data.write(to: Render.directory.appendingPathComponent(
                 "extensions-settings-\(name).png"
             ))
@@ -110,7 +108,13 @@ final class ExtensionsSettingsRenderTests: XCTestCase {
             let controller = ExtensionsPreferencesViewController(
                 manager: manager,
                 installTrust: trust,
-                sourceControlConnectionStore: connectionStore
+                sourceControlConnectionStore: connectionStore,
+                nativePluginStates: [
+                    NativePluginCatalog.deviceLogsIdentifier: .available,
+                    NativePluginManagedOffer.devices.identifier: .available,
+                    NativePluginCatalog.t3NavigatorIdentifier: .available,
+                    NativePluginManagedOffer.proxy.identifier: .available
+                ]
             )
             let host = self.laidOut(controller.view)
             host.appearance = appearance

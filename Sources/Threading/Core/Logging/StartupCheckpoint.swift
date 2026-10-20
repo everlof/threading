@@ -4,7 +4,7 @@ import Foundation
 
 /// How far a launch got before it stopped being a launch.
 ///
-/// Nine facts, recorded and never acted on. The launch path deliberately keeps its
+/// Launch facts, recorded without changing the startup sequence. The launch path keeps its
 /// force-unwraps (archived reliability review §3.2): there, a silent no-op would hide a real failure, so
 /// nothing here guards anything — a checkpoint says only that the launch reached this line.
 /// What reads them is `CrashLoopPolicy`, after the fact and from the *next* launch.
@@ -56,6 +56,11 @@ enum StartupCheckpoint: String, CaseIterable, Sendable {
     /// held back after an unclean previous exit.
     case selectedSessionRestored
 
+    /// A native bundle is about to map its principal class. A matching finish is appended only
+    /// after the plugin constructor returns, so an unclean launch can quarantine that build.
+    case nativePluginLoadStarted
+    case nativePluginLoadFinished
+
     /// Ten interactive minutes after `firstWindowVisible`. The one checkpoint that is not a
     /// point in the launch sequence, and the one that clears a crash-loop count.
     case stable
@@ -79,6 +84,7 @@ enum StartupCheckpoint: String, CaseIterable, Sendable {
     var isReadiness: Bool {
         switch self {
         case .migrationDone, .persistenceOpened, .themeRestored, .mainWindowConstructed,
+                .nativePluginLoadStarted, .nativePluginLoadFinished,
                 .recoverySurfaceShown:
             return false
         case .firstWindowVisible, .extensionsStarted, .mcpListenerStarted,

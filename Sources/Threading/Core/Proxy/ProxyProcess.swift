@@ -67,14 +67,39 @@ final class ProxyProcess: @unchecked Sendable {
         let setupScript: URL
         let temporaryRoot: URL
         let authority: @Sendable () throws -> ProxyCertificateAuthority
+        let useFirstPartyPlugin: Bool
+
+        init(
+            executable: URL,
+            setupScript: URL,
+            temporaryRoot: URL,
+            authority: @escaping @Sendable () throws -> ProxyCertificateAuthority,
+            useFirstPartyPlugin: Bool = false
+        ) {
+            self.executable = executable
+            self.setupScript = setupScript
+            self.temporaryRoot = temporaryRoot
+            self.authority = authority
+            self.useFirstPartyPlugin = useFirstPartyPlugin
+        }
+
+        func withAuthority(
+            _ replacement: @escaping @Sendable () throws -> ProxyCertificateAuthority
+        ) -> Self {
+            Self(executable: executable, setupScript: setupScript, temporaryRoot: temporaryRoot,
+                 authority: replacement, useFirstPartyPlugin: useFirstPartyPlugin)
+        }
 
         static var bundled: Self {
-            let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
+            let assets = ProxyHelperLocation.assets(
+                in: ProxyHelperLocation.installedPlugin()
+            )
             return Self(
-                executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/threading-proxyd"),
-                setupScript: resources.appendingPathComponent("ProxyTools/apple_certificate.py"),
+                executable: assets.executable,
+                setupScript: assets.setupScript,
                 temporaryRoot: FileManager.default.temporaryDirectory,
-                authority: { try ProxyCertificateAuthority.loadOrCreate() }
+                authority: { try ProxyCertificateAuthority.loadOrCreate() },
+                useFirstPartyPlugin: true
             )
         }
     }
@@ -87,6 +112,7 @@ final class ProxyProcess: @unchecked Sendable {
     private var input: FileHandle?
     private var output: FileHandle?
     private var directory: URL?
+    private var setupScript: URL
     private var publicCertificate: URL?
     private var profile: URL?
     private var fingerprint: String?
@@ -101,6 +127,7 @@ final class ProxyProcess: @unchecked Sendable {
     init(scope: ProxyLaunchScope, configuration: Configuration, clientsChanged: @escaping @Sendable (ProxyClientSnapshot) -> Void = { _ in }) {
         self.scope = scope
         self.configuration = configuration
+        setupScript = configuration.setupScript
         self.clientsChanged = clientsChanged
     }
 
@@ -173,12 +200,28 @@ final class ProxyProcess: @unchecked Sendable {
     }
 
     private func launch() throws {
-        guard FileManager.default.isExecutableFile(atPath: configuration.executable.path) else {
-            throw Failure.message("The app bundle is missing threading-proxyd. Rebuild Threading with its proxy helper.")
+        let assets = try configuration.useFirstPartyPlugin
+            ? ProxyHelperTrust.availableAssets()
+            : ProxyHelperAssets(
+                executable: configuration.executable,
+                setupScript: configuration.setupScript
+            )
+        guard FileManager.default.isExecutableFile(atPath: assets.executable.path) else {
+            throw Failure.message("The configured proxy helper is unavailable.")
         }
         let directory = configuration.temporaryRoot.appendingPathComponent("threading-proxy-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         self.directory = directory
+        if configuration.useFirstPartyPlugin {
+            // An installer can replace and remove the verified plugin version while this capture
+            // is running. Keep the setup command's script beside this capture's public cert.
+            let staged = directory.appendingPathComponent("apple_certificate.py")
+            try FileManager.default.copyItem(at: assets.setupScript, to: staged)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: staged.path)
+            setupScript = staged
+        } else {
+            setupScript = assets.setupScript
+        }
         var arguments = ["--mcp", "--body-limit", String(scope.bodyLimit),
                          "--listen-address", scope.listenAddress]
         arguments += scope.asksClients ? ["--ask-clients"] : ["--client-address", scope.clientAddress]
@@ -210,7 +253,7 @@ final class ProxyProcess: @unchecked Sendable {
         }
         guard !isCancelled else { throw Failure.message("This capture session has ended.") }
         let child = Process(), stdin = Pipe(), stdout = Pipe()
-        child.executableURL = configuration.executable
+        child.executableURL = assets.executable
         child.arguments = arguments
         child.standardInput = stdin
         child.standardOutput = stdout
@@ -288,8 +331,8 @@ final class ProxyProcess: @unchecked Sendable {
         data["certificate_path"] = publicCertificate.path
         data["profile_path"] = profile.path
         data["inspection_ca_sha256"] = fingerprint
-        data["macos_setup_argv"] = ["python3", configuration.setupScript.path, publicCertificate.path, "--sha256", fingerprint, "--target", "macos", "--apply"]
-        data["simulator_setup_argv"] = ["python3", configuration.setupScript.path, publicCertificate.path, "--sha256", fingerprint, "--target", "simulator", "--udid", "EXACT_BOOTED_SIMULATOR_UDID", "--apply"]
+        data["macos_setup_argv"] = ["python3", setupScript.path, publicCertificate.path, "--sha256", fingerprint, "--target", "macos", "--apply"]
+        data["simulator_setup_argv"] = ["python3", setupScript.path, publicCertificate.path, "--sha256", fingerprint, "--target", "simulator", "--udid", "EXACT_BOOTED_SIMULATOR_UDID", "--apply"]
         data["setup"] = "AirDrop only profile_path (the public .mobileconfig) to the iPhone. Install it in Settings > Profile Downloaded, then enable full trust in General > About > Certificate Trust Settings. Trust installation is explicit and does not configure the Wi-Fi proxy. Remove the profile after testing."
     }
 

@@ -673,6 +673,96 @@ final class SettingsDisclosureRenderTests: HostedStoreTestCase {
         }
     }
 
+    /// The product sidebar with enough installed extension pages to require the resting-list
+    /// pager. Capture the bottom of its first page so the controls are inspected in their real
+    /// header, scroll and footer shell rather than in an isolated component host.
+    @MainActor
+    func testRendersPagedExtensionSettingsInProductSidebar() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let manifests = (0..<13).map { owner -> ExtensionManifest in
+            let pages = (0..<8).map { offset -> ExtensionSettingsPage in
+                let index = owner * 8 + offset
+                let field = ExtensionSettingField(
+                    id: "sample-\(index)",
+                    title: "Sample setting",
+                    control: .text(defaultValue: "Ready", placeholder: "Value", maximumLength: 40)
+                )
+                return ExtensionSettingsPage(
+                    id: "page-\(offset)",
+                    title: String(format: "Settings %03d", index),
+                    sections: [.init(id: "details-\(index)", title: "Details", fields: [field])]
+                )
+            }
+            return ExtensionManifest(
+                identifier: "com.example.settings-evidence-\(owner)",
+                name: String(format: "Example Extension %02d", owner),
+                version: "1.0.0",
+                runtime: .native,
+                executable: "bin/fixture",
+                capabilities: [.settings],
+                settings: .init(pages: pages)
+            )
+        }
+        for manifest in manifests { try manifest.validate() }
+        ExtensionSettingsRegistry.shared.replace(enabledManifests: manifests)
+        defer { ExtensionSettingsRegistry.shared.replace(enabledManifests: []) }
+
+        let stateDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-settings-paged-evidence-\(UUID().uuidString)", isDirectory: true
+        )
+        let stateManager = StateManager(appSupportDirectory: stateDirectory)
+        defer {
+            stateManager.closeDatabase()
+            try? FileManager.default.removeItem(at: stateDirectory)
+        }
+        let controller = ProjectSidebarViewController(
+            projectStore: ProjectStore(stateManager: stateManager),
+            defersInitialTreeMount: true
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 700),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.animationBehavior = .none
+        window.isReleasedWhenClosed = false
+        defer {
+            window.contentViewController = nil
+            window.close()
+        }
+        AppThemePalette.set(.system)
+        defer { AppThemePalette.set(.system) }
+        window.appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        window.contentViewController = controller
+        window.setContentSize(NSSize(width: 280, height: 700))
+        controller.setSettingsMode(true)
+        let host = try XCTUnwrap(window.contentView)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThanOrEqual(host.bounds.height, 650)
+
+        let sidebar = try XCTUnwrap(descendants(of: host, type: SettingsSidebar.self).first)
+        let scroll = try XCTUnwrap(descendants(of: sidebar, type: ThemedScrollView.self).first)
+        let document = try XCTUnwrap(scroll.documentView)
+        scroll.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: max(0, document.bounds.height - scroll.contentView.bounds.height)
+        ))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(sidebar.visibleItemIDs.count, SettingsPages.sidebarItems.count)
+        let next = try XCTUnwrap(descendants(of: sidebar, type: ThemedButton.self).first {
+            $0.title == L10n.string("Next") && $0.isEnabled
+        })
+        XCTAssertTrue(host.bounds.intersects(next.convert(next.bounds, to: host)))
+        XCTAssertFalse(next.visibleRect.isEmpty)
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: host), [])
+
+        let url = directory.appendingPathComponent("settings-sidebar-paged-system-light.png")
+        try XCTUnwrap(png(of: host)).write(to: url)
+    }
+
     /// While a search is typed the group captions stand down entirely: a result's geography
     /// is the page row above it, not the sidebar's sections. Cleared, the geography returns.
     @MainActor

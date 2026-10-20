@@ -217,6 +217,9 @@ public final class PluginTool: NSObject {
     public let summary: String
     /// A JSON Schema object, as text.
     public let inputSchemaJSON: String
+    /// A host-registered pane section to reveal before invoking this tool. The host still owns
+    /// placement and tab lifetime; plugins name only one of their own section identifiers.
+    public private(set) var paneSectionToReveal: String?
 
     public init(
         name: String,
@@ -233,6 +236,26 @@ public final class PluginTool: NSObject {
         self.summary = summary
         self.inputSchemaJSON = inputSchemaJSON
         super.init()
+    }
+
+    public convenience init(
+        name: String,
+        title: String,
+        detail: String,
+        symbol: String,
+        summary: String,
+        inputSchemaJSON: String,
+        paneSectionToReveal: String
+    ) {
+        self.init(
+            name: name,
+            title: title,
+            detail: detail,
+            symbol: symbol,
+            summary: summary,
+            inputSchemaJSON: inputSchemaJSON
+        )
+        self.paneSectionToReveal = paneSectionToReveal
     }
 }
 

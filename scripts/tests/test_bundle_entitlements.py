@@ -2,6 +2,7 @@ import importlib.util
 import pathlib
 import plistlib
 import re
+import shutil
 import sys
 import tempfile
 import unittest
@@ -30,6 +31,10 @@ class BundleEntitlementTests(unittest.TestCase):
         self.bundle = self.root / "Threading.app"
         self.helpers = self.bundle / "Contents/Helpers"
         self.helpers.mkdir(parents=True)
+        self.plugin_helpers = self.bundle / "Contents/PlugIns/DevicesPlugin.bundle/Contents/Helpers"
+        self.plugin_helpers.mkdir(parents=True)
+        self.proxy_helpers = self.bundle / "Contents/PlugIns/ProxyPlugin.bundle/Contents/Helpers"
+        self.proxy_helpers.mkdir(parents=True)
         self.observed = {}
 
         for name, relative_path in checker.HELPER_ENTITLEMENTS.items():
@@ -41,7 +46,10 @@ class BundleEntitlementTests(unittest.TestCase):
                 else {}
             )
             declaration.write_bytes(plistlib.dumps(value))
-            binary = self.helpers / name
+            binary = {
+                "threading-simulator-helper": self.plugin_helpers,
+                "threading-proxyd": self.proxy_helpers,
+            }.get(name, self.helpers) / name
             binary.touch()
             binary.chmod(0o755)
             self.observed[name] = value
@@ -146,6 +154,41 @@ class BundleEntitlementTests(unittest.TestCase):
             "threading-new-helper: executable has no entitlement declaration in the verifier",
             problems,
         )
+
+    def test_simulator_helper_must_move_out_of_the_app(self) -> None:
+        duplicate = self.helpers / "threading-simulator-helper"
+        duplicate.touch()
+        duplicate.chmod(0o755)
+        problems = checker.verify_bundle(self.bundle, self.root, self.signed_reader)
+        self.assertIn("threading-simulator-helper: still embedded directly in the app", problems)
+
+    def test_proxy_helper_must_move_out_of_the_app(self) -> None:
+        duplicate = self.helpers / "threading-proxyd"
+        duplicate.touch()
+        duplicate.chmod(0o755)
+        problems = checker.verify_bundle(self.bundle, self.root, self.signed_reader)
+        self.assertIn("threading-proxyd: still embedded directly in the app", problems)
+
+    def test_staged_devices_bundle_is_checked_after_pruning(self) -> None:
+        staged = self.root / "native-plugin-input"
+        target = staged / "DevicesPlugin.bundle/Contents/Helpers"
+        target.mkdir(parents=True)
+        (target / "threading-simulator-helper").write_bytes(
+            (self.plugin_helpers / "threading-simulator-helper").read_bytes()
+        )
+        (target / "threading-simulator-helper").chmod(0o755)
+        proxy_target = staged / "ProxyPlugin.bundle/Contents/Helpers"
+        proxy_target.mkdir(parents=True)
+        (proxy_target / "threading-proxyd").write_bytes(
+            (self.proxy_helpers / "threading-proxyd").read_bytes()
+        )
+        (proxy_target / "threading-proxyd").chmod(0o755)
+        shutil.rmtree(self.bundle / "Contents/PlugIns/DevicesPlugin.bundle")
+        shutil.rmtree(self.bundle / "Contents/PlugIns/ProxyPlugin.bundle")
+        problems = checker.verify_bundle(
+            self.bundle, self.root, self.signed_reader, plugin_source=staged
+        )
+        self.assertEqual(problems, [])
 
     def test_manifest_matches_project_entitlement_declarations(self) -> None:
         project = (REPOSITORY / "Threading.xcodeproj/project.pbxproj").read_text(encoding="utf-8")

@@ -109,7 +109,8 @@ release_version_is_publishable "$CHANNEL" "$VERSION" "$TAG" <<< "$published" \
 # MARK: - Build, notarize, appcast
 
 say "Building the notarized release ($CHANNEL)"
-THREADING_VERSION="$VERSION" "$ROOT/scripts/release.sh" --notarize --channel "$CHANNEL"
+THREADING_VERSION="$VERSION" THREADING_RELEASE_TAG="$TAG" \
+    "$ROOT/scripts/release.sh" --notarize --channel "$CHANNEL"
 
 # The enclosure URL is built from the tag, not from the version: a beta's zip lives under
 # releases/download/beta-v0.1.9/, and defaulting to v0.1.9 would publish a feed whose every
@@ -117,25 +118,21 @@ THREADING_VERSION="$VERSION" "$ROOT/scripts/release.sh" --notarize --channel "$C
 #
 # Channel: only a prerelease is tagged. An untagged item is what "stable" means to Sparkle.
 #
-# Phased rollout: the 86400s default staggers a public release over days, which is right when
-# the audience is everyone and wrong when it is a handful of testers waiting for the build.
+# Every channel is immediately eligible; generate_appcast.sh also clears old rollout metadata
+# from the seed before signing the feed.
 #
 # Seed: extend the feed already published rather than replacing it, so a lagging stable user is
 # still offered the stable release when the newest item is a beta.
 say "Generating the appcast"
 appcast_args=(--seed "$FEED_URL")
-appcast_rollout="${THREADING_SPARKLE_PHASED_ROLLOUT_INTERVAL:-}"
 if [[ "$CHANNEL" != "release" ]]; then
     appcast_args+=(--channel "$CHANNEL")
-    appcast_rollout="${appcast_rollout:-0}"
 fi
 appcast_env=(
     THREADING_VERSION="$VERSION"
     THREADING_RELEASE_TAG="$TAG"
     THREADING_SPARKLE_MAXIMUM_VERSIONS="${THREADING_SPARKLE_MAXIMUM_VERSIONS:-5}"
 )
-[[ -z "$appcast_rollout" ]] \
-    || appcast_env+=(THREADING_SPARKLE_PHASED_ROLLOUT_INTERVAL="$appcast_rollout")
 env "${appcast_env[@]}" "$ROOT/scripts/generate_appcast.sh" "${appcast_args[@]}"
 
 readonly ZIP="$BUILD_DIR/Threading-$VERSION.zip"
@@ -143,7 +140,12 @@ readonly APPCAST="$BUILD_DIR/appcast.xml"
 # The GPL helper's corresponding source travels beside the zip, never without it (release.sh,
 # "Corresponding source").
 readonly PROXY_SOURCE="$BUILD_DIR/threading-proxyd-source-$VERSION.tar.gz"
-[[ -f "$ZIP" && -f "$APPCAST" && -f "$PROXY_SOURCE" ]] \
+readonly PLUGIN_MANIFEST="$BUILD_DIR/native-plugins/native-plugins-$VERSION.json"
+shopt -s nullglob
+PLUGIN_ARCHIVES=("$BUILD_DIR"/native-plugins/*-"$VERSION".zip)
+shopt -u nullglob
+[[ -f "$ZIP" && -f "$APPCAST" && -f "$PROXY_SOURCE" && -f "$PLUGIN_MANIFEST" \
+    && ${#PLUGIN_ARCHIVES[@]} -gt 0 ]] \
     || fail "expected artefacts are missing from $BUILD_DIR"
 
 # MARK: - Release notes
@@ -180,6 +182,9 @@ fi
 
 # MARK: - Publish
 
+say "Rechecking remote host downloads before publishing the app"
+python3 "$ROOT/scripts/check_remote_components.py"
+
 # --latest is stated rather than left to GitHub's default, because the next step uploads the
 # feed to whatever `latest` resolves to and a race there would publish it where nothing reads it.
 release_kind_args=()
@@ -191,11 +196,14 @@ fi
 
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
     say "Updating the existing GitHub release $TAG"
-    gh release upload "$TAG" "$ZIP" "$PROXY_SOURCE" --repo "$REPO" --clobber
+    gh release upload "$TAG" "$ZIP" "$PROXY_SOURCE" "${PLUGIN_ARCHIVES[@]}" \
+        --repo "$REPO" --clobber
+    gh release upload "$TAG" "$PLUGIN_MANIFEST" --repo "$REPO" --clobber
     gh release edit "$TAG" --repo "$REPO" --notes "$NOTES" "${release_kind_args[@]}"
 else
     say "Creating the GitHub release $TAG"
-    gh release create "$TAG" "$ZIP" "$PROXY_SOURCE" \
+    gh release create "$TAG" "$ZIP" "$PROXY_SOURCE" "${PLUGIN_ARCHIVES[@]}" \
+        "$PLUGIN_MANIFEST" \
         --repo "$REPO" \
         --title "Threading $VERSION" \
         --notes "$NOTES" \

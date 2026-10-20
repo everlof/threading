@@ -49,7 +49,6 @@
 #   THREADING_REPO                             GitHub slug (default everlof/threading)
 #   THREADING_SPARKLE_ACCOUNT                  keychain account (default mjukis-threading)
 #   THREADING_SPARKLE_PRIVATE_KEY_FILE         private-key file for CI; '-' reads stdin
-#   THREADING_SPARKLE_PHASED_ROLLOUT_INTERVAL  seconds between rollout phases (default 86400; 0 disables)
 #   THREADING_SPARKLE_MAXIMUM_VERSIONS         items kept per channel branch (default 1)
 #   THREADING_DOWNLOAD_URL_PREFIX              enclosure URL prefix (nightly feeds override this)
 #   THREADING_RELEASE_TAG                      tag the full-notes link points at (default v<version>)
@@ -167,11 +166,8 @@ fi
 # MARK: - Generate
 
 say "Generating the signed appcast"
-phase_args=()
-readonly PHASE_SECONDS="${THREADING_SPARKLE_PHASED_ROLLOUT_INTERVAL:-86400}"
-if [[ "$PHASE_SECONDS" != "0" ]]; then
-    phase_args+=(--phased-rollout-interval "$PHASE_SECONDS")
-fi
+# All users are eligible as soon as the feed is published. Do not pass a phased-rollout option:
+# stable, beta and nightly releases mostly deliver fixes to the people already waiting for them.
 
 channel_args=()
 if [[ -n "$CHANNEL" ]]; then
@@ -191,6 +187,9 @@ if [[ -n "$SEED_URL" ]]; then
         grep -q '<rss' "$APPCAST.seed" \
             || fail "$SEED_URL did not return an appcast (got ${seed_status:-no status})"
         mv "$APPCAST.seed" "$APPCAST"
+        # Older feed entries may still carry the former week-long rollout. Remove that metadata
+        # before generate_appcast updates and signs the feed, preserving all other item bytes.
+        python3 "$ROOT/scripts/remove_appcast_rollout.py" "$APPCAST"
         echo "  extending $(grep -c '<item>' "$APPCAST") published item(s)"
     else
         rm -f "$APPCAST.seed"
@@ -203,7 +202,6 @@ fi
 readonly MAXIMUM_VERSIONS="${THREADING_SPARKLE_MAXIMUM_VERSIONS:-1}"
 "$SPARKLE_BIN/generate_appcast" \
     "${key_args[@]}" \
-    "${phase_args[@]}" \
     "${channel_args[@]}" \
     --download-url-prefix "$DOWNLOAD_URL_PREFIX" \
     --full-release-notes-url "https://github.com/$REPO/releases/tag/$RELEASE_TAG" \
@@ -248,6 +246,8 @@ if [[ -n "$CHANNEL" ]]; then
 fi
 grep -q '<!-- sparkle-signatures:' "$APPCAST" && grep -q '^edSignature: ' "$APPCAST" \
     || fail "the feed itself is not signed"
+python3 "$ROOT/scripts/remove_appcast_rollout.py" --check "$APPCAST" \
+    || fail "the generated feed still delays updates with a phased rollout"
 grep -q "Threading-$VERSION.zip" <<< "$item_for_this_version" \
     || fail "$VERSION's item does not reference Threading-$VERSION.zip"
 grep -q 'sparkle:format="markdown"' <<< "$item_for_this_version" \

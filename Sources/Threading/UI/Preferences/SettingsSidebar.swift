@@ -20,9 +20,11 @@ final class SettingsSidebar: NSView {
         /// keystroke, and pages are externally sized — 256 installed packages may contribute
         /// eight pages each — so construction is capped **before** views exist and the cut is
         /// said out loud in an overflow line, never taken silently. Deep enough that a real
-        /// query is never cut; the resting page list is the app's own fixed catalogue and
-        /// stays uncapped.
+        /// query is rarely cut; the resting list uses separate page navigation below.
         static let maximumResultRows = 48
+        /// Installed extensions can add thousands of settings pages. Keep the resting list
+        /// navigable without constructing one AppKit row and its constraints for every page.
+        static let maximumRestingPageRows = 48
     }
 
     // MARK: - Item
@@ -106,6 +108,8 @@ final class SettingsSidebar: NSView {
     private var items: [Item] = []
     private var displayedItems: [Item] = []
     private var rows: [ThemedTabItemView] = []
+    private var rowItemIDs: [String] = []
+    private var restingPageStart = 0
     /// The setting-level result rows on screen, one run per displayed page, for the tests.
     private(set) var hitRows: [SearchResultRowView] = []
     private(set) var selectedID: String?
@@ -186,16 +190,27 @@ final class SettingsSidebar: NSView {
     /// Selects a page without notifying, for setting the initial state.
     func select(id: String) {
         selectedID = items.contains { $0.id == id } ? id : nil
-        for (offset, row) in rows.enumerated() {
-            row.isSelected = displayedItems[offset].id == selectedID
+        if let index = items.firstIndex(where: { $0.id == selectedID }) {
+            let pageStart = (index / Defaults.maximumRestingPageRows)
+                * Defaults.maximumRestingPageRows
+            if pageStart != restingPageStart {
+                restingPageStart = pageStart
+                if searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    rebuildResults()
+                    return
+                }
+            }
         }
+        updateRowSelection()
     }
 
     func rebuild(items: [Item], selecting selectedID: String?) {
-        build(items)
-        if let selectedID {
-            select(id: selectedID)
+        self.selectedID = selectedID.flatMap { id in items.contains { $0.id == id } ? id : nil }
+        if let index = items.firstIndex(where: { $0.id == self.selectedID }) {
+            restingPageStart = (index / Defaults.maximumRestingPageRows)
+                * Defaults.maximumRestingPageRows
         }
+        build(items)
     }
 
     /// Updates the live filter. Kept separate from the delegate callback so restored Settings
@@ -249,6 +264,7 @@ final class SettingsSidebar: NSView {
     private func rebuildResults() {
         resultsStack?.removeFromSuperview()
         rows = []
+        rowItemIDs = []
         hitRows = []
 
         let query = searchField.stringValue
@@ -266,17 +282,29 @@ final class SettingsSidebar: NSView {
         var resultViews: [NSView] = []
 
         if query.isEmpty {
-            // The resting list: rows interleaved with their group captions, one caption per
-            // run, exactly as the sidebar has always drawn its geography.
+            // A page of the resting list: rows and group captions keep their usual geography,
+            // while the remaining page metadata stays searchable without owning AppKit views.
+            let lastPageStart = displayedItems.isEmpty ? 0
+                : ((displayedItems.count - 1) / Defaults.maximumRestingPageRows)
+                    * Defaults.maximumRestingPageRows
+            restingPageStart = min(restingPageStart, lastPageStart)
+            let pageEnd = min(
+                restingPageStart + Defaults.maximumRestingPageRows,
+                displayedItems.count
+            )
             var lastGroup: String?
-            for item in displayedItems {
+            for item in displayedItems[restingPageStart..<pageEnd] {
                 if let group = item.group, group != lastGroup {
                     resultViews.append(groupCaption(group, isFirst: resultViews.isEmpty))
                 }
                 lastGroup = item.group
                 let row = makeRow(title: item.title, symbol: item.symbol, opens: item.id)
                 rows.append(row)
+                rowItemIDs.append(item.id)
                 resultViews.append(row)
+            }
+            if displayedItems.count > Defaults.maximumRestingPageRows {
+                resultViews.append(paginationControls(totalPages: displayedItems.count))
             }
         } else {
             // The results: each surviving page's row, then the settings the query landed on
@@ -290,6 +318,7 @@ final class SettingsSidebar: NSView {
                 }
                 let row = makeRow(title: item.title, symbol: item.symbol, opens: item.id)
                 rows.append(row)
+                rowItemIDs.append(item.id)
                 resultViews.append(row)
 
                 for entry in item.entries where SettingsSearch.matches(
@@ -335,7 +364,55 @@ final class SettingsSidebar: NSView {
         for view in resultViews {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
-        select(id: selectedID ?? "")
+        updateRowSelection()
+    }
+
+    private func updateRowSelection() {
+        for (index, row) in rows.enumerated() {
+            row.isSelected = rowItemIDs[index] == selectedID
+        }
+    }
+
+    private func paginationControls(totalPages: Int) -> NSView {
+        let pageCount = (totalPages - 1) / Defaults.maximumRestingPageRows + 1
+        let currentPage = restingPageStart / Defaults.maximumRestingPageRows + 1
+        let previous = ThemedButton(
+            title: L10n.string("Previous"), target: self, action: #selector(showPreviousPage)
+        )
+        previous.isEnabled = currentPage > 1
+        let next = ThemedButton(
+            title: L10n.string("Next"), target: self, action: #selector(showNextPage)
+        )
+        next.isEnabled = currentPage < pageCount
+
+        let position = NSTextField(
+            labelWithString: L10n.format("Page %lld of %lld", currentPage, pageCount)
+        )
+        position.applyFont(.caption)
+        position.textColor = Design.Text.secondary
+        let controls = NSStackView(views: [previous, position, next])
+        controls.orientation = .horizontal
+        controls.alignment = .centerY
+        controls.distribution = .equalSpacing
+        controls.spacing = Design.Spacing.small
+        controls.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: Design.Spacing.medium)
+        return controls
+    }
+
+    @objc private func showPreviousPage() {
+        guard restingPageStart > 0 else { return }
+        restingPageStart -= Defaults.maximumRestingPageRows
+        rebuildResults()
+        scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    @objc private func showNextPage() {
+        guard restingPageStart + Defaults.maximumRestingPageRows < items.count else { return }
+        restingPageStart += Defaults.maximumRestingPageRows
+        rebuildResults()
+        scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     /// A section's quiet caption: the settings pages' own caption voice, indented to the rows'

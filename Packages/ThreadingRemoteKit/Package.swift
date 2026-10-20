@@ -10,7 +10,7 @@ let package = Package(
     name: "ThreadingRemoteKit",
     platforms: [.macOS(.v13), .iOS(.v15)],
     products: [
-        .library(name: "ThreadingRemoteKit", targets: ["ThreadingRemoteKit"])
+        .library(name: "ThreadingRemoteKit", type: .static, targets: ["ThreadingRemoteKit"])
     ],
     dependencies: [
         .package(path: "../ThreadingExtensionKit"),

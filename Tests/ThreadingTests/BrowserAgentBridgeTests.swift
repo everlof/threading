@@ -6234,7 +6234,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             selector: nil
         )
         XCTAssertTrue(swatchResult.target.ok, swatchResult.target.message)
-        XCTAssertFalse(swatchResult.target.clipped)
+        XCTAssertFalse(swatchResult.target.clipped, "\(swatchResult.target)")
         let swatchCapture = try XCTUnwrap(swatchResult.capture)
         XCTAssertEqual(swatchCapture.width, swatchResult.target.width)
         XCTAssertEqual(swatchCapture.height, swatchResult.target.height)

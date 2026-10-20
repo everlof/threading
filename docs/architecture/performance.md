@@ -1160,6 +1160,38 @@ THREADING_AUTOMATION_STRESS=1 scripts/test.sh fast \
 
 ## Implementation-time scaling gate
 
+Settings sidebar pages can come from installed extensions: 256 packages with eight pages each
+means 2,048 destinations. The resting sidebar used to build an `NSStackView` row and its
+constraints for every page before anybody searched. In a hosted `-O` test at 2,048 pages it held
+one CPU core and reached about 420 MB RSS without producing its first metric after 2 minutes
+46 seconds. The resting list now builds at most 48 destination rows per page, with Previous/Next
+navigation; selection jumps to the right page, and all page metadata remains searchable. The
+same hosted fixture then measured 150.16 ms to construct and lay out the first page, 94.85 ms
+for the first search and 95.31 ms for an updated query, with 48 result rows and 398 descendant
+views. This is a bounded construction rule, not a cache of hidden rows: changing page or query
+replaces only the current page's views.
+
+### Optimization-level gate, 2026-10-20
+
+`scripts/profile_threading.sh full` completed once with `-O` and once with `-Osize` on the same
+source, using app-hosted XCTest fixtures and isolated app homes. Both produced 116 performance
+records in the same order, plus a process sample and Time Profiler, Animation Hitches and
+Allocations traces. The test runner now builds one Mac test bundle per full sweep and launches
+each selected fixture through its `.xctestrun` host; direct `xcrun xctest` could not resolve
+symbols supplied by the app binary. A verified manual `build-for-testing` can be reused with
+`THREADING_PROFILE_PREBUILT=1` to avoid rebuilding the same optimization setting twice.
+
+The median `-Osize`/`-O` ratio across 1,098 corresponding millisecond fields was 1.019.
+That aggregate hides a repeated hot-path cost: across seven project-sidebar shapes, median
+ratios were 1.27 for `tree_build_ms`, 1.30 for `cold_tree_ms`, 1.24 for `cold_reload_ms`, and 1.30
+for `same_shape_refresh_ms` (range 1.28–1.32). The 2,048-page Settings fixture remained close:
+`-O` load/search/update 149.92/95.09/96.48 ms versus `-Osize` 147.77/95.23/97.31 ms, with
+48 rows and 398 descendants in each. Attachment I/O cases varied in both directions and are
+not treated as proof of an optimization effect. The sweeps were sequential, so thermal state
+was not alternated after the expensive `-Osize` rebuild; a later alternating repeat can test
+that confounder. Until then, the consistent sidebar regression fails the no-regression gate
+and Release retains `-O`.
+
 Browser operations use one native delay at a time in the ordinary case, stress-tested with 64
 pending timers and refusal of the 65th. Timers accept at most 1,000 ms, carry no page content,
 and retire before calling WebKit. Operation activity uses O(1) begin/end bookkeeping per active

@@ -51,10 +51,28 @@ final class AutomationPermissionPolicyTests: XCTestCase {
         guard case .shell(let pattern) = try AutomationPermissionRule(parsing: "Bash(python3 /x/collect.py *)") else {
             return XCTFail("not a shell rule")
         }
-        XCTAssertTrue(pattern.matches(words: ["python3", "/x/collect.py"]))
-        XCTAssertTrue(pattern.matches(words: ["python3", "\"/x/collect.py\"", "collect"]))
-        XCTAssertFalse(pattern.matches(words: ["python3", "/x/collect.py.evil"]))
-        XCTAssertFalse(pattern.matches(words: ["\"python3\"", "/x/collect.py"]))
+        func words(_ line: String) -> [String] { ShellCommandPolicy.segments(ofVettable: line)?.first?.words ?? [] }
+        XCTAssertTrue(pattern.matches(words: words("python3 /x/collect.py")))
+        XCTAssertTrue(pattern.matches(words: words(#"python3 "/x/collect.py" collect"#)))
+        XCTAssertTrue(pattern.matches(words: words("python3 /x/collect.py 'a|b' 'lastSeen:>1'")))
+        XCTAssertFalse(pattern.matches(words: words("python3 /x/collect.py.evil")))
+        XCTAssertFalse(pattern.matches(words: words(#""python3" /x/collect.py"#)))
+    }
+
+    /// A rule's words are read as the shell reads them and saved so they read back the same:
+    /// a quoted `|` is one argument, not a second command.
+    func testQuotedRuleWordsRoundTrip() throws {
+        let search = try AutomationPermissionRule(parsing: "Bash(rg -n 'a|b' *)")
+        XCTAssertEqual(search.text, "Bash(rg -n 'a|b' *)")
+        XCTAssertEqual(try AutomationPermissionRule(parsing: search.text), search)
+
+        let commit = try AutomationPermissionRule(parsing: #"Bash(git commit -m "two words")"#)
+        XCTAssertEqual(commit.text, "Bash(git commit -m 'two words')")
+        XCTAssertEqual(try AutomationPermissionRule(parsing: commit.text), commit)
+        guard case .shell(let pattern) = commit else { return XCTFail("not a shell rule") }
+        XCTAssertEqual(pattern.words, ["git", "commit", "-m", "two words"])
+
+        XCTAssertThrowsError(try AutomationPermissionRule(parsing: "Bash(rg x '*')"))
     }
 
     // MARK: - Persistence

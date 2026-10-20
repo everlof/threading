@@ -1434,9 +1434,26 @@ enum BrowserAgentScripts {
         function scrollIntoViewAcrossFrames(element) {
           let current = element;
           while (current) {
+            // Centering visible controls can scroll overflow:hidden application shells,
+            // leaving headings clipped after the action. Reveal only what is offscreen.
             current.scrollIntoView({
-              block: 'center', inline: 'center', behavior: 'instant'
+              block: 'nearest', inline: 'nearest', behavior: 'instant'
             });
+            // WebKit rounds scroll offsets to CSS pixels. Nearest alignment can leave a
+            // fractional edge outside the viewport; centre only that axis if it can fit.
+            const view = current.ownerDocument?.defaultView || globalThis;
+            const rect = current.getBoundingClientRect();
+            const horizontalClipped = rect.width <= view.innerWidth
+              && (rect.left < 0 || rect.right > view.innerWidth);
+            const verticalClipped = rect.height <= view.innerHeight
+              && (rect.top < 0 || rect.bottom > view.innerHeight);
+            if (horizontalClipped || verticalClipped) {
+              current.scrollIntoView({
+                block: verticalClipped ? 'center' : 'nearest',
+                inline: horizontalClipped ? 'center' : 'nearest',
+                behavior: 'instant'
+              });
+            }
             try {
               current = current.ownerDocument?.defaultView?.frameElement || null;
             } catch (_) {

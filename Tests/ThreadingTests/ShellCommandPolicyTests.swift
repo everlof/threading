@@ -133,12 +133,12 @@ final class ShellCommandPolicyTests: XCTestCase {
         assertReadOnly("sed -n 240,290p file.txt")
     }
 
-    /// `sed -n '10,$p'` reads to end-of-file and is perfectly safe, but it prompts — the `$`
-    /// ban runs before any of this and cannot tell `$p` inside single quotes from a variable
-    /// reference without tracking shell quoting. Refusing a rare legitimate form is the price
-    /// of not having to be right about quoting, and it is the correct direction to be wrong in.
-    func testEndOfFileRangePromptsBecauseOfTheDollarBan() {
-        assertPrompts("sed -n '10,$p' file.txt")
+    /// `sed -n '10,$p'` reads to end-of-file. Inside single quotes the `$` is literal, so it
+    /// passes; unquoted or in double quotes the shell expands `$p` first, so it still prompts.
+    func testEndOfFileRangeIsAllowedOnlyWhereTheDollarIsLiteral() {
+        assertReadOnly("sed -n '10,$p' file.txt")
+        assertPrompts(#"sed -n "10,$p" file.txt"#)
+        assertPrompts("sed -n 10,$p file.txt")
     }
 
     /// `sed` is the one allowlisted command that can write, so everything outside the bare
@@ -159,11 +159,74 @@ final class ShellCommandPolicyTests: XCTestCase {
         assertPrompts("sed '1,220p' file")
     }
 
-    /// Naive splitting is safe *because* it is naive: a quoted `;` splits into a segment whose
-    /// first word is not allowlisted, so the command is refused rather than admitted.
-    func testQuotedSeparatorsFailClosed() {
-        assertPrompts("grep '; rm -rf /' file.txt")
-        assertPrompts("echo 'a | sh'")
+    // MARK: - Quoting
+
+    /// An operator inside quotes is part of an argument, as the shell reads it. Splitting at every
+    /// `|` refused these, and for an unattended automation run a refusal is final: wordy's issue
+    /// triage stopped at needsHuman in 29 of 34 runs (2026-10-06 to 20) on searches like the
+    /// first two, whose allow-list named `rg`, `jq` and `check.py`.
+    func testOperatorsInsideQuotesAreLiteral() {
+        assertReadOnly("rg -n 'Next|onNext|next|dismiss|RoundResultView' ios/Ordus/RoundResultView.swift")
+        assertReadOnly(#"rg -n -i "open latest match|latest.match|senaste.match" ios swift docs"#)
+        assertReadOnly(#"jq -r '.breadcrumbs[] | select(.ms > 30000) | "\(.at) \(.message)"' device.jsonl"#)
+        assertReadOnly("grep '; rm -rf /' file.txt")
+        assertReadOnly("echo 'a | sh'")
+        assertReadOnly("rg 'foo$' src")
+        assertReadOnly("rg a\\|b src")
+        assertReadOnly("rg '{a,b}' .")
+        assertReadOnly("find . -name '*.{swift,kt}'")
+        assertReadOnly("git show stash@{0}")
+    }
+
+    /// Quotes protect only what they enclose: an operator after the closing quote still starts a
+    /// new command, and it is vetted like any other.
+    func testOperatorsOutsideQuotesStillSplit() {
+        assertPrompts("grep 'x' ; rm -rf /")
+        assertPrompts("rg 'a|b' | sh")
+        assertPrompts("rg 'a'|sh")
+        assertPrompts("echo 'a'&& rm x")
+        assertPrompts(#"rg "a"; rm x"#)
+    }
+
+    /// The shell still expands `$` and backticks inside double quotes; an unterminated quote or a
+    /// trailing backslash has no reading at all.
+    func testExpansionInDoubleQuotesAndUnterminatedQuotesPrompt() {
+        assertPrompts(#"rg "$HOME" ."#)
+        assertPrompts(#"cat "${HOME}/.ssh/id_rsa""#)
+        assertPrompts(#"echo "$(rm -rf /)""#)
+        assertPrompts("rg \"`id`\" .")
+        assertPrompts("rg $'a\\nb' .")
+        assertPrompts("grep 'x ; rm -rf /")
+        assertPrompts(#"grep "x ; rm -rf /"#)
+        assertPrompts("ls \\")
+        assertPrompts("echo 'a\nb'")
+    }
+
+    /// The shell joins adjacent quoted and escaped pieces into one word, so every one of these
+    /// passes `-delete`, `-exec`, `-o` or `--pre=` to its program. Taking one layer of quotes off
+    /// each whitespace-separated token missed all of them.
+    func testSplicedQuotesAndEscapesCannotHideAFlag() {
+        assertPrompts("find . -de'l'ete")
+        assertPrompts("find . -\\delete")
+        assertPrompts(#"find . "-ex"ec rm {} +"#)
+        assertPrompts(#"sort -"o" /tmp/stolen input.txt"#)
+        assertPrompts("rg --p're'=/tmp/evil.sh pattern")
+    }
+
+    /// The shell reads bytes. Swift groups a quote and a following combining mark into one
+    /// `Character`, so a reader working on `Character`s would see this quote stay open while the
+    /// shell closes it and runs the `rm`.
+    func testACombiningMarkCannotHideAClosingQuote() {
+        assertPrompts("echo 'a'\u{301}; rm -rf ~; echo '")
+    }
+
+    /// Brace expansion and subshells produce commands or arguments no word on the line shows.
+    func testBraceExpansionAndSubshellsPrompt() {
+        assertPrompts("rg {--pre=/tmp/evil.sh,pattern} .")
+        assertPrompts("cat {a,b}.txt")
+        assertPrompts("cat x{1..3}")
+        assertPrompts("(rm -rf /)")
+        assertPrompts("ls *(e:'rm -rf ~':)")
     }
 
     /// `find` is the one allowlisted command that runs other commands and deletes files.
@@ -234,6 +297,7 @@ final class ShellCommandPolicyTests: XCTestCase {
     func testAQuotedCommandNameStillPrompts() {
         assertPrompts("\"ls\" -la")
         assertPrompts("'cat' file.txt")
+        assertPrompts("\\ls -la")
     }
 
     /// `find . -xdev` is an ordinary read that shares `fd`'s exec prefix, which is why the `fd`

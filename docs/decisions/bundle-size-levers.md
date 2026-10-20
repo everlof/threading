@@ -2,7 +2,8 @@
 
 > Status: **decision record** (2026-08-22). **Done**: ship `arm64` only — the durable rule now
 > lives in [`releasing.md`](../architecture/releasing.md#apple-silicon-only). **Reject**
-> on-demand resources and any further stripping. **Wait for evidence** on `-Osize`. **Wait for
+> on-demand resources and any further stripping. **Keep `-O`** after the matched `-Osize`
+> interaction sweep showed a repeated sidebar regression. **Wait for
 > demand** on a slimmer or on-demand WebRTC, and on Sparkle delta updates. **Added 2026-10-08**:
 > the Mermaid attachment reader ships the official tiny build, not the full one, and is not
 > downloaded on demand (§2, §3). **Re-measured 2026-10-17**: 54.5 → 129.0 MB on disk and
@@ -10,7 +11,8 @@
 > [size ratchet](../architecture/releasing.md#the-bundle-size-ratchet) now enforces §4's 5 MB
 > line, and the [bundle diet plan](../feature-drafts/bundle-diet.md) **reopens on-demand
 > delivery** for first-party native plugins (§2, §3). **2026-10-18**: the proxy helper's source
-> moved from the bundle to each release, 63.1 → 46.4 MB compressed (§3).
+> moved from the bundle to each release, 63.1 → 46.4 MB compressed (§3). **2026-10-20**: the
+> shared plugin runtime is implemented, 46.40 → 42.50 MB compressed in the exported app (§3).
 
 Part of the [decisions index](README.md). Read alongside
 [`releasing.md`](../architecture/releasing.md) (the archive, export and the gates),
@@ -88,6 +90,17 @@ Three things in it were not true in August, and each changes a lever:
   module above ~10% (themes); remote access ~9%, the extension host ~7%, usage, conversation and
   browser ~6% each. 1,637 commits added ~240k net lines since August.
 
+**Shared runtime measured 2026-10-20.** A Developer ID Release archive at `477a299e8` plus the
+uncommitted runtime change was thinned to arm64 before export, then measured by the same size
+script. The prior two plugin bundles totalled 22.39 MB on disk / 9.22 MB compressed. The new
+`ThreadingDesignKit.framework` plus the two plugin bundles total 13.43 / 5.19 MB: a saving of
+**8.96 / 4.04 MB**. The full exported app is 103.42 / 42.50 MB, down 8.62 / 3.90 MB from the
+step-1a baseline; the app and other resources also changed between source revisions. The app
+executable does not link DesignKit, both bundled plugin executables do, and all 22 Mach-O files
+in the exported bundle passed arm64, Developer ID, hardened-runtime and secure-timestamp checks.
+The framework is an 11.22 MB fixed cost; a new bundled plugin adds its own code rather than a
+second design-system copy.
+
 **Stripping is already complete.** `STRIP_INSTALLED_PRODUCT=YES`, `STRIP_STYLE=all`,
 `STRIP_SWIFT_SYMBOLS=YES`, dead-stripping and whole-module `-O` are all in effect for the
 archive; the shipped main binary has 3.4k symbols left (the exports dyld needs) and a 1.1 MB
@@ -117,7 +130,8 @@ is under 30 KB. There is no fat spot; the binary shrinks by writing less code, n
 | Lever | Measured | Verdict |
 |---|---|---|
 | **Ship `arm64` only** | 107 → 54.5 MB on disk, 46 → 24.5 MB download; a product decision and ~0 code | **Done** — [`releasing.md`](../architecture/releasing.md#apple-silicon-only) |
-| **`-Osize`** | `__text` 22.1 → 18.0 MB per slice (−19%), bundle 107 → 99 MB, download 46.2 → 43.8 MB; speed cost unmeasured | **Wait for evidence**: a `scripts/profile_threading.sh full` sweep at `-Osize` with no regression reopens it. 2.4 MB of download is not worth an unmeasured speed cost |
+| **`-Osize`** | `__text` 22.1 → 18.0 MB per slice (−19%), bundle 107 → 99 MB, download 46.2 → 43.8 MB in the original probe | **Keep `-O`**: matched full interaction sweeps found a repeated 24–30% project-sidebar regression under `-Osize`; a later alternating retest may reopen it |
+
 | **Resources on demand** (a CDN, "our Cloudflare setup") | Resources are 7.4 MB on disk, 3.7 MB compressed; deleting every one saves 8% of the download | **Reject**. macOS has no on-demand resources; a signed bundle cannot change after signing, so files would live outside it with their own integrity check, offline story and first-launch wait. The Cloudflare service is a signalling/TURN control plane, not a CDN |
 | **Slimmer WebRTC** | 27 MB universal, 11.8 MB `arm64`, 5.5 MB compressed, for nine imported classes — the data channel, ICE and SDP types; no media | **Wait for demand**. A data-channel-only libwebrtc is a depot_tools checkout and a build we maintain; downloading it on demand is code, so a signed and notarized payload, EdDSA verification, quarantine handling and a fail-safe loader — a second Sparkle. Reopen when remote-access adoption is known or a maintained slim community build exists |
 | **Sparkle delta updates** | Affects updates only; `scripts/generate_appcast.sh` runs `--maximum-deltas 0` with only the current zip in its work dir, so deltas cannot be produced today | **Wait for demand**: reopen when update downloads are what people notice. The change is to download the previous release's zip into `$WORK` and raise `--maximum-versions`/`--maximum-deltas` |
@@ -127,8 +141,21 @@ is under 30 KB. There is no fat spot; the binary shrinks by writing less code, n
 | **`SWIFT_REFLECTION_METADATA_LEVEL=none`** | `__swift5_fieldmd` + `__swift5_reflstr` ≈ 0.5 MB per slice; three `Mirror(` call sites to audit | **Reject**: not worth the audit |
 | **A release-time size ratchet** (2026-10-17) | The 5 MB rule in §4 held for nothing it applied to: Mermaid was recorded after it landed, and the 74.5 MB since arrived unrecorded | **Done** — [`releasing.md`](../architecture/releasing.md#the-bundle-size-ratchet) |
 | **`ProxySource` outside the bundle** (2026-10-17) | −16.8 MB of a 63.1 MB download (129.0 → 112.0 MB on disk, 63.1 → 46.4 MB compressed); reverses the retained-source choice in [`dependencies.md`](../architecture/dependencies.md). Adds 0.25 MB of upstream license texts to `Legal/`, which the bundle must carry once the source does not | **Done** 2026-10-18, by the owner's call: the source is attached to every release beside the zip (GPLv3 §6(d)) — [`releasing.md`](../architecture/releasing.md#the-proxy-helpers-source) |
-| **One shared plugin runtime** (2026-10-17) | ~−10 MB on disk today and ~−10 MB per future plugin; the kit as a dynamic framework linked by plugins only, never by the app | **Accept** — step 1b, the prerequisite for moving any feature |
+| **One shared plugin runtime** (2026-10-20) | −8.96 MB on disk / −4.04 MB compressed across the plugin components; one 11.22 MB dynamic kit linked by bundled plugins only, never by the app | **Done** — step 1b; future bundled plugins pay only for their own code and resources |
 | **First-party plugins on demand** (2026-10-17) | The "second Sparkle" cost of the WebRTC row, paid once for every movable feature | **Reopened** — step 2; this row supersedes "wait for demand" on WebRTC, which moves with the iPhone companion in step 3 |
+
+The 2026-10-20 step-1b follow-up archived and Developer ID exported `-Osize` for all Swift
+targets. It saved 7.95 MB in the host executable and 0.88 MB in the shared plugin framework on
+disk; the complete app was 94.22 MB / 40.11 MB against the earlier `-O` export's 103.42 MB /
+42.50 MB. Another helper packaging change is present between those exports, so the whole-app
+delta is not wholly attributable to optimization. On 2026-10-20, both `-O` and `-Osize`
+completed `scripts/profile_threading.sh full` against the same source and app-hosted test bundle
+shape: 116 corresponding performance records and the sample plus three Instruments traces per
+setting. Median ratio over all timing fields was +1.9%, but across seven project-sidebar fixture
+sizes, tree construction was 27% slower, cold reload 24% slower, and same-shape refresh 30%
+slower under `-Osize`. The latter ranged from 28% to 32% slower. The runs were sequential, not
+alternated after the expensive rebuild, so thermal state remains a possible confounder; the
+repeated sidebar cost does not pass the no-regression gate. Leave the shipping flag at `-O`.
 
 ## 4. Evidence that should reopen this
 
@@ -136,7 +163,8 @@ is under 30 KB. There is no fat spot; the binary shrinks by writing less code, n
   deltas first.
 - Remote-access adoption numbers, or a maintained data-channel-only WebRTC build — then the
   WebRTC row.
-- A full profile sweep at `-Osize` that shows no regression on the interaction workloads.
+- An alternating, matched sidebar and full-profile sweep that explains or removes the measured
+  `-Osize` regression without moving the bottleneck to another interaction workload.
 - Any new embedded binary over ~5 MB: add it to the table in §2 before accepting it. Since
   2026-10-17 `release.sh` refuses an unseen component over 1 MiB until the baseline is
   regenerated, so the rule is enforced at the release rather than remembered.

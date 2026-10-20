@@ -48,6 +48,7 @@ let products: [Product] = [
     .executable(name: "SwiftTermFuzz", targets: ["SwiftTermFuzz"]),
     .library(
         name: "SwiftTerm",
+        type: .static,
         targets: ["SwiftTerm"]
     ),
 ]
@@ -87,6 +88,7 @@ let products: [Product] = [
     .executable(name: "termcast", targets: ["Termcast"]),
     .library(
         name: "SwiftTerm",
+        type: .static,
         targets: ["SwiftTerm"]
     ),
 ]

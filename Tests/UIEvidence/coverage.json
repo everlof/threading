@@ -1153,16 +1153,19 @@
       "status": "implemented",
       "priority": "important",
       "title": "Settings navigation",
-      "description": "The complete grouped Settings sidebar, proving every built-in destination remains visible and legible across adaptive and strongly authored themes.",
-      "states": ["All destination groups", "Built-in page inventory"],
+      "description": "The grouped Settings sidebar and its bounded page navigation when installed extensions contribute many destinations.",
+      "states": ["All destination groups", "Built-in page inventory", "Paged extension destinations"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Neo Brutalism", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],
-        "sizes": ["240×700-point sidebar"]
+      "sizes": ["240×700-point sidebar", "280×700-point paged sidebar"]
       },
       "source": {
         "path": "Tests/ThreadingTests/SettingsDisclosureRenderTests.swift",
-        "test": "ThreadingTests/SettingsDisclosureRenderTests/testRendersTheGroupedSettingsSidebar"
+        "tests": [
+          "ThreadingTests/SettingsDisclosureRenderTests/testRendersTheGroupedSettingsSidebar",
+          "ThreadingTests/SettingsDisclosureRenderTests/testRendersPagedExtensionSettingsInProductSidebar"
+        ]
       },
       "capture": {
         "glob": "settings-sidebar-*.png"
@@ -1575,7 +1578,7 @@
       "priority": "important",
       "title": "Browser responsive review",
       "description": "A complete browser review surface at wide and compact widths, proving the content and chrome adapt together rather than testing the toolbar in isolation.",
-      "states": ["Wide review", "Compact review"],
+      "states": ["Wide review", "Compact review", "Page position after agent interactions"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],
@@ -1583,10 +1586,14 @@
       },
       "source": {
         "path": "Tests/ThreadingTests/ToolbarChromeRenderTests.swift",
-        "test": "ThreadingTests/ToolbarChromeRenderTests/testRendersBrowserResponsiveReviewMatrix"
+        "tests": [
+          "ThreadingTests/ToolbarChromeRenderTests/testRendersBrowserResponsiveReviewMatrix",
+          "ThreadingTests/BrowserAnnotationEditingTests/testAgentInteractionsKeepVisiblePageContentInPlace",
+          "ThreadingTests/BrowserAnnotationEditingTests/testAgentInteractionStillRevealsAnOffscreenTargetInNestedOverflow"
+        ]
       },
       "capture": {
-        "glob": "browser-responsive-review-*.png"
+        "globs": ["browser-responsive-review-*.png", "browser-agent-visible-target.png"]
       }
     },
     {

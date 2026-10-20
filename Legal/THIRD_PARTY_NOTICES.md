@@ -40,10 +40,11 @@ present and non-empty in the finished application resources.
 
 ## Threading proxy helper (macOS)
 
-`Contents/Helpers/threading-proxyd` is GPL-3.0-only. It statically links libuv
+The on-demand `ProxyPlugin.bundle/Contents/Helpers/threading-proxyd` is GPL-3.0-only. It statically links libuv
 (MIT/BSD-2-Clause/ISC), llhttp (MIT), cJSON (MIT), Mbed TLS and TF-PSA-Crypto (Apache-2.0 selected
 from the dual license), and zlib (Zlib). See `Legal/ProxyHost-THIRD_PARTY_NOTICES.md`; the
-original upstream license texts it names are in `Legal/ProxyHost/`.
+original upstream license texts it names are in both the app's `Legal/ProxyHost/` and the
+plugin's `Contents/Resources/Legal/ProxyHost/`.
 
 Its complete corresponding source — the helper's own code, the hash-pinned upstream source
 archives it is built from, their original notices and the CMake rebuild instructions — is offered

@@ -12,9 +12,9 @@ import AppKit
 ///
 /// Tabs are per-session, exactly as the panel's are: switching sessions swaps which list is
 /// shown and tears nothing down, so a shell keeps its process and scrollback across switches
-/// — the old drawer's one load-bearing promise, kept. The bundled Device Logs pane is the one
-/// singleton surface with an explicit bottom-pane route: keeping the device beside its logs is
-/// the point of that route. Closing a *tab* ends what it held.
+/// — the old drawer's one load-bearing promise, kept. Device Logs has a dedicated bottom-pane
+/// route so the device stays beside its logs; other verified plugin panes may be moved here too.
+/// Closing a *tab* ends what it held.
 @MainActor
 final class DrawerHostViewController: NSViewController {
 
@@ -62,6 +62,7 @@ final class DrawerHostViewController: NSViewController {
     /// Extra context-menu entries for a tab — the window appends "Move to …" here, because
     /// where else a tab could live is the window's knowledge, not this host's.
     var transferEntries: ((UUID) -> [ThemedMenuEntry])?
+    var onNativePluginToolReveal: ((SessionID) -> Void)?
 
     /// How many browsers the session holds across every host, so the cap is the session's and
     /// not this strip's. Unset, the drawer counts its own.
@@ -410,17 +411,80 @@ final class DrawerHostViewController: NSViewController {
         return controller
     }
 
-    private func makeDeviceLogs(for sessionID: SessionID, section: String = "regular") -> NativePluginPaneViewController? {
-        guard let bundleURL = NativePluginCatalog.deviceLogsBundle else { return nil }
-        let controller = NativePluginPaneViewController.deviceLogs(
-            bundleURL: bundleURL, sessionID: sessionID, section: section
-        )
+    private func makePlugin(
+        bundleURL: URL,
+        for sessionID: SessionID,
+        section: String? = nil,
+        expectedIdentifier: String? = nil
+    ) -> NativePluginPaneViewController? {
+        guard let controller = NativePluginPaneViewController.forBundle(
+            bundleURL, sessionID: sessionID, section: section,
+            expectedIdentifier: expectedIdentifier
+        ) else { return nil }
         addChild(controller)
-        controller.onTitleChange = { [weak self] in
-            guard let self, sessionID == self.currentSessionID else { return }
-            self.render()
-        }
+        configureNativePluginPane(controller, for: sessionID)
         return controller
+    }
+
+    private func makeRestoredPlugin(
+        identifier: String,
+        bundleName: String,
+        section: String?,
+        for sessionID: SessionID
+    ) -> NativePluginPaneViewController? {
+        guard let bundleURL = NativePluginCatalog.restoredPaneBundle(
+            identifier: identifier, bundleName: bundleName
+        ) else { return nil }
+        return makePlugin(bundleURL: bundleURL, for: sessionID,
+            section: section, expectedIdentifier: identifier)
+    }
+
+    private func configureNativePluginPane(
+        _ controller: NativePluginPaneViewController,
+        for sessionID: SessionID
+    ) {
+        controller.onTitleChange = { [weak self] in
+            guard let self else { return }
+            self.persist(sessionID)
+            if sessionID == self.currentSessionID { self.render() }
+        }
+        controller.onRevealSection = { [weak self, weak controller] section in
+            guard let self, let controller else { return false }
+            return self.revealPluginSection(section, from: controller, for: sessionID)
+        }
+    }
+
+    private func revealPluginSection(
+        _ section: String,
+        from controller: NativePluginPaneViewController,
+        for sessionID: SessionID
+    ) -> Bool {
+        guard let offer = NativePluginManagedOffer.paneOffer(at: controller.bundleURL),
+              offer.containsPaneSection(section) else { return false }
+        restoreIfNeeded(sessionID)
+        var state = statesBySession[sessionID] ?? TabListState()
+        if let existing = state.tabs.first(where: {
+            guard case let .nativePlugin(plugin) = $0.body else { return false }
+            return plugin.bundleURL == controller.bundleURL && plugin.paneSection == section
+        }) {
+            state.activate(id: existing.id)
+        } else {
+            // The primary owner may still live in another host. A secondary section can
+            // join it here; never reparent that owner just to satisfy a section reveal.
+            guard section != offer.primaryPaneSection,
+                  let sibling = makePlugin(
+                    bundleURL: controller.bundleURL, for: sessionID, section: section
+                  ),
+                  sibling !== controller else { return false }
+            let tab = PaneTab(body: .nativePlugin(sibling), owningSessionID: sessionID)
+            state.insert(tab)
+            state.activate(id: tab.id)
+        }
+        statesBySession[sessionID] = state
+        persist(sessionID)
+        if sessionID == currentSessionID { render() }
+        onNativePluginToolReveal?(sessionID)
+        return true
     }
 
     private func presentNewTabMenu(from source: NSView) {
@@ -605,9 +669,24 @@ final class DrawerHostViewController: NSViewController {
                 tabs.append(PaneTab(id: id, body: .browser(controller)))
 
             case .deviceLog:
-                guard let controller = makeDeviceLogs(
-                    for: sessionID, section: persisted.mode ?? NativePluginCatalog.DeviceLogsSection.regular
+                guard let bundle = NativePluginCatalog.deviceLogsBundle,
+                      let controller = makePlugin(
+                        bundleURL: bundle, for: sessionID,
+                        section: persisted.mode ?? NativePluginManagedOffer.DeviceLogsSection.regular
                 ) else { continue }
+                tabs.append(PaneTab(
+                    id: id,
+                    body: .nativePlugin(controller),
+                    owningSessionID: sessionID
+                ))
+
+            case .nativePlugin:
+                guard let identifier = persisted.pluginIdentifier,
+                      let bundleName = persisted.pluginBundleName,
+                      let controller = makeRestoredPlugin(
+                        identifier: identifier, bundleName: bundleName,
+                        section: persisted.mode, for: sessionID
+                      ) else { continue }
                 tabs.append(PaneTab(
                     id: id,
                     body: .nativePlugin(controller),
@@ -672,6 +751,20 @@ final class DrawerHostViewController: NSViewController {
             )
         }
 
+        if case .nativePlugin(let plugin) = tab.body {
+            guard let identifier = plugin.verifiedBundleIdentifier
+                ?? NativePluginManagedOffer.paneOffer(at: plugin.bundleURL)?.identifier else { return nil }
+            let route = PersistedTab(
+                id: tab.id.uuidString, kind: .nativePlugin, title: tab.title,
+                subtitle: "", url: nil, html: nil, cacheFile: nil,
+                mode: plugin.paneSection,
+                pluginIdentifier: identifier,
+                pluginBundleName: plugin.bundleURL.lastPathComponent,
+                host: PersistedTab.drawerHost
+            )
+            return route.hasValidNativePluginRoute ? route : nil
+        }
+
         return nil
     }
 }
@@ -714,15 +807,18 @@ extension DrawerHostViewController: TabHosting {
         return moveTab(id: id, toIndex: index, for: session)
     }
 
-    /// The drawer shows what it can build — and therefore *restore*: shells, browsers and the
-    /// bundled Device Logs pane. Other singleton surfaces keep their one home in the panel, and
-    /// a kind this host could not rebuild after a relaunch would be a tab the layout later
-    /// forgets, which is worse than refusing the move.
+    /// A plugin needs a verified identifier (or a reserved managed offer) before moving here:
+    /// the drawer must be able to write a route it can reconstruct after relaunch.
     func canAdopt(_ tab: PaneTab) -> Bool {
         switch tab.body {
         case .terminal, .browser: return true
         case .nativePlugin(let plugin):
-            return plugin.bundleURL == NativePluginCatalog.deviceLogsBundle
+            if plugin.bundleURL == NativePluginCatalog.deviceLogsBundle { return true }
+            guard let identifier = plugin.verifiedBundleIdentifier
+                ?? NativePluginManagedOffer.paneOffer(at: plugin.bundleURL)?.identifier else { return false }
+            return NativePluginCatalog.restoredPaneBundle(
+                identifier: identifier, bundleName: plugin.bundleURL.lastPathComponent
+            ) != nil
         default: return false
         }
     }
@@ -754,6 +850,9 @@ extension DrawerHostViewController: TabHosting {
             guard let self else { return }
             persist(session)
             if session == self.currentSessionID { render() }
+        }
+        if case let .nativePlugin(plugin) = tab.body {
+            configureNativePluginPane(plugin, for: session)
         }
         if let controller = tab.hostedController {
             addChild(controller)

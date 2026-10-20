@@ -414,6 +414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         let decision = CrashLoopPolicy.decide(opening.read)
         launchDecision = decision
         launchLedgerRead = opening.read
+        NativePluginCatalog.prepareCrashQuarantine(from: opening.read)
         if case .unclean(let report) = EventLog.shared.previousLaunchOutcome {
             launchCrashReport = report
         }
@@ -547,6 +548,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // the menu is built gives the first Navigator open a warm immutable inventory without
         // ever mapping unapproved plugin code.
         NativeWorkspaceNavigatorRegistry.shared.refresh(includeInstalled: plan.startsExtensions)
+        menuEvents.observe(NativePluginManagedDidInstall.self) { [weak self] _ in
+            NativeWorkspaceNavigatorRegistry.shared.refresh()
+            self?.refreshPanelCommands()
+        }
+        if plan.startsExtensions {
+            // A changed host build cannot run yesterday's lockstep native plugin. Fetch only
+            // features the person previously installed, after startup and off the main actor.
+            // Offline failures leave the usage record pending for the next launch.
+            Task.detached(priority: .background) {
+                do {
+                    try await NativePluginManagedInstaller.refreshPreviouslyUsed()
+                } catch {
+                    ThreadingLogger.app.warning(
+                        "Native plugin refresh is pending: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                    )
+                }
+            }
+        }
 
         setupMenuBar()
         startupProfile?.menuReadyNanoseconds = DispatchTime.now().uptimeNanoseconds
@@ -2390,11 +2409,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private func refreshPanelCommands() {
         guard panelDiscoveryTask == nil else { return }
         panelDiscoveryTask = Task { [weak self] in
-            let bundles = await Task.detached(priority: .utility) {
-                NativePluginCatalog.installedBundles()
+            let inventory = await Task.detached(priority: .utility) {
+                let installed = NativePluginCatalog.installedBundles()
+                let bundled = NativePluginCatalog.bundledPlugins()
+                let panes = NativePluginPaneDiscovery.inventory(
+                    bundled: bundled, installed: installed
+                )
+                return (installed, bundled, panes)
             }.value
             guard let self else { return }
-            CommandRegistry.shared.replaceNativePluginBundles(bundles)
+            CommandRegistry.shared.replaceNativePluginBundles(
+                inventory.0, paneDescriptors: inventory.2,
+                scannedBundledBundles: inventory.1
+            )
             panelDiscoveryTask = nil
         }
     }

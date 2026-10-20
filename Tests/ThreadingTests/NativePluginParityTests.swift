@@ -3,13 +3,13 @@ import XCTest
 import ThreadingPluginKit
 @testable import Threading
 
-/// Proves the first-party plugin still works when built and loaded the way a third party's is.
+/// Proves the first-party plugin still works when built with the public SDK recipe.
 ///
 /// Threading ships Device Logs as an Xcode bundle target, trusted because it sits inside the app
-/// and is covered by the app's signature. A third party builds with `scripts/build_plugin.sh`,
-/// installs into Application Support, and runs only once the user has approved it. **Two paths,
-/// and only one of them runs on every build** — which is exactly how the third-party path stops working
-/// without anyone noticing. This runs the other one.
+/// and is covered by the app's signature. The manually built copy exercises the public recipe
+/// and loader. The host reserves its identifier for the managed release path, so that copy cannot
+/// load through `NativePluginCatalog` without a matching release receipt. The independent example
+/// below exercises the ordinary third-party host policy.
 ///
 /// Opt in with `TEST_RUNNER_THREADING_PLUGIN_PARITY=1` — `xcodebuild` forwards an environment
 /// variable to the test process only under that prefix, and setting the bare name looks like it
@@ -75,35 +75,30 @@ final class NativePluginParityTests: XCTestCase {
         return NativePluginCatalog.directory.appendingPathComponent("DeviceLogsPlugin.bundle")
     }
 
-    /// The same plugin, built by the documented third-party route, loaded by decision rather than
-    /// by location, offering the same tools.
-    func testThePluginBuiltTheThirdPartyWayLoadsAndOffersTheSameTools() throws {
+    /// The public recipe produces a plugin with the same tools as the embedded target. The SDK
+    /// loader can construct it after validating its signature and an explicit test decision.
+    func testDeviceLogsBuiltWithPublicRecipeOffersTheSameTools() throws {
         let bundle = try buildTheThirdPartyWay()
 
-        // Trusted by the user's decision, not because it sits inside the app: this copy does not.
         XCTAssertFalse(
             bundle.path.hasPrefix(Bundle.main.bundleURL.path),
-            "the parity check must exercise the installed path, not the bundled one"
+            "the parity check must exercise the installed build, not the bundled one"
         )
 
-        // The user's decision is what lets an installed plugin run at all, so the parity check
-        // records one — that *is* the third-party path, not a way around it.
         let identity = try PluginLoader.identity(of: bundle)
-        NativePluginApprovalStore.shared.remember(true, for: identity)
-        defer { NativePluginApprovalStore.shared.revoke(identifier: identity.bundleIdentifier) }
-
-        let plugin: ThreadingNativePlugin
-        switch NativePluginCatalog.load(bundle) {
-        case .success(let loaded): plugin = loaded
-        case .failure(let failure):
-            return XCTFail("a plugin built the third-party way was refused: \(failure)")
+        let sections = try XCTUnwrap(NativePluginPaneDiscovery.descriptor(
+            at: bundle, isBundled: false, verifiedInstalledIdentity: identity
+        ))
+        XCTAssertEqual(sections.sections.map(\.identifier), ["regular", "bluetooth"])
+        let plugin = try PluginLoader.signatureAndDecision().load(bundleAt: bundle) {
+            $0 == identity
         }
 
         XCTAssertEqual(plugin.pluginIdentifier, NativePluginCatalog.deviceLogsIdentifier)
         XCTAssertEqual(type(of: plugin).pluginAPIVersion, ThreadingPluginAPI.version)
 
         let thirdParty = Set((plugin.pluginTools ?? []).map(\.name))
-        XCTAssertEqual(thirdParty.count, 6, "found \(thirdParty.sorted())")
+        XCTAssertFalse(thirdParty.isEmpty)
 
         // The bundled copy is the comparison, so a capability that only the shipped one has is a
         // failure here rather than a discovery later.
@@ -118,16 +113,17 @@ final class NativePluginParityTests: XCTestCase {
         )
     }
 
-    /// The decision is what stands between the plugins folder and arbitrary code in this process,
-    /// so an installed plugin must be refused without one — including ours, signed by our own team.
-    func testTheInstalledCopyIsRefusedWithoutTheUsersDecision() throws {
+    /// A manual copy using a reserved first-party identity cannot impersonate a managed release,
+    /// even when its exact signed build has been approved as an ordinary installed plugin.
+    func testManuallyInstalledFirstPartyIdentifierRequiresManagedReceipt() throws {
         let bundle = try buildTheThirdPartyWay()
         let identity = try PluginLoader.identity(of: bundle)
-        NativePluginApprovalStore.shared.revoke(identifier: identity.bundleIdentifier)
+        NativePluginApprovalStore.shared.remember(true, for: identity)
+        defer { NativePluginApprovalStore.shared.revoke(identifier: identity.bundleIdentifier) }
         switch NativePluginCatalog.load(bundle) {
-        case .success: XCTFail("an installed plugin loaded with no decision recorded")
+        case .success: XCTFail("a manual copy impersonated a managed first-party release")
         case .failure(let failure):
-            XCTAssertEqual(failure.code, "not_approved", "refused for the wrong reason")
+            XCTAssertEqual(failure.code, "build_changed", "refused for the wrong reason")
         }
     }
 
@@ -159,6 +155,19 @@ final class NativePluginParityTests: XCTestCase {
         XCTAssertEqual(plugin.pluginIdentifier, "com.example.hellopane")
         XCTAssertEqual(type(of: plugin).pluginAPIVersion, ThreadingPluginAPI.version)
         XCTAssertEqual((plugin.pluginTools ?? []).map(\.name), ["set_greeting"])
+
+        let paneDeclaration = try XCTUnwrap(NativePluginPaneDiscovery.descriptor(
+            at: bundle, isBundled: false, verifiedInstalledIdentity: identity
+        ))
+        XCTAssertEqual(paneDeclaration.sections.map(\.identifier), ["hello"])
+        XCTAssertEqual(paneDeclaration.sections.first?.command?.title, "Open Hello Pane")
+        let registry = CommandRegistry()
+        registry.replaceNativePluginBundles([bundle], paneDescriptors: [paneDeclaration])
+        let commandID = PanelCommands.nativePluginSectionID(
+            identifier: identity.bundleIdentifier, section: "hello"
+        )
+        XCTAssertEqual(registry.command(id: commandID)?.panelTarget,
+                       .nativePluginSection(identifier: identity.bundleIdentifier, section: "hello"))
 
         // It draws, in the host's colours, through the same path the shipped plugin uses.
         let pane = try XCTUnwrap(plugin.makePaneView?(
@@ -231,6 +240,9 @@ final class NativePluginParityTests: XCTestCase {
             kit.appendingPathComponent("Tools/build-plugin.sh").path,
             kit.appendingPathComponent("Examples/HelloPanePlugin").path,
             "--identifier", "com.example.hellopane",
+            "--metadata", kit.appendingPathComponent(
+                "Examples/HelloPanePlugin/PaneMetadata.plist"
+            ).path,
             "--install",
         ]
         let output = Pipe()

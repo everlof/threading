@@ -6,7 +6,9 @@ a pane, the leading workspace navigator, or both. The host owns placement and ha
 theme; the plugin owns the native view inside that rectangle. `Plugins/DeviceLogsPlugin` is the
 first pane tenant. `Plugins/T3NavigatorPlugin` is the first navigator-only tenant and proves that a
 bundle can supply a complete, design-system-native thread hierarchy without changing the default
-navigator.
+navigator. Its installed bundle does not add a generic pane command: T3 has no pane factory, so
+that command would only open a refusal view. The managed-offer catalogue records whether a
+first-party bundle should have such a command; third-party pane bundles retain the normal one.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
@@ -29,16 +31,18 @@ over JSONL; `customSurface` is Metal-shader-only; and `ExtensionRemoteSurface` i
 across a boundary the contract says accessibility never crosses. So the answer to "I want a
 native-feeling extension surface" was that you could not have one.
 
-This tier is the answer **for code we sign**. It is not a route for arbitrary installed
-extensions, and it does not replace the semantic node tier or the planned sandboxed web surface —
-those remain the answer for untrusted code and for anything that has to render on the iPhone.
+This tier is the answer for **explicitly trusted native code**: Threading's signed plugins and
+external plugins whose exact build the user approves. It does not replace the semantic node tier
+or the planned sandboxed web surface — those remain the answer for untrusted code and for anything
+that has to render on the iPhone. First-party publication and automatic trust are distribution
+policies, not extra presentation or command capabilities.
 
 | tier | for | crash isolation | status |
 |---|---|---|---|
 | semantic nodes on a Wasm core | most extensions | full | shipped, API v1 |
 | companion remote surface (BGRA8 frames) | pixels from a companion app | process | shipped, advanced tier |
 | web/canvas body | rich, untrusted, cross-platform | full | proposed, `network-inspector-extension.md` Host gap 2 |
-| **native plugin** | **first-party, maximum fidelity** | **none** | **shipped** |
+| **native plugin** | **approved native code, maximum fidelity** | **none** | **shipped; external installation is manual** |
 | ExtensionKit appex | rich, native, third-party | process | proposed, not started |
 
 ## The operating system enforces nothing here
@@ -183,9 +187,86 @@ Two measurement traps cost real time and are worth naming:
 drift; the application is untouched — no import churn, no access-level annotations, no risk to a
 working target. The set grows by adding a symlink and rebuilding.
 
-It is a **static** product. A plugin carries its own copy of the design system, the host has one
-compiled into the app already, and the two never exchange a component — only an encoded theme — so
-there is nothing to share and a self-contained bundle is the simpler artifact.
+It is a **dynamic** product embedded once in `Contents/Frameworks`, and only plugins link it.
+The host still compiles these sources into its executable and must never link the framework: doing
+so makes `Design` ambiguous throughout the application module. Both bundled plugins resolve the
+same framework image, rather than carrying a copy of its dependency closure apiece. The host and
+the framework still exchange only an encoded theme. The package also vends a static
+`ThreadingDesignKitStandalone` product for separately installed plugins: their Swift ABI stays
+with their build instead of depending on a private host framework that changes each release.
+
+The package products below DesignKit are explicitly static. With an automatic library product,
+Xcode made a separate `*_PackageProduct.framework` for each dependency of the dynamic kit and
+copied those frameworks into both plugin bundles and the app. The first build grew each plugin
+from roughly 11 MB to about 50 MB before export. Linking the local dependencies statically into
+DesignKit keeps that closure in the one shared image. The kit also drops its unused `Syntax.swift`
+type aliases, so it does not pull the remote `NativeDiffCore` product into the runtime. The app
+keeps its own syntax model unchanged.
+
+Xcode's static-library diamond check sees the app and DesignKit linking those same local
+products. That duplication is intentional across these **two images**: the app cannot import the
+kit, and the kit cannot use the app's Swift types. It already existed once per plugin before this
+change. `DISABLE_DIAMOND_PROBLEM_DIAGNOSTIC` is set at the project level because the hosted test
+target and helpers also link these static products into separate binaries. The hosted linkage
+test checks the important boundary separately: the app executable never links DesignKit, while
+both plugin executables link its one embedded framework.
+
+### First-party archives for an exact host build
+
+`scripts/release.sh` saves every exported, Developer ID signed native bundle before sealing the
+app without them. `scripts/package_native_plugins.py` packages those saved bundles as
+separate zip assets. A notarized release submits each zip to Apple, staples the resulting bundle,
+then zips it again so the download carries its ticket. The script signs a compact manifest with
+Threading's Sparkle Ed25519 key. The signature covers the exact payload bytes, including the app
+version and channel, SHA-256 hashes of the host executable, DesignKit and PluginKit, and each
+plugin archive's URL, byte length, SHA-256 and code-directory hash. The release publisher uploads
+the plugin zips before the manifest. A development-signed or unnotarized bundle cannot pass the
+managed-install code requirement.
+
+`NativePluginManagedInstaller` downloads with a byte ceiling, checks the signed manifest against
+the running host, validates the archive hash, extracts into a private candidate, requires our
+Developer ID team **and notarization** through `SecStaticCodeCheckValidity`, with strict recursive
+validation of nested code. Only then does it remove quarantine. Activation renames one top-level
+symlink to a versioned candidate, leaving the old
+target available if any prior step fails. Concurrent requests for the same archive share one
+download and activation. The ordinary plugin inventory sees that symlink;
+`PluginLoader` copies its resolved destination into its read-only staging area, validates that
+copy, and never maps the mutable install path. A local receipt is not an approval: every managed
+load rechecks the signed manifest, host build, notarized code and staged code-directory hash.
+Only that managed first-party path skips the manual approval prompt. An old managed build reports
+`build_changed` instead of falling back to a prompt. Previously installed identifiers are bounded
+and retained for a background re-fetch after the host build changes; offline failure leaves the
+refresh pending for the next launch.
+
+The release app embeds no first-party native plugin. The current four are offered through the
+virtualized Extensions Settings page. Device Logs' existing host commands create a pane at its
+stable installed URL.
+Devices carries the separately signed Simulator helper. Its host route verifies the managed
+receipt and nested code before launching the helper from the resolved version path; the app's
+direct helper copy is removed. A missing Devices bundle leaves the public screenshot fallback.
+Proxy carries the separately signed portable `threading-proxyd` helper and certificate setup
+script. The host verifies its managed receipt and both signatures before a capture launch, pins
+the resolved version path, and reports the install action when the bundle is absent. Capture
+leases, client approval and certificate authority custody remain host-owned.
+Any first-party pane in `NativePluginManagedOffer` uses that same missing-bundle view to explain
+its size and install it on request; a stale managed version offers the same repair path. The
+catalogue supplies the exact reserved path, display name and size hint to Settings and the pane.
+The Settings row reports whether code is included in
+a development build, installed for this app version, needs an update, or has a conflicting manual
+copy, and gives an approximate download size while offline. The first-party identifiers and
+install filenames are reserved: a manually approved bundle cannot claim the Device Logs host tool
+path or masquerade as a managed first-party release. The release flow was exercised against a
+local Developer ID export, including independent Apple notarization of Device Logs and T3. The
+Devices pilot repeated the local export with all three bundles, notarized and stapled each, and
+checked the signed manifest and nested Simulator helper against the exact release-shaped host
+after removing its native plugins. These were local probes; a clean-tree published release remains
+to be exercised.
+
+The launch ledger brackets each first-party native plugin constructor with start/finish checkpoints naming
+the bundle identifier and exact code build. On the next launch, an unclean exit with an unmatched
+start pauses only that build before its principal class can be mapped. The Extensions row explains
+the pause and offers an explicit Retry; a successful retry writes a finish, clearing the pause in
+later launches. The plugin's own code has no way to skip this host gate.
 
 `Seam/HostSeam.swift` supplies the handful of things the application owns because they read stores
 a plugin has no business touching: `AppThemePalette`, the six `DesignSettings` values,
@@ -276,11 +357,13 @@ Two things the recipe does are not optional:
 `ThreadingPluginKit.framework/Versions/A/ThreadingPluginKit`. dyld would map a *second* copy — and
 two `@objc` protocol declarations in two images are two protocols, so the plugin is refused for not
 conforming to the protocol it plainly conforms to. The script rewrites the dependency to the name
-the host already has loaded.
+the host already has loaded. The standalone plugin manifests link
+`ThreadingDesignKitStandalone` statically; only bundled Xcode targets use the dynamic product.
 
-**The framework has to be embedded in the app.** It was resolving through DerivedData's
-`PackageFrameworks` rpath, which works in development and fails in a shipped app. The app has an
-Embed Frameworks phase for it.
+**The frameworks have to be embedded in the app.** The contract once resolved through
+DerivedData's `PackageFrameworks` rpath, which worked in development and failed in a shipped app.
+The app's Embed Frameworks phase copies and signs both `ThreadingPluginKit` and
+`ThreadingDesignKit`; only the contract appears in the app executable's link dependencies.
 
 Two approaches were tried before the bundle target and both look obviously right until they are
 not:
@@ -326,6 +409,47 @@ because the last reference is often released by a main-actor pane and bundle siz
 it inspects**. A plugins folder is externally writable, so a limit applied after
 `contentsOfDirectory` has materialized everything bounds the result and not the scan — the
 distinction the [Scaling Gate](../../CLAUDE.md#scaling-gate) names.
+
+### Native pane sections and commands
+
+A native bundle can declare `ThreadingPaneSections` in `Contents/Info.plist`. This static
+declaration is read on a bounded worker after signature validation, without mapping the plugin's
+executable. `ThreadingPluginKit.PluginBundleMetadata` publishes the keys. Version 1 has this form:
+
+```xml
+<key>ThreadingPaneSections</key>
+<dict>
+  <key>schemaVersion</key><integer>1</integer>
+  <key>sections</key>
+  <array>
+    <dict>
+      <key>id</key><string>overview</string>
+      <key>title</key><string>Overview</string>
+      <key>command</key>
+      <dict>
+        <key>title</key><string>Open overview</string>
+        <key>symbol</key><string>rectangle.grid.1x2</string>
+        <key>detail</key><string>Optional palette detail</string>
+      </dict>
+    </dict>
+  </array>
+</dict>
+```
+
+The first section is the primary pane returned by `makePaneView(context:)`; additional sections
+come from `makePaneSectionView(identifier:)`. `command` is optional. A declared command appears
+in the panel menu and command palette and opens that section for the current session. The host
+owns its shortcut, route, tab lifetime and placement. Up to eight sections are accepted; an
+unknown version, duplicate ID, invalid field or oversized plist rejects the whole declaration.
+Manually installed bundles need a valid signature and the user's approval of that exact build
+before code is loaded; managed first-party downloads instead prove the signed release manifest.
+`Tools/build-plugin.sh --metadata PaneMetadata.plist` merges this declaration into the bundle
+before signing; `Examples/HelloPanePlugin/PaneMetadata.plist` is an independent author example.
+
+Device Logs declares these sections in its own `Info.plist` and uses the same discovery and pane
+registry when installed. The host retains its two existing command aliases before the managed
+bundle has been downloaded. The managed catalogue also retains contextual `from-device` routing;
+that route and the managed iPhone executable broker are separate public API work.
 
 ### Native workspace navigators
 
@@ -407,8 +531,21 @@ takes. The app is ~1,500 lines lighter and the tier carries a feature rather tha
 Device logs remains an entry in the panel's new-tab menu and `device_log_prepare` still reveals it.
 The live Simulator and physical-iPhone toolbars also carry a logs button: it moves that session's
 one plugin tab into the bottom drawer, keeps the device visible in the right panel, and targets the
-same UDID. The drawer persists and restores this bundled singleton through `.deviceLog`; other
-native plugins remain panel-only because the drawer cannot reconstruct their installed identity.
+same UDID. The drawer still reads legacy `.deviceLog` rows, but any verified native plugin pane now
+persists an identifier and bundle name through `.nativePlugin` in panel, dock and drawer. The host
+rebuilds only a reserved first-party address or a top-level installed address, then requires the
+verified bundle identifier to match before mapping code. The stored route grants no trust; a
+removed plugin shows its ordinary refusal state. Format version 8 keeps an older app from reading
+this new tab kind and silently saving a partial layout. Device Logs keeps writing `.deviceLog`
+while older layouts and the dedicated logs commands exist.
+On transfer, the destination host takes over the plugin pane's title and section-reveal callbacks.
+The drawer can create a Bluetooth sibling for Device Logs without moving its shared owner out of
+another host, and a tool reveal opens the drawer through the same host route as a browser. Other
+plugins declare section identifiers in signed metadata; a saved route waits for that declaration
+and only restores a section that still exists. Contextual pane routes declare a section and panel
+or drawer placement in that same offer. The device button names Device Logs' `from-device` route
+and passes the selected `deviceID`; the window resolves the route, reuses a tab in its current dock or drawer,
+or moves a new panel tab into the drawer. The route does not grant execution authority.
 
 Revealing a singleton for a new subject must not rebuild its view or start a second reader.
 `ThreadingNativePlugin.activatePane(context:)` is therefore optional and additive: the host sends
@@ -425,9 +562,10 @@ the log daemon, the modern paired-phone native-RSD reader with its legacy relay 
 `DeviceRelayReclaim` — stay in
 [`device-and-simulator-logs.md`](../feature-drafts/device-and-simulator-logs.md).
 
-The bundled Device Logs tenant alone receives the preferred path to Threading's managed
-`pymobiledevice3` environment in its placement arguments. The host owns that installation and
-selects the capability; arbitrary installed plugins do not receive it. The pane resolves and
+Only the verified first-party Device Logs tenant receives the preferred path to Threading's
+managed `pymobiledevice3` environment in its placement arguments, whether bundled in a development
+build or installed from the signed release manifest. The host owns that installation and selects
+the capability; arbitrary installed plugins do not receive it. The pane resolves and
 version-checks the path during every source rescan, so an explicit Advanced Settings installation
 can become active without reloading the plugin or restarting the app.
 
@@ -747,7 +885,7 @@ Three things were fixed *because* they are cheap now and expensive after publica
 **`ThreadingDesignKit` cannot follow yet, and that is recorded rather than hoped away.** It is 80
 symlinks into `Sources/Threading` plus dependencies on ThreadingDomain, ThreadingRemoteKit and
 SwiftTerm; publishing it means exporting the app's UI layer and dragging two more of our layers
-behind it. So the bundled Device Logs and T3 navigators link something an external author cannot
+behind it. So the first-party Device Logs and T3 plugins link something an external author cannot
 consume from a released package yet. The distinction is now explicit rather than visual debt:
 first-party native plugins use the actual components; external custom components receive all 30
 resolved semantic colours through publishable `ThreadingPluginKit`. The latter is palette parity,
@@ -782,21 +920,27 @@ one is not mistaken for coverage.
 
 ## Still open
 
+- **Contextual native pane routes are still host declarations.** Versioned bundle metadata now
+  exposes pane sections and commands to every signed native plugin. Device Logs retains the
+  pre-install command aliases and `from-device` route in `NativePluginManagedOffer`. A public
+  contextual-route declaration and capability-scoped iPhone tool broker remain to reach full
+  Device Logs parity. The host keeps placement and command conflicts.
 - **No install flow for a third-party plugin.** A bundle is placed in `~/Library/Application
   Support/Threading/Plugins` by hand, and the approval prompt is the whole review surface. It says
   which tier the thing is and cannot be suppressed, but it is a dialog rather than a flow: nothing
   yet lists what has been approved or offers to revoke it, though `NativePluginApprovalStore`
   supports both.
-- **No crash quarantine yet.** A plugin crash is the app's crash. `pluginIdentifier` exists so the
-  policy can name a plugin rather than point at a path, and
-  [`crash-recovery.md`](crash-recovery.md) already has the launch ledger and crash-loop machinery
-  to hang it on.
+- **Manual third-party plugins have no automatic crash quarantine.** The managed first-party
+  path records a load-start and load-finish checkpoint, blocks the exact build after an unclean
+  load, and offers an explicit Retry. A manually placed bundle still requires the user's build
+  approval, and the host does not silently quarantine it without a matching recovery path.
 - **Gatekeeper still runs at `dlopen`** for a bundle carrying a quarantine attribute, and refuses
   with its own dialog rather than an error we control. An install flow has to own the attribute.
-  This — not library validation, and not SIP — is the real requirement a third-party plugin faces:
+  This is the real requirement a third-party plugin faces:
   it must be Developer ID signed **and notarized**, which also means signed with a secure timestamp.
-  `build_plugin.sh` passes `--timestamp=none`, which is correct for a bundled first-party plugin
-  sealed by the app's own signature and would have to change for a distributable one.
+  The first-party on-demand installer now removes the attribute only after manifest and notarized
+  code checks. `build_plugin.sh` passes `--timestamp=none` for a bundled development build; the
+  release export signs the distributable bundle again with a secure timestamp.
 
   **We can check notarization ourselves, and should.** The `notarized` code requirement is
   available and works (verified 2026-09-03 against notarized applications, which satisfy it, and
@@ -817,15 +961,20 @@ one is not mistaken for coverage.
 
 ### Device Logs in independent dock groups
 
-The bundled log plugin supports two optional, additive PluginKit selectors:
+The log plugin supports two optional, additive PluginKit selectors:
 `makePaneSectionView(identifier:)` and `setPaneSectionPresented(identifier:presented:)`.
 The host opts in with `hostPaneSections=true` in the initial context. Without that opt-in, the
 plugin retains its internal segmented-control presentation, so older hosts and ordinary native
 plugins keep their existing contract. The binary API generation remains 5.
 
 Device Logs and Bluetooth become separate host tabs, with persisted modes `regular` and
-`bluetooth`. Their host controllers share one verified plugin owner and one runtime registration
-per session. A Bluetooth sibling retains that owner, including when the regular tab closes.
+`bluetooth`. Each first-party offer declares its ordered section identifiers and localized title
+keys in `NativePluginManagedOffer`; the first is the primary section. The panel, dock and drawer
+use the same registration to create and restore tabs, validate saved modes and accept tool reveals
+without reading bundle metadata on the main actor. `NativePluginPaneViewController.sectioned`
+shares one verified plugin owner and one runtime registration per bundle and session. Device Logs
+adds only its privileged managed-tool path. A Bluetooth sibling retains that owner,
+including when the regular tab closes.
 Visibility is tracked per section: both can project rows simultaneously, an inactive section
 keeps its reader while another is visible, and hiding the last section stops both. Visibility
 loss is deferred one main turn so synchronous tab reparenting does not restart capture. Theme
@@ -833,10 +982,22 @@ handoff repaints both section trees, including a section in another dock group.
 
 **One command opens one tab.** Device Logs (`panel.deviceLogs`) and Bluetooth
 (`panel.bluetoothLogs`) are separate panel commands, each revealing or creating only its own
-section tab, in either order. Device Logs first opened a Bluetooth tab beside itself, so one menu
+section tab, in either order. Their stable command IDs, titles, icons and optional descriptions
+are declared beside their section identifiers in the first-party managed offer. The command
+registry and `+` menu therefore expose them before the on-demand bundle is installed, while the
+panel resolves the current fixed bundle address and opens the declared section. Device Logs first
+opened a Bluetooth tab beside itself, so one menu
 choice produced two tabs and a packet tab the user had not asked for; a legacy row persisted
-without a mode now restores as Device Logs alone for the same reason. A plugin cannot ask the host
-for a tab, so `NativePluginMCPToolProvider` opens the Bluetooth tab (through
-`NativePluginRuntime.revealBluetoothLog`, installed by the window) before the plugin's `bluetooth`
-tool starts a capture — otherwise an agent's capture would record packets no tab shows. See
+without a mode now restores as Device Logs alone for the same reason. A native `PluginTool` may
+declare `paneSectionToReveal`; the six-argument initializer remains available to existing
+plugins. The runtime snapshots the tool declarations when the pane loads; the MCP provider
+verifies that the invoked tool was in that snapshot, then asks the pane that
+owns that exact loaded instance to reveal the section before invoking it. This also keeps two
+windows with the same plugin from routing to the most recently opened window. Device Logs declares
+`bluetooth` for its capture tool, so an agent's packets arrive in a visible tab. A section must
+also be declared in its first-party managed offer; naming a section in a tool alone does not
+create section chrome. If the owning host cannot reveal the declared section, the
+provider refuses the tool call rather than starting work in an invisible pane. The offer's
+section registration is the one source for panel, dock and drawer routing. Threading retains tab
+placement and lifetime. See
 `WorkspaceDockTests.testDeviceLogsAndBluetoothCommandsEachOpenOnlyTheirOwnTab`.

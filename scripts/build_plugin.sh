@@ -16,9 +16,14 @@ name="$(basename "${package}")"
 
 identity="${THREADING_PLUGIN_IDENTITY:-Developer ID Application: MJUKIS AB (SMQ3E8Y57T)}"
 identifier="codes.threading.plugin.$(echo "${name}" | tr '[:upper:]' '[:lower:]' | sed 's/plugin$//')"
+metadata_args=()
+if [ -f "${package}/Info.plist" ]; then
+    metadata_args=(--metadata "${package}/Info.plist")
+fi
 
 exec "${root}/Packages/ThreadingPluginKit/Tools/build-plugin.sh" \
     "${package}" \
     --identifier "${identifier}" \
     --identity "${identity}" \
+    "${metadata_args[@]}" \
     "${@:2}"

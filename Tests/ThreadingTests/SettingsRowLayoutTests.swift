@@ -1232,6 +1232,11 @@ final class SettingsRowLayoutTests: XCTestCase {
 
         let loadStarted = DispatchTime.now().uptimeNanoseconds
         let sidebar = SettingsSidebar(items: items)
+        XCTAssertLessThanOrEqual(
+            rowTitles(in: sidebar).count,
+            SettingsSidebar.Defaults.maximumRestingPageRows,
+            "the resting list built every installed extension page before search"
+        )
         let host = NSView()
         host.translatesAutoresizingMaskIntoConstraints = false
         sidebar.translatesAutoresizingMaskIntoConstraints = false
@@ -1290,6 +1295,45 @@ final class SettingsRowLayoutTests: XCTestCase {
         )
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: sidebar), [])
         withExtendedLifetime(host) {}
+    }
+
+    func testLargeRestingSettingsListKeepsEveryPageReachable() throws {
+        let items = (0..<101).map { index in
+            SettingsSidebar.Item(
+                id: "page-\(index)",
+                title: "Page \(index)",
+                symbol: "puzzlepiece.extension",
+                searchText: index == 0 ? "Unique first page" : "Page \(index)",
+                group: "Extensions"
+            )
+        }
+        let sidebar = SettingsSidebar(items: items)
+        XCTAssertEqual(rowTitles(in: sidebar).count, 48)
+        XCTAssertEqual(sidebar.visibleItemIDs.count, items.count)
+
+        let next = try XCTUnwrap(
+            descendants(of: sidebar).compactMap { $0 as? ThemedButton }
+                .first { $0.title == L10n.string("Next") }
+        )
+        next.performClick()
+        XCTAssertEqual(rowTitles(in: sidebar).first, "Page 48")
+        XCTAssertEqual(rowTitles(in: sidebar).count, 48)
+
+        sidebar.select(id: "page-100")
+        XCTAssertEqual(rowTitles(in: sidebar).last, "Page 100")
+        XCTAssertEqual(rowTitles(in: sidebar).count, 5)
+        XCTAssertTrue(labels(in: sidebar).contains(L10n.format("Page %lld of %lld", 3, 3)))
+
+        sidebar.updateSearchQuery("Unique")
+        XCTAssertEqual(sidebar.visibleItemIDs, ["page-0"])
+        XCTAssertEqual(rowTitles(in: sidebar), ["Page 0"])
+        sidebar.resetSearch()
+        XCTAssertEqual(rowTitles(in: sidebar).last, "Page 100")
+
+        sidebar.updateSearchQuery("Unique")
+        sidebar.select(id: "page-0")
+        sidebar.resetSearch()
+        XCTAssertEqual(rowTitles(in: sidebar).first, "Page 0")
     }
 
     private static func milliseconds(_ nanoseconds: UInt64) -> String {

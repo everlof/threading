@@ -22,7 +22,7 @@ let package = Package(
             name: "MarketeerPanelPlugin",
             dependencies: [
                 .product(name: "ThreadingPluginKit", package: "ThreadingPluginKit"),
-                .product(name: "ThreadingDesignKit", package: "ThreadingDesignKit"),
+                .product(name: "ThreadingDesignKitStandalone", package: "ThreadingDesignKit"),
             ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),

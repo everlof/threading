@@ -3,10 +3,11 @@ import Foundation
 /// Panel creation is a host command by default. Menus contribute presentation, never closures
 /// with a separate implementation. Dynamic targets retain values, not constructed controllers.
 enum PanelCommandTarget: Equatable {
-    case simulator, androidDevice, realDevice, deviceLogs, bluetoothLogs, audit, browser, privateBrowser, overview, compare
+    case simulator, androidDevice, realDevice, audit, browser, privateBrowser, overview, compare
     case supervision
     case notificationTest, webExtensions
     case nativePlugin(URL)
+    case nativePluginSection(identifier: String, section: String)
     case extensionPanel(identifier: String, panelID: String)
 }
 
@@ -28,11 +29,17 @@ enum PanelCommands {
               detail: "Show an Android emulator or a USB Android phone, beside any iOS Simulator"),
         Entry(id: "panel.realDevice", title: "iPhone Device", icon: "iphone.gen2", target: .realDevice,
               detail: "Preview and control a paired physical iPhone"),
-        // One command, one tab. The two streams share a reader and its discovery, but each tab
-        // is asked for on its own, so opening the logs does not also open a packet capture.
-        Entry(id: "panel.deviceLogs", title: "Device logs", icon: "list.bullet.rectangle", target: .deviceLogs),
-        Entry(id: "panel.bluetoothLogs", title: "Bluetooth logs", icon: "antenna.radiowaves.left.and.right",
-              target: .bluetoothLogs, detail: "Capture a paired iPhone's Bluetooth packets"),
+    ] + NativePluginManagedOffer.all.flatMap { offer in
+        offer.paneSections.compactMap { section -> Entry? in
+            guard let command = section.command else { return nil }
+            return Entry(
+                id: command.id, title: command.titleKey, icon: command.symbol,
+                target: .nativePluginSection(
+                    identifier: offer.identifier, section: section.identifier
+                ), detail: command.detailKey
+            )
+        }
+    } + [
         Entry(id: "panel.notificationTest", title: "Push Test", icon: "bell.badge",
               target: .notificationTest,
               detail: "Send a test notification from this chat to the Mac or iPhone"),
@@ -57,6 +64,10 @@ enum PanelCommands {
 
     static func nativePluginID(_ url: URL) -> String {
         "panel.native." + url.lastPathComponent
+    }
+
+    static func nativePluginSectionID(identifier: String, section: String) -> String {
+        "panel.nativeSection.\(identifier).\(section)"
     }
 
     static func extensionPanelID(identifier: String, panelID: String) -> String {

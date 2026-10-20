@@ -56,6 +56,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | New-session composer welcome | theme document: `variants.<kind>.welcome` (backdrop, mark, `mark_size`, greeting, caption, scrim) | theme-selected host presentation from a fixed vocabulary: a backdrop through the shared dressing, one of four marks, `{token}` lines with conditions and weights (a `{fact:KEY}` line shows a scalar an extension publishes through `facts.provide`), a type style, two veil strengths | the layout (prompt at the foot, hero centred above, hidden when the pane is short), the pick-on-arrival rule and the re-pick only when the words change, every token's value and the localized daypart words, a fact's lookup chain, wording, 64-character cap, freshness and in-place re-render (Mac only), the app's own greeting as the fallback, the manager's brief, the on-the-minute re-render that runs only while the composer is seen, the mark's mood source and bounds, the veil reach and ceiling, the extension plane above the theme's backdrop, pointer passthrough and accessibility silence for every decorative layer, the hold | Implemented |
 | App theme preview (`preview_app_theme`) | — | host-only | sample rows instead of the user's data, the one-turn palette swap and restore, still frames for motion | Host-only |
 | Workspace navigator | `ui.workspace-navigation` or the signed native PluginKit navigator contract | complete semantic navigator, optionally augmented with a host-evaluated pipeline; native plugins receive bounded typed rows and visible-row enrichment | shell and menu, user selection and persistence, Native/failback route, declaration and fact validation, evaluation and virtualization, theme and accessibility, source-session activation, change-request truth and credentials, and intent availability, revalidation and execution | Implemented |
+| Native plugin pane sections and commands | versioned PluginKit bundle declarations, shared by Threading's plugins and approved external plugins | plugin-authored section views, titles and command presentation | signature and approval gate, metadata bounds and validation, command identity/conflicts, placement, tab lifetime, restoration, theme and capability admission | Sections and commands implemented; contextual routes remain planned |
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
 | Native and mobile work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence, mobile three-chat and Mac five-chat preview/disclosure (the Mac's staged by `SidebarChatPreview`, published to navigators only as the `chat-preview` option), hidden activity counts and scroll return | Host-only |
 | Archived conversations browser | — | host-only navigation/filter around existing additive Archived settings slots | archive chronology/search, provider lifecycle truth, Restore/Delete authority, bounded virtual list | Host-only |
@@ -697,6 +698,28 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+**Restored native plugin tabs** extend the existing signed native pane surface into dock groups
+and the drawer. The plugin still owns only the view inside its rectangle. Threading owns the tab
+shell, placement, active selection, persisted identifier, bounded route validation, current code
+signature and approval, and the refusal when a bundle is missing or changed. A saved tab does not
+grant execution authority, and this adds no safe-extension presentation slot.
+
+**Declared first-party pane sections** extend that same native pane surface. A managed offer
+declares stable section identifiers and localized title keys; plugin code supplies the interior
+view for each identifier. Threading owns section chrome, placement across panel, dock and drawer,
+visibility, saved-mode validation, tool reveal routing and the user commands that open a section.
+Command IDs stay stable for keyboard overrides and remain available before installation. The
+first-party offer may also declare a contextual panel or drawer route. The window owns reuse,
+movement and selection when that route is invoked. The registration gives no new
+capability to safe extensions and grants no execution authority from a saved route.
+
+**Paged Settings navigation for large extension catalogues** extends the existing host-owned
+Settings shell. Extensions still contribute pages and fields through their existing semantic
+settings declarations; they cannot replace the sidebar, select a page, change the 48-row
+construction bound, hide search or reorder host destinations. Threading owns pagination,
+selection, search, row accessibility and the overflow count. Themes style the existing rows and
+the Previous/Next controls. This adds no extension execution or data authority.
+
 **Remote-host startup and sleep status** extends the host-only machine settings and project host
 mark. Threading owns the read-only probe, its bounds, the distinction between configuration and
 current reachability, last-observed freshness, and the Windows setup export. Unknown facts are
@@ -762,6 +785,9 @@ A future extension may present flow data through a separate admitted capability;
 introduces no presentation slot or extension data authority. Proxy client approval and the Tools
 settings revocation row are also host-only: Threading owns pending connections, one-time/capture
 grants, persisted exact-IP scope, expiry, dismissal and revocation. Extensions cannot approve clients.
+Moving the signed portable helper and setup script into first-party `ProxyPlugin.bundle` changes
+installation and code delivery only. The existing host owns the commands, Tools settings,
+certificate authority and consent; no public extension can claim the proxy helper or its powers.
 
 The iPhone conversation's pinned composer dock and model, effort, permission and speed controls
 are host-only. Themes supply the existing ground, control material, ink and border. Threading
@@ -832,9 +858,10 @@ extension gets installation authority, a device identity, or a replacement setup
 The live Simulator and physical-iPhone **Open Device Logs in Bottom Pane** control is a host-only
 navigation affordance on the existing protected device surfaces. Its entity is the selected device
 UDID within the current session. Threading owns that identity, singleton routing, tab movement and
-drawer placement even under full visual replacement; the bundled Device Logs plugin owns the log
-sources, reader lifetime, filters and history once revealed. An absent bundled plugin fails closed,
-an invalid or disconnected UDID remains a pending selection for the next source rescan, and a
+drawer placement even under full visual replacement; the first-party Device Logs plugin owns the
+log sources, reader lifetime, filters and history once revealed. An absent on-demand plugin offers
+its signed install path. An invalid or disconnected UDID remains a pending selection for the next
+source rescan, and a
 repeated press reuses the existing pane. No extension receives new device data or authority.
 
 The browser origin prompt's chat-wide grant is host-only authorization UI. Its entity is the
@@ -901,6 +928,12 @@ host-only security surfaces. Threading owns authenticated chat attribution, the 
 of consent, persistence, revocation, package validation, and disabled-first installation. Extensions
 cannot supply or replace the approval actions or grant themselves trust. Existing themed alert and
 virtual settings table components present these values; no new public component contract is added.
+
+The first-party native plugin rows on the same page are host-only installation and recovery
+controls. Threading owns the offer list, archive size hint, release-manifest signature, exact host
+match, notarized-code admission, activation, crash quarantine and explicit retry. A plugin cannot
+contribute an install button for itself or clear its own quarantine. The existing virtual settings
+row and themed button provide presentation; there is no new public component contract.
 
 ## Face ID approvals
 

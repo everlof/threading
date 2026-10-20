@@ -15,6 +15,8 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case update
         case reveal
         case remove
+        case installNativePlugin
+        case retryNativePlugin
         case installFirstParty
         case updateFirstParty
         case openFirstPartySource
@@ -54,6 +56,8 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case trustedAgentsCaption
         case trustedAgent(Int)
         case firstPartyProblem
+        case nativePluginCaption
+        case nativePluginEntry(Int)
         case firstPartyCaption
         case firstPartyEntry(Int)
         case installedCaption
@@ -82,6 +86,10 @@ final class ExtensionsPreferencesViewController: NSViewController {
     private var identityMenus: [ObjectIdentifier: IdentityFamily] = [:]
     private var isImporting = false
     private var firstPartyOperationIdentifier: String?
+    private var nativePluginOperationIdentifier: String?
+    private var nativePluginStates: [String: NativePluginState] = [:]
+    private var nativePluginStateGeneration = 0
+    private let usesInjectedNativePluginStates: Bool
     private var firstPartyExtensions: [FirstPartyExtensionCatalog.Entry] = []
     private var installedExtensions: [InstalledExtensionSnapshot] = []
     private var installedNames: [String: String] = [:]
@@ -93,6 +101,16 @@ final class ExtensionsPreferencesViewController: NSViewController {
     private var sourceControlProviders: [ExtensionSourceControlProviderInventoryItem] = []
     private var extensionSections: [ExtensionSettingsSectionModel] = []
     private var presentationRows: [PresentationRow] = []
+
+    enum NativePluginState: Sendable, Equatable {
+        case bundled
+        case installed(codeKey: String)
+        case available
+        case updateRequired
+        case occupied
+    }
+
+    private static let nativePluginOffers = NativePluginManagedOffer.all
 
     private lazy var importButton: ThemedButton = {
         let button = SettingsUI.button(
@@ -143,7 +161,8 @@ final class ExtensionsPreferencesViewController: NSViewController {
         identityRegistry: ExtensionIdentityResolverRegistry? = nil,
         componentRegistry: ComponentCustomizationRegistry? = nil,
         installTrust: AgentExtensionInstallTrustStore? = nil,
-        sourceControlConnectionStore: SourceControlProviderConnectionStore? = nil
+        sourceControlConnectionStore: SourceControlProviderConnectionStore? = nil,
+        nativePluginStates: [String: NativePluginState]? = nil
     ) {
         self.installTrust = installTrust ?? .shared
         self.manager = manager ?? .shared
@@ -153,6 +172,8 @@ final class ExtensionsPreferencesViewController: NSViewController {
             ?? ComponentCustomizationProviderSlot.shared.provider
                 as? ComponentCustomizationRegistry
         self.sourceControlConnectionStore = sourceControlConnectionStore ?? .shared
+        self.nativePluginStates = nativePluginStates ?? [:]
+        self.usesInjectedNativePluginStates = nativePluginStates != nil
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -174,6 +195,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
         appEvents.observe(ExtensionsDidChange.self) { [weak self] _ in
             self?.render()
         }
+        appEvents.observe(NativePluginManagedDidInstall.self) { [weak self] _ in
+            self?.refreshNativePluginStates()
+        }
         appEvents.observe(AppearanceActivationDidChange.self) { [weak self] _ in self?.render() }
         appEvents.observe(ExtensionIdentityResolversDidChange.self) { [weak self] _ in
             self?.render()
@@ -190,6 +214,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         appEvents.observe(SourceControlProviderConnectionsDidChange.self) { [weak self] _ in
             self?.render()
         }
+        refreshNativePluginStates()
     }
 
     /// Brings the row `title` names into the table, so a settings destination that points at an
@@ -207,6 +232,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
             case .firstPartyEntry(let entryIndex):
                 return firstPartyExtensions.indices.contains(entryIndex)
                     && firstPartyExtensions[entryIndex].name == title
+            case .nativePluginEntry(let entryIndex):
+                return Self.nativePluginOffers.indices.contains(entryIndex)
+                    && Self.nativePluginOffers[entryIndex].name == title
             case .extensionField(let sectionIndex, let fieldIndex):
                 guard extensionSections.indices.contains(sectionIndex),
                       extensionSections[sectionIndex].fields.indices.contains(fieldIndex) else {
@@ -259,6 +287,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
 
         importButton.title = L10n.string(isImporting ? "Importing…" : "Import…")
         importButton.isEnabled = !isImporting && firstPartyOperationIdentifier == nil
+            && nativePluginOperationIdentifier == nil
 
         if let pageView {
             pageView.updateSummary(installedSummary(installedExtensions.count))
@@ -283,6 +312,56 @@ final class ExtensionsPreferencesViewController: NSViewController {
         pageView = page
     }
 
+    /// Checking a downloaded code bundle includes signature and manifest hashing. Keep that
+    /// filesystem work off the Settings render path, even when the visible list is only one row.
+    private func refreshNativePluginStates() {
+        guard !usesInjectedNativePluginStates else { return }
+        nativePluginStateGeneration += 1
+        let generation = nativePluginStateGeneration
+        let offers = Self.nativePluginOffers
+        let app = Bundle.main.bundleURL
+        let directory = NativePluginManagedPaths.directory
+        Task { [weak self] in
+            let states = await Task.detached(priority: .utility) {
+                var result: [String: NativePluginState] = [:]
+                for offer in offers {
+                    let bundled = app.appendingPathComponent(
+                        "Contents/PlugIns/\(offer.bundleName)", isDirectory: true
+                    )
+                    if FileManager.default.fileExists(atPath: bundled.path) {
+                        result[offer.identifier] = .bundled
+                        continue
+                    }
+                    let installed = directory.appendingPathComponent(
+                        offer.bundleName, isDirectory: true
+                    )
+                    let exists = FileManager.default.fileExists(atPath: installed.path)
+                        || (try? FileManager.default.destinationOfSymbolicLink(
+                            atPath: installed.path
+                        )) != nil
+                    guard exists else {
+                        result[offer.identifier] = .available
+                        continue
+                    }
+                    if case .success(let candidate) = NativePluginCatalog.verify(
+                        installed, isBundled: false
+                    ), candidate.isManaged,
+                       let codeKey = candidate.bundle.identity?.cdHash {
+                        result[offer.identifier] = .installed(codeKey: codeKey)
+                    } else {
+                        result[offer.identifier] = NativePluginManagedPaths.ownedVersion(
+                            for: installed, in: directory
+                        ) != nil ? .updateRequired : .occupied
+                    }
+                }
+                return result
+            }.value
+            guard let self, nativePluginStateGeneration == generation else { return }
+            nativePluginStates = states
+            render()
+        }
+    }
+
     private func makePresentationRows() -> [PresentationRow] {
         var rows: [PresentationRow] = [.note]
         if !trustedAgents.isEmpty {
@@ -291,6 +370,12 @@ final class ExtensionsPreferencesViewController: NSViewController {
         }
         if firstPartyCatalog.problem != nil {
             rows.append(.firstPartyProblem)
+        }
+        if !Self.nativePluginOffers.isEmpty {
+            rows.append(.nativePluginCaption)
+            rows.append(contentsOf: Self.nativePluginOffers.indices.map {
+                .nativePluginEntry($0)
+            })
         }
         if !firstPartyExtensions.isEmpty {
             rows.append(.firstPartyCaption)
@@ -757,6 +842,73 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case installed
     }
 
+    private func nativePluginRow(_ offer: NativePluginManagedOffer) -> NSView {
+        let state = nativePluginStates[offer.identifier]
+        let operating = nativePluginOperationIdentifier == offer.identifier
+        let codeKey: String?
+        switch state {
+        case .bundled: codeKey = BuildFingerprint.current.token
+        case .installed(let installedKey): codeKey = installedKey
+        default: codeKey = nil
+        }
+        let quarantined = codeKey.map {
+            NativePluginCatalog.isCrashQuarantined(
+                identifier: offer.identifier, codeKey: $0
+            )
+        } ?? false
+        let title: String
+        let status: String
+        switch (state, quarantined) {
+        case (.bundled, true), (.installed, true):
+            title = L10n.string("Retry…")
+            status = L10n.string("Paused after a crash while loading")
+        case (.bundled, false):
+            title = L10n.string("Included")
+            status = L10n.string("Included with Threading")
+        case (.installed, false):
+            title = L10n.string("Installed")
+            status = L10n.string("Installed for this app version")
+        case (.available, _):
+            title = operating ? L10n.string("Installing…") : L10n.string("Install…")
+            status = L10n.format("About %@ download", offer.approximateDownloadSize)
+        case (.updateRequired, _):
+            title = operating ? L10n.string("Updating…") : L10n.string("Update…")
+            status = L10n.format(
+                "Update needed · about %@ download", offer.approximateDownloadSize
+            )
+        case (.occupied, _):
+            title = L10n.string("Unavailable")
+            status = L10n.string("Another copy occupies the plugin location")
+        case (nil, _):
+            title = L10n.string("Checking…")
+            status = L10n.string("Checking this app version")
+        }
+        let button = SettingsUI.button(
+            title,
+            target: self,
+            action: quarantined
+                ? #selector(retryNativePlugin(_:))
+                : #selector(installNativePlugin(_:))
+        )
+        button.isEnabled = !isImporting && firstPartyOperationIdentifier == nil
+            && nativePluginOperationIdentifier == nil
+            && (quarantined || state == .available || state == .updateRequired)
+        button.setAccessibilityIdentifier(
+            "settings.extensions.native.install.\(offer.identifier)"
+        )
+        remember(
+            button,
+            action: quarantined ? .retryNativePlugin : .installNativePlugin,
+            identifier: offer.identifier
+        )
+        return SettingsUI.row(
+            title: offer.name,
+            subtitle: offer.summary + " · " + status,
+            control: button,
+            localizes: false
+        )
+    }
+
     private func firstPartyState(
         for entry: FirstPartyExtensionCatalog.Entry
     ) -> FirstPartyEntryState {
@@ -988,6 +1140,34 @@ final class ExtensionsPreferencesViewController: NSViewController {
             action: .openFirstPartySource
         ) else { return }
         NSWorkspace.shared.open(entry.repositoryURL)
+    }
+
+    @objc private func installNativePlugin(_ sender: ThemedButton) {
+        guard !isImporting,
+              firstPartyOperationIdentifier == nil,
+              nativePluginOperationIdentifier == nil,
+              let identifier = identifier(for: sender, action: .installNativePlugin),
+              Self.nativePluginOffers.contains(where: { $0.identifier == identifier }),
+              nativePluginStates[identifier] == .available
+                || nativePluginStates[identifier] == .updateRequired else { return }
+        nativePluginOperationIdentifier = identifier
+        render()
+        Task { [weak self] in
+            do {
+                _ = try await NativePluginManagedInstaller.install(identifier: identifier)
+                self?.refreshNativePluginStates()
+            } catch {
+                self?.present(error: error)
+            }
+            self?.nativePluginOperationIdentifier = nil
+            self?.render()
+        }
+    }
+
+    @objc private func retryNativePlugin(_ sender: ThemedButton) {
+        guard let identifier = identifier(for: sender, action: .retryNativePlugin) else { return }
+        NativePluginCatalog.retryCrashQuarantined(identifier: identifier)
+        render()
     }
 
     @objc private func installFirstPartyExtension(_ sender: ThemedButton) {
@@ -1406,6 +1586,11 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
                     )
                 ])
             )
+        case .nativePluginCaption:
+            return SettingsUI.caption("Native plugins")
+        case .nativePluginEntry(let entryIndex):
+            guard Self.nativePluginOffers.indices.contains(entryIndex) else { return NSView() }
+            return nativePluginRow(Self.nativePluginOffers[entryIndex])
         case .firstPartyCaption:
             return SettingsUI.caption("From Threading")
         case .firstPartyEntry(let entryIndex):
@@ -1619,10 +1804,18 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
     private func updateCardDecorations() {
         var packageBounds: [Int: (first: Int, last: Int)] = [:]
         var extensionBounds: [Int: (first: Int, last: Int)] = [:]
+        var nativePluginBounds: (first: Int, last: Int)?
         var firstPartyBounds: (first: Int, last: Int)?
         var sourceControlBounds: (first: Int, last: Int)?
         for (rowIndex, row) in presentationRows.enumerated() {
             switch row {
+            case .nativePluginEntry:
+                if var bounds = nativePluginBounds {
+                    bounds.last = rowIndex
+                    nativePluginBounds = bounds
+                } else {
+                    nativePluginBounds = (rowIndex, rowIndex)
+                }
             case .firstPartyEntry:
                 if var bounds = firstPartyBounds {
                     bounds.last = rowIndex
@@ -1652,6 +1845,7 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
                     sourceControlBounds = (rowIndex, rowIndex)
                 }
             case .note, .trustedAgentsCaption, .trustedAgent, .firstPartyProblem,
+                 .nativePluginCaption,
                  .firstPartyCaption, .installedCaption, .identityResolvers,
                  .sourceControlCaption,
                  .inventoryProblem, .emptyInventory, .extensionCaption:
@@ -1660,6 +1854,14 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
         }
 
         var decorations: [ThemedTableCardDecoration] = []
+        if let nativePluginBounds {
+            decorations.append(ThemedTableCardDecoration(
+                rows: nativePluginBounds.first...nativePluginBounds.last,
+                topInset: 0,
+                bottomInset: nativePluginBounds.last == presentationRows.count - 1
+                    ? Design.Spacing.large : 0
+            ))
+        }
         if let firstPartyBounds {
             decorations.append(ThemedTableCardDecoration(
                 rows: firstPartyBounds.first...firstPartyBounds.last,
@@ -1702,7 +1904,8 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
 
     private func topInset(for row: PresentationRow) -> CGFloat {
         switch row {
-        case .packageDetail, .firstPartyEntry, .sourceControlConnection, .sourceControlAction:
+        case .packageDetail, .nativePluginEntry, .firstPartyEntry,
+             .sourceControlConnection, .sourceControlAction:
             return 0
         case .extensionField(let sectionIndex, let fieldIndex):
             guard fieldIndex == 0, extensionSections.indices.contains(sectionIndex) else {
@@ -1712,6 +1915,7 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
                 ? Design.Spacing.large
                 : 0
         case .note, .trustedAgentsCaption, .trustedAgent, .firstPartyProblem,
+             .nativePluginCaption,
              .firstPartyCaption, .installedCaption, .identityResolvers,
              .sourceControlCaption, .inventoryProblem, .emptyInventory, .packageHeader,
              .extensionCaption:
@@ -1725,6 +1929,9 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
             return Design.Spacing.small
         }
         if case .firstPartyCaption = presentationRows[row] {
+            return Design.Spacing.small
+        }
+        if case .nativePluginCaption = presentationRows[row] {
             return Design.Spacing.small
         }
         if case .installedCaption = presentationRows[row] {

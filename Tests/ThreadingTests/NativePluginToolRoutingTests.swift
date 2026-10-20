@@ -84,6 +84,84 @@ final class NativePluginToolRoutingTests: XCTestCase {
         XCTAssertTrue(answer.text.contains("rows are shown"), answer.text)
     }
 
+    func testToolDeclaredPaneSectionIsRevealedInItsOwningPaneBeforeInvocation() async throws {
+        let sessionID = SessionID()
+        let pane = try await openPane(for: sessionID)
+        let otherSession = SessionID()
+        let otherPane = NativePluginPaneViewController(
+            bundleURL: pane.bundleURL, owningSessionID: otherSession
+        )
+        _ = otherPane.view
+        for _ in 0..<200 where otherPane.loaded == nil && otherPane.refusal == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        defer { NativePluginRuntime.shared.deregister(otherPane) }
+        XCTAssertNotNil(otherPane.loaded)
+        let bluetooth = try XCTUnwrap(pane.loaded?.pluginTools?.first {
+            $0.name == "bluetooth"
+        })
+        XCTAssertEqual(bluetooth.paneSectionToReveal, "bluetooth")
+
+        var revealed: String?
+        var otherPaneRevealed = false
+        pane.onRevealSection = { revealed = $0; return true }
+        otherPane.onRevealSection = { _ in otherPaneRevealed = true; return true }
+
+        let answered = expectation(description: "invalid Bluetooth request answered")
+        var response: MCPExternalToolResponse?
+        XCTAssertTrue(NativePluginMCPToolProvider().invokeTool(
+            named: "plugin__devicelogs__bluetooth",
+            arguments: .emptyObject,
+            for: sessionID
+        ) { result in
+            response = result
+            answered.fulfill()
+        })
+        XCTAssertEqual(revealed, "bluetooth")
+        XCTAssertFalse(otherPaneRevealed)
+        await fulfillment(of: [answered], timeout: 10)
+        XCTAssertTrue(try XCTUnwrap(response).isError)
+    }
+
+    func testSectionToolRefusesWhenNoPaneHostCanRevealIt() async throws {
+        let sessionID = SessionID()
+        _ = try await openPane(for: sessionID)
+        let answered = expectation(description: "unrevealed tool refused")
+        var response: MCPExternalToolResponse?
+        XCTAssertTrue(NativePluginMCPToolProvider().invokeTool(
+            named: "plugin__devicelogs__bluetooth",
+            arguments: .emptyObject,
+            for: sessionID
+        ) { result in
+            response = result
+            answered.fulfill()
+        })
+        await fulfillment(of: [answered], timeout: 10)
+        let answer = try XCTUnwrap(response)
+        XCTAssertTrue(answer.isError)
+        XCTAssertTrue(answer.text.contains("cannot reveal"), answer.text)
+    }
+
+    func testUndeclaredPluginToolIsRefused() async throws {
+        let sessionID = SessionID()
+        _ = try await openPane(for: sessionID)
+
+        let answered = expectation(description: "unknown plugin tool answered")
+        var response: MCPExternalToolResponse?
+        XCTAssertTrue(NativePluginMCPToolProvider().invokeTool(
+            named: "plugin__devicelogs__invented",
+            arguments: .emptyObject,
+            for: sessionID
+        ) { result in
+            response = result
+            answered.fulfill()
+        })
+        await fulfillment(of: [answered], timeout: 10)
+        let answer = try XCTUnwrap(response)
+        XCTAssertTrue(answer.isError)
+        XCTAssertTrue(answer.text.contains("does not declare"), answer.text)
+    }
+
     /// A name the provider does not own must be declined rather than answered, or it would swallow
     /// every other provider's tools — the extension tier's included.
     func testAToolFromSomewhereElseIsDeclined() {

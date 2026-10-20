@@ -1,8 +1,9 @@
 # Portable proxy engine
 
 `Targets/ProxyHost` is the portable C11 HTTP/CONNECT/TLS engine behind Threading's typed
-`traffic_*` MCP tools. Xcode builds and signs the helper, retaining its complete source archives
-and notices in the app bundle. Its independent CMake build also serves Linux and Windows.
+`traffic_*` MCP tools. Xcode builds and signs the helper inside an on-demand first-party plugin;
+the app retains its notices and each release publishes the corresponding source archive. Its
+independent CMake build also serves Linux and Windows.
 The [Traffic Inspector draft](../feature-drafts/network-inspector-extension.md) still owns the
 future visual workbench and extension presentation; those are not shipped by this increment.
 Client proxy routing and certificate trust remain explicit setup steps.
@@ -160,11 +161,17 @@ Archives also retain the separately licensed documentation.
 
 The authoritative inventory and obligations are
 [`Targets/ProxyHost/THIRD_PARTY_NOTICES.md`](../../Targets/ProxyHost/THIRD_PARTY_NOTICES.md).
-The provenance test verifies archive hashes, build pins and exact notice contents. Installation
-includes the helper, notices and corresponding source tree. The Xcode app bundle includes the
-helper, its legal index and the upstream license texts (`Legal/ProxyHost/`) but not the source,
-which every release publishes beside the zip ([releasing.md](releasing.md#the-proxy-helpers-source));
-release signing covers the helper and those resources.
+The provenance test verifies archive hashes, build pins and exact notice contents. The
+`ProxyPlugin.bundle` build carries the signed helper, public-certificate setup script and its
+license notices. The
+release app offers that bundle through Extensions Settings; the host keeps capture leases, client
+consent and CA private keys. Before launch, the host verifies the exact managed receipt, plugin
+signature, nested helper signature and team, then uses the resolved version path. The app retains
+the legal index and upstream license texts (`Legal/ProxyHost/`). Each release publishes the
+corresponding source beside the zip ([releasing.md](releasing.md#the-proxy-helpers-source)).
+The worker copies the verified setup script into the capture's private temporary directory before
+returning its command, so replacing the installed plugin cannot invalidate an active capture's
+certificate instructions.
 
 ## Apple onboarding
 
@@ -176,8 +183,9 @@ targets one explicit already-booted UDID and never resets all devices. Its
 [physical-device guide](https://docs.proxyman.com/debug-devices/ios-device) distinguishes routing,
 profile installation, full trust and per-host inspection.
 
-`Targets/ProxyHost/tools/apple_certificate.py` is a development shortcut, bundled as
-`Resources/ProxyTools/apple_certificate.py`, the path `traffic_certificate`'s setup argv names.
+`Targets/ProxyHost/tools/apple_certificate.py` is a development shortcut, shipped inside
+`ProxyPlugin.bundle` at `Contents/Resources/ProxyTools/apple_certificate.py`, the path
+`traffic_certificate`'s setup argv names.
 Default output is a reviewable command plan. `--apply` checks the expected fingerprint, stages those exact public DER
 bytes and invokes user-domain SSL trust on macOS or `simctl keychain <UDID> add-root-cert` on one
 available booted simulator. Removal supports user-domain Mac trust only. `simctl` has no targeted

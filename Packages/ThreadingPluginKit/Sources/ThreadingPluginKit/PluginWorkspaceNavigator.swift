@@ -441,6 +441,14 @@ public final class PluginWorkspaceNavigatorContext: NSObject {
 /// Static keys a host can inspect without mapping a plugin's executable.
 public enum PluginBundleMetadata {
     public static let workspaceNavigators = "ThreadingWorkspaceNavigators"
+    /// Versioned static pane declarations in Info.plist. The host reads these without loading code.
+    public static let paneSections = "ThreadingPaneSections"
+    public static let paneSectionsVersion = 1
+    public static let schemaVersion = "schemaVersion"
+    public static let sections = "sections"
+    public static let command = "command"
+    public static let symbol = "symbol"
+    public static let detail = "detail"
     public static let identifier = "id"
     public static let title = "title"
     public static let preferredWidth = "preferredWidth"

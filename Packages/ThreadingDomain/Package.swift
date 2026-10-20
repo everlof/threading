@@ -10,7 +10,7 @@ let package = Package(
     name: "ThreadingDomain",
     platforms: [.macOS(.v13), .iOS(.v15)],
     products: [
-        .library(name: "ThreadingDomain", targets: ["ThreadingDomain"])
+        .library(name: "ThreadingDomain", type: .static, targets: ["ThreadingDomain"])
     ],
     targets: [
         .target(name: "ThreadingDomain"),

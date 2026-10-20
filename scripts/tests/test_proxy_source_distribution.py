@@ -1,6 +1,7 @@
 """The GPL proxy helper ships without its source, so the source has to ship beside it.
 
-Threading.app carries threading-proxyd and its notices; its corresponding source is offered from
+The on-demand ProxyPlugin carries threading-proxyd; Threading.app carries its notices. The
+corresponding source is offered from
 the GitHub release the app is downloaded from (docs/architecture/releasing.md, "The proxy
 helper's source"). Each link in that chain is a different file, and losing any one of them is
 silent: the app still builds, installs and updates.
@@ -112,17 +113,23 @@ class ProxySourceDistributionTests(unittest.TestCase):
         self.assertIn("`threading-proxyd-source-<version>.tar.gz`", notice)
         self.assertIn("<https://github.com/everlof/threading/releases>", notice)
 
-    def test_certificate_tool_is_embedded_where_the_app_runs_it(self) -> None:
+    def test_certificate_tool_is_embedded_in_the_signed_proxy_plugin(self) -> None:
         process = (REPOSITORY / "Sources/Threading/Core/Proxy/ProxyProcess.swift").read_text(
+            encoding="utf-8"
+        )
+        trust = (REPOSITORY / "Sources/Threading/Core/Proxy/ProxyHelperTrust.swift").read_text(
             encoding="utf-8"
         )
         embed = (REPOSITORY / "scripts/embed_proxy_helper.sh").read_text(encoding="utf-8")
         project = (REPOSITORY / "Threading.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
 
-        self.assertIn('appendingPathComponent("ProxyTools/apple_certificate.py")', process)
+        self.assertIn("ProxyHelperTrust.availableAssets()", process)
+        self.assertIn('Contents/Resources/ProxyTools/apple_certificate.py', trust)
         self.assertIn('proxy_tools="${proxy_resources}/ProxyTools"', embed)
         self.assertIn('"$proxy_tools/apple_certificate.py"', embed)
-        self.assertIn("$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ProxyTools/apple_certificate.py", project)
+        self.assertIn('cp "$proxy_source/third_party/licenses/"* "$proxy_legal/"', embed)
+        self.assertIn("Build and Embed Proxy Payload", project)
+        self.assertIn("Prune Legacy Proxy Payload", project)
 
 
 if __name__ == "__main__":

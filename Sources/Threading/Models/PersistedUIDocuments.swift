@@ -17,7 +17,9 @@ struct PersistedPanel: Codable {
   /// 6 is a workspace with an Android member: a build that predates Android cannot parse its
   /// device identity, and refusing the document is what keeps it from restoring the workspace
   /// minus that member and saving the loss back.
-  static let currentFormatVersion = 7
+  /// 8 is a native plugin pane route: older builds know only the Device Logs tab kind and would
+  /// otherwise discard another plugin's tab when they next save this session's layout.
+  static let currentFormatVersion = 8
 
   var tabs: [PersistedTab]
   var activeTabID: String?
@@ -72,6 +74,10 @@ extension PersistedPanel {
     guard tabs.allSatisfy({ $0.kind != .deviceLog || $0.mode == nil || ["regular", "bluetooth"].contains($0.mode!) }) else {
       throw DecodingError.dataCorruptedError(forKey: .tabs, in: container,
         debugDescription: "Unknown device log stream")
+    }
+    guard tabs.allSatisfy(\.hasValidNativePluginRoute) else {
+      throw DecodingError.dataCorruptedError(forKey: .tabs, in: container,
+        debugDescription: "Invalid native plugin route")
     }
     let ids = tabs.map(\.id)
     guard ids.allSatisfy({ !$0.isEmpty }), Set(ids).count == ids.count else {
@@ -165,6 +171,7 @@ extension PersistedPanel {
   /// every window slice. Stamping the version by what the document contains keeps the bump
   /// costing only the sessions that actually used the feature.
   var requiredFormatVersion: Int {
+    if tabs.contains(where: { $0.kind == .nativePlugin }) { return 8 }
     if dockLayout != nil || tabs.contains(where: { $0.kind == .deviceLog && $0.mode != nil }) { return 7 }
     if tabs.contains(where: \.namesAnAndroidDevice) { return 6 }
     if tabs.contains(where: { $0.simulatorWorkspace != nil }) { return 5 }
@@ -207,6 +214,7 @@ struct PersistedTab: Codable {
     case simulator
     case realDevice
     case deviceLog
+    case nativePlugin
     case extensionPanel
     case compare
   }
@@ -226,6 +234,10 @@ struct PersistedTab: Codable {
   var mode: String? = nil
   var extensionIdentifier: String? = nil
   var extensionPanelID: String? = nil
+  /// A native plugin's stable route. Never persist its mutable install path or code identity:
+  /// the loader verifies the current bundle again before mapping it.
+  var pluginIdentifier: String? = nil
+  var pluginBundleName: String? = nil
   var simulatorDeviceID: String? = nil
   var simulatorWorkspace: SimulatorWorkspaceState? = nil
   var physicalDeviceID: String? = nil
@@ -271,6 +283,41 @@ struct PersistedTab: Codable {
     let members = simulatorWorkspace?.members.compactMap(\.deviceID) ?? []
     let legacy = simulatorDeviceID.flatMap(SimulatorDeviceID.init)
     return (members + [legacy].compactMap { $0 }).contains { $0.platform.isAndroid }
+  }
+
+  var hasValidNativePluginRoute: Bool {
+    guard kind == .nativePlugin else { return true }
+    guard let pluginIdentifier, !pluginIdentifier.isEmpty,
+      pluginIdentifier.utf8.count <= 255,
+      Self.isPlainRouteText(pluginIdentifier),
+      let pluginBundleName, pluginBundleName.hasSuffix(".bundle"),
+      pluginBundleName.utf8.count <= 100,
+      !pluginBundleName.dropLast(7).isEmpty,
+      pluginBundleName == (pluginBundleName as NSString).lastPathComponent,
+      Self.isPlainRouteText(pluginBundleName) else { return false }
+    // A saved section is only a bounded route token. Its existence is checked against the
+    // current signed bundle declaration when the pane restores, before plugin code is mapped.
+    guard let mode else { return true }
+    guard !mode.isEmpty, mode.utf8.count <= 128,
+      mode.unicodeScalars.allSatisfy({
+        CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+          .contains($0)
+      }) else { return false }
+    if let offer = NativePluginManagedOffer.all.first(where: {
+      $0.identifier == pluginIdentifier && $0.bundleName == pluginBundleName
+    }) {
+      return offer.containsPaneSection(mode)
+    }
+    return true
+  }
+
+  private static func isPlainRouteText(_ value: String) -> Bool {
+    value.unicodeScalars.allSatisfy { scalar in
+      switch scalar.properties.generalCategory {
+      case .control, .format, .lineSeparator, .paragraphSeparator: return false
+      default: return true
+      }
+    }
   }
 }
 

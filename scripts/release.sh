@@ -122,6 +122,14 @@ if [[ $NOTARIZE -eq 1 && -n "$(git -C "$ROOT" status --porcelain)" ]]; then
     fail "notarized releases require a clean worktree"
 fi
 
+# All shipping channels share this gate, including the local driver's quality-gate bypass.
+# The manifest is committed before tagging; an archive never rewrites its own tested source.
+# Non-notarized local archive experiments publish nothing and retain their development inputs.
+if [[ $NOTARIZE -eq 1 ]]; then
+    say "Verifying the remote host components"
+    python3 "$ROOT/scripts/check_remote_components.py"
+fi
+
 # The proxy helper's corresponding source is archived from this commit ("Corresponding source"
 # below). A notarized build has just proved the tree clean, so that is exactly what gets built; a
 # dry run publishes nothing, but says so when its proxy source and its archive differ.
@@ -364,10 +372,25 @@ run_xcodebuild "export" "$BUILD_DIR/export.log" -exportArchive \
 
 [[ -d "$APP" ]] || fail "the export produced no app bundle"
 
+# Export signs the plugins with the same Developer ID identity as the host. Keep those exact
+# signed bundles as distribution inputs before the release app is sealed without them. Dry runs
+# retain them so an unpublished manifest cannot make their entry points unreachable.
+plugin_input="$BUILD_DIR/native-plugin-input"
+python3 "$ROOT/scripts/native_plugin_staging.py" stage \
+    "$APP/Contents/PlugIns" "$plugin_input"
+if [[ $NOTARIZE -eq 1 ]]; then
+    say "Moving first-party native plugins out of the release app"
+    python3 "$ROOT/scripts/native_plugin_staging.py" prune \
+        "$APP/Contents/PlugIns" "$plugin_input"
+    codesign --force --sign "Developer ID Application" --timestamp \
+        --preserve-metadata=identifier,entitlements,flags,requirements "$APP"
+fi
+
 # MARK: - Verify
 
 say "Verifying declared helper entitlements"
-python3 "$ROOT/scripts/check_bundle_entitlements.py" --root "$ROOT" "$APP" \
+python3 "$ROOT/scripts/check_bundle_entitlements.py" --root "$ROOT" \
+    --plugin-source "$plugin_input" "$APP" \
     || fail "an embedded helper does not carry its declared entitlements"
 
 # Notarization rejects a bundle whose *nested* code is development-signed, untimestamped, or
@@ -523,11 +546,46 @@ ditto -c -k --keepParent --sequesterRsrc "$APP" "$zip"
 say "Gatekeeper assessment"
 spctl -a -vvv -t install "$APP"
 
+# First-party native plugins are distributed as separate, notarized code bundles too. The
+# detached manifest signs their archive hashes and the exact host executable/framework bytes;
+# a later app update can therefore only fetch plugins built for that updated host. Both are
+# delivered on demand; a dry run retains embedded copies because its manifest is unpublished.
+say "Packaging first-party native plugins"
+plugin_output="$BUILD_DIR/native-plugins"
+# A retry of this release version must not publish an archive for a plugin that was removed
+# from the export. publish_release.sh uploads every matching zip in this generated directory.
+rm -rf "$plugin_output"
+plugin_release_tag="${THREADING_RELEASE_TAG:-}"
+if [[ -z "$plugin_release_tag" ]]; then
+    case "$CHANNEL" in
+        release) plugin_release_tag="v$version" ;;
+        beta) plugin_release_tag="beta-v$version" ;;
+        nightly) plugin_release_tag="nightly" ;;
+    esac
+fi
+plugin_sparkle_bin="${THREADING_SPARKLE_BIN:-}"
+if [[ -z "$plugin_sparkle_bin" ]]; then
+    plugin_sparkle_bin="$(ls -dt "$HOME"/Library/Developer/Xcode/DerivedData/Threading-*/SourcePackages/artifacts/sparkle/Sparkle/bin 2>/dev/null | head -1)"
+fi
+[[ -n "$plugin_sparkle_bin" && -x "$plugin_sparkle_bin/sign_update" ]] \
+    || fail "Sparkle's signing tools are unavailable for the plugin manifest"
+python3 "$ROOT/scripts/package_native_plugins.py" \
+    --app "$APP" \
+    --plugin-source "$plugin_input" \
+    --output "$plugin_output" \
+    --release-tag "$plugin_release_tag" \
+    --repository "${THREADING_REPO:-everlof/threading}" \
+    --sparkle-bin "$plugin_sparkle_bin" \
+    --notarize \
+    --notary-profile "$NOTARY_PROFILE" \
+    || fail "first-party native plugin packaging failed"
+
 simulator_matrix_if_asked
 
 say "Ready: $SCHEME $version ($build, $channel)"
 echo "  app: $APP"
 echo "  zip: $zip"
 echo "  source: $proxy_source"
+echo "  plugins: $plugin_output"
 
 install_if_asked

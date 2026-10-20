@@ -15,6 +15,29 @@ import ThreadingPluginKit
 @MainActor
 final class NativePluginLoadingTests: XCTestCase {
 
+    func testFirstPartyIdentifiersAndInstallLocationsAreReserved() {
+        XCTAssertTrue(NativePluginCatalog.isReservedFirstPartyIdentity(
+            identifier: NativePluginCatalog.deviceLogsIdentifier,
+            bundleName: "renamed.bundle"
+        ))
+        XCTAssertTrue(NativePluginCatalog.isReservedFirstPartyIdentity(
+            identifier: "example.thirdparty",
+            bundleName: "DeviceLogsPlugin.bundle"
+        ))
+        XCTAssertTrue(NativePluginCatalog.isReservedFirstPartyIdentity(
+            identifier: NativePluginCatalog.t3NavigatorIdentifier,
+            bundleName: "renamed.bundle"
+        ))
+        XCTAssertTrue(NativePluginCatalog.isReservedFirstPartyIdentity(
+            identifier: NativePluginManagedOffer.devices.identifier,
+            bundleName: "renamed.bundle"
+        ))
+        XCTAssertFalse(NativePluginCatalog.isReservedFirstPartyIdentity(
+            identifier: "example.thirdparty",
+            bundleName: "Other.bundle"
+        ))
+    }
+
     /// The plugin Threading ships inside itself. No install step, and no skip: if this is missing
     /// the app has lost its Device Logs pane, which is a failure rather than an absence.
     private var installed: URL {
@@ -44,9 +67,9 @@ final class NativePluginLoadingTests: XCTestCase {
         view.frame = NSRect(x: 0, y: 0, width: 640, height: 360)
         view.layoutSubtreeIfNeeded()
 
-        // The pane is drawn by the plugin's own copy of the design system. What proves that
+        // The pane is drawn by the plugins' shared design framework. What proves that
         // crossed the boundary is the components: these types exist only in ThreadingDesignKit,
-        // and the app never handed the plugin one — it compiled its own and resolved the theme
+        // and the app never handed the plugin one — the framework resolved the theme
         // Threading sent. Appearance itself is covered by the plugin package's render tests.
         func descendants(of view: NSView) -> [NSView] {
             view.subviews + view.subviews.flatMap(descendants(of:))
@@ -55,6 +78,42 @@ final class NativePluginLoadingTests: XCTestCase {
         for expected in ["ThemedScrollView", "ThemedTableView", "ThemedPopUp"] {
             XCTAssertTrue(kinds.contains(expected), "\(expected) is missing; found \(kinds.sorted())")
         }
+    }
+
+    func testBundledPluginsLinkOneDesignFrameworkWithoutLinkingItIntoTheApp() throws {
+        let app = Bundle.main.bundleURL
+        let framework = app.appendingPathComponent(
+            "Contents/Frameworks/ThreadingDesignKit.framework/Versions/A/ThreadingDesignKit"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: framework.path))
+
+        let t3 = try XCTUnwrap(NativePluginCatalog.bundledPlugin(
+            identifier: "codes.threading.plugin.t3navigator"
+        ))
+        let sharedInstallName = "@rpath/ThreadingDesignKit.framework/Versions/A/ThreadingDesignKit"
+        for bundleURL in [try installed, t3] {
+            let executable = try XCTUnwrap(Bundle(url: bundleURL)?.executableURL)
+            let dependencies = try linkedLibraries(at: executable)
+            XCTAssertTrue(dependencies.contains(sharedInstallName), "\(executable): \(dependencies)")
+            XCTAssertFalse(dependencies.contains("libThreadingDesignKit.dylib"))
+        }
+
+        let appExecutable = try XCTUnwrap(Bundle.main.executableURL)
+        XCTAssertFalse(try linkedLibraries(at: appExecutable).contains(sharedInstallName))
+    }
+
+    private func linkedLibraries(at executable: URL) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/otool")
+        process.arguments = ["-L", executable.path]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, text)
+        return text
     }
 
     /// A bundled plugin is trusted by *location*: altering it invalidates the signature the system

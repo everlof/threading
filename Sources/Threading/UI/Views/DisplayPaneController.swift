@@ -257,6 +257,15 @@ final class DisplayPaneController: NSViewController {
   private var syntheticOverview: (sessionID: SessionID, tab: DisplayTab)?
 
   private var tabsBySession: [SessionID: [DisplayTab]] = [:]
+  private struct PendingNativeTab {
+    let index: Int
+    let persisted: PersistedTab
+  }
+  /// A signed bundle may finish discovery after its session layout is first read. Keep its
+  /// section route in memory and on disk until the worker's descriptor is available.
+  private var pendingNativeTabsBySession: [SessionID: [PendingNativeTab]] = [:]
+  private var pendingNativeActiveTabBySession: [SessionID: UUID] = [:]
+  private var pendingNativeFallbackActiveBySession: [SessionID: UUID] = [:]
   private var activeTabIDBySession: [SessionID: UUID] = [:]
   /// Monotonic, in-memory identity for what one session's panel has to present.
   ///
@@ -353,6 +362,9 @@ final class DisplayPaneController: NSViewController {
   /// pane about another split-view child.
   var onOpenDeviceLogs: ((SessionID, String) -> Void)?
 
+  /// The owning window expands this host when an agent reveals a plugin tool's section.
+  var onNativePluginToolReveal: ((SessionID) -> Void)?
+
   /// Asks for a new invitation to this chat. The sharing pane offers the button; the sheet, its
   /// grant choice and its copy behaviour stay where the sidebar's Share Chat… already put them.
   var onShareSession: ((SessionID) -> Void)?
@@ -424,6 +436,9 @@ final class DisplayPaneController: NSViewController {
     appEvents.observe(SupervisionDidChange.self) { [weak self] event in
       self?.tabsBySession[event.managerID]?.first(where: { $0.supervision != nil })?
         .supervision?.refresh()
+    }
+    appEvents.observe(CommandRegistryDidChange.self) { [weak self] _ in
+      self?.restorePendingNativeTabs()
     }
   }
 
@@ -624,8 +639,23 @@ final class DisplayPaneController: NSViewController {
     case .simulator: showSimulatorPlatform(android: false, for: sessionID); return true
     case .androidDevice: showSimulatorPlatform(android: true, for: sessionID); return true
     case .realDevice: activateRealDevice(for: sessionID); return true
-    case .deviceLogs: return activateDeviceLog(for: sessionID) != nil
-    case .bluetoothLogs: return activateBluetoothLog(for: sessionID) != nil
+    case .nativePluginSection(let identifier, let section):
+      let bundle: URL?
+      if let pane = CommandRegistry.shared.nativePluginPane(
+        identifier: identifier, section: section
+      ) {
+        bundle = pane.bundleURL
+      } else if let offer = NativePluginManagedOffer.all.first(where: {
+        $0.identifier == identifier && $0.containsPaneSection(section)
+      }) {
+        bundle = NativePluginCatalog.restoredPaneBundle(
+          identifier: offer.identifier, bundleName: offer.bundleName
+        )
+      } else {
+        return false
+      }
+      guard let bundle else { return false }
+      return activateNativePlugin(bundleURL: bundle, section: section, for: sessionID) != nil
     case .notificationTest: return activateNotificationTest(for: sessionID) != nil
     case .webExtensions: return activateWebExtensions(for: sessionID) != nil
     case .audit: return addAuditTab(for: sessionID) != nil
@@ -1011,7 +1041,7 @@ final class DisplayPaneController: NSViewController {
   @discardableResult
   func activateDeviceLog(for sessionID: SessionID) -> NativePluginPaneViewController? {
     guard let bundle = NativePluginCatalog.deviceLogsBundle else { return nil }
-    return activateNativePlugin(bundleURL: bundle, section: NativePluginCatalog.DeviceLogsSection.regular,
+    return activateNativePlugin(bundleURL: bundle, section: NativePluginManagedOffer.DeviceLogsSection.regular,
                                 for: sessionID)
   }
 
@@ -1023,7 +1053,7 @@ final class DisplayPaneController: NSViewController {
   @discardableResult
   func activateBluetoothLog(for sessionID: SessionID) -> NativePluginPaneViewController? {
     guard let bundle = NativePluginCatalog.deviceLogsBundle else { return nil }
-    return activateNativePlugin(bundleURL: bundle, section: NativePluginCatalog.DeviceLogsSection.bluetooth,
+    return activateNativePlugin(bundleURL: bundle, section: NativePluginManagedOffer.DeviceLogsSection.bluetooth,
                                 for: sessionID)
   }
 
@@ -1038,6 +1068,11 @@ final class DisplayPaneController: NSViewController {
     section: String? = nil,
     for sessionID: SessionID
   ) -> NativePluginPaneViewController? {
+    if let section {
+      guard CommandRegistry.shared.nativePluginPane(at: bundleURL)?.contains(section) == true ||
+        NativePluginManagedOffer.paneOffer(at: bundleURL)?.containsPaneSection(section) == true
+      else { return nil }
+    }
     let matches: (DisplayTab) -> Bool = { tab in
       guard case let .nativePlugin(plugin) = tab.body, plugin.bundleURL == bundleURL else { return false }
       return section == nil || plugin.paneSection == section
@@ -1054,8 +1089,9 @@ final class DisplayPaneController: NSViewController {
       return nil
     }
 
-    let controller = makeNativePluginPane(bundleURL: bundleURL, for: sessionID,
-                                          section: section ?? NativePluginCatalog.DeviceLogsSection.regular)
+    guard let controller = makeNativePluginPane(
+      bundleURL: bundleURL, for: sessionID, section: section
+    ) else { return nil }
     let tab = DisplayTab(body: .nativePlugin(controller), owningSessionID: sessionID)
     tabs.append(tab)
     tabsBySession[sessionID] = tabs
@@ -1068,22 +1104,34 @@ final class DisplayPaneController: NSViewController {
   private func makeNativePluginPane(
     bundleURL: URL,
     for sessionID: SessionID,
-    section: String = "regular"
-  ) -> NativePluginPaneViewController {
-    let controller = bundleURL == NativePluginCatalog.deviceLogsBundle
-      ? NativePluginPaneViewController.deviceLogs(bundleURL: bundleURL, sessionID: sessionID, section: section)
-      : NativePluginPaneViewController(
-      bundleURL: bundleURL,
-      owningSessionID: sessionID,
-      managedIPhoneToolPath: bundleURL == NativePluginCatalog.deviceLogsBundle
-        ? Pymobiledevice3ManagedTool.executable().path
-        : nil
-    )
-    controller.onTitleChange = { [weak self] in
-      guard let self, sessionID == self.currentSessionID else { return }
-      self.render()
-    }
+    section: String? = nil,
+    expectedIdentifier: String? = nil
+  ) -> NativePluginPaneViewController? {
+    guard let controller = NativePluginPaneViewController.forBundle(
+      bundleURL, sessionID: sessionID, section: section,
+      expectedIdentifier: expectedIdentifier
+    ) else { return nil }
+    configureNativePluginPane(controller, for: sessionID)
     return controller
+  }
+
+  private func configureNativePluginPane(
+    _ controller: NativePluginPaneViewController,
+    for sessionID: SessionID
+  ) {
+    controller.onTitleChange = { [weak self] in
+      guard let self else { return }
+      self.persist(sessionID)
+      if sessionID == self.currentSessionID { self.render() }
+    }
+    controller.onRevealSection = { [weak self, weak controller] section in
+      guard let self, let controller else { return false }
+      guard let revealed = self.activateNativePlugin(
+        bundleURL: controller.bundleURL, section: section, for: sessionID
+      ), revealed.paneSection == section else { return false }
+      self.onNativePluginToolReveal?(sessionID)
+      return true
+    }
   }
 
   /// Builds a browser view controller wired to persist and re-render when its page changes, so a
@@ -2343,6 +2391,9 @@ final class DisplayPaneController: NSViewController {
     }
 
     tabsBySession = tabsBySession.filter { sessionIDs.contains($0.key) }
+    pendingNativeTabsBySession = pendingNativeTabsBySession.filter { sessionIDs.contains($0.key) }
+    pendingNativeActiveTabBySession = pendingNativeActiveTabBySession.filter { sessionIDs.contains($0.key) }
+    pendingNativeFallbackActiveBySession = pendingNativeFallbackActiveBySession.filter { sessionIDs.contains($0.key) }
     activeTabIDBySession = activeTabIDBySession.filter { sessionIDs.contains($0.key) }
     contentRevisionBySession = contentRevisionBySession.filter {
       sessionIDs.contains($0.key)
@@ -2375,6 +2426,9 @@ final class DisplayPaneController: NSViewController {
     }
     for sessionID in sessionIDs {
       tabsBySession.removeValue(forKey: sessionID)?.forEach { teardownHosted($0) }
+      pendingNativeTabsBySession.removeValue(forKey: sessionID)
+      pendingNativeActiveTabBySession.removeValue(forKey: sessionID)
+      pendingNativeFallbackActiveBySession.removeValue(forKey: sessionID)
       activeTabIDBySession.removeValue(forKey: sessionID)
       contentRevisionBySession.removeValue(forKey: sessionID)
       activeBrowserTabIDBySession.removeValue(forKey: sessionID)
@@ -3007,7 +3061,7 @@ final class DisplayPaneController: NSViewController {
     let storedOverview = storedOverviewTabs.first { $0.id == storedActiveID }
       ?? storedOverviewTabs.first { $0.kind == .files }
       ?? storedOverviewTabs.first
-    for persisted in storedTabs {
+    for (storedIndex, persisted) in storedTabs.enumerated() {
       let id = UUID(uuidString: persisted.id) ?? UUID()
       switch persisted.kind {
       case .browser:
@@ -3111,12 +3165,49 @@ final class DisplayPaneController: NSViewController {
         // A kind persisted before Device Logs became a plugin. It restores as the plugin, so an
         // older row opens the pane the user had rather than disappearing. A row from before the
         // streams had tabs of their own restores as Device Logs alone, like the command.
-        guard let bundle = NativePluginCatalog.deviceLogsBundle else { continue }
+        guard let bundle = NativePluginCatalog.deviceLogsBundle,
+          let controller = makeNativePluginPane(
+            bundleURL: bundle, for: sessionID,
+            section: persisted.mode ?? NativePluginManagedOffer.DeviceLogsSection.regular
+          ) else { continue }
         tabs.append(DisplayTab(
           id: id,
-          body: .nativePlugin(makeNativePluginPane(
-            bundleURL: bundle, for: sessionID,
-            section: persisted.mode ?? NativePluginCatalog.DeviceLogsSection.regular)),
+          body: .nativePlugin(controller),
+          owningSessionID: sessionID
+        ))
+
+      case .nativePlugin:
+        guard let identifier = persisted.pluginIdentifier,
+          let bundleName = persisted.pluginBundleName,
+          let bundle = NativePluginCatalog.restoredPaneBundle(
+            identifier: identifier, bundleName: bundleName)
+        else { continue }
+        let awaitsDiscovery = NativePluginManagedOffer.paneOffer(at: bundle) == nil &&
+          !CommandRegistry.shared.nativePluginScanComplete
+        if awaitsDiscovery {
+          pendingNativeTabsBySession[sessionID, default: []].append(
+            PendingNativeTab(index: storedIndex, persisted: persisted)
+          )
+          if persisted.id == storedActiveID { pendingNativeActiveTabBySession[sessionID] = id }
+          continue
+        }
+        guard let controller = makeNativePluginPane(
+            bundleURL: bundle, for: sessionID, section: persisted.mode,
+            expectedIdentifier: identifier
+          ) else {
+          if persisted.mode != nil {
+            pendingNativeTabsBySession[sessionID, default: []].append(
+              PendingNativeTab(index: storedIndex, persisted: persisted)
+            )
+            if persisted.id == storedActiveID {
+              pendingNativeActiveTabBySession[sessionID] = id
+            }
+          }
+          continue
+        }
+        tabs.append(DisplayTab(
+          id: id,
+          body: .nativePlugin(controller),
           owningSessionID: sessionID
         ))
 
@@ -3197,6 +3288,9 @@ final class DisplayPaneController: NSViewController {
     } else {
       activeTabIDBySession[sessionID] = tabs.last?.id
     }
+    if pendingNativeActiveTabBySession[sessionID] != nil {
+      pendingNativeFallbackActiveBySession[sessionID] = activeTabIDBySession[sessionID]
+    }
     let activeID = activeTabIDBySession[sessionID]
     activeBrowserTabIDBySession[sessionID] =
       tabs.first {
@@ -3251,13 +3345,58 @@ final class DisplayPaneController: NSViewController {
     if sessionID == currentSessionID { render() }
   }
 
+  private func restorePendingNativeTabs() {
+    for (sessionID, pendingTabs) in pendingNativeTabsBySession {
+      guard var tabs = tabsBySession[sessionID] else { continue }
+      var remaining: [PendingNativeTab] = []
+      for pending in pendingTabs {
+        let saved = pending.persisted
+        guard let identifier = saved.pluginIdentifier,
+          let bundleName = saved.pluginBundleName,
+          let bundle = NativePluginCatalog.restoredPaneBundle(
+            identifier: identifier, bundleName: bundleName
+          ),
+          let controller = makeNativePluginPane(
+            bundleURL: bundle, for: sessionID, section: saved.mode,
+            expectedIdentifier: identifier
+          ) else {
+          remaining.append(pending)
+          continue
+        }
+        let id = UUID(uuidString: saved.id) ?? UUID()
+        tabs.insert(DisplayTab(id: id, body: .nativePlugin(controller),
+                               owningSessionID: sessionID),
+                    at: min(pending.index, tabs.count))
+        if pendingNativeActiveTabBySession[sessionID] == id,
+           activeTabIDBySession[sessionID] == pendingNativeFallbackActiveBySession[sessionID] {
+          activeTabIDBySession[sessionID] = id
+          pendingNativeActiveTabBySession[sessionID] = nil
+          pendingNativeFallbackActiveBySession[sessionID] = nil
+        }
+      }
+      guard remaining.count != pendingTabs.count else { continue }
+      pendingNativeTabsBySession[sessionID] = remaining.isEmpty ? nil : remaining
+      tabsBySession[sessionID] = tabs
+      persist(sessionID)
+      if sessionID == currentSessionID { render() }
+    }
+  }
+
   /// Writes the session's current tabs and selection to disk.
   private func persist(_ sessionID: SessionID) {
     advanceContentRevision(for: sessionID)
     let tabs = tabsBySession[sessionID] ?? []
-    let persistedTabs = tabs.compactMap(persisted)
+    var persistedTabs = tabs.compactMap(persisted)
+    for pending in pendingNativeTabsBySession[sessionID] ?? [] {
+      persistedTabs.insert(pending.persisted, at: min(pending.index, persistedTabs.count))
+    }
+    if pendingNativeActiveTabBySession[sessionID] != nil,
+       activeTabIDBySession[sessionID] != pendingNativeFallbackActiveBySession[sessionID] {
+      pendingNativeActiveTabBySession[sessionID] = nil
+      pendingNativeFallbackActiveBySession[sessionID] = nil
+    }
     let active =
-      activeTabIDBySession[sessionID]
+      (pendingNativeActiveTabBySession[sessionID] ?? activeTabIDBySession[sessionID])
       .flatMap { activeID in
         persistedTabs.contains { $0.id == activeID.uuidString }
           ? activeID.uuidString
@@ -3280,6 +3419,19 @@ final class DisplayPaneController: NSViewController {
     if case let .nativePlugin(plugin) = tab.body, plugin.bundleURL == NativePluginCatalog.deviceLogsBundle {
       return PersistedTab(id: tab.id.uuidString, kind: .deviceLog, title: tab.title,
         subtitle: "", url: nil, html: nil, cacheFile: nil, mode: plugin.paneSection)
+    }
+    if case let .nativePlugin(plugin) = tab.body {
+      guard let identifier = plugin.verifiedBundleIdentifier
+        ?? plugin.declaredBundleIdentifier
+        ?? NativePluginManagedOffer.paneOffer(at: plugin.bundleURL)?.identifier else { return nil }
+      let route = PersistedTab(
+        id: tab.id.uuidString, kind: .nativePlugin, title: tab.title,
+        subtitle: "", url: nil, html: nil, cacheFile: nil,
+        mode: plugin.paneSection,
+        pluginIdentifier: identifier,
+        pluginBundleName: plugin.bundleURL.lastPathComponent
+      )
+      return route.hasValidNativePluginRoute ? route : nil
     }
     if let audit = tab.audit {
       return PersistedTab(
@@ -3620,10 +3772,7 @@ extension DisplayPaneController: TabHosting {
       if session == currentSessionID { render() }
     }
     if case let .nativePlugin(plugin) = tab.body {
-      plugin.onTitleChange = { [weak self] in
-        guard let self, session == currentSessionID else { return }
-        render()
-      }
+      configureNativePluginPane(plugin, for: session)
     }
     tab.simulatorWorkspace?.onChange = { [weak self] in
       guard let self else { return }

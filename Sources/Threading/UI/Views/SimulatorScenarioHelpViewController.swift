@@ -70,7 +70,7 @@ final class SimulatorScenarioHelpViewController: NSViewController {
         title.textColor = Design.Text.label
 
         let explanation = Self.wrapping(SimulatorScenarioGuide.explanation, width: Metrics.contentWidth)
-        statusLabel.font = Design.Typography.caption()
+        statusLabel.applyFont(.caption)
         // The popover sizes itself from `fittingSize` before the panel exists; a wrapping label
         // without a layout width measures as one line and the panel comes out short.
         statusLabel.preferredMaxLayoutWidth = Metrics.contentWidth
@@ -99,7 +99,7 @@ final class SimulatorScenarioHelpViewController: NSViewController {
         let example = ThemedTextView.scrolling()
         example.textView.isEditable = false
         example.textView.isSelectable = true
-        example.textView.font = Design.Typography.compactCode()
+        example.textView.applyFont(.compactCode)
         example.textView.textColor = Design.Text.label
         example.textView.string = SimulatorScenarioGuide.example
         // A well, so the example reads as a file rather than more of the panel's prose.
@@ -112,7 +112,7 @@ final class SimulatorScenarioHelpViewController: NSViewController {
         primaryButton.setAccessibilityIdentifier(Identifiers.primary)
         copyExampleButton.setAccessibilityIdentifier(Identifiers.copyExample)
         copyPromptButton.setAccessibilityIdentifier(Identifiers.copyPrompt)
-        feedback.font = Design.Typography.caption()
+        feedback.applyFont(.caption)
         feedback.textColor = Design.Text.secondary
         let actions = NSStackView(views: [primaryButton, copyExampleButton, copyPromptButton, feedback])
         actions.spacing = Design.Spacing.small

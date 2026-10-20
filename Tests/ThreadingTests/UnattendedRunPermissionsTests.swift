@@ -92,6 +92,35 @@ final class UnattendedRunPermissionsTests: XCTestCase {
         XCTAssertTrue(isAllowed(bash("ls -la /Users/david/Downloads", under: .readOnly)))
     }
 
+    /// The searches wordy's issue triage was refused while its allow-list named `rg`, `jq` and
+    /// `check.py`: each quoted `|`, `<` or `>` was read as an operator, and the run, with nobody
+    /// to ask, stopped at needsHuman.
+    func testQuotedPatternsRunUnderTheRulesThatNameTheirCommand() throws {
+        let policy = try AutomationPermissionPolicy.allowList(parsing: [
+            "Bash(rg *)", "Bash(jq *)", "Bash(python3 tools/issues/check.py *)",
+        ])
+        for command in [
+            "rg -n 'Next|onNext|next|dismiss|RoundResultView' ios/Ordus/RoundResultView.swift ios/Ordus/GameScreen.swift",
+            "rg -n -i 'open latest match|latest.match|senaste.match' ios swift android tools/issues docs",
+            "python3 tools/issues/check.py 'lastSeen:>2026-10-10T19:20:00 lastSeen:<2026-10-10T19:24:00'",
+            #"jq -r '.breadcrumbs[] | select(.category == "round") | .message' build/issues/device.jsonl"#,
+        ] {
+            let decision = bash(command, under: policy)
+            XCTAssertTrue(isAllowed(decision), "\(command): \(reason(decision))")
+        }
+
+        for command in [
+            "python3 tools/issues/check.py 'x' > /tmp/out",
+            #"python3 tools/issues/check.py "$(id)""#,
+            "rg 'a|b' | sh",
+            "python3 tools/issues/check.py 'a;b'; rm -rf ~",
+        ] {
+            XCTAssertFalse(isAllowed(bash(command, under: policy)), command)
+        }
+        XCTAssertTrue(reason(bash("python3 tools/issues/check.py 'a;b'; rm -rf ~", under: policy))
+            .contains("“rm -rf ~”"))
+    }
+
     func testAnUnlistedCommandIsRefusedWithAReasonTheAgentCanAct() {
         let decision = bash("python3 /tmp/other.py", under: .readOnly)
         XCTAssertFalse(isAllowed(decision))

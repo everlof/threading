@@ -187,6 +187,9 @@ release_version_is_publishable "$CHANNEL" "$VERSION" "$TAG" <<< "$published" \
 say "Checking the deployed report contract before publishing refs"
 node "$ROOT/scripts/verify_report_deployment.mjs"
 
+say "Verifying the remote host components before publishing refs"
+python3 "$ROOT/scripts/check_remote_components.py"
+
 say "Running the Mac release quality gate before publishing refs"
 "$ROOT/scripts/ci.sh" --mac-release
 

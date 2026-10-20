@@ -39,6 +39,10 @@ HELPER_ENTITLEMENTS = {
 # scc is a checked-in third-party executable, not an Xcode helper target. Its checksum and
 # architecture have their own gate; it has no repository entitlement declaration to compare.
 UNMANAGED_EXECUTABLES = {"scc"}
+PLUGIN_HELPERS = {
+    "threading-proxyd": "ProxyPlugin.bundle",
+    "threading-simulator-helper": "DevicesPlugin.bundle",
+}
 
 
 def load_entitlements(path: Path) -> Dict[str, object]:
@@ -126,20 +130,38 @@ def verify_bundle(
     repository: Path,
     signed_reader: Callable[[Path], Mapping[str, object]] = read_signed_entitlements,
     build_settings: Mapping[str, str] | None = None,
+    plugin_source: Path | None = None,
 ) -> List[str]:
     helper_directory = bundle / "Contents/Helpers"
     if not helper_directory.is_dir():
         return [f"missing helper directory: {helper_directory}"]
 
-    executable_names = {
-        path.name
-        for path in helper_directory.iterdir()
-        if path.is_file() and os.access(path, os.X_OK)
+    plugin_directory = plugin_source or bundle / "Contents/PlugIns"
+    helper_paths = {
+        name: (
+            plugin_directory / plugin_name / "Contents/Helpers" / name
+            if (plugin_name := PLUGIN_HELPERS.get(name))
+            else helper_directory / name
+        )
+        for name in HELPER_ENTITLEMENTS
     }
+
+    helper_directories = {helper_directory}
+    helper_directories.update(path.parent for path in helper_paths.values())
+    executable_names = set()
+    for directory in helper_directories:
+        if directory.is_dir():
+            executable_names.update(
+                path.name for path in directory.iterdir()
+                if path.is_file() and os.access(path, os.X_OK)
+            )
     problems = [
         f"{name}: executable has no entitlement declaration in the verifier"
         for name in sorted(executable_names - set(HELPER_ENTITLEMENTS) - UNMANAGED_EXECUTABLES)
     ]
+    for name in PLUGIN_HELPERS:
+        if (helper_directory / name).exists():
+            problems.append(f"{name}: still embedded directly in the app")
 
     if build_settings is None:
         try:
@@ -148,7 +170,7 @@ def verify_bundle(
             return problems + [f"could not inspect embedded provisioning profile: {error}"]
 
     for name, declaration in HELPER_ENTITLEMENTS.items():
-        binary = helper_directory / name
+        binary = helper_paths[name]
         entitlement_file = repository / declaration
         if name not in executable_names:
             problems.append(f"{name}: declared helper executable is missing")
@@ -184,12 +206,17 @@ def parse_arguments(arguments: Sequence[str]) -> argparse.Namespace:
         help="repository checkout containing the entitlement declarations",
     )
     parser.add_argument("bundle", type=Path)
+    parser.add_argument(
+        "--plugin-source",
+        type=Path,
+        help="signed native bundles staged before the release app was pruned",
+    )
     return parser.parse_args(arguments)
 
 
 def main(arguments: Sequence[str]) -> int:
     options = parse_arguments(arguments)
-    problems = verify_bundle(options.bundle, options.root)
+    problems = verify_bundle(options.bundle, options.root, plugin_source=options.plugin_source)
     if problems:
         for problem in problems:
             print(f"bundle-entitlements: {problem}", file=sys.stderr)

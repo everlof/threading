@@ -83,6 +83,22 @@ final class PluginLoaderTests: XCTestCase {
         }
     }
 
+    func testInstalledSymlinkStagesItsSignedBundleRatherThanTheLink() throws {
+        let visible = try makeBundle(principalClass: nil)
+        try sign(visible)
+        let version = directory.appendingPathComponent(".managed/versions/one")
+        try FileManager.default.createDirectory(at: version, withIntermediateDirectories: true)
+        let target = version.appendingPathComponent("Fixture.bundle")
+        try FileManager.default.moveItem(at: visible, to: target)
+        try FileManager.default.createSymbolicLink(at: visible, withDestinationURL: target)
+
+        let verified = try PluginLoader.signatureAndDecision().verify(bundleAt: visible)
+        XCTAssertEqual(verified.identity?.bundleIdentifier, "codes.threading.test.fixture")
+        XCTAssertThrowsError(try verified.load { _ in false }) {
+            XCTAssertEqual(($0 as? PluginLoadFailure)?.code, "not_approved")
+        }
+    }
+
     func testVerifiedInstalledBundleMapsTheStagedBuildAfterSourceReplacement() async throws {
         let bundle = try makeBundle(
             principalClass: "LoaderFixturePrincipal",

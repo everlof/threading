@@ -3930,6 +3930,16 @@ order is the same one the agent sees, and it survives a relaunch. **⌘⇧[** an
 **⌘1**–**⌘9** jump to a tab by its place in it. The same gestures and menu, with the same
 commands, work on the shell drawer's tabs.
 
+### Optional feature components
+
+Device Logs, Devices, the network proxy and T3 Navigator download their native components
+separately from the main app. Open **Settings ▸ Extensions** to install them. A feature whose
+component is missing also shows an install action when you open it.
+
+These downloads are signed and matched to your exact Threading version. After an app update,
+components for features you have used download again in the background. If you are offline,
+the feature keeps its place and shows its installation state until the download can finish.
+
 ### iOS Simulator in the panel
 
 When an agent builds an iPhone app, it can adopt an already-installed Simulator device as an

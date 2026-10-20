@@ -148,6 +148,23 @@ tools also accept a rerender-safe semantic locator using an exact accessibility 
 name, an associated form label, or a test id. Semantic locators are resolved immediately before the
 action, stay strict, and may opt into a case-insensitive name/label substring only when the result is
 still unique.
+
+Target reveal starts with `scrollIntoView` using `nearest` alignment on both axes, including each
+same-origin frame. A control that is already visible must not move the page when an agent clicks,
+types or checks it. Center alignment can scroll an `overflow:hidden` application shell, clipping
+its heading and leaving the website displaced until a resize resets that shell. Keep scrolling
+owned by WebKit and reveal offscreen controls with the minimum movement; do not repair this by
+resetting native viewport geometry or the website's scroll position after an action. The existing
+stability and hit-testing checks still decide whether the revealed target can receive the action.
+WebKit rounds native scroll offsets to CSS pixels: a target positioned at a fractional coordinate
+can remain 0.25–0.5 pixels beyond a viewport edge after nearest alignment. Check its resulting
+rectangle and centre only a clipped axis whose target fits in that viewport; otherwise element
+captures lose edge pixels and correctly report clipping. Fully visible and oversized axes retain
+nearest alignment. This adds one rectangle read per target/frame, with no DOM scan, retained views,
+timers or work in resize/scroll callbacks. The browser-host regression covers
+click, type and checkbox interactions in hidden overflow, plus reaching an offscreen control;
+its rendered state is part of `browser-responsive-review` evidence.
+
 Drag sends both pointer/mouse gestures and the HTML drag/drop sequence, covering application
 drag handles and standard drop zones without moving the user's cursor. WKWebView derives genuine
 hover from the physical pointer even when given a synthetic AppKit event, and moving the user's

@@ -15,13 +15,10 @@ final class NativePluginRuntime {
         let sessionID: SessionID?
         weak var controller: NativePluginPaneViewController?
         let plugin: ThreadingNativePlugin
+        let tools: [PluginTool]
     }
 
     private var entries: [ObjectIdentifier: Entry] = [:]
-
-    /// Opens a chat's Bluetooth tab. The window that owns the panes installs it: the plugin's
-    /// `bluetooth` tool can start a capture but cannot ask for the tab its packets appear in.
-    var revealBluetoothLog: ((SessionID) -> Void)?
 
     func register(
         _ plugin: ThreadingNativePlugin,
@@ -31,7 +28,8 @@ final class NativePluginRuntime {
         entries[ObjectIdentifier(controller)] = Entry(
             sessionID: sessionID,
             controller: controller,
-            plugin: plugin
+            plugin: plugin,
+            tools: plugin.pluginTools ?? []
         )
         MCPExternalToolRegistry.shared.toolsDidChange()
     }
@@ -43,9 +41,12 @@ final class NativePluginRuntime {
 
     /// Every loaded plugin, with dead entries swept. A pane can go away without telling anyone if
     /// its window closed, so the weak reference is the truth rather than the dictionary.
-    func loaded() -> [(plugin: ThreadingNativePlugin, sessionID: SessionID?)] {
+    func loaded() -> [(plugin: ThreadingNativePlugin, tools: [PluginTool], sessionID: SessionID?, controller: NativePluginPaneViewController)] {
         entries = entries.filter { $0.value.controller != nil }
-        return entries.values.map { ($0.plugin, $0.sessionID) }
+        return entries.values.compactMap { entry in
+            guard let controller = entry.controller else { return nil }
+            return (entry.plugin, entry.tools, entry.sessionID, controller)
+        }
     }
 
     /// The plugin with this identity that belongs to this chat, if one is open.

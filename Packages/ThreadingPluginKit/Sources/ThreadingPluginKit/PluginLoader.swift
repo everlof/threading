@@ -20,6 +20,8 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
     case buildChanged(identifier: String)
     /// Validly signed, but the user has not agreed to run this particular build of it.
     case notApproved(identifier: String)
+    /// Its constructor was the last active operation before a previous unclean exit.
+    case quarantined(identifier: String)
 
     public var description: String {
         switch self {
@@ -37,6 +39,8 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
             return "\(identifier) changed after its presentation was discovered"
         case .notApproved(let identifier):
             return "\(identifier) has not been approved to run inside Threading"
+        case .quarantined(let identifier):
+            return "\(identifier) is paused after a crash while it was loading"
         case .apiVersionMismatch(let found, let expected):
             return "plugin speaks API \(found), host speaks \(expected)"
         }
@@ -51,6 +55,7 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
         case .wrongProtocol: return "wrong_protocol"
         case .apiVersionMismatch: return "api_version_mismatch"
         case .notApproved: return "not_approved"
+        case .quarantined: return "quarantined"
         case .capabilityUnavailable: return "capability_unavailable"
         case .buildChanged: return "build_changed"
         }
@@ -287,6 +292,11 @@ public struct PluginLoader: Sendable {
         guard FileManager.default.fileExists(atPath: source.path) else {
             throw PluginLoadFailure.unreadableBundle(path: source.path)
         }
+        // A managed first-party install publishes one top-level symlink atomically. Copy its
+        // current destination, then validate the staged bytes: replacing the link during the
+        // copy cannot make an unverified image reach principalClass. Links inside the copied
+        // bundle still have to stay within that staging tree below.
+        let resolvedSource = source.resolvingSymlinksInPath()
         let root = stagingRoot
         do {
             let parent = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -300,7 +310,7 @@ public struct PluginLoader: Sendable {
                 isDirectory: true
             )
             do {
-                try FileManager.default.copyItem(at: source, to: staged)
+                try FileManager.default.copyItem(at: resolvedSource, to: staged)
                 try removeWritePermissionRecursively(from: staged)
                 try FileManager.default.setAttributes(
                     [.posixPermissions: 0o500],

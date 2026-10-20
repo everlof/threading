@@ -29,6 +29,9 @@ final class CommandRegistry {
     private let builtInCommands: [AppCommand]
     private var extensions: [String: ExtensionCommands] = [:]
     private var nativePluginBundles: [URL] = []
+    private var scannedBundledPluginURLs: [URL] = []
+    private var nativePluginPanes: [NativePluginPaneDescriptor] = []
+    private(set) var nativePluginScanComplete = false
     private var projectScripts: [ProjectScript] = []
     private var appearanceCommands: [AppCommand] = []
     private var resolvedCommands: [AppCommand]
@@ -95,11 +98,38 @@ final class CommandRegistry {
         rebuildAndNotify()
     }
 
-    func replaceNativePluginBundles(_ bundles: [URL]) {
+    func replaceNativePluginBundles(
+        _ bundles: [URL], paneDescriptors: [NativePluginPaneDescriptor] = [],
+        scannedBundledBundles: [URL] = []
+    ) {
         let bounded = Array(bundles.prefix(32))
-        guard bounded != nativePluginBundles else { return }
+        let panes = Array(paneDescriptors.prefix(32))
+        let bundled = Array(scannedBundledBundles.prefix(32))
+        guard !nativePluginScanComplete || bounded != nativePluginBundles || panes != nativePluginPanes ||
+                bundled != scannedBundledPluginURLs else { return }
+        nativePluginScanComplete = true
         nativePluginBundles = bounded
+        nativePluginPanes = panes
+        scannedBundledPluginURLs = bundled
         rebuildAndNotify()
+    }
+
+    func nativePluginPane(at url: URL) -> NativePluginPaneDescriptor? {
+        let path = url.standardizedFileURL.path
+        return nativePluginPanes.first { $0.bundleURL.standardizedFileURL.path == path }
+    }
+
+    func hasScannedNativePlugin(at url: URL) -> Bool {
+        let path = url.standardizedFileURL.path
+        return (nativePluginBundles + scannedBundledPluginURLs).contains {
+            $0.standardizedFileURL.path == path
+        }
+    }
+
+    func nativePluginPane(identifier: String, section: String) -> NativePluginPaneDescriptor? {
+        nativePluginPanes.first {
+            $0.pluginIdentifier == identifier && $0.contains(section)
+        }
     }
 
     var panelCommands: [AppCommand] { resolvedCommands.filter { $0.panelTarget != nil } }
@@ -173,13 +203,35 @@ final class CommandRegistry {
                     iconName: script.icon
                 )
             }
-        let nativePanels = nativePluginBundles.filter {
-            $0.deletingPathExtension().lastPathComponent != "DeviceLogsPlugin"
+        let nativePanels = nativePluginBundles.filter { url in
+            NativePluginManagedOffer.all.first {
+                $0.bundleName == url.lastPathComponent
+            }?.showsGenericPaneCommand ?? true
+        }.filter { url in
+            nativePluginPane(at: url)?.sections.contains(where: { $0.command != nil }) != true
         }.map { url in
             AppCommand(id: PanelCommands.nativePluginID(url), group: .view,
                        title: url.deletingPathExtension().lastPathComponent,
                        defaultShortcut: nil, isEditable: true, scope: .session,
                        iconName: "puzzlepiece.extension", panelTarget: .nativePlugin(url))
+        }
+        let nativeSections = nativePluginPanes.flatMap { pane in
+            pane.sections.compactMap { section -> AppCommand? in
+                guard let command = section.command,
+                      NativePluginManagedOffer.all.contains(where: {
+                          $0.identifier == pane.pluginIdentifier
+                      }) == false else { return nil }
+                return AppCommand(
+                    id: PanelCommands.nativePluginSectionID(
+                        identifier: pane.pluginIdentifier, section: section.identifier
+                    ), group: .view, title: command.title, detail: command.detail,
+                    defaultShortcut: nil, isEditable: true, scope: .session,
+                    iconName: command.symbol,
+                    panelTarget: .nativePluginSection(
+                        identifier: pane.pluginIdentifier, section: section.identifier
+                    )
+                )
+            }
         }
         let extensionPanels = extensions.sorted { $0.key < $1.key }.flatMap { identifier, contribution in
             contribution.panels.map { panel in
@@ -190,7 +242,7 @@ final class CommandRegistry {
                            panelTarget: .extensionPanel(identifier: identifier, panelID: panel.id))
             }
         }
-        resolvedCommands = builtInCommands + scriptCommands + extensionCommands + nativePanels + extensionPanels + appearanceCommands
+        resolvedCommands = builtInCommands + scriptCommands + extensionCommands + nativePanels + nativeSections + extensionPanels + appearanceCommands
         NotificationCenter.default.post(CommandRegistryDidChange())
     }
 }

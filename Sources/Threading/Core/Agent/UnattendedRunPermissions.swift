@@ -134,19 +134,19 @@ enum UnattendedRunPermissions {
     ) -> PermissionDecision {
         guard let command, let segments = ShellCommandPolicy.segments(ofVettable: command) else {
             return .deny(reason:
-                "Unattended automation runs only run simple commands: no redirection (> <), "
-                    + "substitution ($ or backticks), backgrounding or newlines "
+                "Unattended automation runs only run simple commands: no unquoted redirection (> <) "
+                    + "or parentheses, no $ or backticks outside single quotes, no brace expansion, "
+                    + "backgrounding or newlines. Put patterns in single quotes "
                     + "(automation revision \(revision)).")
         }
         var used: [AutomationPermissionRule] = []
         for segment in segments {
             if ShellCommandPolicy.isReadOnlySegment(segment) { continue }
-            let words = segment.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
             guard let rule = rules.first(where: { rule in
-                if case .shell(let pattern) = rule { return pattern.matches(words: words) }
+                if case .shell(let pattern) = rule { return pattern.matches(words: segment.words) }
                 return false
             }) else {
-                return refused("“\(segment)”", revision: revision)
+                return refused("“\(segment.text)”", revision: revision)
             }
             used.append(rule)
         }
@@ -208,6 +208,7 @@ enum UnattendedRunPermissions {
     private static func refused(_ what: String, revision: Int) -> PermissionDecision {
         .deny(reason:
             "Not in this automation's allow-list (revision \(revision)): \(what). Unattended runs "
-                + "cannot ask a person; continue without it, or report needsHuman if the task needs it.")
+                + "cannot ask a person; continue with what is allowed, and report needsHuman only if "
+                + "the task cannot be finished without it.")
     }
 }

@@ -23,7 +23,7 @@ let package = Package(
             name: "DeviceLogsPlugin",
             dependencies: [
                 .product(name: "ThreadingPluginKit", package: "ThreadingPluginKit"),
-                .product(name: "ThreadingDesignKit", package: "ThreadingDesignKit"),
+                .product(name: "ThreadingDesignKitStandalone", package: "ThreadingDesignKit"),
                 .product(name: "TimberLineParser", package: "TimberLineParser"),
             ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]

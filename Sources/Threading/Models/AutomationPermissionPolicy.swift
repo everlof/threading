@@ -94,11 +94,11 @@ enum AutomationPermissionRule: Hashable, Sendable, Codable {
         /// Whether any further arguments may follow (`Bash(command *)`).
         let allowsMoreArguments: Bool
 
-        /// Whether one simple command — a single segment of a command line — is this pattern.
-        /// The name is compared as typed; arguments as the shell will read them, unquoted.
+        /// Whether one simple command — a single segment of a command line, in the words
+        /// `ShellWords` reads from it — is this pattern.
         func matches(words candidate: [String]) -> Bool {
             guard let name = candidate.first, name == words[0] else { return false }
-            let arguments = candidate.dropFirst().map(ShellCommandPolicy.unquoted)
+            let arguments = Array(candidate.dropFirst())
             let fixed = Array(words.dropFirst())
             if allowsMoreArguments {
                 return arguments.count >= fixed.count && Array(arguments.prefix(fixed.count)) == fixed
@@ -183,7 +183,9 @@ enum AutomationPermissionRule: Hashable, Sendable, Codable {
     var text: String {
         switch self {
         case .shell(let pattern):
-            return "Bash(" + (pattern.words + (pattern.allowsMoreArguments ? ["*"] : [])).joined(separator: " ") + ")"
+            let arguments = pattern.words.dropFirst().map(ShellWords.quoted)
+            return "Bash(" + ([pattern.words[0]] + arguments + (pattern.allowsMoreArguments ? ["*"] : []))
+                .joined(separator: " ") + ")"
         case .fileWrite(let pattern): return "Write(\(pattern.glob))"
         case .webFetch(let domain): return "WebFetch(domain:\(domain))"
         case .mcpTool(let name): return name
@@ -193,12 +195,14 @@ enum AutomationPermissionRule: Hashable, Sendable, Codable {
     private static func shellPattern(_ body: String, rule: String) throws -> ShellPattern {
         // A rule names one simple command. Anything that could chain, redirect or substitute is
         // refused here, so a rule can never stand for more than the words it shows.
-        guard ShellCommandPolicy.segments(ofVettable: body) == [body] else {
+        guard let segments = ShellCommandPolicy.segments(ofVettable: body), segments.count == 1 else {
             throw AutomationPermissionPolicyError.compoundCommand(rule)
         }
-        var words = body.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+        var words = segments[0].words
         var allowsMore = false
-        if words.last == "*" {
+        // Only a bare trailing `*` means "and any arguments"; a quoted or escaped one is a
+        // literal argument and is refused below like any other `*`.
+        if words.last == "*", body == "*" || body.hasSuffix(" *") || body.hasSuffix("\t*") {
             allowsMore = true
             words.removeLast()
         }
@@ -206,8 +210,7 @@ enum AutomationPermissionRule: Hashable, Sendable, Codable {
         guard !name.contains("="), !words.contains(where: { $0.contains("*") }) else {
             throw AutomationPermissionPolicyError.unsupported(rule)
         }
-        return ShellPattern(words: [name] + words.dropFirst().map(ShellCommandPolicy.unquoted),
-                            allowsMoreArguments: allowsMore)
+        return ShellPattern(words: words, allowsMoreArguments: allowsMore)
     }
 
     private static func pathPattern(_ body: String, rule: String) throws -> PathPattern {
