@@ -12,13 +12,15 @@ final class WorkroomPortalServerTests: XCTestCase {
 
     private var directory: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
+        try await super.setUp()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("workroom-server-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
+        try await super.tearDown()
     }
 
     func testTheListenerServesThePortalOnLoopbackOnly() async throws {
@@ -38,9 +40,9 @@ final class WorkroomPortalServerTests: XCTestCase {
         let (_, inbox) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/")!)
         XCTAssertEqual((inbox as? HTTPURLResponse)?.statusCode, 401)
 
-        let ambiguous = try await raw("GET / HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nHost: rooms.example.test\r\n\r\n", port: port)
+        let ambiguous = try await Self.raw("GET / HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nHost: rooms.example.test\r\n\r\n", port: port)
         XCTAssertTrue(ambiguous.hasPrefix("HTTP/1.1 400"), ambiguous)
-        let foreign = try await raw("GET / HTTP/1.1\r\nHost: evil.example\r\n\r\n", port: port)
+        let foreign = try await Self.raw("GET / HTTP/1.1\r\nHost: evil.example\r\n\r\n", port: port)
         XCTAssertTrue(foreign.hasPrefix("HTTP/1.1 421"), foreign)
     }
 
@@ -97,7 +99,7 @@ final class WorkroomPortalServerTests: XCTestCase {
     }
 
     /// One raw request on a fresh connection; returns the response head and body as text.
-    private nonisolated func raw(_ request: String, port: UInt16) async throws -> String {
+    private nonisolated static func raw(_ request: String, port: UInt16) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
             let once = OnceFlag()

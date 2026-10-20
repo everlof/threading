@@ -25,14 +25,14 @@ final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
     private var window: NSWindow?
     private var browser: BrowserViewController?
 
-    override func tearDown() {
+    override func tearDown() async throws {
         // Ordered out before release. Closing a live WKWebView window synchronously can retire
         // WebKit/AppKit state while XCTest is still draining the case's autorelease pool; the
         // all-plan tripwire owns only one fixture at a time, so it needs no shared host.
         window?.orderOut(nil)
         window = nil
         browser = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Measurements
@@ -235,11 +235,11 @@ final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
         window?.orderOut(nil)
         // Deterministically model a throttled isolated-world timer. The 70-second platform
         // tripwire beside this varies with other pages sharing WebKit's process assertions.
-        let _: Any = try await withCheckedThrowingContinuation { continuation in
+        let _: Void = try await withCheckedThrowingContinuation { continuation in
             browser.webView.callAsyncJavaScript(
                 "globalThis.setTimeout = () => { throw new Error('DOM timer used by agent action'); }; return true;",
                 arguments: [:], in: nil, in: .defaultClient
-            ) { continuation.resume(with: $0) }
+            ) { continuation.resume(with: $0.map { _ in () }) }
         }
         try await changeWhileHidden(browser)
         let typed = try await browser.agentType(
@@ -259,7 +259,7 @@ final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
 
     func testHostDelayRejectsInvalidAndExcessRequests() async throws {
         let browser = try await loadedBrowser()
-        let result: Any = try await withCheckedThrowingContinuation { continuation in
+        let result: String? = try await withCheckedThrowingContinuation { continuation in
             browser.webView.callAsyncJavaScript(
                 """
                 const delay = (milliseconds, index) =>
@@ -273,9 +273,9 @@ final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
                 });
                 """,
                 arguments: [:], in: nil, in: .defaultClient
-            ) { continuation.resume(with: $0) }
+            ) { continuation.resume(with: $0.map { $0 as? String }) }
         }
-        let data = try XCTUnwrap((result as? String)?.data(using: .utf8))
+        let data = try XCTUnwrap(result?.data(using: .utf8))
         let counts = try JSONDecoder().decode([String: Int].self, from: data)
         XCTAssertEqual(counts, ["invalid": 4, "completed": 64, "refused": 1])
     }

@@ -1396,8 +1396,8 @@ public enum DeviceLogDecoding {
 // MARK: - Discovery
 
 /// One thing the pane can be pointed at.
-public struct DeviceLogSourceOption: Equatable {
-    public enum Kind: Equatable {
+public struct DeviceLogSourceOption: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
         case simulator(udid: String)
         case device(udid: String, overNetwork: Bool)
         case bluetooth(udid: String, overNetwork: Bool, toolPath: String?)
@@ -1418,7 +1418,7 @@ public struct DeviceLogSourceOption: Equatable {
     /// name, and recovering that name by parsing it back out of a source title is how a rename
     /// becomes a second device in the menu. It also gives identity somewhere to hang — two phones
     /// both offer "System log", and only the machine tells them apart.
-    public struct Machine: Equatable, Hashable {
+    public struct Machine: Equatable, Hashable, Sendable {
         public let id: String
         public let title: String
         public let isSimulator: Bool

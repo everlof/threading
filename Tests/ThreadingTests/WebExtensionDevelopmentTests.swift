@@ -355,6 +355,7 @@ final class WebExtensionDevelopmentTests: XCTestCase {
         return script
     }
 
+    @MainActor
     private func awaitFile(_ url: URL) async throws {
         let deadline = Date().addingTimeInterval(10)
         while !FileManager.default.fileExists(atPath: url.path), Date() < deadline {

@@ -203,8 +203,8 @@ enum MCPDefaults {
     /// keys only make it deterministic, which a fragment written into two provider files and
     /// compared byte-for-byte has to be.
     static let hookDenyResponseJSON: String = {
-        let response = PermissionDecision.deny(reason: hookDenyReason).hookResponse
-        guard let data = try? JSONSerialization.data(
+        guard let response = PermissionDecision.deny(reason: hookDenyReason).hookResponse,
+              let data = try? JSONSerialization.data(
             withJSONObject: response,
             options: [.sortedKeys]
         ), let json = String(data: data, encoding: .utf8) else {

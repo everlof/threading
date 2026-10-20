@@ -8,13 +8,15 @@ final class WorkroomHostTests: XCTestCase {
 
     private var directory: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
+        try await super.setUp()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("workroom-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         try? FileManager.default.removeItem(at: directory)
+        try await super.tearDown()
     }
 
     // MARK: - Git context
@@ -181,14 +183,5 @@ final class WorkroomHostTests: XCTestCase {
 
     private func write(_ name: String, _ text: String) throws {
         try Data(text.utf8).write(to: directory.appendingPathComponent(name))
-    }
-}
-
-extension WorkroomGitContextReader.Failure: CustomStringConvertible {
-    public var description: String {
-        switch self {
-        case .notARepository: return "notARepository"
-        case .unknownBase(let base): return "unknownBase(\(base))"
-        }
     }
 }

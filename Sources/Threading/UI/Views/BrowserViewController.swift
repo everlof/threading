@@ -1368,7 +1368,7 @@ final class BrowserViewController: NSViewController {
     /// store, so clearing that whole ephemeral store is both stronger and more narrowly scoped.
     func clearSiteData(
         for origin: BrowserOrigin,
-        completion: @escaping (BrowserSiteDataClearReport) -> Void
+        completion: @escaping @MainActor (BrowserSiteDataClearReport) -> Void
     ) {
         let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
         // A project move may replace the controller's store while WebKit fetches records.
@@ -1389,7 +1389,7 @@ final class BrowserViewController: NSViewController {
             let matching = records.filter {
                 Self.websiteDataRecord($0, belongsToHost: origin.host)
             }
-            let finish = {
+            let finish: @MainActor @Sendable () -> Void = {
                 // A just-written cookie may not yet appear in WebKit's website data records.
                 // Delete it from the captured store before reporting that clearing finished.
                 Self.removeCookies(in: store, matchingHost: origin.host) {
@@ -1410,7 +1410,7 @@ final class BrowserViewController: NSViewController {
     private static func removeCookies(
         in store: WKWebsiteDataStore,
         matchingHost host: String?,
-        completion: @escaping () -> Void
+        completion: @escaping @MainActor @Sendable () -> Void
     ) {
         store.httpCookieStore.getAllCookies { cookies in
             let normalizedHost = host?
@@ -1425,7 +1425,7 @@ final class BrowserViewController: NSViewController {
                     || ((domain.contains(".") || domain == "localhost")
                         && normalizedHost.hasSuffix("." + domain))
             }
-            func remove(at index: Int) {
+            @MainActor @Sendable func remove(at index: Int) {
                 guard index < matching.count else { completion(); return }
                 store.httpCookieStore.delete(matching[index]) { remove(at: index + 1) }
             }
@@ -2324,7 +2324,7 @@ final class BrowserViewController: NSViewController {
         let page = webView
         let finishActivity = executionActivity.begin(for: page)
         defer { finishActivity() }
-        let result: Any = try await withCheckedThrowingContinuation { continuation in
+        let result: String? = try await withCheckedThrowingContinuation { continuation in
             let completion = BrowserBridgeCallCompletion(
                 continuation,
                 onLateCompletion: onLateCompletion
@@ -2335,6 +2335,7 @@ final class BrowserViewController: NSViewController {
                 in: nil,
                 in: .defaultClient
             ) { [weak self] result in
+                let result = result.map { $0 as? String }
                 Task { @MainActor in
                     let accepted = completion.finish(result)
                     let outcome: String
@@ -2373,7 +2374,7 @@ final class BrowserViewController: NSViewController {
                 }
             }
         }
-        guard let json = result as? String, let data = json.data(using: .utf8) else {
+        guard let json = result, let data = json.data(using: .utf8) else {
             recordAgentBridgePhase(
                 "javascript.decode",
                 startedAt: startedAt,
@@ -4953,12 +4954,12 @@ private enum BrowserConsoleLevel {
 
 @MainActor
 private final class BrowserBridgeCallCompletion {
-    private var continuation: CheckedContinuation<Any, Error>?
+    private var continuation: CheckedContinuation<String?, Error>?
     private var timedOut = false
     private var onLateCompletion: (@MainActor () -> Void)?
 
     init(
-        _ continuation: CheckedContinuation<Any, Error>,
+        _ continuation: CheckedContinuation<String?, Error>,
         onLateCompletion: (@MainActor () -> Void)?
     ) {
         self.continuation = continuation
@@ -4966,7 +4967,7 @@ private final class BrowserBridgeCallCompletion {
     }
 
     @discardableResult
-    func finish(_ result: Result<Any, Error>) -> Bool {
+    func finish(_ result: Result<String?, Error>) -> Bool {
         guard let continuation else {
             if timedOut {
                 let callback = onLateCompletion

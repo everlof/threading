@@ -53,7 +53,7 @@ final class BrowserExecutionActivity {
         }
     }
 
-    deinit {
+    isolated deinit {
         if let processActivity { ProcessInfo.processInfo.endActivity(processActivity) }
     }
 }

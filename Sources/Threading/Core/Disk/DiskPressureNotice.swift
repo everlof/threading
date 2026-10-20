@@ -59,7 +59,7 @@ enum DiskPressureNotice {
         failure: DiskPressureFailure,
         reading: DiskSpace.Reading?,
         now: Date = Date(),
-        isEligible: (SessionID) -> Bool = DiskPressureNotice.isEligible
+        isEligible: @MainActor (SessionID) -> Bool = DiskPressureNotice.isEligible
     ) -> [String: Any]? {
         guard !failure.isInterrupt, isEligible(sessionID) else { return nil }
 

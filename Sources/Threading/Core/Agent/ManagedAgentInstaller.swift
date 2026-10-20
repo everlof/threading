@@ -42,20 +42,12 @@ actor ManagedAgentInstaller {
         try await Task.detached(priority: .utility) { try store.rollback(kind) }.value
     }
 
-    private static func stageAndActivate(_ release: ManagedAgentRelease,
-                                         store: ManagedAgentRuntimeStore,
-                                         download: Download) async throws {
-        let files = FileManager.default
-        let provider = store.providerRoot(release.kind)
-        try files.createDirectory(at: provider, withIntermediateDirectories: true,
-                                  attributes: [.posixPermissions: 0o700])
-        guard provider.resolvingSymlinksInPath() == provider.standardizedFileURL else {
-            throw ManagedAgentError.invalidReceipt
-        }
+    private static func checkRetainedInstallations(in provider: URL) throws {
         // Retained binaries can still be mmap'd by a process hosted across an app restart.
         // Never replace/delete one while installing. Bound the inventory before making more.
-        guard let entries = files.enumerator(at: provider, includingPropertiesForKeys: nil,
-                                             options: [.skipsSubdirectoryDescendants]) else {
+        guard let entries = FileManager.default.enumerator(
+            at: provider, includingPropertiesForKeys: nil, options: [.skipsSubdirectoryDescendants]
+        ) else {
             throw ManagedAgentError.invalidReceipt
         }
         var generations = 0
@@ -68,6 +60,19 @@ actor ManagedAgentInstaller {
                 throw ManagedAgentError.retentionLimit
             }
         }
+    }
+
+    private static func stageAndActivate(_ release: ManagedAgentRelease,
+                                         store: ManagedAgentRuntimeStore,
+                                         download: Download) async throws {
+        let files = FileManager.default
+        let provider = store.providerRoot(release.kind)
+        try files.createDirectory(at: provider, withIntermediateDirectories: true,
+                                  attributes: [.posixPermissions: 0o700])
+        guard provider.resolvingSymlinksInPath() == provider.standardizedFileURL else {
+            throw ManagedAgentError.invalidReceipt
+        }
+        try checkRetainedInstallations(in: provider)
         let staging = provider.appendingPathComponent(".staging-\(UUID().uuidString)")
         try files.createDirectory(at: staging, withIntermediateDirectories: false,
                                   attributes: [.posixPermissions: 0o700])
