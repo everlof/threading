@@ -492,6 +492,10 @@ recipe with only the scoped MCP tools; its model login/live run remains unverifi
 The supervisor adds five core checks for migration, cross-connection capacity, global capacity,
 revision changes and manual ownership, plus four real-process checks for restart/continuation,
 pause/child survival, refusal circuit breaking and fairness across unavailable hosts.
+The survival fixture waits for the provider's execution-specific readiness file after its initial
+broker request. A `running` launch proves spawn acknowledgement, not provider initialization;
+stopping the supervisor earlier races that request and makes the fixture exit with
+`agent_broker_unavailable` before it reaches its intended hold.
 
 The general owner protocol, shared knowledge and indexed inbox/outbox reads are implemented below.
 Native Threading remote automation UI is implemented; production deployment/model validation is consumer-owned.

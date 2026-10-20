@@ -81,6 +81,7 @@ if sys.argv[1] in ("mcp", "mcp-question"):
 elif sys.argv[1] == "secret":
     pathlib.Path("secret-seen.txt").write_text(os.environ.get("API_TOKEN", "missing"))
 elif sys.argv[1] == "hold":
+    pathlib.Path("provider-ready-" + os.environ["THREADING_EXECUTION_ID"]).write_text("ready")
     time.sleep(60)
 elif sys.argv[1] in ("question", "auto"):
     if not work["checkpoint"]:
@@ -313,6 +314,9 @@ class RuntimeTests(unittest.TestCase):
         supervisor = self.start_supervisor()
         launch = self.wait(lambda: self.call("launches", self.work["id"])["items"])[0]
         self.wait(lambda: self.call("launches", self.work["id"])["items"][0]["state"] == "running")
+        # Spawn acknowledgement precedes the provider's initial broker request. Let that
+        # request finish before withdrawing its broker, so this tests a live child's survival.
+        self.wait(lambda: (self.root / ("provider-ready-" + launch["executionID"])).exists())
         supervisor.terminate(); supervisor.wait(timeout=10)
         self.assertEqual(self.call("launch-status", launch["executionID"])["presence"], "running")
         self.call("worker-pause", self.worker, str(policy["revision"]))
