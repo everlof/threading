@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 
 /// The selected login's remote home. Credential bytes only exist on the preparation worker and
-/// SSH stdin; neither launch arguments nor diagnostics carry them. The remote CLI owns refreshes.
+/// SSH pipes; neither launch arguments nor diagnostics carry them. The remote CLI owns refreshes.
 struct RemoteConversationAccount: Sendable {
     private static let worker = DispatchQueue(label: "codes.threading.remote-account", qos: .userInitiated)
     let directory: String
@@ -85,8 +85,8 @@ struct RemoteConversationAccount: Sendable {
         return lines.joined(separator: "\n")
     }
 
-    /// Runs on a bounded, serial worker. An already populated remote account is left alone:
-    /// copying the Mac's older refresh token over a remotely refreshed token would break login.
+    /// Runs on a bounded, serial worker. Usable remote credentials are preserved; Claude's
+    /// expired or cleared browser login can recover from a currently usable Mac credential.
     func prepare(
         account: AgentAccount,
         reuse: Bool,
@@ -101,6 +101,36 @@ struct RemoteConversationAccount: Sendable {
         guard installed.succeeded else { throw RemoteAgentLaunchError.agentNotInstalled(account.provider) }
         guard reuse else { return }
         let token = account.provider.longLivedToken == nil ? nil : AgentAccountTokenVault.shared.token(for: account.id)
+        switch account.provider {
+        case .claude where token == nil:
+            try RemoteClaudeLoginRecovery.prepare(directory: directory, context: context, runner: runner) {
+                try Self.credentials(for: account)
+            }
+        case .claude, .codex, .grok, .openCode, .cursor:
+            try prepareCredentialFile(account: account, token: token, context: context, runner: runner)
+        }
+        switch account.provider {
+        case .claude:
+            // A new copied login has already completed sign-in on the Mac. Claude's interactive
+            // onboarding otherwise asks for a second sign-in even with a usable credential.
+            // Seed only our private account's missing state file; existing CLI state is preserved.
+            let script = Self.installScript(directory: directory, file: ".claude.json",
+                credentials: Data(#"{"hasCompletedOnboarding":true}"#.utf8))
+            let result = try runner.run(on: context.destination, command: "sh -s", input: .data(Data(script.utf8)),
+                                        extraOptions: [], timeout: 30)
+            guard result.succeeded else { throw RemoteConversationFailure.credentialTransfer }
+        case .codex, .grok, .openCode, .cursor:
+            break
+        }
+    }
+
+    private func prepareCredentialFile(
+        account: AgentAccount,
+        token: AgentAccountToken?,
+        context: RemoteHostLaunchContext,
+        runner: any RemoteHostCommandRunning
+    ) throws {
+        let q = { (value: String) in ShellCommand(word: value).source }
         let file = token == nil ? credentialFile : "threading-login-token"
         let path = "\(directory)/\(file)"
         let check = Self.privateDirectoryScript(directory) + """
@@ -125,23 +155,32 @@ struct RemoteConversationAccount: Sendable {
                                         extraOptions: [], timeout: 30)
             guard result.succeeded else { throw RemoteConversationFailure.credentialTransfer }
         }
-        switch account.provider {
-        case .claude:
-            // A new copied login has already completed sign-in on the Mac. Claude's interactive
-            // onboarding otherwise asks for a second sign-in even with a usable credential.
-            // Seed only our private account's missing state file; existing CLI state is preserved.
-            let script = Self.installScript(directory: directory, file: ".claude.json",
-                credentials: Data(#"{"hasCompletedOnboarding":true}"#.utf8))
-            let result = try runner.run(on: context.destination, command: "sh -s", input: .data(Data(script.utf8)),
-                                        extraOptions: [], timeout: 30)
-            guard result.succeeded else { throw RemoteConversationFailure.credentialTransfer }
-        case .codex, .grok, .openCode, .cursor:
-            break
-        }
     }
 
-    static func installScript(directory: String, file: String, credentials: Data) -> String {
+    static func installScript(directory: String, file: String, credentials: Data,
+                              replacingDigest: String? = nil) -> String {
         let q = { (value: String) in ShellCommand(word: value).source }
+        let existingFileAction: String
+        let publication: String
+        if let replacingDigest {
+            existingFileAction = """
+            test "$(stat -c %s "$target")" -le \(KeychainCredentialsDefaults.maxItemBytes)
+            actual=$(head -c \(KeychainCredentialsDefaults.maxItemBytes + 1) "$target" | sha256sum)
+            test "${actual%% *}" = \(q(replacingDigest)) || exit 0
+            """
+            publication = """
+            # Recheck after staging: a CLI may have refreshed since the snapshot was read.
+            test ! -L "$target" && test -f "$target"
+            test "$(stat -c %u "$target")" = "$(id -u)"
+            test "$(stat -c %s "$target")" -le \(KeychainCredentialsDefaults.maxItemBytes)
+            actual=$(head -c \(KeychainCredentialsDefaults.maxItemBytes + 1) "$target" | sha256sum)
+            test "${actual%% *}" = \(q(replacingDigest)) || exit 0
+            mv -f "$temporary" "$target"
+            """
+        } else {
+            existingFileAction = "exit 0"
+            publication = #"ln "$temporary" "$target" 2>/dev/null || test -f "$target""#
+        }
         return privateDirectoryScript(directory) + """
 
         target="$directory"/\(q(file))
@@ -150,18 +189,17 @@ struct RemoteConversationAccount: Sendable {
           test -f "$target"
           test "$(stat -c %u "$target")" = "$(id -u)"
           chmod 600 "$target"
-          exit 0
+          \(existingFileAction)
         fi
         temporary=$(mktemp "$directory/.credential.XXXXXXXX")
         trap 'rm -f "$temporary"' EXIT HUP INT TERM
         printf '%s' '\(credentials.base64EncodedString())' | base64 -d > "$temporary"
         chmod 600 "$temporary"
-        # Atomic create, without replacing credentials another launch has just refreshed.
-        ln "$temporary" "$target" 2>/dev/null || test -f "$target"
+        \(publication)
         """
     }
 
-    private static func privateDirectoryScript(_ directory: String) -> String {
+    static func privateDirectoryScript(_ directory: String) -> String {
         """
         set -eu
         umask 077

@@ -164,9 +164,20 @@ an already-granted Claude Keychain item on a worker. Claude setup tokens use the
 vault. Codex uses its documented `auth.json` file; keyring-only Codex logins cannot be exported
 by this path. No preferences, hooks, MCP configuration or conversation history are copied.
 
-Transfers use SSH stdin, never command arguments. Each copied account gets a deterministic
-private directory (0700), with atomically created credential files (0600). Existing remote
-credentials are preserved because the remote CLI owns refresh-token rotation. A chat remembers
+Transfers use SSH pipes, never command arguments or diagnostics. Each copied account gets a
+deterministic private directory (0700), with atomically published credential files (0600).
+Usable remote credentials are preserved because the remote CLI owns refresh-token rotation.
+For Claude browser logins, launch preparation reads at most 64 KiB of the selected remote
+credential on the serial worker. A nonempty file is not proof of a login: after refresh fails,
+Claude can leave JSON with empty access and refresh tokens and zero expiry. Missing, cleared or
+expired credentials recover from a currently usable selected Mac login under the same standing
+copy consent. A healthy remote login never needs a Mac Keychain read. If the Mac cannot supply a
+current credential and the remote still has a refresh token, the CLI keeps its chance to refresh;
+otherwise preparation reports the existing provider-specific recovery error. A digest is checked
+again after staging and immediately before replacement so an observed intervening CLI refresh
+wins. This is launch-time recovery, not background synchronization or provider token refresh.
+Codex and saved Claude setup tokens retain their existing create-only transfer behavior.
+A chat remembers
 its chosen account namespace, so turning off future transfers cannot redirect an existing chat's
 history. An older remote terminal transcript keeps the host's default account when opened as a
 native chat. New chats with copying disabled also use the host's default login, regardless of the
@@ -188,7 +199,11 @@ copies a login nor changes its account. A fresh terminal launch pins the prepare
 the session, and generation checks discard late preparation results after cancellation/retry.
 Failure to prepare the selected login refuses launch instead of opening an unsigned-in CLI.
 Account discovery and the serial credential worker stay off-main; each launch handles one
-selected account and at most 64 KiB of credential data.
+selected account, at most one 64 KiB remote credential and one 64 KiB local credential.
+There is no account-directory scan or polling. Regression coverage includes the cleared-token
+shape, fresh and expired credentials, unavailable Keychain access, and an opt-in Linux SSH lane
+(`RemoteClaudeLoginRecoveryTests`, `THREADING_REMOTE_LOGIN_RECOVERY_TEST=1`) with synthetic
+credentials that checks recovery, intervening refresh, permissions, symlinks and input bounds.
 
 A newly copied Claude account also gets a minimal `.claude.json` with
 `hasCompletedOnboarding: true`. This initializes only Threading's private remote account after

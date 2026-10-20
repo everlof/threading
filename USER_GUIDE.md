@@ -3024,8 +3024,10 @@ the remote folder. Managed Mac worktrees and side-chat forks are not supported o
 
 **Use this Mac's login for remote chats** copies only the selected account's login to a private
 account directory on that host when needed. Enable it only for a host you trust with that login.
-The Mac keeps its login, and an existing remote login is preserved so remote token refreshes are
-not overwritten. Claude supports a saved setup token or an already accessible OAuth login;
+The Mac keeps its login, and a usable remote login is preserved so remote token refreshes are
+not overwritten. When a copied Claude browser login has expired or been cleared, restarting
+the chat restores it from the selected Mac login if that login is current and accessible.
+Claude supports a saved setup token or an already accessible OAuth login;
 Codex supports its `auth.json` login. Codex logins stored only in a credential keyring cannot be
 exported through this path.
 The same login reuse applies to new Claude terminal sessions. Their first-run setup is completed
