@@ -1,10 +1,8 @@
 import Foundation
 
-/// Answers whether the agent CLIs are actually reachable from the shell that will launch them.
-///
-/// Availability, account setup, updates and external-editor discovery all resolve executables
-/// against the PATH exported by the launcher's login shell. Startup prose and aliases are not
-/// executable paths; the shared framed environment reader keeps them out of every lookup.
+/// Resolves selected agent executables and, separately, tools found on the project's shell PATH.
+/// Account setup, availability and update checks share the app's runtime selection. The framed
+/// login-environment reader remains responsible for PATH-based external-tool discovery.
 enum AgentCLIProbe {
 
     /// Marks the beginning of the environment emitted by the login-shell probe. Shell profiles
@@ -42,11 +40,17 @@ enum AgentCLIProbe {
     /// availability. Parsing raw `command -v` output rejected installed tools whenever a login
     /// profile printed a greeting or defined an alias for the command.
     nonisolated static func locate(_ executable: String, shell: String) -> String? {
+        if let store = AgentLocalLaunch.store,
+           let kind = AgentKind.allCases.first(where: { $0.executableName == executable }) {
+            store.refresh(shell: shell)
+            let selected = store.selection(for: kind).executable
+            return FileManager.default.isExecutableFile(atPath: selected) ? selected : nil
+        }
         guard let path = loginShellPATH(shell: shell) else { return nil }
         return locate(executable, on: path)
     }
 
-    /// Reads the PATH exported by the same login shell that launches agents.
+    /// Reads the PATH exported by the configured login shell for project tools.
     ///
     /// The marker is printed after the shell has sourced its profile. This makes the answer
     /// immune to a profile banner containing a PATH-looking line, while the bounded child keeps

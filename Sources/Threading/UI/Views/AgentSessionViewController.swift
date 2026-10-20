@@ -549,6 +549,10 @@ final class AgentSessionViewController: NSViewController {
         do {
             plan = try launchPlanProvider(agentSession, project, initialPrompt)
         } catch {
+            if let unavailable = error as? AgentClientUnavailable {
+                recordLaunchRefusal(unavailable.failure)
+                return
+            }
             // A runtime with no terminal surface has no command line to run here, and running
             // its interactive CLI anyway would open a different conversation from the one this
             // row names. The surface clamp keeps ordinary paths away from this; a route that

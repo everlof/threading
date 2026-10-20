@@ -98,6 +98,9 @@ struct AgentCLIUpdateExecutionPlan: Equatable, Sendable {
         case .success(nil):
             return .failed(update: update, reason: .executableNotFound)
         case .success(.some(let resolved)):
+            guard !resolved.managed else {
+                return .failed(update: update, reason: .managedInstallation)
+            }
             guard let installed = AgentCLIVersion(resolved.version),
                   let latest = AgentCLIVersion(update.latestVersion) else {
                 return .failed(update: update, reason: .unreadableVersionOutput)

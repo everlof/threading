@@ -15,13 +15,12 @@ optional beyond the first click:
    and OpenCode. Claude Code and Codex can add and switch isolated logins here. Grok uses its
    terminal login, Cursor uses the Mac login created by `agent login`, and OpenCode owns provider
    sign-in through `/connect`. Existing managed logins each have the same enable switch as
-   **Settings ▸ Agents & Accounts**. The page also checks which agent commands your login shell
-   can find. One is enough to start chatting; any that are missing have an **Install…** button
-   that shows the provider's official install command and, when you press **Install**, runs it in
-   a terminal inside the sheet so you can watch it and answer its questions. Codex, Grok and
-   OpenCode install with npm, so on a Mac without Node.js the sheet says so first. If an install
-   lands in `~/.local/bin` but your shell's `PATH` doesn't include it, the sheet gives you the
-   line to add to `~/.zprofile`.
+   **Settings ▸ Agents & Accounts**. The page also checks the selected client installations.
+   One is enough to start chatting. **Install…** downloads a verified version into Threading's
+   own folder after you press **Install**. All five clients work without a global Node.js or npm
+   installation. Your account logins and conversations stay where they are. The current managed Cursor
+   client requires macOS 13.5 or later. To use an existing
+   client instead, choose it under **Settings ▸ General ▸ Agent tools ▸ Options…**.
 3. **Conversations** — chats you already have on disk, one list newest first, with the last
    two days pre-checked. Importing creates a project for each checked conversation's folder
    implicitly and adopts the conversations so they resume in place; **Skip for now** leaves
@@ -6473,37 +6472,40 @@ warn you about is refused anyway. The Files & Folders prompt is deliberately *no
 macOS offers no way to check that grant without requesting it, so a warning there could only be
 a guess, and a wrong guess is an interruption about a folder you approved years ago.
 
-**Software updates.** Once a day, Threading checks GitHub for a newer Threading release and the
-official release source for each installed agent tool: npm for Claude Code, Codex, Grok and
-OpenCode, and cursor.com for Cursor. The app request carries the version you are on and your
-macOS version, the way any download does — no identifier, and nothing about your projects. The
-agent lookups include no account, project, session or installed-version data, and reach only the
-tools you actually have installed. Switch this traffic off under
-**Settings ▸ General ▸ Software Updates**;
-**Help ▸ Check for Updates…** still checks Threading when it is off, so turning off background
-traffic never means losing the ability to look for a new app release.
+**Software updates.** Once a day, Threading checks for a newer Threading release and checks
+installed agent versions. Managed clients are compared with the versions tested with this
+Threading release. Clients you explicitly select from elsewhere are compared with their
+publisher's current release. These checks do not install updates or send account, project or
+conversation data. Turn background checks off under **Settings ▸ General ▸ Software Updates**;
+**Help ▸ Check for Updates…** still checks Threading when they are off.
 
-**Settings ▸ General ▸ Software Updates ▸ Agent tools ▸ Check Now** checks installed agent
-versions and their official release sources, even when automatic checking is off. Results stay
-on the page: each tool has an **Installation Guide**, a tool that isn't installed has
-**Install…** (the same install sheet as onboarding), and an available update has an **Update**
-button that opens the visible update terminal. After updating, restart the agent in your chat
-and choose **Check Now** again to refresh the installed version. Package-manager installations
-may need their package manager's update command; the installation guide explains those paths.
-Claude's **Model support** row explains known minimum CLI versions and links to Anthropic's
-current **Model Requirements**. Tool version, account access and provider availability all matter;
-the model picker follows what the runtime actually reports.
+**Settings ▸ General ▸ Agent tools** lists Claude Code, Codex, Grok, OpenCode and Cursor.
+**Install…**, **Update** or **Reinstall…** opens the shared installer. It downloads the pinned
+publisher artifact, checks its checksum and version, then switches the selection. A failed or
+cancelled installation leaves the current version selected. Managed clients live under
+`~/Library/Application Support/Threading/AgentTools`; their account data stays separate.
 
-Threading updates are handled through **Sparkle**, only after you agree. Agent tool updates never
-run as part of the background check: a sidebar receipt aligns the now/latest versions in a compact
-table. **Update** first checks the executable and installed version again, then opens a named
-standalone terminal and runs the provider's own command by its resolved path, with every prompt and
-result visible. Threading checks the installed version again afterward and reports whether it
-reached the announced version, changed to another version, stayed unchanged or failed. When
-several tools have news, **Update All** runs them sequentially in that terminal, summarizes the
-outcomes and continues to the next if one fails.
-Because Threading provides that notice, Codex chats launched inside Threading skip Codex's own
-startup update screen; this does not change Codex's setting when you launch it elsewhere.
+**Options…** offers **Use My Installation…** to select and verify your own executable,
+**Use Managed Installation** to switch back, **Restore Previous Version** when a previous
+installation is available, **Show Installation Folder**, and the publisher's installation guide.
+Running agents keep their original executable; restart a chat to use a newly selected version.
+Old managed generations are retained so running processes can continue using their files. At
+eight retained installations, stop agents using older versions and remove unused generations
+through Show Installation Folder before installing again. Each generation's
+`.threading-installation.json` identifies its version; `active.json` identifies the selected and
+previous generations, which should be kept.
+
+**Check Now** refreshes client health even when background checks are off. Claude's **Model
+support** row explains documented minimum versions and links to Anthropic's Model Requirements.
+Tool version, account access and provider availability all matter; the model picker follows what
+the runtime actually reports. Managed client self-updaters are disabled in Threading so the tested
+version remains selected. An external client keeps its publisher's update behavior.
+
+Threading application updates use **Sparkle**, only after you agree. Agent update notices open
+the managed installer for managed clients; external clients use a visible terminal running the
+publisher's update command by its resolved path. A mixed update request handles each kind through
+its corresponding path. Package-manager installations may need their package manager's update
+command; the publisher's guide explains those paths.
 
 **Which builds you receive.** **Settings ▸ General ▸ Software Updates ▸ Updates you receive**
 chooses between **Stable releases** and **Betas and stable releases**. Stable is the default and

@@ -177,6 +177,7 @@ struct ResolvedAgentCLI: Equatable, Sendable {
     let executablePath: String
     let effectivePATH: String
     let version: String
+    var managed = false
 }
 
 struct AgentCLIUpdate: Equatable, Sendable {
@@ -203,6 +204,7 @@ struct AgentCLIUpdateFailure: Equatable, Sendable {
         case unreadableVersionOutput
         case loginEnvironmentUnavailable
         case executableNotFound
+        case managedInstallation
         case transport
         case httpStatus(Int)
         case responseTooLarge
@@ -217,6 +219,7 @@ struct AgentCLIUpdateFailure: Equatable, Sendable {
             case .unreadableVersionOutput: return "unreadable-version-output"
             case .loginEnvironmentUnavailable: return "login-environment-unavailable"
             case .executableNotFound: return "executable-not-found"
+            case .managedInstallation: return "managed-installation"
             case .transport: return "transport"
             case .httpStatus(let status): return "http-\(status)"
             case .responseTooLarge: return "response-too-large"
@@ -235,6 +238,7 @@ struct AgentCLIUpdateFailure: Equatable, Sendable {
             case .loginEnvironmentUnavailable:
                 return "the configured login environment could not be read"
             case .executableNotFound: return "the executable is no longer on the login PATH"
+            case .managedInstallation: return "use the managed installer in Settings ▸ General ▸ Agent tools"
             case .transport: return "the release source could not be reached"
             case .httpStatus(let status): return "the release source returned HTTP \(status)"
             case .responseTooLarge: return "the release response exceeded the safety limit"
@@ -438,21 +442,37 @@ final class AgentCLILocalResolver: @unchecked Sendable {
         executable: String,
         versionArguments: [String]
     ) -> Result<ResolvedAgentCLI?, AgentCLIUpdateFailure.Reason> {
-        guard let effectivePATH = loginPATH() else {
-            return .failure(.loginEnvironmentUnavailable)
+        let kind = AgentKind.allCases.first { $0.executableName == executable }
+        let store = AgentLocalLaunch.store
+        let effectivePATH: String
+        let executablePath: String
+        let managed: Bool
+        if let store, let kind {
+            effectivePATH = loginPATH() ?? ManagedAgentCatalog.systemPATH
+            let selected = store.selection(for: kind)
+            executablePath = selected.executable
+            managed = selected.managed
+            guard FileManager.default.isExecutableFile(atPath: executablePath) else { return .success(nil) }
+        } else {
+            guard let path = loginPATH() else { return .failure(.loginEnvironmentUnavailable) }
+            guard let found = AgentCLIProbe.locate(executable, on: path) else { return .success(nil) }
+            effectivePATH = path
+            executablePath = found
+            managed = false
         }
-        guard let executablePath = AgentCLIProbe.locate(executable, on: effectivePATH) else {
-            return .success(nil)
-        }
-
         var environment = AgentEnvironment.launchEnvironment()
         environment[EnvironmentKeys.path] = effectivePATH
+        var arguments = versionArguments
+        if managed, let kind {
+            environment.merge(ManagedAgentRuntimeStore.managedEnvironment(for: kind)) { _, value in value }
+            arguments = ManagedAgentRuntimeStore.managedArguments(for: kind) + arguments
+        }
 
         let result: BoundedChildResult
         do {
             result = try BoundedChildProcess.run(
                 executable: executablePath,
-                arguments: versionArguments,
+                arguments: arguments,
                 environment: environment,
                 timeout: AgentCLIUpdateDefaults.versionCommandTimeout,
                 maximumOutputBytes: AgentCLIUpdateDefaults.maximumVersionOutputBytes,
@@ -478,7 +498,8 @@ final class AgentCLILocalResolver: @unchecked Sendable {
         return .success(ResolvedAgentCLI(
             executablePath: executablePath,
             effectivePATH: effectivePATH,
-            version: version.display
+            version: version.display,
+            managed: managed
         ))
     }
 
@@ -493,7 +514,13 @@ final class AgentCLILocalResolver: @unchecked Sendable {
         case .resolved(let path):
             return path
         case .unresolved:
-            let path = AgentCLIProbe.loginShellPATH(shell: shell)
+            let path: String?
+            if let store = AgentLocalLaunch.store {
+                store.refresh(shell: shell)
+                path = store.effectivePATH
+            } else {
+                path = AgentCLIProbe.loginShellPATH(shell: shell)
+            }
             pathState = .resolved(path)
             return path
         }
@@ -644,21 +671,25 @@ struct AgentCLIUpdateChecker: Sendable {
 
         let latestVersionText: String
         do {
-            var request = URLRequest(
-                url: definition.source.url,
-                cachePolicy: .reloadIgnoringLocalCacheData,
-                timeoutInterval: AgentCLIUpdateDefaults.requestTimeout
-            )
-            request.httpMethod = "GET"
-            request.setValue(AgentCLIUpdateDefaults.userAgent, forHTTPHeaderField: "User-Agent")
-            let response = try await transport(request)
-            guard (200...299).contains(response.statusCode) else {
-                throw AgentCLIUpdateFailure.Reason.httpStatus(response.statusCode)
+            if resolvedCLI.managed, let kind = AgentKind(rawValue: definition.id) {
+                latestVersionText = ManagedAgentCatalog.release(for: kind).version
+            } else {
+                var request = URLRequest(
+                    url: definition.source.url,
+                    cachePolicy: .reloadIgnoringLocalCacheData,
+                    timeoutInterval: AgentCLIUpdateDefaults.requestTimeout
+                )
+                request.httpMethod = "GET"
+                request.setValue(AgentCLIUpdateDefaults.userAgent, forHTTPHeaderField: "User-Agent")
+                let response = try await transport(request)
+                guard (200...299).contains(response.statusCode) else {
+                    throw AgentCLIUpdateFailure.Reason.httpStatus(response.statusCode)
+                }
+                guard response.data.count <= AgentCLIUpdateDefaults.maximumResponseBytes else {
+                    throw AgentCLIUpdateFailure.Reason.responseTooLarge
+                }
+                latestVersionText = try definition.source.latestVersion(in: response.data)
             }
-            guard response.data.count <= AgentCLIUpdateDefaults.maximumResponseBytes else {
-                throw AgentCLIUpdateFailure.Reason.responseTooLarge
-            }
-            latestVersionText = try definition.source.latestVersion(in: response.data)
         } catch let reason as AgentCLIUpdateFailure.Reason {
             return .failed(
                 installed: installed,

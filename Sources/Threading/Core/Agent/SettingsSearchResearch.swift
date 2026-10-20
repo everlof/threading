@@ -198,10 +198,12 @@ enum SettingsSearchResearch {
             return false
         }
 
+        let plan = AgentLocalLaunch.plan(command: command, in: FileManager.default.currentDirectoryPath,
+                                         shell: shell, credentials: route.credentials)
         guard let result = try? BoundedChildProcess.run(
-            executable: shell,
-            arguments: ["-l", "-c", command.source],
-            environment: route.credentials.applied(to: AgentEnvironment.launchEnvironment()),
+            executable: plan.executable,
+            arguments: plan.arguments,
+            environment: plan.launchEnvironment(),
             timeout: timeout,
             maximumOutputBytes: AccountProbeDefaults.maximumOutputBytes,
             output: .standardOutput

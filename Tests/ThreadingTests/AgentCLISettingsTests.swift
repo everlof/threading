@@ -83,16 +83,36 @@ final class AgentCLISettingsTests: HostedStoreTestCase {
         })
     }
 
-    func testOnboardingOffersTheCorrectNativeInstallerForClaudeAndCursor() {
-        XCTAssertEqual(OnboardingCLIDefaults.installCommand(for: AgentDefaults.claudeExecutable),
-                       "curl -fsSL https://claude.ai/install.sh | bash")
-        XCTAssertEqual(OnboardingCLIDefaults.installCommand(for: AgentDefaults.cursorExecutable),
-                       "curl https://cursor.com/install -fsS | bash")
+    func testEveryClientHasAPinnedPublisherArtifactAndInstallationGuide() {
+        for kind in AgentKind.allCases {
+            let release = ManagedAgentCatalog.release(for: kind)
+            XCTAssertEqual(release.kind, kind)
+            XCTAssertEqual(release.archiveURL.scheme, "https")
+            XCTAssertFalse(release.integrity.isEmpty)
+        }
         XCTAssertEqual(Set(AgentKind.allCases.map(\.cliInstallationGuide)).count, AgentKind.allCases.count)
         XCTAssertTrue(AgentKind.allCases.allSatisfy { $0.cliInstallationGuide.scheme == "https" })
     }
 
     func testRendersAgentToolsInTheProductSettingsShell() throws {
+        let runtimeRoot = FileManager.default.temporaryDirectory.appendingPathComponent("managed-render-\(UUID())")
+        let suite = "ManagedAgentRender.\(UUID())"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let runtimes = ManagedAgentRuntimeStore(root: runtimeRoot, preferences: preferences)
+        let olderVersions: [AgentKind: String] = [.claude: "2.1.220"]
+        for kind in [AgentKind.claude, .codex, .cursor] {
+            let release = ManagedAgentCatalog.release(for: kind)
+            try runtimes.activate(ManagedAgentInstallation(version: olderVersions[kind] ?? release.version,
+                directory: UUID().uuidString, executable: release.executable, archiveIntegrity: release.integrity), for: kind)
+        }
+        runtimes.selectExternal("/Users/example/tools/opencode", for: .openCode)
+        let previousStore = AgentLocalLaunch.store
+        AgentLocalLaunch.configure(runtimes)
+        defer {
+            AgentLocalLaunch.configure(previousStore)
+            preferences.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: runtimeRoot)
+        }
         let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
                             ?? NSTemporaryDirectory(), isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -120,7 +140,7 @@ final class AgentCLISettingsTests: HostedStoreTestCase {
             }.first)
             XCTAssertNotNil(general.agentTools.runUpdates, "Shipping settings lost the visible-terminal route")
             general.agentTools.show(mixedReport())
-            shell.presentAgentCLIUpdates([update()], didStart: {})
+            shell.presentAgentCLIUpdates([update(to: ManagedAgentCatalog.release(for: .claude).version)], didStart: {})
             let content = try XCTUnwrap(window.contentView)
             content.appearance = NSAppearance(named: appearance)
             AppThemeRefresh.repaint(content)
@@ -128,7 +148,7 @@ final class AgentCLISettingsTests: HostedStoreTestCase {
             SettingsRowReveal.reveal(title: L10n.string("Model support"), in: general.view)
             content.layoutSubtreeIfNeeded()
             let controls = descendants(general.agentTools.view, ThemedButton.self)
-            XCTAssertEqual(controls.filter { $0.accessibilityIdentifier().hasSuffix(".guide") }.count, 5)
+            XCTAssertEqual(controls.filter { $0.accessibilityIdentifier().hasSuffix(".options") }.count, 5)
             for button in controls {
                 let frame = button.convert(button.bounds, to: general.agentTools.view)
                 XCTAssertGreaterThan(frame.minX, -1)
@@ -138,6 +158,47 @@ final class AgentCLISettingsTests: HostedStoreTestCase {
             content.cacheDisplay(in: content.bounds, to: rep)
             let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
             try png.write(to: directory.appendingPathComponent("agent-tools-\(name).png"))
+        }
+    }
+
+    func testRendersManagedInstallSheetInProductHost() throws {
+        let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+                            ?? NSTemporaryDirectory(), isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        let runtimes = ManagedAgentRuntimeStore(
+            root: URL(fileURLWithPath: "/Users/example/Library/Application Support/Threading/AgentTools"),
+            preferences: PreferenceStore.shared
+        )
+        let fixtures: [(String, AppTheme, NSAppearance.Name, AgentCLIInstallViewController.Phase)] = [
+            ("ready", .system, .aqua, .ready),
+            ("running", AppThemeStyles.cyberpunk, .darkAqua, .running),
+            ("failed", .system, .darkAqua, .failed(message: "The download did not match the approved checksum.")),
+            ("installed", AppThemeStyles.neoBrutalism, .aqua, .installed(path: "/verified/claude"))
+        ]
+        for (name, theme, appearance, phase) in fixtures {
+            AppThemePalette.set(theme)
+            let shell = makeMainWindowController()
+            let parent = try XCTUnwrap(shell.window)
+            let presenter = try XCTUnwrap(parent.contentViewController)
+            let sheet = AgentCLIInstallViewController(kind: .claude, runtimes: runtimes,
+                                                     install: { _ in XCTFail("render must not install"); return "" })
+            presenter.presentAsSheet(sheet)
+            defer { presenter.dismiss(sheet) }
+            sheet.setPhaseForTesting(phase)
+            let panel = try XCTUnwrap(sheet.view.window)
+            XCTAssertEqual(panel.sheetParent, parent)
+            panel.appearance = NSAppearance(named: appearance)
+            let content = try XCTUnwrap(panel.contentView)
+            AppThemeRefresh.repaint(content)
+            content.layoutSubtreeIfNeeded()
+            XCTAssertGreaterThan(sheet.view.bounds.height, 150)
+            XCTAssertEqual(ThemeBoundaryAudit.violations(in: sheet.view), [])
+            let rep = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: rep)
+            try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(
+                to: directory.appendingPathComponent("agent-tools-install-\(name).png"))
         }
     }
 

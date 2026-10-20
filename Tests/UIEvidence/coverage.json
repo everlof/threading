@@ -834,10 +834,10 @@
       "kind": "surface",
       "status": "implemented",
       "priority": "important",
-      "title": "Agent tool updates and model support",
-      "description": "The installed-version check in General Settings inside the real main window, including available updates, failed release checks, missing tools, official install paths and Claude model requirements.",
+      "title": "Managed agent installations and model support",
+      "description": "All five client selections in General Settings inside the real main window, plus the attached managed installer in ready, running, failed and installed states.",
       "states": [
-        "Mixed installed, update, missing and failed-source results"
+        "Managed, missing and external installations", "Installer ready, running, failed and installed"
       ],
       "matrix": {
         "themes": [
@@ -855,7 +855,10 @@
       },
       "source": {
         "path": "Tests/ThreadingTests/AgentCLISettingsTests.swift",
-        "test": "ThreadingTests/AgentCLISettingsTests/testRendersAgentToolsInTheProductSettingsShell"
+        "tests": [
+          "ThreadingTests/AgentCLISettingsTests/testRendersAgentToolsInTheProductSettingsShell",
+          "ThreadingTests/AgentCLISettingsTests/testRendersManagedInstallSheetInProductHost"
+        ]
       },
       "capture": {
         "glob": "agent-tools-*.png"
@@ -2259,6 +2262,21 @@
       "capture": {
         "glob": "manager-role-*.png"
       }
+    },
+    {
+      "id": "managed-agent-recovery",
+      "kind": "journey",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Managed client recovery",
+      "description": "Restore a verified previous client through the real settings menu, retain the selection across relaunch, and inspect and cancel a reinstall without changing it.",
+      "states": ["Previous version selected", "Selection after relaunch", "Reinstall cancelled"],
+      "matrix": { "sizes": ["Product settings shell", "Attached installer"] },
+      "source": {
+        "path": "Tests/ThreadingUITests/ManagedAgentJourneyUITests.swift",
+        "test": "ThreadingUITests/ManagedAgentJourneyUITests/testRollbackPersistsAndCancellingReinstallKeepsTheSelection"
+      },
+      "capture": { "journey": "Managed agent installations" }
     },
     {
       "id": "proxy-client-access",

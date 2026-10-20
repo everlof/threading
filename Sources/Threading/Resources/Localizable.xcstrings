@@ -8881,6 +8881,17 @@
         }
       }
     },
+    "Another agent installation is in progress." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En annan agentinstallation pågår."
+          }
+        }
+      }
+    },
     "Another app changed this file after you opened it. Replace it with your version, or save yours as a new file." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19172,6 +19183,17 @@
         }
       }
     },
+    "Couldn’t check agent installations. Agents are checked again when you start a chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte kontrollera agentinstallationerna. De kontrolleras igen när du startar en chatt."
+          }
+        }
+      }
+    },
     "Couldn’t close the terminal" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19306,6 +19328,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte återställa ”%@”"
+          }
+        }
+      }
+    },
+    "Couldn’t run the selected client" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte köra den valda klienten"
           }
         }
       }
@@ -22148,6 +22181,17 @@
         }
       }
     },
+    "Downloading, verifying and checking the agent…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämtar och verifierar agenten…"
+          }
+        }
+      }
+    },
     "Downloads" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22815,6 +22859,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Åtta begränsade band: en fryst avläsning bredvid otillgängligt ljud. Ingen inspelning startas."
+          }
+        }
+      }
+    },
+    "Eight installations are retained. Quit agents using older versions, then use Show Installation Folder to remove unused versions before installing again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Åtta installationer har sparats. Avsluta agenter som använder äldre versioner och använd Visa installationsmapp för att ta bort oanvända versioner innan du installerar igen."
           }
         }
       }
@@ -26321,6 +26376,17 @@
         }
       }
     },
+    "For shell sessions and project tool discovery." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "För skalsessioner och identifiering av projektverktyg."
+          }
+        }
+      }
+    },
     "For shell sessions. Agents launch through your login shell." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29548,6 +29614,17 @@
         }
       }
     },
+    "Install Managed…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera hanterad klient…"
+          }
+        }
+      }
+    },
     "Install Tailscale and sign in on this Mac. The door comes back on its own." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29616,6 +29693,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Installera en byggd .app eller .apk och starta den på den kopplade panelenheten."
+          }
+        }
+      }
+    },
+    "Install a verified client managed by Threading, or choose your own installation in Settings ▸ General ▸ Agent tools." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera en verifierad klient som hanteras av Threading, eller välj din egen installation i Inställningar ▸ Allmänt ▸ Agentverktyg."
           }
         }
       }
@@ -29752,6 +29840,17 @@
         }
       }
     },
+    "Installation verified. New chats will use this version." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installationen är verifierad. Nya chattar använder den här versionen."
+          }
+        }
+      }
+    },
     "Installed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29871,6 +29970,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Installerar uppdatering…"
+          }
+        }
+      }
+    },
+    "Installing…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installerar…"
           }
         }
       }
@@ -33324,6 +33434,39 @@
         }
       }
     },
+    "Managed by Threading · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hanteras av Threading · %@"
+          }
+        }
+      }
+    },
+    "Managed by Threading · Not installed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hanteras av Threading · Inte installerad"
+          }
+        }
+      }
+    },
+    "Managed by Threading. No global Node.js or npm installation is required." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hanteras av Threading. Ingen global installation av Node.js eller npm behövs."
+          }
+        }
+      }
+    },
     "Managed chats" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33342,6 +33485,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hanteras på annat håll"
+          }
+        }
+      }
+    },
+    "Managed installations, selected versions and updates." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hanterade installationer, valda versioner och uppdateringar."
+          }
+        }
+      }
+    },
+    "Managed updates use the release tested with this app. Running agents keep their version. Choose Options to use your own executable or restore the previous installation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hanterade uppdateringar använder den version som testats med appen. Agenter som körs behåller sin version. Välj Alternativ för att använda en egen körbar fil eller återställa den föregående installationen."
           }
         }
       }
@@ -40553,6 +40718,17 @@
         }
       }
     },
+    "Options…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alternativ…"
+          }
+        }
+      }
+    },
     "Opus · 1M" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47164,6 +47340,17 @@
         }
       }
     },
+    "Requires macOS %@ or later." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kräver macOS %@ eller senare."
+          }
+        }
+      }
+    },
     "Requires macOS 14.2 or later." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47744,6 +47931,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återställ namn och ikon"
+          }
+        }
+      }
+    },
+    "Restore Previous Version" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återställ föregående version"
           }
         }
       }
@@ -51201,6 +51399,17 @@
         }
       }
     },
+    "Select the agent executable to use for new sessions." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj den körbara agentfil som ska användas för nya sessioner."
+          }
+        }
+      }
+    },
     "Selected" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51214,6 +51423,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Valt"
+          }
+        }
+      }
+    },
+    "Selected executable is missing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den valda körbara filen saknas"
+          }
+        }
+      }
+    },
+    "Selected executable: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vald körbar fil: %@"
           }
         }
       }
@@ -53166,6 +53397,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa dolda projekt"
+          }
+        }
+      }
+    },
+    "Show Installation Folder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa installationsmapp"
           }
         }
       }
@@ -58180,6 +58422,17 @@
         }
       }
     },
+    "Tested release: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Testad version: %@"
+          }
+        }
+      }
+    },
     "Tests" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59081,6 +59334,17 @@
         }
       }
     },
+    "The agent archive contains an unsupported entry." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentarkivet innehåller en post som inte stöds."
+          }
+        }
+      }
+    },
     "The agent compares the page with a picture taken just before its action. The pictures stay in memory for the chat and are never added to your visual baselines." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59088,6 +59352,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenten jämför sidan med en bild tagen strax före åtgärden. Bilderna finns bara i minnet för chatten och läggs aldrig till bland dina visuella baslinjer."
+          }
+        }
+      }
+    },
+    "The agent could not be verified: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten kunde inte verifieras: %@"
           }
         }
       }
@@ -59110,6 +59385,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenten svarade inte på kontrollbegäran."
+          }
+        }
+      }
+    },
+    "The agent download failed (HTTP %@)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten kunde inte hämtas (HTTP %@)."
           }
         }
       }
@@ -60565,6 +60851,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dokumentet är större än de %@ som spelaren accepterar."
+          }
+        }
+      }
+    },
+    "The download did not match the approved checksum." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämtningen matchade inte den godkända kontrollsumman."
           }
         }
       }
@@ -62834,6 +63131,17 @@
         }
       }
     },
+    "The saved agent installation is invalid. Reinstall this client." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den sparade agentinstallationen är ogiltig. Installera om klienten."
+          }
+        }
+      }
+    },
     "The saved appearance choices could not be read." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62995,6 +63303,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Scrollfabriken sammansätter alla tre gränserna."
+          }
+        }
+      }
+    },
+    "The selected %@ installation is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den valda installationen av %@ är inte tillgänglig."
+          }
+        }
+      }
+    },
+    "The selected %@ installation is unavailable. Install it in Settings ▸ General ▸ Agent tools, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den valda installationen av %@ är inte tillgänglig. Installera den i Inställningar ▸ Allmänt ▸ Agentverktyg och försök igen."
           }
         }
       }
@@ -64873,6 +65203,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det finns ingen annan flik att välja."
+          }
+        }
+      }
+    },
+    "There is no previous installation to restore." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det finns ingen föregående installation att återställa."
           }
         }
       }
@@ -67493,6 +67834,17 @@
         }
       }
     },
+    "Threading installs verified client releases in its own folder. Account logins and conversations stay in their existing locations." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading installerar verifierade klientversioner i en egen mapp. Kontoinloggningar och konversationer finns kvar på sina befintliga platser."
+          }
+        }
+      }
+    },
     "Threading is already running" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -67869,6 +68221,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading tar bort den sparade inloggningsuppgiften från din nyckelring. För att ansluta igen krävs token på nytt."
+          }
+        }
+      }
+    },
+    "Threading will download and verify %@ %@ from its publisher. Your logins and conversations are preserved." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading hämtar och verifierar %@ %@ från utgivaren. Dina inloggningar och konversationer bevaras."
           }
         }
       }
@@ -70541,6 +70904,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använd vänster- och högerpil för att granska punkter."
+          }
+        }
+      }
+    },
+    "Use Managed Installation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd hanterad installation"
+          }
+        }
+      }
+    },
+    "Use My Installation…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd min installation…"
           }
         }
       }
@@ -73854,6 +74239,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Din inmatning skickades inte."
+          }
+        }
+      }
+    },
+    "Your installation · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Din installation · %@"
           }
         }
       }

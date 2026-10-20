@@ -85,14 +85,11 @@ enum OpenCodeSessionDiscovery {
         command.append(flag: "--max-count", value: String(OpenCodeDiscoveryDefaults.sessionListLimit))
         command.append(flag: "--format", value: "json")
 
+        let plan = AgentLocalLaunch.plan(command: command, in: projectPath, shell: shell)
         guard let result = try? BoundedChildProcess.run(
-            executable: shell,
-            arguments: [
-                "-l",
-                "-c",
-                ShellCommand.executing(command, in: projectPath).source
-            ],
-            environment: AgentEnvironment.launchEnvironment(),
+            executable: plan.executable,
+            arguments: plan.arguments,
+            environment: plan.launchEnvironment(),
             timeout: OpenCodeDiscoveryDefaults.commandTimeout,
             maximumOutputBytes: OpenCodeDiscoveryDefaults.maximumSessionListBytes,
             output: .standardOutput

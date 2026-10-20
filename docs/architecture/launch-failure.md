@@ -146,12 +146,12 @@ sheet onboarding, the composer's refusal and Settings ▸ Agent tools open — a
 the CLI found relaunches the session itself. **Report a Problem…** is left off: nothing in
 Threading failed, and offering it invited reports about a tool that had not been installed yet.
 
-Most of these failures no longer happen at all. `AgentCLIAvailability` keeps the login shell's
-answer for every runtime (one `PATH` read per refresh, re-asked on activation and after an
-install), and `SessionCoordinator` refuses a composer send to a runtime the probe *proved* missing
-before a row exists — a persistent toast that keeps the brief and carries **Install…**. An unknown
-answer launches exactly as before; only sessions that start without the composer (schedules,
-automations, a phone, the MCP tools) can still reach this surface for a missing CLI.
+`AgentCLIAvailability` checks the selected absolute executable for every local runtime and
+refreshes after an installation or selection change. `SessionCoordinator` refuses a composer
+send to a runtime the probe proved missing before a row exists, preserving the brief and offering
+Install. An unknown answer still launches; a missing or invalid managed receipt cannot fall back
+to PATH. [Managed agent installations](managed-agents.md) removes the login-shell and ambient
+interpreter dependencies from local client startup. Remote hosts keep their own installation path.
 
 ### A refused write must not turn into a desktop-only dialog
 

@@ -7,97 +7,13 @@ struct AgentCLIAvailabilityDidChange: AppEvent {
     static let name = Notification.Name("ThreadingAgentCLIAvailabilityDidChange")
 }
 
-// MARK: - Install Recipe
-
-/// How each runtime's official CLI gets onto a Mac, in one place: the onboarding page, the
-/// install sheet, the composer's refusal and the launch-failure screen all say the same thing.
-///
-/// The commands are each provider's own published installer. Three of them are npm packages,
-/// which is the detail a fresh Mac trips on: without Node.js there is no `npm`, and an
-/// "Install" that fails with a second `command not found` is worse than one that says up front
-/// what it needs.
-struct AgentCLIInstallRecipe: Equatable, Sendable {
-
-    enum Requirement: Equatable, Sendable {
-        /// `curl` ships with macOS; nothing to check.
-        case none
-        /// The package manager that comes with Node.js.
-        case nodePackageManager
-    }
-
-    let kind: AgentKind
-    /// The exact shell source the install sheet runs, and the text **Copy** puts on the
-    /// pasteboard.
-    let command: String
-    let requirement: Requirement
-    /// Where the native installers put the binary. When the install succeeds but the login
-    /// shell still cannot find it, this is the evidence that the PATH, not the install, is what
-    /// needs fixing.
-    let userBinaryName: String?
-
-    static func recipe(for kind: AgentKind) -> AgentCLIInstallRecipe {
-        switch kind {
-        case .claude:
-            return AgentCLIInstallRecipe(
-                kind: kind,
-                command: "curl -fsSL https://claude.ai/install.sh | bash",
-                requirement: .none,
-                userBinaryName: AgentDefaults.claudeExecutable
-            )
-        case .codex:
-            return AgentCLIInstallRecipe(
-                kind: kind,
-                command: "npm install -g @openai/codex",
-                requirement: .nodePackageManager,
-                userBinaryName: nil
-            )
-        case .grok:
-            return AgentCLIInstallRecipe(
-                kind: kind,
-                command: "npm install -g @xai-official/grok",
-                requirement: .nodePackageManager,
-                userBinaryName: nil
-            )
-        case .openCode:
-            return AgentCLIInstallRecipe(
-                kind: kind,
-                command: "npm install -g opencode-ai",
-                requirement: .nodePackageManager,
-                userBinaryName: nil
-            )
-        case .cursor:
-            return AgentCLIInstallRecipe(
-                kind: kind,
-                command: "curl https://cursor.com/install -fsS | bash",
-                requirement: .none,
-                userBinaryName: AgentDefaults.cursorExecutable
-            )
-        }
-    }
-}
-
 // MARK: - Agent CLI Availability
 
-/// Which agent CLIs the launching login shell can actually find, shared by every surface that
-/// has to decide something before a launch.
-///
-/// Before this, the onboarding page asked once and kept the answer to itself, so the rest of the
-/// app learnt a CLI was missing the expensive way: the composer defaulted to Claude Code on a Mac
-/// without it, a session row was created, and the first thing the user saw was a launch-failure
-/// screen whose primary action — Try Again — could not succeed. Now the composer opens on an
-/// installed runtime, refuses a send to a missing one before a row exists, and the failure
-/// screen and onboarding offer the install itself.
-///
-/// **One shell, not one per CLI.** The probe asks the login shell for its `PATH` once
-/// (`AgentCLIProbe.loginShellPATH`, the launcher's shell and profile) and resolves every
-/// executable against that answer, so a heavy profile is paid once per refresh rather than six
-/// times. Refreshes run off the main actor, coalesce while one is in flight, and are throttled
-/// on app activation — coming back from a Terminal where something was just installed is
-/// exactly when the answer is worth having.
-///
-/// **Unknown is not missing.** Until a probe has answered, every runtime is `.unknown` and every
-/// caller behaves exactly as it did before this type existed. A refusal is only ever made on a
-/// `.missing` the probe actually returned.
+/// The selected local client executables, shared by onboarding, settings and launch refusals.
+/// The application runtime store supplies exact managed or explicitly external paths. A single
+/// bounded login-shell probe supplies project-tool PATH independently of client selection.
+/// Refreshes run off main, coalesce while in flight and run again after installation or selection.
+/// Unknown remains distinct from missing until the first filesystem probe has answered.
 @MainActor
 final class AgentCLIAvailability {
 
@@ -172,10 +88,7 @@ final class AgentCLIAvailability {
 
     /// Whether this runtime's installer can run at all on this Mac right now.
     func canRunInstaller(for kind: AgentKind) -> Bool {
-        switch AgentCLIInstallRecipe.recipe(for: kind).requirement {
-        case .none: return true
-        case .nodePackageManager: return snapshot?.hasNodePackageManager ?? true
-        }
+        true // Managed artifacts include their runtime; a global npm is never required.
     }
 
     func isInstalledOffPath(_ kind: AgentKind) -> Bool {
@@ -191,7 +104,7 @@ final class AgentCLIAvailability {
         return installed
     }
 
-    /// Re-reads the login shell's PATH. Coalesces: a request while a probe is running schedules
+    /// Rechecks selected installations and refreshes project-tool PATH. Coalesces: a request while a probe is running schedules
     /// exactly one more, so an install that finishes mid-probe is never answered from before it.
     func refresh(completion: (@MainActor () -> Void)? = nil) {
         if let completion { waiters.append(completion) }
@@ -254,6 +167,15 @@ final class AgentCLIAvailability {
 
     /// The production probe: one login shell for the PATH, then a file check per executable.
     nonisolated static func loginShellProbe(shell: String) -> Snapshot? {
+        if let store = AgentLocalLaunch.store {
+            store.refresh(shell: shell)
+            var snapshot = Snapshot()
+            for kind in AgentKind.allCases {
+                let path = store.selection(for: kind).executable
+                if FileManager.default.isExecutableFile(atPath: path) { snapshot.paths[kind] = path }
+            }
+            return snapshot
+        }
         guard let path = AgentCLIProbe.loginShellPATH(shell: shell) else { return nil }
         return snapshot(
             onPath: path,
@@ -272,7 +194,8 @@ final class AgentCLIAvailability {
         for kind in AgentKind.allCases {
             if let found = AgentCLIProbe.locate(kind.executableName, on: path, isExecutable: isExecutable) {
                 result.paths[kind] = found
-            } else if let binary = AgentCLIInstallRecipe.recipe(for: kind).userBinaryName {
+            } else {
+                let binary = kind.executableName
                 let candidate = home
                     .appendingPathComponent(AgentCLIAvailabilityDefaults.userBinaryDirectory)
                     .appendingPathComponent(binary)

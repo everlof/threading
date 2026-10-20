@@ -35,13 +35,10 @@ set, so the first chat does not ask for the same sign-in again (see below). Fail
 timed-out or unverified attempts are never admitted. Settings' **Reconnect** repeats the provider-owned browser login against the same
 home and does not replace or delete anything on disk.
 
-The setup preflight resolves the executable through `AgentCLIProbe`'s framed login-shell PATH
-reader, the same reader shared availability and update checks use. Raw `command -v` output is
-not a reliable executable record: a profile greeting makes it multiline, and a shell alias can
-replace the path with a definition. Either used to make Add Login report an installed CLI missing
-even when onboarding found it. Resolution searches executable files in PATH order and preserves
-the selected symlink; an alias alone does not count as an installation. The probe remains one
-off-main child with its existing five-second deadline and 64 KiB output limit.
+The setup preflight resolves the selected executable through `AgentCLIProbe`, shared with
+availability and update checks. Local client selection and the separately captured project PATH
+are owned by [managed agent installations](managed-agents.md). Installing or selecting a client
+does not change these account homes.
 
 This is still a non-interactive login shell. A PATH entry exported only by `.zshrc` is not present
 unless the login profile also exports it; accepting profile output does not source interactive

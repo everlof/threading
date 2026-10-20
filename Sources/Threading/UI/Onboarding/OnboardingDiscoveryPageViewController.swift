@@ -276,7 +276,7 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
     private func rebuildCLIRows() {
         guard availability.snapshot != nil else {
             let text = probeFinished
-                ? L10n.string("Couldn't read your login shell's PATH. Agents are checked again when you start a chat.")
+                ? L10n.string("Couldn’t check agent installations. Agents are checked again when you start a chat.")
                 : L10n.string("Checking your shell's PATH…")
             var views: [NSView] = []
             if !probeFinished {
@@ -367,16 +367,8 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         return SettingsUI.fullRow(content)
     }
 
-    /// Why a runtime is not available, in the order the cures go: a PATH fix beats a reinstall,
-    /// and a missing prerequisite is said before the install that would trip on it.
     private func missingDetail(for kind: AgentKind) -> String {
-        if availability.isInstalledOffPath(kind) {
-            return L10n.string("Installed in ~/.local/bin, which your login shell's PATH doesn't include.")
-        }
-        if !availability.canRunInstaller(for: kind) {
-            return L10n.string("Not installed. Installs with npm, which comes with Node.js.")
-        }
-        return L10n.format("Not installed — %@ isn't on your login shell's PATH.", kind.executableName)
+        L10n.string("Install a verified client managed by Threading, or choose your own installation in Settings ▸ General ▸ Agent tools.")
     }
 
     @objc private func installClicked(_ sender: ThemedButton) {
@@ -398,16 +390,5 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
             card.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             card.trailingAnchor.constraint(equalTo: host.trailingAnchor)
         ])
-    }
-}
-
-// MARK: - Defaults
-
-enum OnboardingCLIDefaults {
-    /// The install hint per executable — the `ProjectStatsPopover` shape: what is absent, the
-    /// command that fixes it, and the promise that nothing else is needed.
-    static func installCommand(for executable: String) -> String {
-        let kind = AgentKind.allCases.first { $0.executableName == executable } ?? .claude
-        return AgentCLIInstallRecipe.recipe(for: kind).command
     }
 }

@@ -11,6 +11,10 @@
   "defaultOptions" : {
     "environmentVariableEntries" : [
       {
+        "key" : "THREADING_MANAGED_AGENT_LIVE_TESTS",
+        "value" : "$(THREADING_MANAGED_AGENT_LIVE_TESTS)"
+      },
+      {
         "key" : "THREADING_TEST_AUDIO_TONE_APP",
         "value" : "$(THREADING_TEST_AUDIO_TONE_APP)"
       },

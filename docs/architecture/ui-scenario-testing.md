@@ -155,6 +155,13 @@ load-bearing split: macOS refuses to execute code copied into the XCUITest runne
 container, and allowing an arbitrary executable path would let a malformed test launch a real
 provider. Non-UI and Release builds remove any helper left in a reused products directory.
 
+The managed-client recovery journey uses that same signed helper. Before receipts load, a Debug
+worker validates the marked scenario home and copies the helper into two synthetic generations
+when `THREADING_UI_SCENARIO_MANAGED_AGENTS=1`. Their fixed executable names return versions 1.0.0
+and 2.0.0 for `--version`. Relaunch preserves the receipt selected by the real rollback action.
+Creating even a shell-script executable in the UI runner instead is refused by macOS quarantine;
+the fixture must not remove quarantine or bypass the installer's executable verification.
+
 ## The combined UI evidence catalogue
 
 Application journeys are only one of three kinds of review evidence. Component behavior and

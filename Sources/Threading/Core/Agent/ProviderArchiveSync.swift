@@ -134,6 +134,8 @@ struct ProviderArchiveCommand: Equatable, Sendable {
     let source: String
     let providerName: String
     let archives: Bool
+    var arguments: [String]? = nil
+    var environmentOverrides: [String: String] = [:]
 
     @MainActor
     static func make(
@@ -146,11 +148,15 @@ struct ProviderArchiveCommand: Equatable, Sendable {
         command.append(word: session.kind.executableName)
         command.append(word: archives ? "archive" : "unarchive")
         command.append(word: transcriptID.rawValue)
+        let plan = AgentLocalLaunch.plan(command: command, in: NSHomeDirectory(),
+                                         shell: AgentLauncher.loginShellPath)
         return Self(
-            shellPath: AgentLauncher.loginShellPath,
+            shellPath: plan.executable,
             source: command.source,
             providerName: session.kind.displayName,
-            archives: archives
+            archives: archives,
+            arguments: plan.arguments,
+            environmentOverrides: plan.environmentOverrides
         )
     }
 }
@@ -223,8 +229,8 @@ private enum ProviderArchiveCommandRunner {
         do {
             result = try BoundedChildProcess.run(
                 executable: command.shellPath,
-                arguments: ["-l", "-c", command.source],
-                environment: AgentEnvironment.launchEnvironment(),
+                arguments: command.arguments ?? ["-l", "-c", command.source],
+                environment: AgentEnvironment.launchEnvironment().merging(command.environmentOverrides) { _, value in value },
                 timeout: ProviderArchiveDefaults.commandTimeout,
                 maximumOutputBytes: ProviderArchiveDefaults.maximumCommandOutputBytes
             )

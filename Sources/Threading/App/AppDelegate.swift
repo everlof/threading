@@ -289,6 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // startup then: the tests exercise types directly and must not spawn agents, start the MCP
         // server, or touch the user's stores.
         if NSClassFromString("XCTestCase") != nil { return }
+        AgentLocalLaunch.configure(.local)
         Task { @MainActor in await finishLaunching() }
     }
 
@@ -349,6 +350,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
         }
         ownsSingleInstanceLock = true
+#if DEBUG
+        if let reason = await Task.detached(priority: .userInitiated, operation: {
+            UIScenarioManagedAgents.prepareIfRequested()
+        }).value {
+            ThreadingLogger.app.error("UI scenario bootstrap refused: \(reason, privacy: .public)")
+            NSApp.terminate(nil)
+            return
+        }
+#endif
+        await Task.detached(priority: .userInitiated) {
+            ManagedAgentRuntimeStore.local.loadReceipts()
+        }.value
 
         // Immediately after the lock and only in the process that holds it: a heartbeat from an
         // instance that lost is a lie about who owns the state. In recovery too — a wedged

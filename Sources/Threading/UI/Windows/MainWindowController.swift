@@ -2116,9 +2116,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Shows the completed background health check in the same sidebar lane as other receipts.
     /// The checker and scheduler stay outside the window; this is presentation only.
     ///
-    /// `didStart` is called only once a terminal is actually running the plan, which is what the
-    /// coordinator records against: a receipt that timed out unseen, or whose terminal refused to
-    /// open, leaves the same versions free to be offered again.
+    /// A notice is acknowledged once managed installs finish or its external-update terminal
+    /// starts. Cancelling a managed batch leaves unfinished versions eligible for another notice.
     func presentAgentCLIUpdates(
         _ updates: [AgentCLIUpdate],
         didStart: @escaping @MainActor () -> Void
@@ -2127,23 +2126,36 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sidebarViewController.presentToast(AgentCLIUpdateToast.request(for: updates) {
             [weak self] requestedUpdates in
             guard let self else { return }
-            let shell = AgentLauncher.loginShellPath
-            Task { @MainActor [weak self] in
-                let plan = await AgentCLIUpdateExecutionPlan.prepare(
-                    updates: requestedUpdates,
-                    shell: shell
-                )
-                guard let self else { return }
-                guard self.runAgentCLIUpdates(plan) != nil else {
-                    self.sidebarViewController.presentToast(ToastRequest(
-                        message: L10n.string("Couldn’t start agent updates"),
-                        detail: L10n.string("Threading couldn’t open the update terminal.")
-                    ))
-                    return
-                }
-                didStart()
-            }
+            self.startRequestedAgentUpdates(requestedUpdates, didStart: didStart)
         })
+    }
+
+    private func startRequestedAgentUpdates(
+        _ updates: [AgentCLIUpdate], didStart: @escaping @MainActor () -> Void
+    ) {
+        guard !updates.isEmpty else { didStart(); return }
+        if let store = AgentLocalLaunch.store,
+           let kind = updates.compactMap({ AgentKind(rawValue: $0.id) }).first(where: { store.isManaged($0) }),
+           let presenter = window?.contentViewController {
+            AgentCLIInstallViewController.present(kind, from: presenter) { [weak self] installed in
+                guard installed else { return }
+                self?.startRequestedAgentUpdates(updates.filter { $0.id != kind.rawValue }, didStart: didStart)
+            }
+            return
+        }
+        let shell = AgentLauncher.loginShellPath
+        Task { @MainActor [weak self] in
+            let plan = await AgentCLIUpdateExecutionPlan.prepare(updates: updates, shell: shell)
+            guard let self else { return }
+            guard runAgentCLIUpdates(plan) != nil else {
+                sidebarViewController.presentToast(ToastRequest(
+                    message: L10n.string("Couldn’t start agent updates"),
+                    detail: L10n.string("Threading couldn’t open the update terminal.")
+                ))
+                return
+            }
+            didStart()
+        }
     }
 
     /// Restores the session that was selected when the app last quit.

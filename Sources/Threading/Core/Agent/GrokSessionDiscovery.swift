@@ -58,11 +58,12 @@ enum GrokSessionDiscovery {
         command.append(word: "sessions")
         command.append(word: "list")
         command.append(flag: "--limit", value: String(GrokDiscoveryDefaults.sessionListLimit))
-        let source = ShellCommand.executing(command, in: projectPath)
+        let plan = AgentLocalLaunch.plan(command: command, in: projectPath, shell: shell)
 
         guard let result = try? BoundedChildProcess.run(
-            executable: shell,
-            arguments: ["-l", "-c", source.source],
+            executable: plan.executable,
+            arguments: plan.arguments,
+            environment: plan.launchEnvironment(),
             timeout: GrokDiscoveryDefaults.commandTimeout,
             maximumOutputBytes: GrokDiscoveryDefaults.maximumSessionListBytes,
             output: .standardOutput

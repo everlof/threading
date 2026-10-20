@@ -160,6 +160,17 @@ final class AgentCLIUpdatePresentationTests: XCTestCase {
         ])
     }
 
+    func testManagedSelectionCannotReachTheVendorSelfUpdater() async {
+        let update = fixtureUpdates()[0]
+        let plan = await AgentCLIUpdateExecutionPlan.prepare(updates: [update]) { _ in
+            .success(ResolvedAgentCLI(executablePath: "/private/managed/claude",
+                                      effectivePATH: "/usr/bin:/bin",
+                                      version: update.installedVersion, managed: true))
+        }
+        XCTAssertEqual(plan.items, [.failed(update: update, reason: .managedInstallation)])
+        XCTAssertFalse(plan.shellSource.contains("/private/managed/claude"))
+    }
+
     func testResolvedPATHRunsAnEnvShebangFromASparseGUIEnvironment() throws {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentCLIUpdatePATH-\(UUID().uuidString)", isDirectory: true)

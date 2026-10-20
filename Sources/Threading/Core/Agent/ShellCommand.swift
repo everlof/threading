@@ -21,6 +21,7 @@ struct ShellCommand: Equatable, Sendable {
     }
 
     private var components: [String] = []
+    private var words: [String?] = []
 
     /// The command's trailing operand — for an agent launch, the opening prompt.
     ///
@@ -45,6 +46,7 @@ struct ShellCommand: Equatable, Sendable {
 
     mutating func append(word: String) {
         components.append(Self.quote(word))
+        words.append(word)
     }
 
     mutating func append(words: [String]) {
@@ -65,6 +67,7 @@ struct ShellCommand: Equatable, Sendable {
 
     mutating func append(operator shellOperator: Operator) {
         components.append(shellOperator.source)
+        words.append(nil)
     }
 
     /// Sets the trailing operand. A command has at most one — the opening prompt.
@@ -77,6 +80,7 @@ struct ShellCommand: Equatable, Sendable {
     /// command is built up afterwards.
     mutating func append(contentsOf command: ShellCommand) {
         components.append(contentsOf: command.components)
+        words.append(contentsOf: command.words)
         if let inner = command.operand {
             append(operand: inner)
         }
@@ -86,6 +90,42 @@ struct ShellCommand: Equatable, Sendable {
         guard let operand else { return components.joined(separator: " ") }
         return (components + [Operator.endOfOptions.source, Self.quote(operand)])
             .joined(separator: " ")
+    }
+
+    /// Find the command behind authored `env -u NAME NAME=value` prefixes without parsing
+    /// shell source. Operands and argument values never participate in executable selection.
+    private var executableIndex: Int? {
+        var index = 0
+        while index < words.count {
+            guard let word = words[index] else { return nil }
+            guard word == "env" || word == "/usr/bin/env" else { return index }
+            index += 1
+            while index < words.count, let option = words[index] {
+                if option == "-u" {
+                    index += 2
+                } else if option == "--" {
+                    index += 1
+                    break
+                } else if option.contains("=") {
+                    index += 1
+                } else {
+                    break
+                }
+            }
+        }
+        return nil
+    }
+
+    var executableWord: String? { executableIndex.flatMap { words[$0] } }
+
+    func replacingExecutable(with path: String, arguments: [String] = []) -> ShellCommand {
+        guard let index = executableIndex else { return self }
+        var result = self
+        result.words[index] = path
+        result.components[index] = Self.quote(path)
+        result.words.insert(contentsOf: arguments.map(Optional.some), at: index + 1)
+        result.components.insert(contentsOf: arguments.map(Self.quote), at: index + 1)
+        return result
     }
 
     /// Produces the fixed `cd <directory> && exec <command>` wrapper used by login-shell and

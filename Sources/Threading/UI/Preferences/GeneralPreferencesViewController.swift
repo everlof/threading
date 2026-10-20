@@ -359,7 +359,7 @@ final class GeneralPreferencesViewController: NSViewController {
             ),
             SettingsUI.row(
                 title: "Shell path",
-                subtitle: "For shell sessions. Agents launch through your login shell.",
+                subtitle: "For shell sessions and project tool discovery.",
                 control: SettingsUI.controlGroup([shellField, choose])
             )
         ])

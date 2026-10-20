@@ -4,6 +4,11 @@ Side chats, standalone terminals, the shell drawer, naming, launching, resuming 
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+Local provider executables are selected by [managed agent installations](managed-agents.md).
+The command builders retain provider arguments and account routing; the local launch adapter
+supplies the selected absolute executable and stable shell. Remote hosts retain their own paths.
+
+
 ## The Runtime Capability Matrix
 
 `AgentKind.capabilities` in `Models/Project.swift` is the **only** place a runtime is named to

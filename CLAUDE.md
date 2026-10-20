@@ -166,8 +166,11 @@ Agent Output ← LocalProcessTerminalView ← PTY
 
 ### Launching
 
-Launches go through a **login shell** because a GUI app does not inherit the user's interactive
-`PATH`, and the agent CLIs live in `~/.local/bin` or a Node prefix. Claude and Grok accept
+Local client launches use the exact executable selected by `ManagedAgentRuntimeStore` through
+`/bin/sh -c`, without sourcing a shell profile. A separate bounded login-shell probe supplies
+the cached `PATH` for project tools. Managed installations, updates and rollback are described in
+[`managed-agents.md`](docs/architecture/managed-agents.md); remote hosts retain their own clients.
+Claude and Grok accept
 `--session-id <uuid>`, so their ids are minted up front. `GrokSessionDiscovery` confirms the Grok
 record through `grok sessions list` before marking it resumable, because quitting first-login
 authentication creates no session. Codex has no equivalent, so its id is read back from the
@@ -209,6 +212,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Writing a message now and sending it later: the record, the store, the clock, waking a dormant session, the usage-reset presets | [`scheduled-messages.md`](docs/architecture/scheduled-messages.md) |
 | A session refused over a rate limit: the transcript signal, the limit chooser, recovery policies, the parked state, the scheduled continuation | [`limit-recovery.md`](docs/architecture/limit-recovery.md) |
 | A scheduled end for a session: the deadline and its three moments, the wind-down message, the hold at every seam, bounded interrupts and the stop-agent escalation, quiet hours, receipts | [`curfew.md`](docs/architecture/curfew.md) |
+| Local client installations, pinned publisher artifacts, exact executable selection, update and rollback | [`managed-agents.md`](docs/architecture/managed-agents.md) |
 | An agent that would not start: the captured failure record, the launch-failure surface, the transcript preflight, and repairing a broken conversation with an agent | [`launch-failure.md`](docs/architecture/launch-failure.md) |
 | The typed session control plane: actor/scope/refusal contract, cross-session messaging (`list_sessions`/`mail_send`/`send_to_session`), subagents (`start_subagent`), delivery per surface, provenance | [`control-plane.md`](docs/architecture/control-plane.md) |
 | Autonomous host work, durable questions/continuations, delivery receipts, worker memory and the portable owner CLI | [`autonomous-controller.md`](docs/architecture/autonomous-controller.md) |

@@ -114,7 +114,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Managed iPhone tooling installation (Advanced row) | — | host-only | explicit network consent, PyPI source and package identity, the app-owned environment, version validation, atomic activation and rollback, stale-version cleanup, and which bundled feature receives the executable path | Host-only |
 | Command-line tools on launched `PATH` (Advanced switch) | — | host-only | the environment composed for every shell and agent, prepend-never-substitute, the absent-`PATH` refusal | Host-only |
 | Update channel picker | — | host-only | which builds the updater accepts, the default a build resolves to, the feed override, the versions Sparkle compares | Host-only |
-| Agent tools settings check and model support guidance | — | host-only | official release and install sources, executable/version identity, documented model minimums, failure truth, explicit check and visible-terminal update authority | Host-only |
+| Managed agent installations, selection, rollback and model support guidance | — | host-only | pinned publisher artifact trust, executable/version identity, account separation, atomic activation, failure truth and explicit install/update/rollback authority | Host-only |
 | Hosted-service environment picker (Developer Settings) | — | host-only | selected control-plane identity, public Release's production lock, credential and push-registration isolation, live Hosted Direct replacement | Host-only |
 | Project remote host (project menu editor, row marks, session hover line) | — | host-only | which machine a project's agents run on, host validation, the public-build refusal, the always-visible mark and its accessibility, launch routing | Host-only |
 

@@ -21,6 +21,15 @@ enum ScenarioToolError: LocalizedError {
 do {
     let arguments = Array(CommandLine.arguments.dropFirst())
     switch arguments.first {
+    case "--version" where arguments.count == 1:
+        // The Debug app copies this signed helper into two synthetic managed generations.
+        // Only these fixed names identify version fixtures; no real provider is invoked.
+        switch URL(fileURLWithPath: CommandLine.arguments[0]).lastPathComponent {
+        case "managed-agent-1.0.0": print("1.0.0")
+        case "managed-agent-2.0.0": print("2.0.0")
+        default: throw ScenarioToolError.usage
+        }
+
     case "validate" where arguments.count > 1:
         for path in arguments.dropFirst() {
             let url = URL(fileURLWithPath: path)

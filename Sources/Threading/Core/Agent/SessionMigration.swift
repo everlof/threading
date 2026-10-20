@@ -1162,10 +1162,11 @@ enum ConversationHandoffCapture {
         }
         defer { try? standardOutput?.close() }
 
+        let plan = AgentLocalLaunch.plan(command: command, in: projectFolder, shell: loginShellPath)
         let child = try ChildProcessSpawn.spawn(
-            executableURL: URL(fileURLWithPath: loginShellPath),
-            arguments: ["-l", "-c", command.source],
-            environment: AgentEnvironment.launchEnvironment(),
+            executableURL: URL(fileURLWithPath: plan.executable),
+            arguments: plan.arguments,
+            environment: plan.launchEnvironment(),
             workingDirectory: URL(fileURLWithPath: projectFolder, isDirectory: true),
             descriptors: [
                 AgentChildProcessDefaults.standardInputDescriptor: .nullDevice,

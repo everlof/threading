@@ -429,6 +429,12 @@ final class AgentAccountSetupCoordinator {
     ) {
         var environment = ProcessInfo.processInfo.environment
         environment[context.provider.environmentKey] = context.configPath
+        if let store = AgentLocalLaunch.store {
+            environment[EnvironmentKeys.path] = store.effectivePATH
+            if store.isManaged(context.provider.kind) {
+                environment.merge(ManagedAgentRuntimeStore.managedEnvironment(for: context.provider.kind)) { _, value in value }
+            }
+        }
 
         // Three `/dev/null`s used to be the whole point: a login Threading could not read was a
         // login Threading could not leak. What it also meant was that the URL the CLI prints for

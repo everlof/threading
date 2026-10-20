@@ -3503,7 +3503,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     private func handleLaunchFailure(_ error: Error) {
         let hostFailure = error as? PTYHostLaunchError
-        let failure = SessionLaunchFailure(
+        let failure = (error as? AgentClientUnavailable)?.failure ?? SessionLaunchFailure(
             origin: .preflight,
             summary: hostFailure == nil
                 ? L10n.string("Its agent could not be started.")

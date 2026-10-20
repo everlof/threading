@@ -91,11 +91,14 @@ enum AccountEmailProbe {
         command.append(word: "status")
         command.append(word: "--json")
 
+        let plan = AgentLocalLaunch.plan(command: command, in: FileManager.default.currentDirectoryPath,
+                                         shell: shell)
+        environment.merge(plan.environmentOverrides) { _, selected in selected }
         let result: BoundedChildResult
         do {
             result = try BoundedChildProcess.run(
-                executable: shell,
-                arguments: ["-l", "-c", command.source],
+                executable: plan.executable,
+                arguments: plan.arguments,
                 environment: environment,
                 timeout: AccountProbeDefaults.timeout,
                 maximumOutputBytes: AccountProbeDefaults.maximumOutputBytes,

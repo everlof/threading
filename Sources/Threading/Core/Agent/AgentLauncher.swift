@@ -18,9 +18,8 @@ enum AgentLaunchPlanningError: LocalizedError, Equatable {
 
 /// Builds command lines for starting and resuming agent sessions.
 ///
-/// Launches are wrapped in a login shell because a GUI app does not inherit the
-/// user's interactive `PATH`, and the agent CLIs typically live in `~/.local/bin`
-/// or a Node prefix that only a login shell resolves.
+/// Provider arguments and account routing stay here; AgentLocalLaunch selects the exact
+/// local executable and stable shell, while remote hosts retain their own launch environment.
 @MainActor
 enum AgentLauncher {
 
@@ -40,6 +39,7 @@ enum AgentLauncher {
         in project: Project,
         initialPrompt: String? = nil
     ) throws -> AgentLaunchPlan {
+        if project.executionHost == nil { try AgentLocalLaunch.requireConfigured(session.kind) }
         var executionProject = project
         executionProject.folderPath = session.workingDirectory(in: project)
         let command: ShellCommand
@@ -118,6 +118,7 @@ enum AgentLauncher {
         for session: AgentSession,
         in project: Project
     ) throws -> AgentLaunchPlan {
+        if project.executionHost == nil { try AgentLocalLaunch.requireConfigured(session.kind) }
         var executionProject = project
         executionProject.folderPath = session.workingDirectory(in: project)
         switch session.kind {
@@ -1511,7 +1512,7 @@ enum AgentLauncher {
         NSClassFromString("XCTestCase") == nil
     }
 
-    /// Wraps a command invocation in the login-shell source shared by every launch surface.
+    /// Resolves a local client and wraps its invocation through the shared launch adapter.
     private static func launchPlan(
         command: ShellCommand,
         in folder: String,
@@ -1519,13 +1520,13 @@ enum AgentLauncher {
         environmentOverrides: [String: String] = [:],
         credentials: AgentCredentialEnvironment = .none
     ) -> AgentLaunchPlan {
-        AgentLaunchPlan.inLoginShell(
+        AgentLocalLaunch.plan(
             command: command,
             in: folder,
-            shellPath: loginShellPath,
+            shell: loginShellPath,
             resumeState: resumeState,
             environmentOverrides: environmentOverrides,
-            credentialEnvironment: credentials
+            credentials: credentials
         )
     }
 
@@ -1545,11 +1546,8 @@ enum AgentLauncher {
         )
     }
 
-    /// The user's login shell, used so agent launches inherit the interactive `PATH`.
-    ///
-    /// Internal rather than private: anything that runs a CLI has the same problem — a GUI app
-    /// does not inherit the interactive `PATH`, and `claude` lives in `~/.local/bin`. See
-    /// `AccountEmailProbe`.
+    /// The user's login shell, used to discover the PATH for project tools. Local agent
+    /// executable selection and the stable launch shell belong to AgentLocalLaunch.
     static var loginShellPath: String {
         ProcessInfo.processInfo.environment[EnvironmentKeys.shell]
             ?? ProfileStorage.shared.defaultProfile.shellPath

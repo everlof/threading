@@ -639,7 +639,7 @@ enum AccountSetupStrings {
             return L10n.string("Threading could not prepare an isolated provider folder for this login.")
         case .cliMissing:
             return L10n.format(
-                "%@ is not available on your login shell's PATH. Install it, then try again.",
+                "The selected %@ installation is unavailable. Install it in Settings ▸ General ▸ Agent tools, then try again.",
                 provider.kind.executableName
             )
         case .couldNotStart:

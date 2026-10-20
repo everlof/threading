@@ -81,60 +81,36 @@ final class AgentCLIAvailabilityTests: XCTestCase {
 
     // MARK: - The Install Sheet
 
-    /// Nothing runs on open: the exact command is shown and Install is the confirmation.
-    func testSheetShowsTheCommandAndWaitsForTheClick() {
-        let sheet = AgentCLIInstallViewController(kind: .claude, availability: availability())
-        _ = sheet.view
-
-        XCTAssertEqual(sheet.phase, .ready)
-        XCTAssertEqual(sheet.commandForTesting, "curl -fsSL https://claude.ai/install.sh | bash")
-        XCTAssertEqual(sheet.primaryTitleForTesting, "Install")
-        XCTAssertEqual(sheet.secondaryTitleForTesting, "Copy Command")
-        XCTAssertEqual(ThemeBoundaryAudit.violations(in: sheet.view), [])
+    func testSheetWaitsForTheClickAndNeedsNoGlobalNodeInstallation() {
+        for kind in AgentKind.allCases {
+            let sheet = AgentCLIInstallViewController(
+                kind: kind, availability: availability(.init(hasNodePackageManager: false)),
+                install: { _ in XCTFail("Opening a sheet must not install"); return "" }
+            )
+            _ = sheet.view
+            XCTAssertEqual(sheet.phase, .ready)
+            XCTAssertEqual(sheet.primaryTitleForTesting, "Install")
+            XCTAssertTrue(sheet.statusForTesting.contains("No global Node.js"))
+            XCTAssertEqual(ThemeBoundaryAudit.violations(in: sheet.view), [])
+        }
     }
 
-    /// An npm installer on a Mac without npm says what it needs instead of failing with a second
-    /// `command not found`.
-    func testSheetAsksForNodeWhenAnNpmInstallerCannotRun() {
-        let sheet = AgentCLIInstallViewController(
-            kind: .codex,
-            availability: availability(.init(hasNodePackageManager: false))
-        )
+    func testSheetPublishesVerifiedSuccessAndRetryableFailure() async {
+        let completed = expectation(description: "installation requested")
+        let sheet = AgentCLIInstallViewController(kind: .claude, availability: availability(), install: { _ in
+            completed.fulfill()
+            return "/private/verified/claude"
+        })
         _ = sheet.view
-
-        XCTAssertEqual(sheet.phase, .needsNode)
-        XCTAssertEqual(sheet.primaryTitleForTesting, "Check Again")
-        XCTAssertEqual(sheet.secondaryTitleForTesting, "Get Node.js")
-    }
-
-    /// The three outcomes after a run each lead somewhere different.
-    func testSheetTellsTheThreeOutcomesApart() {
-        let found = availability(.init(paths: [.claude: "/Users/me/.local/bin/claude"]))
-        let sheet = AgentCLIInstallViewController(kind: .claude, availability: found)
-        _ = sheet.view
-        sheet.applyProbeForTesting(exitCode: 0)
-        XCTAssertEqual(sheet.phase, .installed(path: "/Users/me/.local/bin/claude"))
+        sheet.startForTesting()
+        XCTAssertEqual(sheet.phase, .running)
+        await fulfillment(of: [completed], timeout: 2)
+        await Task.yield()
+        XCTAssertEqual(sheet.phase, .installed(path: "/private/verified/claude"))
         XCTAssertEqual(sheet.primaryTitleForTesting, "Done")
-
-        let offPath = AgentCLIInstallViewController(
-            kind: .claude,
-            availability: availability(.init(installedOffPath: [.claude]))
-        )
-        _ = offPath.view
-        offPath.applyProbeForTesting(exitCode: 0)
-        XCTAssertEqual(offPath.phase, .installedOffPath)
-        XCTAssertTrue(offPath.statusForTesting.contains(AgentCLIInstallLayout.pathExportLine))
-
-        let unreachable = AgentCLIInstallViewController(kind: .claude, availability: availability())
-        _ = unreachable.view
-        unreachable.applyProbeForTesting(exitCode: 0)
-        XCTAssertEqual(unreachable.phase, .finishedButNotFound)
-
-        let failed = AgentCLIInstallViewController(kind: .claude, availability: availability())
-        _ = failed.view
-        failed.applyProbeForTesting(exitCode: 7)
-        XCTAssertEqual(failed.phase, .failed(exitCode: 7))
-        XCTAssertEqual(failed.primaryTitleForTesting, "Run Again")
+        sheet.setPhaseForTesting(.failed(message: "Checksum mismatch"))
+        XCTAssertEqual(sheet.primaryTitleForTesting, "Try Again")
+        XCTAssertEqual(sheet.statusForTesting, "Checksum mismatch")
     }
 
     // MARK: - The One-Shot Run
@@ -257,8 +233,8 @@ final class AgentCLIAvailabilityTests: XCTestCase {
                     availability: availability(.init(installedOffPath: [.claude]))
                 )
                 _ = offPath.view
-                offPath.applyProbeForTesting(exitCode: 0)
-                images["agent-cli-install-off-path"] = png(of: offPath.view, appearance: appearance)
+                offPath.setPhaseForTesting(.failed(message: "The download did not match the approved checksum."))
+                images["agent-cli-install-failed"] = png(of: offPath.view, appearance: appearance)
 
                 let page = OnboardingDiscoveryPageViewController(
                     accountsProvider: { [] },
