@@ -9,6 +9,16 @@
     }
   ],
   "defaultOptions" : {
+    "commandLineArgumentEntries" : [
+      {
+        "argument" : "-AppleShowScrollBars",
+        "enabled" : true
+      },
+      {
+        "argument" : "WhenScrolling",
+        "enabled" : true
+      }
+    ],
     "environmentVariableEntries" : [
       {
         "key" : "THREADING_MANAGED_AGENT_LIVE_TESTS",

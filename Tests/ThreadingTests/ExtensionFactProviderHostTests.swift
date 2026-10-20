@@ -126,7 +126,7 @@ final class ExtensionFactProviderHostTests: XCTestCase {
             order: 0,
             capabilities: [.factsProvide]
         )) { error in
-            XCTAssertTrue(error is ExtensionValidationError)
+            XCTAssertTrue(error is ExtensionValidationError, "Unexpected \(type(of: error)): \(error)")
         }
         XCTAssertThrowsError(try host.authorize(
             extensionIdentifier: "com.example.missing-capability",
@@ -135,7 +135,7 @@ final class ExtensionFactProviderHostTests: XCTestCase {
             capabilities: [.hostProjectsRead],
             factDefinitions: [definition()]
         )) { error in
-            XCTAssertTrue(error is ExtensionValidationError)
+            XCTAssertTrue(error is ExtensionValidationError, "Unexpected \(type(of: error)): \(error)")
         }
         XCTAssertThrowsError(try host.authorize(
             extensionIdentifier: "com.example.opaque-subject",
@@ -144,7 +144,7 @@ final class ExtensionFactProviderHostTests: XCTestCase {
             capabilities: [.factsProvide],
             factDefinitions: [opaqueDefinition]
         )) { error in
-            XCTAssertTrue(error is ExtensionValidationError)
+            XCTAssertTrue(error is ExtensionValidationError, "Unexpected \(type(of: error)): \(error)")
         }
         XCTAssertNil(registry.definition(for: key))
     }

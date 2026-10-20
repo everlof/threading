@@ -669,16 +669,14 @@ final class ExtensionPackageStoreTests: XCTestCase {
         )
         XCTAssertTrue(card.accessibilityPerformPress())
         window.contentView?.layoutSubtreeIfNeeded()
-        identifiers = Set(
-            descendants(in: controller.view).compactMap { $0.accessibilityIdentifier() }
-        )
+        let expanded = try inspectSettingsRows(in: controller.view)
+        identifiers = expanded.identifiers
         // Updating is reachable from the page. Without it the capability delta is computed and
         // never shown, which is the same as not computing it.
         XCTAssertTrue(identifiers.contains(
             "settings.extensions.update.com.example.installed-test"
         ))
-        let labels = descendants(in: controller.view)
-            .compactMap { ($0 as? NSTextField)?.stringValue }
+        let labels = expanded.labels
         XCTAssertTrue(labels.contains("Agent-tool extension"))
         XCTAssertTrue(labels.contains("Agent tools"))
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
@@ -721,8 +719,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
         })
         XCTAssertTrue(card.accessibilityPerformPress())
         window.contentView?.layoutSubtreeIfNeeded()
-        labels = descendants(in: controller.view)
-            .compactMap { ($0 as? NSTextField)?.stringValue }
+        labels = try inspectSettingsRows(in: controller.view).labels
         XCTAssertTrue(labels.contains("Navigator actions"))
         XCTAssertTrue(labels.contains("Focused sessions [focused]: Archive, Pin"))
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
@@ -807,8 +804,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
         )
         XCTAssertTrue(card.accessibilityPerformPress())
         window.contentView?.layoutSubtreeIfNeeded()
-        let labels = descendants(in: controller.view)
-            .compactMap { ($0 as? NSTextField)?.stringValue }
+        let labels = try inspectSettingsRows(in: controller.view).labels
         XCTAssertTrue(labels.contains("Provides services"))
         XCTAssertTrue(labels.contains("Status v2"))
         XCTAssertTrue(labels.contains("Uses services"))
@@ -3773,6 +3769,24 @@ final class ExtensionPackageStoreTests: XCTestCase {
 
     private func descendants(in root: NSView) -> [NSView] {
         root.subviews.flatMap { [$0] + descendants(in: $0) }
+    }
+
+    /// Expansion adds row identities; the settings page builds their views only on screen.
+    /// Visit each row in these small fixtures instead of assuming every detail is already built.
+    private func inspectSettingsRows(in root: NSView) throws -> (identifiers: Set<String>, labels: [String]) {
+        let table = try XCTUnwrap(descendants(in: root).compactMap { $0 as? NSTableView }.first)
+        var identifiers = Set<String>()
+        var labels: [String] = []
+        for row in 0..<table.numberOfRows {
+            table.scrollRowToVisible(row)
+            root.layoutSubtreeIfNeeded()
+            let cell = try XCTUnwrap(table.view(atColumn: 0, row: row, makeIfNecessary: true))
+            let views = [cell] + descendants(in: cell)
+            identifiers.formUnion(views.compactMap { $0.accessibilityIdentifier() })
+            labels.append(contentsOf: views.compactMap { ($0 as? NSTextField)?.stringValue })
+            XCTAssertEqual(ThemeBoundaryAudit.violations(in: cell), [])
+        }
+        return (identifiers, labels)
     }
 
     private func physicalFootprintBytes() -> UInt64 {

@@ -38,6 +38,20 @@ sets `isReleasedWhenClosed = false` so AppKit and ARC cannot both release it.
 
 ## Current foundation
 
+The hosted Mac unit-test plans select overlay scrollbars through the process-local
+`-AppleShowScrollBars WhenScrolling` launch arguments. Without a stated fixture preference,
+AppKit chooses legacy scrollbars when a mouse is attached, reserving 17 points and changing
+every pane-width and column-center measurement. This does not write the developer's defaults.
+Tests of legacy scrollbars and period themes still select their own presentation explicitly.
+
+`ThreadingTests` imports the shared modules built by its host dependency and resolves their
+implementations through the app bundle loader. It must not declare those static products as its
+own package dependencies: Xcode links their objects even without a Frameworks-phase entry.
+A second copy of ExtensionKit or PTYClient creates distinct Swift error metadata: an
+`ExtensionValidationError` thrown by the host failed the test's cast, and a client error thrown
+by a fixture reached the host as `link.unknown`. Keep those implementations in the host; only
+the dynamic PluginKit contract, Sentry and Cocoa belong in the test bundle's Frameworks phase.
+
 `ThreadingUITests` is a real UI-testing bundle with its own `ThreadingUI` scheme and
 `Threading-UI.xctestplan`. Both it and `ThreadingTests` use Xcode filesystem-synchronized groups,
 so a new source under either target's directory is compiled automatically without per-file

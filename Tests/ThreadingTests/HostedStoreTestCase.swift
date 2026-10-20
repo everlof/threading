@@ -21,17 +21,17 @@ import XCTest
 /// **Inherit from this instead of `XCTestCase` in any test that mutates `ProjectStore.shared`.**
 /// A test that only reads it may too; erasing an already-empty store costs nothing.
 class HostedStoreTestCase: XCTestCase {
+    @MainActor
     private var mainWindowFixtureOwners: [MainWindowTestFixtureOwner] = []
 
     /// Overrides the async hook rather than `tearDown()` so subclasses keep their own sync
-    /// teardown, and so the main-actor work can be awaited instead of asserted into place —
-    /// `MainActor.assumeIsolated` would trap here for an async test case.
+    /// teardown. The hook and its overrides share the main actor that owns the hosted store
+    /// and window fixtures, without transferring the XCTest instance between executors.
+    @MainActor
     override func tearDown() async throws {
         try await super.tearDown()
-        await MainActor.run {
-            tearDownMainWindowFixtures()
-            Self.eraseHostedStore()
-        }
+        tearDownMainWindowFixtures()
+        Self.eraseHostedStore()
     }
 
     /// Retains the explicit owner of a main-window fixture until XCTest has run the subclass's

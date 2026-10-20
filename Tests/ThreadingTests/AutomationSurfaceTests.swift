@@ -16,18 +16,18 @@ final class AutomationSurfaceTests: XCTestCase {
     private var sessions: [SessionID] = []
     private var reportedLifecycle = false
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         reportedLifecycle = AppSettings.shared.reportsClaudeLifecycleEvents
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         AppSettings.shared.reportsClaudeLifecycleEvents = reportedLifecycle
         for session in sessions {
             UnattendedRunPermissions.unregister(session)
             MCPSessionRegistry.remove(sessionID: session)
         }
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Who may run where

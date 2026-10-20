@@ -335,25 +335,30 @@ final class SimulatorPaneRenderTests: XCTestCase {
                 ("missing", SimulatorScenarioHelpViewController.Status.missing(checkout.appendingPathComponent(".threading/scenarios.json"))),
                 ("loaded", .loaded(checkout.appendingPathComponent(".threading/scenarios.json"), scenarios: 3, problems: 0)),
             ] {
-                let help = SimulatorScenarioHelpViewController(status: status)
                 let drawing = try XCTUnwrap(NSAppearance(named: appearance))
-                help.view.appearance = drawing
-                help.view.layoutSubtreeIfNeeded()
-                help.view.setFrameSize(help.view.fittingSize)
-                help.view.layoutSubtreeIfNeeded()
-                // The popover draws the panel's ground; stand in for it so the picture shows the
-                // text on the surface it ships on rather than on a transparent sheet.
-                let ground = NSView(frame: help.view.bounds)
-                ground.wantsLayer = true
-                ground.appearance = drawing
+                var rendered: Result<Data, Error>?
+                // Empty wrapping labels can resolve their text attributes during construction.
+                // Keep construction, layout and drawing in the same appearance as the popover.
                 drawing.performAsCurrentDrawingAppearance {
-                    ground.layer?.backgroundColor = Design.Surface.floating.cgColor
+                    rendered = Result {
+                        let help = SimulatorScenarioHelpViewController(status: status)
+                        help.view.appearance = drawing
+                        help.view.layoutSubtreeIfNeeded()
+                        help.view.setFrameSize(help.view.fittingSize)
+                        help.view.layoutSubtreeIfNeeded()
+                        // The popover owns the ground behind the shipping help controller.
+                        let ground = NSView(frame: help.view.bounds)
+                        ground.wantsLayer = true
+                        ground.appearance = drawing
+                        ground.layer?.backgroundColor = Design.Surface.floating.cgColor
+                        ground.addSubview(help.view)
+                        AppThemeRefresh.repaint(help.view)
+                        let bitmap = try XCTUnwrap(ground.bitmapImageRepForCachingDisplay(in: ground.bounds))
+                        ground.cacheDisplay(in: ground.bounds, to: bitmap)
+                        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                    }
                 }
-                ground.addSubview(help.view)
-                AppThemeRefresh.repaint(help.view)
-                let bitmap = try XCTUnwrap(ground.bitmapImageRepForCachingDisplay(in: ground.bounds))
-                ground.cacheDisplay(in: ground.bounds, to: bitmap)
-                try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                try XCTUnwrap(rendered).get().write(
                     to: Render.directory.appendingPathComponent("simulator-scenarios-help-\(state)-\(name).png"))
             }
         }

@@ -38,7 +38,7 @@ final class FileSystemEventStreamTests: XCTestCase {
     }
 
     @MainActor
-    func testRapidRestartCoalescesRegistrationAndRejectsOldCallbacks() {
+    func testRapidRestartCoalescesRegistrationAndRejectsOldCallbacks() throws {
         let backend = Backend(blockStart: true)
         defer { backend.releaseStart.signal() }
         let armed = expectation(description: "current generation armed")
@@ -59,15 +59,15 @@ final class FileSystemEventStreamTests: XCTestCase {
         wait(for: [armed], timeout: 5)
         XCTAssertEqual(backend.startCount, 2)
         XCTAssertEqual(backend.stopCount, 1)
-        backend.emit(from: 0)
-        backend.emit(from: 1)
+        try backend.emit(from: 0)
+        try backend.emit(from: 1)
         wait(for: [changed], timeout: 5)
         XCTAssertEqual(reports, 2, "retired registration and events must not publish")
         stream.stop()
     }
 
     @MainActor
-    func testStopRevokesQueuedDeliveryBeforeSlowDaemonTeardownCompletes() {
+    func testStopRevokesQueuedDeliveryBeforeSlowDaemonTeardownCompletes() throws {
         let backend = Backend(blockStop: true)
         defer { backend.releaseStop.signal() }
         let armed = expectation(description: "registered")
@@ -79,7 +79,7 @@ final class FileSystemEventStreamTests: XCTestCase {
         stream.start()
         wait(for: [armed], timeout: 5)
         let eventQueued = DispatchSemaphore(value: 0)
-        backend.emit(from: 0, processed: eventQueued)
+        try backend.emit(from: 0, processed: eventQueued)
         // This wait does not pump main, leaving the event's delivery pending when stop runs.
         XCTAssertEqual(eventQueued.wait(timeout: .now() + 5), .success)
         stream.stop()
@@ -93,7 +93,7 @@ final class FileSystemEventStreamTests: XCTestCase {
     }
 
     @MainActor
-    func testEventBurstsKeepOnePendingMainQueueNotification() {
+    func testEventBurstsKeepOnePendingMainQueueNotification() throws {
         let backend = Backend()
         let armed = expectation(description: "armed")
         let changed = expectation(description: "one pending change delivered")
@@ -107,7 +107,7 @@ final class FileSystemEventStreamTests: XCTestCase {
         wait(for: [armed], timeout: 5)
         for _ in 0..<100 {
             let queued = DispatchSemaphore(value: 0)
-            backend.emit(from: 0, processed: queued)
+            try backend.emit(from: 0, processed: queued)
             XCTAssertEqual(queued.wait(timeout: .now() + 5), .success)
         }
         wait(for: [changed], timeout: 5)
@@ -259,8 +259,10 @@ final class FileSystemEventStreamTests: XCTestCase {
             state.withLock { $0.stopFinished = true }
         }
 
-        func emit(from index: Int, processed: DispatchSemaphore? = nil) {
-            let registration = state.withLock { $0.registrations[index] }
+        func emit(from index: Int, processed: DispatchSemaphore? = nil) throws {
+            let registration = try XCTUnwrap(state.withLock {
+                $0.registrations.indices.contains(index) ? $0.registrations[index] : nil
+            }, "registration \(index) never started")
             registration.queue.async {
                 registration.receive(["/fixture/change"], [0])
                 // Coalescing is queued on this same serial lane, so place the fence after it.
