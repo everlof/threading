@@ -9491,12 +9491,21 @@ completion panel was mounted from the production presenter in a Linux render fix
 appearances; its three rows, unavailable state and selected state passed, and both renders were
 visually inspected. The shim now exposes selected accessibility state, middle-button down events,
 scroll content size and window resize/move notification names. This is preparation, not a claim
-that Linux mounts `PromptView`: the editor still needs undo, workspace-file, media, drag and text
-delegate APIs. The render exercise also found that Linux's `SelectionSurface` adapter measured
+that Linux mounts `PromptView`: the editor still needs media, drag, image and pasteboard
+APIs. The render exercise also found that Linux's `SelectionSurface` adapter measured
 selection ink against an accent role rather than the painted selection over its actual ground;
 it now measures against the painted result. This palette policy remains a separate Linux adapter
 and should be replaced by the production `SelectionSurface` when its contrast dependencies are
 portable.
+
+The file-mention reference, parser and search-failure values are now in one Foundation-only
+`WorkspaceFileModels.swift` source. Mac compiles it through its filesystem-synchronized target;
+Linux `CoreSlice` vendors a byte-identical copy, verified by `vendor-core.sh --verify`. The
+Linux `AppKit` text view also now exposes the production composer delegate and undo-owner API:
+edit notices reach `NSTextViewDelegate`, and `UndoManager.removeAllActions()` clears the same
+bounded edit journal the editor uses for Ctrl-Z. The real text editor harness passes a draft
+replacement and undo ownership test. A diagnostic compile of the full `PromptView` still has
+media, pasteboard, drag, image and theme API gaps, so that view is not mounted by Linux yet.
 `check_ui_structure.py` now also ratchets the runtime Linux host's 15 native-view declarations,
 93 constraint sites and 8 stack constructors, excluding links to shared Design sources. A new
 Linux-only view hierarchy therefore requires an explicit baseline change and review while the

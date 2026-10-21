@@ -1,6 +1,31 @@
 #if os(Linux)
 import Foundation
 
+/// AppKit's text delegate surface used by the production composer. Editing remains on the
+/// bounded NSTextView journal; the delegate observes edits and supplies its undo owner.
+@MainActor
+public protocol NSTextViewDelegate: AnyObject {
+    func undoManager(for textView: NSTextView) -> UndoManager?
+    func textDidChange(_ notification: Notification)
+}
+
+public extension NSTextViewDelegate {
+    func undoManager(for textView: NSTextView) -> UndoManager? { nil }
+    func textDidChange(_ notification: Notification) {}
+}
+
+/// The text view keeps the actual bounded edit journal. This object gives a composer the
+/// AppKit ownership API for clearing that journal when it replaces a draft programmatically.
+@MainActor
+public final class UndoManager {
+    private weak var textView: NSTextView?
+
+    public init() {}
+
+    func attach(_ textView: NSTextView) { self.textView = textView }
+    public func removeAllActions() { textView?.clearHistory() }
+}
+
 /// The TextKit 1 ownership chain used by production themed editors. Storage is the editable
 /// source of truth; the layout manager retains its containers and invalidates attached views.
 @MainActor
@@ -477,10 +502,19 @@ open class NSTextView: NSText, NSClipViewDocumentObserver {
 
     /// AppKit's notice after a user edit — typing, deletion, composition, cut, paste, undo —
     /// and not after a programmatic `string` assignment.
-    open func didChangeText() {}
+    open func didChangeText() {
+        (delegate as? NSTextViewDelegate)?.textDidChange(
+            Notification(name: NSText.didChangeNotification, object: self)
+        )
+    }
+
+    /// Every Linux edit is already an individual undo transaction, so there is no open
+    /// coalescing group to close at a programmatic draft replacement.
+    open func breakUndoCoalescing() {}
 
     private func register(_ edit: Edit) {
         guard allowsUndo, edit.removed != edit.inserted else { return }
+        (delegate as? NSTextViewDelegate)?.undoManager(for: self)?.attach(self)
         redoEdits.removeAll()
         undoEdits.append(edit)
         undoBytes += edit.byteCount
@@ -489,7 +523,7 @@ open class NSTextView: NSText, NSClipViewDocumentObserver {
         }
     }
 
-    private func clearHistory() {
+    fileprivate func clearHistory() {
         undoEdits.removeAll()
         redoEdits.removeAll()
         undoBytes = 0

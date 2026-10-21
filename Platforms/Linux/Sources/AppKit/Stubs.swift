@@ -58,6 +58,7 @@ extension NSLayoutManager {
 /// Field-editor identity for focus scoping. Editing, selection and IME are separate services.
 @MainActor
 open class NSText: NSView {
+    public static let didChangeNotification = Notification.Name("NSTextDidChangeNotification")
     public weak var delegate: AnyObject?
 }
 

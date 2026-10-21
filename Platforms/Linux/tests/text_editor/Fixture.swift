@@ -30,6 +30,17 @@ private final class FieldNotices: NSTextFieldDelegate {
     }
 }
 
+@MainActor
+private final class PromptTextNotices: NSTextViewDelegate {
+    let manager = UndoManager()
+    var changes: [String] = []
+
+    func undoManager(for textView: NSTextView) -> UndoManager? { manager }
+    func textDidChange(_ notification: Notification) {
+        changes.append((notification.object as? NSTextView)?.string ?? "")
+    }
+}
+
 @main
 @MainActor
 enum Fixture {
@@ -218,6 +229,7 @@ enum Fixture {
         verifyKeyLoop()
         verifyNavigationKeys()
         verifyEditableField()
+        verifyPromptTextDelegate()
 
         let paint = ThemedTextView(frame: NSRect(x: 0, y: 0, width: 180, height: 40),
                                    textContainer: nil)
@@ -303,6 +315,27 @@ enum Fixture {
         precondition(window.makeFirstResponder(field))
         precondition(field.abortEditing() && field.currentEditor() == nil && window.firstResponder !== field)
         print("PASS editable NSTextField: field editor focus, delegate notices, single line, Return, Tab and abort")
+    }
+
+    private static func verifyPromptTextDelegate() {
+        let view = ThemedTextView(frame: NSRect(x: 0, y: 0, width: 180, height: 40),
+                                  textContainer: nil)
+        let notices = PromptTextNotices()
+        view.delegate = notices
+        view.allowsUndo = true
+        view.insertText("draft", replacementRange: NSRange(location: 0, length: 0))
+        precondition(notices.changes == ["draft"], "the composer delegate missed an edit")
+        view.breakUndoCoalescing()
+        notices.manager.removeAllActions()
+        view.undo(nil)
+        precondition(view.string == "draft", "a replaced draft kept a stale undo action")
+        view.string = "new"
+        precondition(notices.changes == ["draft"], "programmatic replacement notified the delegate")
+        view.insertText("!", replacementRange: NSRange(location: 3, length: 0))
+        view.undo(nil)
+        precondition(view.string == "new" && notices.changes == ["draft", "new!", "new"],
+                     "the new draft did not own its undo and change notices")
+        print("PASS prompt text delegate and draft undo ownership")
     }
 
     private static func verifyKeyLoop() {
