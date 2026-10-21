@@ -9455,8 +9455,10 @@ The audit still has shared-view work, so this checkpoint does **not** claim one 
 * `Specimen.Row` still assembles project, session and terminal sidebar wrappers separately from
   the Mac `ProjectRowView`, `SessionRowView` and `ProjectTerminalRowView`, although the inner
   Design content views are shared. Keep the virtual row slot host-owned and reuse the row shell.
-* Linux text prompts still construct `LinuxThemedTextPromptView` beside the Mac
-  `ThemedAlertContentView`; they currently share `ThemedAlertLayout` but not the content view.
+* Linux text prompts and the Mac alert now subclass `ThemedAlertBodyView`, which owns their
+  heading, section order, action row, and constraints. Their control models and modal event
+  hosts are still separate; the Linux host must eventually use the shared `ThemedAlert` model
+  and its complete interaction semantics.
 * The Linux General settings pane still presents fewer sections than the Mac General page.
   Reuse the complete page composition after its model and settings-store adapters are portable.
 
@@ -9466,6 +9468,21 @@ the shared label's animation backend. The Linux `AgentActivityBeamView` is curre
 placeholder because its saved-runtime rows have no verified working-state input; it must be
 replaced by the production beam when that state becomes available. These exceptions need review
 whenever their content grows.
+
+The shared alert body was added after this checkpoint. Static structure and theme checks pass,
+and an unsigned macOS Debug build succeeds. A signed build reached packaging but failed because
+an older `ThreadingTests.xctest` inside DerivedData was unsigned. Three macOS alert tests pass;
+their rendered classic requesters and the Close Session sheet in the real main-window host were
+inspected. Linux `WindowHarness` compiles and its X11 text-prompt smoke passes in both appearances,
+with keyboard and AT-SPI actions; the light/dark prompt images were inspected. These checks used
+the existing Lima validation VM because Docker Desktop's containerd metadata returned an I/O
+error. The shipping Mac `New Worktree` sheet was also rendered and inspected against the Linux
+prompt. They share the same content and constraint tree, but Linux measures 400×203 pixels while
+Mac measures 400×200; the field and actions are about three pixels lower on Linux. This remaining
+Pango/AppKit intrinsic-height difference needs a shim-level fix, not another prompt-specific frame.
+The Linux worktree request also repeats Mac's `WorktreeCreation.promptRequest` title, message,
+button and placeholder values; that model should become portable with the shared prompt host. The
+broader prompt/transcript/sidebar migrations listed above remain open.
 `check_ui_structure.py` now also ratchets the runtime Linux host's 15 native-view declarations,
 93 constraint sites and 8 stack constructors, excluding links to shared Design sources. A new
 Linux-only view hierarchy therefore requires an explicit baseline change and review while the

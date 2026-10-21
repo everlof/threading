@@ -2,10 +2,10 @@
 import AppKit
 
 /// The Linux presentation of the shared text prompt or confirmation alert. The host supplies
-/// modal event dispatch; this component uses the same content constraints and Design controls
+/// modal event dispatch; the inherited body assembles the same content tree and constraints
 /// as `ThemedAlert`/`TextPromptAlert` on macOS.
 @MainActor
-final class LinuxThemedTextPromptView: NSView {
+final class LinuxThemedTextPromptView: ThemedAlertBodyView {
     let inputField = ThemedTextField(frame: .zero)
     private let titleLabel: NSTextField
     private let messageLabel: NSTextField
@@ -93,27 +93,14 @@ final class LinuxThemedTextPromptView: NSView {
         confirmButton.nextKeyView = showsField ? inputField : cancelButton
         suppressionButton?.nextKeyView = confirmButton
 
-        let copy = ThemedAlertLayout.copyStack(title: titleLabel, message: messageLabel)
-        let heading = ThemedAlertLayout.heading(icon: mark, copy: copy)
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let actions = NSStackView(views: [spacer, cancelButton, clearButton, confirmButton])
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = Design.Spacing.small
-
-        var sectionViews: [NSView] = [heading]
+        var sectionViews: [NSView] = []
         if showsField { sectionViews.append(inputField) }
         if let suppressionButton { sectionViews.append(suppressionButton) }
-        sectionViews.append(actions)
-        let sections = ThemedAlertLayout.sectionStack(sectionViews)
-        addSubview(sections)
-        NSLayoutConstraint.activate(
-            ThemedAlertLayout.iconConstraints(mark)
-            + [ThemedAlertLayout.modernTopConstraint(sections, in: self)]
-            + ThemedAlertLayout.contentConstraints(sections, in: self,
-                widthPeers: sectionViews))
+        installContent(
+            icon: mark, title: titleLabel, message: messageLabel,
+            additionalSections: sectionViews,
+            buttons: [cancelButton, clearButton, confirmButton]
+        )
         setAccessibilityRole(.group)
         setAccessibilityLabel(title)
     }

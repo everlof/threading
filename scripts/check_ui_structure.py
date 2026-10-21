@@ -129,7 +129,7 @@ def inventory(root: Path) -> tuple[Counter[str], dict[str, dict[str, int]]]:
     linux_runtime = list((linux_root / "WindowHarness").glob("*.swift"))
     linux_runtime.append(linux_root / "Harness" / "Specimen.swift")
     for path in sorted(linux_runtime):
-        if path.is_symlink():
+        if not path.is_file() or path.is_symlink():
             continue
         source = path.read_text(encoding="utf-8")
         counts = classify(source)

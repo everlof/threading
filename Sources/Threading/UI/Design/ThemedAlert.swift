@@ -422,7 +422,7 @@ private final class ThemedAlertPanel: NSPanel {
 // MARK: - Content
 
 @MainActor
-private final class ThemedAlertContentView: NSView, ThemedComponent {
+private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent {
     private enum Layout {
         static let maximumTextWidth: CGFloat = 500
         static let checkboxHeight: CGFloat = Design.Size.chipHeight
@@ -436,11 +436,6 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
     private let iconView = NSImageView()
     private var buttonControls: [ThemedButton] = []
     private var checkbox: ThemedCheckbox?
-    private var requesterMessageWell: ThemedAlertRequesterMessageWellView?
-    private weak var copyStack: NSStackView?
-    private weak var sectionStack: NSStackView?
-    private var modernStackTopConstraint: NSLayoutConstraint?
-    private var requesterStackTopConstraint: NSLayoutConstraint?
     private let appEvents = AppEventObservations()
 
     /// Period requester materials do not carry the modern status-symbol heading. Their source
@@ -529,16 +524,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.setAccessibilityElement(false)
-        NSLayoutConstraint.activate(ThemedAlertLayout.iconConstraints(iconView))
-
-        let copy = ThemedAlertLayout.copyStack(title: titleLabel, message: messageLabel)
-        copyStack = copy
-
-        let heading = ThemedAlertLayout.heading(icon: iconView, copy: copy)
-
-        let messageSection = ThemedAlertRequesterMessageWellView(contentView: heading)
-        requesterMessageWell = messageSection
-        var sections: [NSView] = [messageSection]
+        var sections: [NSView] = []
         if let accessory = alert.accessoryView {
             sections.append(wrappedAccessory(accessory))
         }
@@ -552,33 +538,14 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
             self.checkbox = checkbox
             sections.append(checkbox)
         }
-        sections.append(makeButtonRow())
-
-        let stack = ThemedAlertLayout.sectionStack(sections)
-        sectionStack = stack
-        requesterTitleBand.isHidden = !usesClassicRequester
-        addSubview(requesterTitleBand)
-        addSubview(stack)
-
-        let modernTop = ThemedAlertLayout.modernTopConstraint(stack, in: self)
-        let requesterTop = stack.topAnchor.constraint(
-            equalTo: requesterTitleBand.bottomAnchor,
-            constant: Design.Spacing.small
+        installContent(
+            icon: iconView, title: titleLabel, message: messageLabel,
+            additionalSections: sections, buttons: makeButtons(),
+            headingContainer: { ThemedAlertRequesterMessageWellView(contentView: $0) },
+            classicBand: requesterTitleBand,
+            classicBandHeight: WindowChromeAppearance.resolve()?.bandHeight ?? 18,
+            classicInitially: usesClassicRequester
         )
-        modernTop.isActive = !usesClassicRequester
-        requesterTop.isActive = usesClassicRequester
-        modernStackTopConstraint = modernTop
-        requesterStackTopConstraint = requesterTop
-
-        NSLayoutConstraint.activate(ThemedAlertLayout.contentConstraints(
-            stack, in: self, widthPeers: sections) + [
-            requesterTitleBand.topAnchor.constraint(equalTo: topAnchor, constant: 1),
-            requesterTitleBand.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 1),
-            requesterTitleBand.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -1),
-            requesterTitleBand.heightAnchor.constraint(
-                equalToConstant: WindowChromeAppearance.resolve()?.bandHeight ?? 18
-            )
-        ])
 
         setAccessibilityRole(.group)
         setAccessibilityLabel(alert.messageText)
@@ -604,14 +571,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
         return wrapper
     }
 
-    private func makeButtonRow() -> NSView {
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = Design.Spacing.small
-
+    private func makeButtons() -> [NSView] {
         let defaultIndex = alert.buttons.firstIndex(where: { $0.keyEquivalent == "\r" }) ?? 0
 
         // **A destructive confirmation has no primary.** Prominence normally follows Return,
@@ -656,18 +616,12 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
             if model.hasDestructiveAction {
                 button.contentTintColor = Design.Status.negative
             }
-            row.addArrangedSubview(button)
             buttonControls.append(button)
         }
         // Modern sheets keep the whole row trailing. A classic requester uses the same spare
         // width as the source figure: its first action is leading and its cancellation gadget is
         // trailing, with the empty rail between them.
-        if usesClassicRequester {
-            row.insertArrangedSubview(spacer, at: min(1, row.arrangedSubviews.count))
-        } else {
-            row.insertArrangedSubview(spacer, at: 0)
-        }
-        return row
+        return buttonControls
     }
 
     @objc private func buttonPressed(_ sender: ThemedButton) {
@@ -701,20 +655,7 @@ private final class ThemedAlertContentView: NSView, ThemedComponent {
             )?.withSymbolConfiguration(Design.Symbol.configuration(ThemedAlertLayout.iconSize, weight: .medium))
             iconView.contentTintColor = symbolColor
         }
-        requesterTitleBand.isHidden = !usesClassicRequester
-        // Constraint activation is not atomic. Deactivate the outgoing top edge before enabling
-        // the incoming one so a live theme change never briefly asks the stack to sit at both
-        // the modern inset and below the requester band. That transient overlap was enough for
-        // AppKit to break the requester's required band-height constraint while the gallery
-        // cycled between classic and modern materials.
-        if usesClassicRequester {
-            modernStackTopConstraint?.isActive = false
-            requesterStackTopConstraint?.isActive = true
-        } else {
-            requesterStackTopConstraint?.isActive = false
-            modernStackTopConstraint?.isActive = true
-        }
-        sectionStack?.spacing = usesClassicRequester ? Design.Spacing.small : Design.Spacing.large
+        setClassicLayout(usesClassicRequester)
         refreshSurface()
         window?.invalidateShadow()
     }

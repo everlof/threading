@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for the macOS structural-site inventory and ceiling."""
+"""Regression tests for the desktop structural-site inventory and ceiling."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import unittest
 
 SCRIPT = Path(__file__).parents[1] / "check_ui_structure.py"
 CATEGORIES = ("controllers", "platform_views", "constraints", "drawing")
+LINUX_CATEGORIES = ("linux_platform_views", "linux_constraints", "linux_stacks")
 
 
 class UIStructureTests(unittest.TestCase):
@@ -30,6 +31,7 @@ class UIStructureTests(unittest.TestCase):
             """)
         self.write(root, "scripts/config/ui-structure-baseline.json", json.dumps({
             "controllers": 1, "platform_views": 1, "constraints": 2, "drawing": 1,
+            "linux_platform_views": 0, "linux_constraints": 0, "linux_stacks": 0,
         }))
         return root
 
@@ -77,6 +79,32 @@ class UIStructureTests(unittest.TestCase):
     def test_build_gate_runs_the_checker(self) -> None:
         gate = SCRIPT.parent / "check_architecture_boundaries.sh"
         self.assertIn('check_ui_structure.py', gate.read_text(encoding="utf-8"))
+
+    def test_linux_runtime_hierarchy_exceeds_its_own_ceiling(self) -> None:
+        root = self.fixture()
+        self.write(root, "Platforms/Linux/Sources/WindowHarness/NewPane.swift", """
+            final class NewPane: NSView {
+                let content = NSStackView()
+                func mount(_ view: NSView) {
+                    NSLayoutConstraint.activate([view.topAnchor.constraint(equalTo: topAnchor)])
+                }
+            }
+            """)
+        result = self.run_checker(root)
+        self.assertNotEqual(result.returncode, 0)
+        for category, count in zip(LINUX_CATEGORIES, (1, 2, 1)):
+            self.assertIn(f"{category}: {count} sites exceed the 0-site ceiling", result.stderr)
+
+    def test_linux_design_symlink_is_not_counted_again(self) -> None:
+        root = self.fixture()
+        design = root / "Sources/Threading/UI/Design/SharedPane.swift"
+        self.write(root, "Sources/Threading/UI/Design/SharedPane.swift",
+                   "final class SharedPane: NSView { }\n")
+        link = root / "Platforms/Linux/Sources/WindowHarness/SharedPane.swift"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(design)
+        result = self.run_checker(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     @staticmethod
     def write(root: Path, relative: str, contents: str) -> None:
