@@ -9530,3 +9530,12 @@ captures, including the compact window, were inspected in `out/tile-port/`. Open
 the media inspector and its context menu remain Mac-only services; Linux leaves those actions
 unadvertised until the host implements them. The enclosing `PromptView`/Linux pane duplication
 remains open.
+
+The Linux menu and editor now compile the production `SelectionSurface.swift` directly. The
+Linux-specific copy of `stated` and the editor's simplified `dynamic` selection were removed;
+the host theme boundary supplies the selected palette role and full `Design.Ink` value used by
+the common algorithm. `WindowHarness` builds. The real Xvfb composer journey passed keyboard,
+AT-SPI, Unicode edit and selection actions; its selected-text and provider-menu images were
+inspected in `out/selection-port/`. The production completion panel's selected row was rendered
+and inspected in both light and dark appearances. Linux still exposes only the checked theme
+snapshot, so other themes require their palette export before this proves visual parity there.

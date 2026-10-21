@@ -6,6 +6,7 @@ import AppKit
 
 @MainActor public enum SurfaceBevel { case automatic, sunken, none }
 @MainActor public enum AppThemePalette {
+    public enum ColorRole { case selection }
     public struct Material { public let bevel: Bevel? = nil }
     public struct Bevel {
         public enum Style { case hard, soft }
@@ -14,6 +15,11 @@ import AppKit
     }
     public struct Palette { public let material = Material() }
     public static let current = Palette()
+    public static func color(_ role: ColorRole) -> NSColor {
+        switch role {
+        case .selection: LinuxTheme.color("selection")
+        }
+    }
 }
 @MainActor public enum BevelArtwork {
     public struct Edges {

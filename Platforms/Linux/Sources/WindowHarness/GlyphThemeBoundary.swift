@@ -11,6 +11,7 @@ public protocol ThemeDerivedContent: AnyObject {
 @MainActor
 public enum Design {
     @MainActor public struct Ink {
+        public let base: NSColor
         public let label: NSColor
         public let secondary: NSColor
         public let tertiary: NSColor
@@ -18,6 +19,7 @@ public enum Design {
         public let surface: NSColor
         public let surfaceHover: NSColor
         public let border: NSColor
+        public let rule: NSColor
 
         public init(on ground: NSColor, surface customSurface: NSColor? = nil) {
             let light = LinuxTheme.neutralInk(on: ground, dark: false)
@@ -33,6 +35,7 @@ public enum Design {
             label = NSColor(name: NSColor.Name("threading.linux.ink.label")) { appearance in
                 appearance.name == .darkAqua ? darkLabel : lightLabel
             }
+            base = label
             secondary = NSColor(name: NSColor.Name("threading.linux.ink.secondary")) { appearance in
                 appearance.name == .darkAqua ? darkSecondary : lightSecondary
             }
@@ -45,9 +48,28 @@ public enum Design {
             surface = customSurface ?? LinuxTheme.color("controlResting")
             surfaceHover = LinuxTheme.color("controlHover")
             border = LinuxTheme.color("border")
+            rule = LinuxTheme.color("divider")
+        }
+
+        public init(base: NSColor, label: NSColor, secondary: NSColor,
+                    tertiary: NSColor, quaternary: NSColor) {
+            self.base = base
+            self.label = label
+            self.secondary = secondary
+            self.tertiary = tertiary
+            self.quaternary = quaternary
+            surface = Design.Surface.controlResting
+            surfaceHover = Design.Surface.controlHover
+            border = Design.Surface.border
+            rule = Design.Surface.divider
         }
 
         public static var selection: Ink { Ink(on: Design.Surface.selectionFill) }
+        public static var chrome: Ink {
+            Ink(base: Design.Text.label, label: Design.Text.label,
+                secondary: Design.Text.secondary, tertiary: Design.Text.tertiary,
+                quaternary: Design.Text.quaternary)
+        }
     }
 
     public enum Accessibility {

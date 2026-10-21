@@ -7,15 +7,6 @@ extension Design.Surface {
     static var ground: NSColor { LinuxTheme.color("ground") }
 }
 
-extension SelectionSurface {
-    static func dynamic(_ ground: @escaping () -> NSColor) -> SelectionSurface {
-        // Text selection uses the theme's selection role; list selection uses its accent.
-        // The production component still owns the selected-text attributes.
-        let fill = LinuxTheme.color("selection")
-        return SelectionSurface(fill: fill, ink: Design.Ink(on: fill))
-    }
-}
-
 @MainActor
 public class ThemedScrollView: NSScrollView {
     var contentBreathing = NSEdgeInsets() {
