@@ -623,11 +623,6 @@ final class SessionComposerViewController: NSViewController {
         // drawing an agent's name in a pill three times its length. The spacer hugs less than
         // any of them, so it takes the remainder instead.
         let chipSpacer = NSView()
-        chipSpacer.setContentHuggingPriority(ComposerDefaults.spacerPriority, for: .horizontal)
-        chipSpacer.setContentCompressionResistancePriority(
-            ComposerDefaults.spacerPriority,
-            for: .horizontal
-        )
 
         // Where, and who — two chips for the two questions, not four for their parts. A project
         // and a checkout are one place; an agent and a login are one identity, and read as four
@@ -635,10 +630,9 @@ final class SessionComposerViewController: NSViewController {
         // here at all: it belongs to the words being written, so it sits on the prompt box's own
         // bottom row (see `wirePrompt`). Placement is what carries the meaning now — above the
         // box is who and where, inside it is what with.
-        let chips = NSStackView(views: [locationChip, identityChip, roleChip, chipSpacer])
-        chips.orientation = .horizontal
-        chips.alignment = .centerY
-        chips.spacing = Design.Spacing.small
+        let chips = NSStackView()
+        PromptChrome.configureOpeningChoices(chips,
+            choices: [locationChip, identityChip, roleChip], spacer: chipSpacer)
 
         locationChip.setAccessibilityIdentifier("composer.session-start.location")
         identityChip.setAccessibilityIdentifier("composer.session-start.identity")
@@ -689,25 +683,16 @@ final class SessionComposerViewController: NSViewController {
         // Three things, evenly spaced: where this runs, what to say, and what to do about it.
         // The column used to need two different steps because it held a usage block as well;
         // with that folded into the box there is one rhythm to keep.
-        stack.setViews(
-            [chips, managedWorkspaceCheckbox, promptContentContainer, actionRow],
-            in: .leading
-        )
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.medium
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        PromptChrome.configureOpeningColumn(stack, choices: chips,
+            beforePrompt: [managedWorkspaceCheckbox], prompt: promptContentContainer,
+            actionRow: actionRow)
 
         installExtensionBackdrop()
         installWelcomeScrim()
-        view.addSubview(stack)
+        PromptChrome.mountOpeningColumn(stack, in: view,
+            prompt: promptContentContainer, actionRow: actionRow)
         view.addSubview(heroStack)
         view.addLayoutGuide(heroRegion)
-
-        // The Mac and Linux opening shells share the column's cap, pane-width measurement,
-        // hugging priority and edge pins. The prompt grows upward from the pane's bottom edge.
-        PromptChrome.constrainOpeningColumn(
-            stack, in: view, prompt: promptContentContainer, actionRow: actionRow)
 
         NSLayoutConstraint.activate([
             // The hero floats in whatever room the composer leaves above itself.
@@ -3167,10 +3152,6 @@ enum ComposerDefaults {
     static let surfaceChipCompressionPriority = NSLayoutConstraint.Priority(260)
     static let speedChipCompressionPriority = NSLayoutConstraint.Priority(261)
     static let modeChipCompressionPriority = NSLayoutConstraint.Priority(263)
-
-    /// Below every control's own hugging, so a spacer is what stretches when a row has width to
-    /// spare. Any real priority would leave the chips competing for the slack with it.
-    static let spacerPriority = NSLayoutConstraint.Priority(1)
 
     /// The prompt opens several lines tall. The composer owns the whole pane and is replaced
     /// by the conversation the moment it is used, so there is nothing to be compact for — and

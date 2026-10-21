@@ -145,27 +145,15 @@ final class WorkspacePlaceholderPane {
         composerRoot.addSubview(composerHero)
         composerHero.translatesAutoresizingMaskIntoConstraints = false
         let destinationSpacer = NSView()
-        destinationSpacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        destinationSpacer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        destinationRow.orientation = .horizontal
-        destinationRow.alignment = .centerY
-        destinationRow.spacing = Design.Spacing.small
-        destinationRow.addArrangedSubview(projectChip)
-        destinationRow.addArrangedSubview(providerChip)
-        destinationRow.addArrangedSubview(destinationSpacer)
+        PromptChrome.configureOpeningChoices(destinationRow,
+            choices: [projectChip, providerChip], spacer: destinationSpacer)
         projectChip.setContentCompressionResistancePriority(.init(239), for: .horizontal)
         providerChip.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         actionRow.addSubview(composerStartButton)
         composerStartButton.translatesAutoresizingMaskIntoConstraints = false
-        composerColumn.orientation = .vertical
-        composerColumn.alignment = .leading
-        composerColumn.spacing = Design.Spacing.medium
-        composerColumn.translatesAutoresizingMaskIntoConstraints = false
-        composerColumn.addArrangedSubview(destinationRow)
-        composerColumn.addArrangedSubview(composerSurface)
-        composerColumn.addArrangedSubview(actionRow)
-        composerRoot.addSubview(composerColumn)
+        PromptChrome.configureOpeningColumn(composerColumn, choices: destinationRow,
+            prompt: composerSurface, actionRow: actionRow)
         PromptChrome.configureFooter(composerFooter, spacer: composerFooterSpacer)
         composerFooter.insertArrangedSubview(modelChip, at: 0)
         composerFooter.insertArrangedSubview(permissionChip, at: 1)
@@ -180,10 +168,9 @@ final class WorkspacePlaceholderPane {
         composerContentLayout = LinuxPromptContentLayout(
             surface: composerSurface, editor: composerEditor,
             attachments: attachments, footer: composerFooter)
+        composerBottom = PromptChrome.mountOpeningColumn(composerColumn, in: composerRoot,
+            prompt: composerSurface, actionRow: actionRow)
         composerRoot.addSubview(choiceSurface)
-        composerBottom = PromptChrome.constrainOpeningColumn(
-            composerColumn, in: composerRoot, prompt: composerSurface,
-            actionRow: actionRow)
         composerSurfaceHeight = composerSurface.heightAnchor.constraint(
             equalToConstant: PromptChrome.openingMinimumHeight)
         NSLayoutConstraint.activate([

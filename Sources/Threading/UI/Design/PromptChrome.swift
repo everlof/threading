@@ -48,6 +48,38 @@ enum PromptChrome {
         ]
     }
 
+    /// Both opening hosts mount this same choice row and vertical content stack. The hosts
+    /// supply controls and optional rows; the Design component owns their arrangement.
+    static func configureOpeningChoices(_ row: NSStackView, choices: [NSView], spacer: NSView) {
+        // The spacer yields below every control, taking any spare width instead of the chips.
+        spacer.setContentHuggingPriority(spacerPriority, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(spacerPriority, for: .horizontal)
+        row.setViews(choices + [spacer], in: .leading)
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = Design.Spacing.small
+        row.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    static func configureOpeningColumn(_ column: NSStackView, choices: NSView,
+                                       beforePrompt: [NSView] = [], prompt: NSView,
+                                       actionRow: NSView) {
+        column.setViews([choices] + beforePrompt + [prompt, actionRow], in: .leading)
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = Design.Spacing.medium
+        column.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    /// Mount the opening column with the same edge and width constraints in both products.
+    @discardableResult
+    static func mountOpeningColumn(_ column: NSStackView, in root: NSView,
+                                   prompt: NSView, actionRow: NSView) -> NSLayoutConstraint {
+        root.addSubview(column)
+        return constrainOpeningColumn(column, in: root,
+                                      prompt: prompt, actionRow: actionRow)
+    }
+
     /// The opening composer has the same bounded column in both hosts. Keep the optional
     /// pane-width measurement below the split view's holding priority, and the stack's own
     /// hugging below that measurement so its widest child cannot narrow the prompt.

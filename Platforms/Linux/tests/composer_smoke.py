@@ -428,17 +428,25 @@ try:
         xdo('click', '--repeat', '12', '--delay', '20', '4')
         eventually(lambda: editor_pixels('composer-scroll-up.png') != tail_pixels,
                    'wheel scrolls long brief without moving caret', process)
-        assert Atspi.Text.get_text(editor_text, 0, -1) == long_prompt
-        assert editor_text.get_caret_offset() == len(long_prompt)
-        assert editor.get_state_set().contains(Atspi.StateType.FOCUSED)
+        eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1) == long_prompt,
+                   'long brief after wheel input', process)
+        eventually(lambda: editor_text.get_caret_offset() == len(long_prompt),
+                   'wheel keeps the caret at the end of the brief', process)
+        eventually(lambda: editor.get_state_set().contains(Atspi.StateType.FOCUSED),
+                   'wheel keeps the editor focused', process)
         xdo('click', '--repeat', '12', '--delay', '20', '5')
         eventually(lambda: editor_pixels('composer-scroll-down.png') == tail_pixels,
                    'wheel returns to the same tail pixels', process)
+        eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1) == long_prompt,
+                   'long brief after wheel return', process)
         xdo('key', 'ctrl+a')
         opening = 'Please inspect $(literal) 🦉'
         subprocess.run(['xclip', '-selection', 'clipboard'], input=opening.encode(),
                        check=True, timeout=5)
         xdo('key', 'ctrl+v')
+        # Clipboard target conversion runs on a worker; wait before replacing its anchor.
+        eventually(lambda: Atspi.Text.get_text(editor_text, 0, -1) == opening,
+                   'asynchronous clipboard paste', process)
         xdo('key', 'Return')
         xdo('type', '--clearmodifiers', '--delay', '20', 'Second line')
         prompt = opening + '\nSecond line'
@@ -450,9 +458,11 @@ try:
         editor = eventually(lambda: child_by_id(panel(app), 'linux.composer.editor'),
                             'editor after paste', process)
         editor_text = editor.get_text_iface()
-        assert editor_text.get_caret_offset() == len(prompt)
+        eventually(lambda: editor_text.get_caret_offset() == len(prompt),
+                   'caret after pasted multiline prompt', process)
         assert editor.get_state_set().contains(Atspi.StateType.EDITABLE)
-        assert editor.get_state_set().contains(Atspi.StateType.FOCUSED)
+        eventually(lambda: editor.get_state_set().contains(Atspi.StateType.FOCUSED),
+                   'editor focus after pasted multiline prompt', process)
         screenshot = output / 'composer.png'
         def rendered_text():
             subprocess.run(['import', '-window', window, str(screenshot)], check=True, timeout=5)

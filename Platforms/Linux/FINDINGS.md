@@ -9391,3 +9391,29 @@ mounting its terminal or sending menu input to the PTY. The inspected shell capt
 `out/session-close/session-close-unmounted-menu-2x.png`. The existing mounted Close/rename/
 dormant/resume journey also passed against the same installed static binary, SHA-256
 `93bf9986f17a189a8b304f2c8c74588748b2e4583e1ca7610eb7779dd3a98134`.
+
+## 261. Shared opening composer assembly, 2026-10-21
+
+The Mac and Linux opening composers already activated the same bounded column constraints in
+`PromptChrome`, but each host still built its chip row and vertical stack separately. Both now
+call `configureOpeningChoices`, `configureOpeningColumn` and `mountOpeningColumn` with their own
+controls. The component owns the arrangement, spacing and column anchors. The Mac keeps its
+optional managed-workspace row and safe-area hero guide; Linux keeps its directly anchored hero
+view. The Linux choice overlay remains above the column in drawing order. This shares the
+production AppKit declarations with the shim while leaving host-specific content in each host.
+
+The rebase also left the Linux core slice stale. Its manifest now records the three newly needed
+Mac sources, and all 139 vendored files verify byte-identically. Linux-only confirmation settings
+moved out of the copied core into the window harness. The C smoke contracts link the clipboard
+selection bridge used by `Window.c`.
+
+The real X11 composer journey passed window-size, choice-menu, focus-loop, Unicode editing,
+wheel, clipboard, accessibility and exact one-agent launch checks. Its tall, compact, narrow,
+minimum and typed-prompt captures under `out/composer/` were inspected. The smoke test now waits
+for scroll accessibility state and the asynchronous clipboard worker before sending later text;
+without that barrier, its immediate Return could replace the selection before the paste arrived.
+Five Codex permission combinations passed before the wider matrix was stopped. The focused Mac
+`session-composer-layout` render suite passed and its tall and short images were inspected; the
+report has no approved pixel baselines. All eight Mac `ComposerWindowFitTests` passed, including
+the shortest allowed window and the column's width cap. Theme-boundary, UI-structure, whitespace
+and both vendor verification checks passed.

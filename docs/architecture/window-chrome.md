@@ -119,13 +119,15 @@ responder inside that callback observes the old responder during its transition.
 presentation within the existing host-owned composer, not a new extension slot.
 
 The Linux opening column now uses a retained `NSStackView` with the Mac composer's bottom pin,
-720-point width cap, 32-point side bounds, chip row, prompt width and trailing action row. The
-two shells now activate those column anchors and the low-priority pane-width measurement through
-the same `PromptChrome.constrainOpeningColumn` function, so the cap and column priorities
-cannot drift between implementations. The host updates only the prompt's height constraint from
-the cached TextKit and attachment height;
-the SDL bitmap still supplies the root viewport frame. The hero fills the constrained room above
-the column and its own mark and greeting use the Mac vertical-stack arrangement. The host still
+720-point width cap, 32-point side bounds, chip row, prompt width and trailing action row.
+`PromptChrome.configureOpeningChoices`, `configureOpeningColumn` and `mountOpeningColumn` now
+assemble that row and the vertical stack in both products. The Mac supplies its theme-owned
+welcome and optional managed-workspace row; Linux supplies its fixed-theme welcome. Both
+activate the same column anchors and low-priority pane-width measurement, so the cap and
+priorities cannot drift between implementations. Each host pins its hero to the space above the
+column without adding a Linux layout guide. The Linux host updates only the prompt's height
+constraint from the cached TextKit and attachment height; the SDL bitmap still supplies the root
+viewport frame. The hero's mark and greeting use the Mac vertical-stack arrangement. The host still
 anchors bounded menus to their chips. The attachment rail, editor and footer now use the same
 `PromptChrome` stack setup and sizing constraints as macOS `PromptView`; the host pins that stack
 inside the surface with the Mac footer insets. A
