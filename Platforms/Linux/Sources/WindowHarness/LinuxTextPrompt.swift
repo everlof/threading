@@ -9,44 +9,46 @@ import LinuxWindowBridge
 @MainActor
 enum LinuxTextPrompt {
     private struct Request {
-        let title: String
-        let message: String
-        let placeholder: String
-        let confirmTitle: String
-        let current: String
-        let clearTitle: String?
+        let prompt: TextPromptRequest
         let identity: String
         let fieldID: String
         let fieldDescription: String
-        let allowsEmpty: Bool
         var suppressionPrompt: ConfirmationPrompt? = nil
         var showsField = true
         var warning = false
+
+        var title: String { prompt.title }
+        var message: String { prompt.message ?? "" }
+        var placeholder: String { prompt.placeholder }
+        var confirmTitle: String { prompt.confirmTitle }
+        var current: String { prompt.current }
+        var clearTitle: String? { prompt.clearTitle }
+        var allowsEmpty: Bool { prompt.allowsEmpty }
     }
 
     static func runWorktree() throws -> String? {
-        try run(Request(title: "New Worktree",
-            message: "A worktree lets a session run on its own branch without disturbing this checkout.",
-            placeholder: "branch name", confirmTitle: "Create", current: "", clearTitle: nil,
+        try run(Request(prompt: WorktreePromptSpec.request,
             identity: "linux.prompt.worktree", fieldID: "linux.prompt.branch",
-            fieldDescription: "Branch for the new worktree.", allowsEmpty: false))
+            fieldDescription: "Branch for the new worktree."))
     }
 
     static func runRename(displayTitle: String, currentTitle: String) throws -> String? {
-        try run(Request(title: "Rename Session", message: "", placeholder: displayTitle,
-            confirmTitle: "Rename", current: currentTitle,
+        let prompt = TextPromptRequest(
+            title: "Rename Session", message: nil, confirmTitle: "Rename",
             clearTitle: currentTitle.isEmpty ? nil : "Use Agent's Name",
+            current: currentTitle, placeholder: displayTitle, allowsEmpty: true)
+        return try run(Request(prompt: prompt,
             identity: "linux.prompt.rename-session", fieldID: "linux.prompt.session-name",
-            fieldDescription: "Custom session name. Leave empty to use the agent's name.",
-            allowsEmpty: true))
+            fieldDescription: "Custom session name. Leave empty to use the agent's name."))
     }
 
     static func runConfirmation(title: String, message: String,
                                 confirmTitle: String) throws -> Bool {
-        try run(Request(title: title, message: message, placeholder: "",
-            confirmTitle: confirmTitle, current: "", clearTitle: nil,
+        let prompt = TextPromptRequest(title: title, message: message,
+                                       confirmTitle: confirmTitle, allowsEmpty: true)
+        return try run(Request(prompt: prompt,
             identity: "linux.prompt.close-session", fieldID: "", fieldDescription: "",
-            allowsEmpty: true, suppressionPrompt: .closeRunningSession,
+            suppressionPrompt: .closeRunningSession,
             showsField: false, warning: true)) != nil
     }
 
@@ -58,7 +60,8 @@ enum LinuxTextPrompt {
         let view = LinuxThemedTextPromptView(
             title: request.title, message: request.message,
             placeholder: request.placeholder, confirmTitle: request.confirmTitle,
-            cancelTitle: "Cancel", current: request.current, clearTitle: request.clearTitle,
+            cancelTitle: request.prompt.cancelTitle,
+            current: request.current, clearTitle: request.clearTitle,
             showsField: request.showsField, warning: request.warning,
             suppressionTitle: request.suppressionPrompt == nil ? nil : "Don't ask again")
         view.appearance = LinuxTheme.appearance

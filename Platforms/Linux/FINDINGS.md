@@ -9480,9 +9480,9 @@ error. The shipping Mac `New Worktree` sheet was also rendered and inspected aga
 prompt. They share the same content and constraint tree, but Linux measures 400×203 pixels while
 Mac measures 400×200; the field and actions are about three pixels lower on Linux. This remaining
 Pango/AppKit intrinsic-height difference needs a shim-level fix, not another prompt-specific frame.
-The Linux worktree request also repeats Mac's `WorktreeCreation.promptRequest` title, message,
-button and placeholder values; that model should become portable with the shared prompt host. The
-broader prompt/transcript/sidebar migrations listed above remain open.
+The worktree request's title, message, button and placeholder now come from the same
+`WorktreePromptSpec.request` on Mac and Linux. The broader prompt/transcript/sidebar migrations
+listed above remain open.
 
 The next `PromptView` dependency slice is now shared source on Linux: `ConversationContextRailView`,
 `PromptCompletionView` and `ThemedSurfaceView` compile unchanged apart from conditional CoreSlice
@@ -9506,6 +9506,11 @@ edit notices reach `NSTextViewDelegate`, and `UndoManager.removeAllActions()` cl
 bounded edit journal the editor uses for Ctrl-Z. The real text editor harness passes a draft
 replacement and undo ownership test. A diagnostic compile of the full `PromptView` still has
 media, pasteboard, drag, image and theme API gaps, so that view is not mounted by Linux yet.
+The desktop text-prompt model is also shared now: `TextPromptRequest.swift` is the one request
+type on both hosts, and the worktree's wording comes from `WorktreePromptSpec.request`.
+Linux's modal host keeps only its native accessibility identity,
+input loop and window flags around that request. The Linux package compiled after this change;
+the X11 prompt journey and the macOS app build were not rerun at this checkpoint.
 `check_ui_structure.py` now also ratchets the runtime Linux host's 15 native-view declarations,
 93 constraint sites and 8 stack constructors, excluding links to shared Design sources. A new
 Linux-only view hierarchy therefore requires an explicit baseline change and review while the

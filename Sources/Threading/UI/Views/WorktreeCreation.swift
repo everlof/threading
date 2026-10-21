@@ -1,12 +1,5 @@
 import AppKit
 
-// MARK: - Constants
-
-private enum WorktreeCreationDefaults {
-    static let branchFieldWidth: CGFloat = 260
-    static let branchFieldHeight: CGFloat = 24
-}
-
 /// Asking for a branch, making the worktree, and saying so when it could not be made.
 ///
 /// Two surfaces offer `New Worktree…` — the composer's location menu, which is asking *where
@@ -44,18 +37,7 @@ enum WorktreeCreation {
     }
 
     static var promptRequest: TextPromptRequest {
-        TextPromptRequest(
-            title: L10n.string("New Worktree"),
-            message: L10n.string(
-                "A worktree lets a session run on its own branch without disturbing this checkout."
-            ),
-            confirmTitle: L10n.string("Create"),
-            placeholder: L10n.string("branch name"),
-            fieldSize: NSSize(
-                width: WorktreeCreationDefaults.branchFieldWidth,
-                height: WorktreeCreationDefaults.branchFieldHeight
-            )
-        )
+        WorktreePromptSpec.request
     }
 
     /// The branch a created worktree stands on, read back from the checkout itself rather than
