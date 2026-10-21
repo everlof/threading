@@ -659,6 +659,20 @@ struct AgentSession: Codable, Identifiable {
   /// Whether this session began as a fork of another.
   var isSideChat: Bool { forkedFrom != nil }
 
+  /// Set once, when another chat starts this one as its subagent. See `SessionLineage`.
+  var lineage: SessionLineage?
+
+  /// The chat that started this one as its subagent.
+  var subagentParentID: SessionID? {
+    guard case .subagent(let parent) = lineage else { return nil }
+    return parent
+  }
+
+  var isSubagent: Bool { subagentParentID != nil }
+
+  /// The row this one nests under in the sidebar: a side chat's parent, or a subagent's.
+  var nestingParentID: SessionID? { forkedFrom ?? subagentParentID }
+
   /// The configuration a side chat of *this* conversation runs under, or nil where this
   /// runtime has no fork operation.
   ///
@@ -920,6 +934,7 @@ struct AgentSession: Codable, Identifiable {
     self.curfewState = nil
     self.managedWorkspace = nil
     self.pendingCheckoutMove = nil
+    self.lineage = nil
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -944,6 +959,7 @@ struct AgentSession: Codable, Identifiable {
     case managedWorkspace
     case automationWorkspace
     case pendingCheckoutMove
+    case lineage
   }
 
   init(from decoder: Decoder) throws {
@@ -1325,6 +1341,11 @@ struct AgentSession: Codable, Identifiable {
       PendingCheckoutMove.self,
       forKey: .pendingCheckoutMove
     )
+    // Tolerated rather than trusted, like a side chat's parent: a lineage this build cannot
+    // read (a later case) or one naming the row itself is dropped, and the row simply stands at
+    // the project level instead of failing the whole record.
+    let decodedLineage = try? container.decodeIfPresent(SessionLineage.self, forKey: .lineage)
+    lineage = decodedLineage?.parentID == id ? nil : decodedLineage
   }
 
   func encode(to encoder: Encoder) throws {
@@ -1384,6 +1405,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(managedWorkspace, forKey: .managedWorkspace)
     try container.encodeIfPresent(automationWorkspace, forKey: .automationWorkspace)
     try container.encodeIfPresent(pendingCheckoutMove, forKey: .pendingCheckoutMove)
+    try container.encodeIfPresent(lineage, forKey: .lineage)
   }
 
   /// Where this conversation's process and project-relative tools run.

@@ -1,4 +1,5 @@
 import Foundation
+@testable import CoreSlice
 
 /// Linux's store for the production confirmation register. The key and raw values are the
 /// same as AppSettings so a user's choice survives a later full Settings port.

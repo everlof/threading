@@ -23,6 +23,10 @@ enum ControlScope: Codable, Equatable, Hashable, Sendable {
     /// Several explicit projects. No manager template creates this; it is available only to a
     /// future user-authored grant so cross-project reach never arrives by implication.
     case projects(Set<ProjectID>)
+    /// Every session whose lineage names this one as the chat that started it. Never stored:
+    /// it is the implicit reach a chat has over its own subagents, resolved from the lineage at
+    /// each authorization, so it follows the record rather than a list that could go stale.
+    case subagentsOf(SessionID)
 }
 
 enum SessionRole: String, Codable, CaseIterable, Sendable {
@@ -91,6 +95,8 @@ enum ControlOperation: String, CaseIterable, Codable, Hashable, Sendable {
     case releaseSession
     case subscribeToChildren
     case respondToPermission
+    /// Start a subagent: a chat of this one's own, on any runtime, nested under it.
+    case startSubagent
 
     static let regularProjectOperations: Set<Self> = [
         .listSessions, .sendMessage, .steer, .watch,
@@ -100,7 +106,20 @@ enum ControlOperation: String, CaseIterable, Codable, Hashable, Sendable {
         .archiveSession, .renameSession,
     ]
 
-    static let managerOperations: Set<Self> = Set(allCases)
+    /// What every chat may do to the subagents it started, through `.subagentsOf`.
+    static let regularSubagentOperations: Set<Self> = [
+        .archiveSession,
+    ]
+
+    /// Held implicitly and never written into a grant. A stored grant persists its exact
+    /// operations, and an older build reading one it does not know marks the row corrupt and
+    /// puts the whole store into recovery; a Manager needs nothing here it lacks anyway, since
+    /// `spawnSession` is the broader form. So the role is defined without these.
+    static let implicitOnlyOperations: Set<Self> = [
+        .startSubagent,
+    ]
+
+    static let managerOperations: Set<Self> = Set(allCases).subtracting(implicitOnlyOperations)
 
     /// The complete manager role before permission responses became a manager capability.
     ///
@@ -130,7 +149,7 @@ enum ControlOperation: String, CaseIterable, Codable, Hashable, Sendable {
         case .releaseSession: return "release_session"
         case .subscribeToChildren: return "subscribe_to_children"
         case .respondToPermission: return "respond_to_permission"
-        case .listSessions, .sendMessage, .steer, .watch:
+        case .listSessions, .sendMessage, .steer, .watch, .startSubagent:
             return nil
         }
     }
@@ -329,6 +348,14 @@ struct SupervisionEvent: Codable, Equatable, Sendable, Identifiable {
         self.kind = kind
         self.detail = detail.map { String($0.prefix(SupervisionDefaults.maximumEventDetailLength)) }
     }
+}
+
+/// Bounds on the subagents one chat starts, apart from a manager's: a parent needs no grant, so
+/// its reach is kept smaller than the one the user hands a manager deliberately.
+enum SubagentChatDefaults {
+    static let maximumLiveSubagents = 4
+    static let maximumStartsPerWindow = 6
+    static let startWindow: TimeInterval = 10 * 60
 }
 
 enum SupervisionDefaults {

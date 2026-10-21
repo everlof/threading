@@ -30,8 +30,8 @@ swiftc Sources/Harness/Vendored/NeutralInk.swift Sources/Harness/Vendored/TextLe
 "$fixture/neutral-ink" "$fixture/neutral-ink.json"
 "$bin/TextLabelHarness" --ink-json "$fixture/neutral-ink.json"
 "$bin/MarkdownHarness" out/markdown-linux
-clang tests/window_wait_contract.c Sources/LinuxWindowBridge/Window.c Sources/LinuxWindowBridge/Accessibility.c -I Sources/LinuxWindowBridge/include -I Sources/LinuxWindowBridge $(pkg-config --cflags --libs sdl2 atk-bridge-2.0 atk gobject-2.0) -o "$fixture/window-wait-contract"
-clang -Wall -Wextra -Werror tests/navigator_pointer_contract.c Sources/LinuxWindowBridge/Window.c Sources/LinuxWindowBridge/Accessibility.c -I Sources/LinuxWindowBridge/include -I Sources/LinuxWindowBridge $(pkg-config --cflags --libs sdl2 atk-bridge-2.0 atk gobject-2.0) -o "$fixture/navigator-pointer-contract"
+clang tests/window_wait_contract.c Sources/LinuxWindowBridge/Window.c Sources/LinuxWindowBridge/Accessibility.c Sources/LinuxWindowBridge/ClipboardSelection.c -I Sources/LinuxWindowBridge/include -I Sources/LinuxWindowBridge $(pkg-config --cflags --libs sdl2 atk-bridge-2.0 atk gobject-2.0) -lX11 -o "$fixture/window-wait-contract"
+clang -Wall -Wextra -Werror tests/navigator_pointer_contract.c Sources/LinuxWindowBridge/Window.c Sources/LinuxWindowBridge/Accessibility.c Sources/LinuxWindowBridge/ClipboardSelection.c -I Sources/LinuxWindowBridge/include -I Sources/LinuxWindowBridge $(pkg-config --cflags --libs sdl2 atk-bridge-2.0 atk gobject-2.0) -lX11 -o "$fixture/navigator-pointer-contract"
 clang -shared -fPIC -Wall -Wextra -Werror tests/gtk_present_delay.c -ldl -o "$fixture/gtk-present-delay.so"
 mkdir "$fixture/daemon"
 "$daemon" --socket "$fixture/pty.sock" --state "$fixture/daemon" >"$fixture/daemon.log" 2>&1 &

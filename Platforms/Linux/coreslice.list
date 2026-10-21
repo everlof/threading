@@ -17,6 +17,7 @@ Sources/Threading/Core/Events/AppEvent.swift
 Sources/Threading/Core/Settings/SettingsEvents.swift
 Sources/Threading/Core/Settings/LimitRecoveryPolicy.swift
 Sources/Threading/Core/Settings/PreferenceStore.swift
+Sources/Threading/Core/Settings/ConfirmationPrompt.swift
 Sources/Threading/Core/Agent/AgentDefaults.swift
 Sources/Threading/Core/Agent/ProviderArchiveState.swift
 Sources/Threading/Core/Agent/ModelName.swift
@@ -25,6 +26,7 @@ Sources/Threading/Core/Agent/ProviderModelCatalog.swift
 Sources/Threading/Models/Identifiers.swift
 Sources/Threading/Models/Project.swift
 Sources/Threading/Models/AgentSession.swift
+Sources/Threading/Models/SessionLineage.swift
 Sources/Threading/Models/AgentProviderCapabilities.swift
 Sources/Threading/Models/AgentPermissionMode.swift
 Sources/Threading/Models/ScheduledMessage.swift
@@ -150,5 +152,6 @@ Sources/Threading/Core/Agent/ConversationPreparedChild.swift
 
 Sources/Threading/Core/Agent/PermissionPolicy.swift
 Sources/Threading/Core/Agent/ShellCommandPolicy.swift
+Sources/Threading/Core/Agent/ShellWords.swift
 Sources/Threading/Core/Session/AttachmentDetection.swift
 Sources/Threading/Core/Agent/ACPLaunchCommand.swift
