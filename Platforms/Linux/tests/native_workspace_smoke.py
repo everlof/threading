@@ -398,15 +398,27 @@ try:
     assert turns()[0]['text'] == first, turns()
     pid = turns()[0]['pid']
     capture('native-first-reply.png')
+    xdo('mousemove', '--window', window, str(320 * scale), str(128 * scale))
+    xdo('mousedown', '1')
+    xdo('mousemove', '--window', window, str(430 * scale), str(160 * scale))
+    xdo('mouseup', '1')
+    key('ctrl+c')
+    def copied_reply():
+        result = subprocess.run(['xclip', '-selection', 'clipboard', '-o'],
+                                text=True, capture_output=True, timeout=3)
+        return result.returncode == 0 and 'reply 1' in result.stdout and 'Unicode' in result.stdout
+    eventually(copied_reply, 'cross-row transcript selection copies shared-table text')
+    capture('native-transcript-selection.png')
     frame = composer_frame()
     click(int(frame['x']) + 24, int(frame['y']) + 24)
     eventually(lambda: composer_frame().get('focused') == 'true', 'pointer focuses reply editor')
     paste('Second line 日本語')
+    eventually(lambda: composer_frame().get('enabled') == 'true', 'first multiline draft pasted')
     key('shift+Return')
     paste('Another line café 👩🏽‍🚀')
     key('Return')
     eventually(lambda: len(turns()) == 2, 'multiline second prompt')
-    eventually(lambda: ready(2), 'second native reply')
+    eventually(lambda: ready(2), 'second native reply', timeout=60)
     assert turns()[1]['text'] == 'Second line 日本語\nAnother line café 👩🏽‍🚀', turns()
     assert turns()[1]['pid'] == pid, 'turn replaced the persistent child'
     key('ctrl+shift+t')

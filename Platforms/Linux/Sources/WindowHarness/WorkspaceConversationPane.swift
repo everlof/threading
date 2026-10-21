@@ -23,9 +23,13 @@ final class WorkspaceConversationPane: WorkspacePane {
     let chrome: WorkspacePaneChrome
     private let owner = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
     private let root = NSView(frame: .zero)
-    private let scroll = ThemedScrollView()
-    private let table = ConversationContentTable.make()
-    private let rows = DocumentRowSource()
+    private let transcript = ConversationTranscriptTable<WorkspaceConversationPane>()
+    private var scroll: ThemedScrollView { transcript.scrollView }
+    private var table: ThemedTableView { transcript.tableView }
+    var transcriptRows: [ConversationTimeline.Row] = []
+    private var preparedMarkdownPages: [Int: [[String]]] = [:]
+    private var streamingLabel: ProseLabel?
+    private var displayedDecisionIDs: [ObjectIdentifier] = []
     private let editor = PromptTextView.scrollingPrompt()
     private let composer = NSView(frame: .zero)
     private let attachments = LinuxPromptAttachmentStrip(frame: .zero)
@@ -102,10 +106,8 @@ final class WorkspaceConversationPane: WorkspacePane {
         for view in [scroll, status, composer] {
             view.translatesAutoresizingMaskIntoConstraints = false
         }
-        table.dataSource = rows
-        table.delegate = rows
-        scroll.documentView = table
-        scroll.hasVerticalScroller = true
+        transcript.surface = self
+        transcript.activate()
         editor.textView.placeholder = "Reply to this conversation"
         editor.textView.submitsOnReturn = { true }
         editor.textView.onSubmit = { [weak self] _ in self?.send() }
@@ -193,14 +195,14 @@ final class WorkspaceConversationPane: WorkspacePane {
             submit.heightAnchor.constraint(equalToConstant: PromptChrome.submitSize)
         ])
         owner.contentView = root
-        runtime.onRow = { [weak self] index, row, blocks in
+        runtime.onRow = { [weak self] index, row, pages in
             guard let self else { return }
-            self.rows.updateNativeRow(row, at: index, blocks: blocks, in: self.table)
+            self.present(row, at: index, preparedPages: pages)
             self.needsPresentation = true
         }
         runtime.onStreaming = { [weak self] text in
             guard let self else { return }
-            self.rows.setStreaming(text.flatMap { $0.isEmpty ? nil : $0 }, in: self.table, native: true)
+            self.presentStreaming(text.flatMap { $0.isEmpty ? nil : $0 })
             self.needsPresentation = true
         }
         runtime.onChange = { [weak self] in self?.updateState() }
@@ -210,6 +212,79 @@ final class WorkspaceConversationPane: WorkspacePane {
         updatePermission()
         updateQuestions()
         updateState()
+    }
+
+    private func present(_ row: ConversationTimeline.Row, at index: Int,
+                         preparedPages: [[String]]?) {
+        if index == Int.max {
+            transcript.append(.init(id: .surface(.truncation),
+                content: .surface(.truncation(ConversationRowView.make(for: row).view))))
+            return
+        }
+        precondition(index >= 0 && index <= transcriptRows.count,
+            "native transcript row delivery must be ordered")
+        preparedMarkdownPages[index] = preparedPages
+        if index < transcriptRows.count {
+            transcriptRows[index] = row
+            if case .toolCall = row { transcript.applyToolResult(at: index) }
+            else { transcript.reload() }
+            return
+        }
+
+        // Surface items trail the canonical timeline. Move only this small, host-owned tail
+        // while the shared table appends the row with its normal divider and tool grouping.
+        let streaming = streamingLabel
+        let cards = decisionOrder
+        if streaming != nil { transcript.remove(.surface(.streaming)) }
+        for id in displayedDecisionIDs { transcript.remove(.surface(.decision(id))) }
+        transcriptRows.append(row)
+        transcript.appendTimelineRow(at: index)
+        if let streaming { appendStreaming(streaming) }
+        for card in cards { appendDecision(card) }
+    }
+
+    private func presentStreaming(_ text: String?) {
+        guard let text else {
+            transcript.remove(.surface(.streaming))
+            streamingLabel = nil
+            return
+        }
+        if let streamingLabel {
+            streamingLabel.text = text
+            transcript.noteHeightChanged(of: .surface(.streaming))
+            return
+        }
+        let label = ConversationRowView.streaming(text)
+        streamingLabel = label
+        appendStreaming(label)
+    }
+
+    private func appendStreaming(_ label: ProseLabel) {
+        let item = ConversationTranscriptTable<WorkspaceConversationPane>.Item(
+            id: .surface(.streaming), content: .surface(.streaming(label)))
+        let position = transcript.items.firstIndex { item in
+            if case .surface(.decision) = item.id { return true }
+            return false
+        } ?? transcript.items.count
+        transcript.insert([item], at: position)
+    }
+
+    private func appendDecision(_ card: NSView) {
+        let id = ObjectIdentifier(card)
+        transcript.append(.init(id: .surface(.decision(id)), content: .surface(.decision(card))))
+    }
+
+    private func syncDecisionItems() {
+        let wanted = decisionOrder.map(ObjectIdentifier.init)
+        let wantedSet = Set(wanted)
+        for id in displayedDecisionIDs where !wantedSet.contains(id) {
+            transcript.remove(.surface(.decision(id)))
+        }
+        let shown = Set(displayedDecisionIDs)
+        for card in decisionOrder where !shown.contains(ObjectIdentifier(card)) {
+            appendDecision(card)
+        }
+        displayedDecisionIDs = wanted
     }
 
     /// The queue's head as the production card, after the transcript as the Mac shows it. An
@@ -227,7 +302,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         if let permissionCard { retire(permissionCard, returningFocus: false) }
         permissionCard = card
         if let card { decisionOrder.append(card) }
-        rows.setDecisions(decisionOrder, in: table)
+        syncDecisionItems()
         followTail = true
         needsPresentation = true
     }
@@ -255,7 +330,7 @@ final class WorkspaceConversationPane: WorkspacePane {
             questionCards[id] = card
             decisionOrder.append(card)
         }
-        rows.setDecisions(decisionOrder, in: table)
+        syncDecisionItems()
         followTail = true
         needsPresentation = true
     }
@@ -651,7 +726,9 @@ final class WorkspaceConversationPane: WorkspacePane {
         configurationMenu.appearance = LinuxTheme.appearance
         root.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
         refreshComposerSurface()
-        rows.refreshTheme()
+        transcript.invalidateStyleCaches()
+        NotificationCenter.default.post(AppThemeDidChange())
+        transcript.reload()
         needsPresentation = true
     }
 
@@ -719,8 +796,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         if table.tableColumns.first?.width != scroll.bounds.width || table.frame.width != scroll.bounds.width {
             table.tableColumns.first?.width = scroll.bounds.width
             table.frame.size.width = scroll.bounds.width
-            ConversationVirtualRowHost.stateColumnWidth(in: table)
-            table.noteHeightOfRows(withIndexesChanged: table.visibleRowIndexes)
+            transcript.layoutColumn()
         }
         owner.layoutIfNeeded()
         layoutSpeedMenu()
@@ -787,7 +863,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         }
         for tool in tools(table) where !tool.visibleRect.isEmpty {
             let point = tool.convert(NSPoint(x: tool.bounds.midX, y: tool.bounds.midY), to: root)
-            print("TOOL_FRAME \(originX + Int(point.x * WorkspaceDisplay.scale)),\(WorkspacePaneChrome.headerPixelHeight + Int((size.height - point.y) * WorkspaceDisplay.scale)) height=\(Int(tool.bounds.height)) open=\(rows.expandedTools.count)")
+            print("TOOL_FRAME \(originX + Int(point.x * WorkspaceDisplay.scale)),\(WorkspacePaneChrome.headerPixelHeight + Int((size.height - point.y) * WorkspaceDisplay.scale)) height=\(Int(tool.bounds.height)) open=\(transcript.expandedToolRows.count)")
         }
         print("CONVERSATION_FRAME \(runtime.id.uuidString) rows=\(table.numberOfRows) mounted=\(table.mountedViewCount) turns=\(runtime.completedTurns) prepared=\(prepared) dark=\(LinuxTheme.isDark) status=\(runtime.status)")
         fflush(nil)
@@ -936,6 +1012,10 @@ final class WorkspaceConversationPane: WorkspacePane {
             } else if input.modifiers & (4 | 8) != 0, Int(input.key) == 118 {
                 paste(window: window)
             }
+            else if input.modifiers & (4 | 8) != 0, Int(input.key) == 97,
+                    owner.firstResponder is ThemedTableView {
+                _ = owner.dispatchToContent(event)
+            }
             else if input.modifiers & (4 | 8) != 0, Int(input.key) == 97 {
                 activeTextView.selectAll(nil)
             }
@@ -953,8 +1033,15 @@ final class WorkspaceConversationPane: WorkspacePane {
                 : input.kind == 17 ? .leftMouseDragged
                 : input.action == 3 ? .leftMouseUp : .leftMouseDown
             let point = NSPoint(x: CGFloat(input.x) / WorkspaceDisplay.scale, y: root.bounds.height - CGFloat(input.y) / WorkspaceDisplay.scale)
+            var modifiers: NSEvent.ModifierFlags = []
+            if input.modifiers & 1 != 0 { modifiers.insert(.shift) }
+            if input.modifiers & 2 != 0 { modifiers.insert(.option) }
+            if input.modifiers & 4 != 0 { modifiers.insert(.control) }
+            if input.modifiers & 8 != 0 { modifiers.insert(.command) }
             _ = owner.dispatchToContent(NSEvent(type: type, locationInWindow: point,
-                scrollingDeltaY: input.kind == 16 ? CGFloat(input.key) : 0))
+                modifierFlags: modifiers,
+                scrollingDeltaY: input.kind == 16 ? CGFloat(input.key) : 0,
+                clickCount: max(1, Int(input.clickCount))))
             if input.kind == 16 {
                 followTail = scroll.contentView.bounds.maxY >= table.frame.maxY - 1
             }
@@ -974,5 +1061,38 @@ final class WorkspaceConversationPane: WorkspacePane {
     /// Native text input reaches the focused text view: a decision card's field editor while
     /// one is editing, the prompt otherwise.
     private var activeTextView: NSTextView { (owner.firstResponder as? NSTextView) ?? editor.textView }
+}
+
+extension WorkspaceConversationPane: ConversationTranscriptSurface {
+    func transcriptPreparedPages(at index: Int) -> [[String]]? {
+        preparedMarkdownPages[index]
+    }
+
+    enum SurfaceItemID: Hashable {
+        case streaming
+        case decision(ObjectIdentifier)
+        case truncation
+    }
+
+    enum SurfaceItemContent {
+        case streaming(ProseLabel)
+        case decision(NSView)
+        case truncation(NSView)
+    }
+
+    func transcriptView(for content: SurfaceItemContent, id: SurfaceItemID) -> NSView {
+        switch content {
+        case .streaming(let view): return view
+        case .decision(let view), .truncation(let view): return view
+        }
+    }
+
+    func transcriptRhythm(for content: SurfaceItemContent, id: SurfaceItemID) -> Design.Chat.Rhythm {
+        switch content {
+        case .streaming: return .answer
+        case .decision: return .chrome
+        case .truncation: return .chrome
+        }
+    }
 }
 #endif

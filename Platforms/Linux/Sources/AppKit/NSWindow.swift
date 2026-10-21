@@ -173,7 +173,9 @@ public final class NSWindow: NSResponder {
             cursor(atWindowPoint: pointerLocation).set()
             needsCursorUpdate = false
         }
-        return NSEvent.dispatchLocalMonitors(event)
+        let delivered = NSEvent.dispatchLocalMonitors(event)
+        NSApp.currentEvent = delivered
+        return delivered
     }
 
     /// Deliver a native host event through tracking, local monitors and the retained content
@@ -182,6 +184,7 @@ public final class NSWindow: NSResponder {
     /// Returning the down-hit view lets a host keep its own row selection policy.
     @discardableResult
     public func dispatchToContent(_ event: NSEvent) -> NSView? {
+        defer { NSApp.currentEvent = nil }
         if event.type == .leftMouseDown { pressedView = nil }
         let delivered = dispatch(event)
         defer {

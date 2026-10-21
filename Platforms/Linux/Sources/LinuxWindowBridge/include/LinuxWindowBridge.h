@@ -117,7 +117,7 @@ int tw_worker_wake(uint64_t identity);
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
-    int key, modifiers, action, textCursor, textSelectionLength;
+    int key, modifiers, action, textCursor, textSelectionLength, clickCount;
     double scrollingDeltaX, scrollingDeltaY;
 } TWEvent;
 TWWindow *tw_open(const char *title, int width, int height);

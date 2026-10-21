@@ -15,7 +15,6 @@ final class ConversationVirtualRowHost: NSTableCellView {
     /// The installed content's ceiling, `Design.Chat.columnWidth`.
     private weak var measureCap: NSLayoutConstraint?
 
-    #if !os(Linux)
     /// The transcript's own text selection, which a press on this row's prose belongs to.
     weak var textSelection: TranscriptTextSelection?
 
@@ -42,7 +41,16 @@ final class ConversationVirtualRowHost: NSTableCellView {
         textSelection.track(mouseDown: event)
     }
 
-    #endif
+#if os(Linux)
+    override func mouseDragged(with event: NSEvent) {
+        textSelection?.track(mouseDragged: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        textSelection?.track(mouseUp: event)
+    }
+#endif
+
 
     /// The width of the column this cell sits in, which has to be *stated* — see
     /// `setColumnWidth`. Held on the cell rather than the content so it survives recycling.

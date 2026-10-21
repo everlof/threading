@@ -104,6 +104,7 @@ public enum Design {
     }
     public enum Motion {
         public static let quick: TimeInterval = 0.15
+        public static var reducesMotion: Bool { ProcessInfo.processInfo.environment["THREADING_LINUX_REDUCE_MOTION"] == "1" }
         public static let reducesStatusMotion = ProcessInfo.processInfo.environment["THREADING_LINUX_REDUCE_MOTION"] == "1"
     }
     public enum Size {

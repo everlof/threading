@@ -1,4 +1,7 @@
 import AppKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 // MARK: - Surface
 
@@ -22,6 +25,10 @@ protocol ConversationTranscriptSurface: AnyObject {
     /// The canonical rows every `.timeline` and `.markdown` item points into.
     var transcriptRows: [ConversationTimeline.Row] { get }
 
+    /// Cheap Markdown page boundaries prepared off the UI actor, when the surface has them.
+    /// The row still parses and builds only the page its viewport materializes.
+    func transcriptPreparedPages(at index: Int) -> [[String]]?
+
     /// The view for one of the surface's own items, asked for each time a host materializes it.
     func transcriptView(for content: SurfaceItemContent, id: SurfaceItemID) -> NSView
 
@@ -38,6 +45,8 @@ protocol ConversationTranscriptSurface: AnyObject {
 }
 
 extension ConversationTranscriptSurface {
+    func transcriptPreparedPages(at index: Int) -> [[String]]? { nil }
+
     func transcriptRowView(
         _ view: NSView,
         decorating row: ConversationTimeline.Row,
@@ -52,6 +61,8 @@ extension ConversationTranscriptSurface {
 }
 
 enum ConversationTranscriptDefaults {
+    /// Temporary table estimate until the viewport row is measured.
+    static let estimatedRowHeight: CGFloat = 48
     /// Parsed Markdown blocks kept for rows the viewport recently asked for. Sixty-four covers a
     /// screen of blocks either side of the visible ones without retaining a long answer's worth.
     static let markdownBlockCacheLimit = 64
@@ -242,7 +253,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         table.focusRingType = .none
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.intercellSpacing = .zero
-        table.rowHeight = ConversationDefaults.estimatedRowHeight
+        table.rowHeight = ConversationTranscriptDefaults.estimatedRowHeight
         table.usesAutomaticRowHeights = true
         table.autoresizingMask = [.width]
         tableView = table
@@ -842,7 +853,8 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         let rows = surface.transcriptRows
         guard rows.indices.contains(index) else { return NSView() }
         let row = rows[index]
-        let (nativeView, _) = ConversationRowView.make(for: row)
+        let (nativeView, _) = ConversationRowView.make(
+            for: row, preparedPages: surface.transcriptPreparedPages(at: index))
         configureDisclosureState(in: nativeView, rowIndex: index)
         let view = surface.transcriptRowView(nativeView, decorating: row, at: index)
         rowViews[index] = view

@@ -59,7 +59,7 @@ final class NativeWorkspaceSession {
     private(set) var status = "Loading conversation…"
     private(set) var failure: String?
     private(set) var stopped = false
-    var onRow: ((Int, ConversationTimeline.Row, [String]?) -> Void)?
+    var onRow: ((Int, ConversationTimeline.Row, [[String]]?) -> Void)?
     var onStreaming: ((String?) -> Void)?
     var onChange: (() -> Void)?
     /// Fired when the request at the head of the permission queue changes.
@@ -293,11 +293,11 @@ final class NativeWorkspaceSession {
             let truncated = prepared.truncated
             worker.async { [weak self] in
                 for (index, row) in snapshot.rows.enumerated() {
-                    let blocks = Self.markdownBlocks(for: row)
+                    let pages = Self.markdownPages(for: row)
                     let single = RowSnapshot(rows: [row])
                     NativeConversationDelivery.callbacks.receive {
                         guard let self, !self.stopped else { return }
-                        self.onRow?(index, single.rows[0], blocks)
+                        self.onRow?(index, single.rows[0], pages)
                         self.changed()
                     }
                 }
@@ -936,8 +936,9 @@ final class NativeWorkspaceSession {
         contextReading = (tokens, metrics.contextWindow)
     }
 
-    /// Markdown partitioning stays off the actor. All row jobs use one ordered, paced lane;
-    /// parsed values awaiting it have explicit byte/count admission rather than an unbounded queue.
+    /// All row jobs use one ordered, paced lane. Page boundaries are prepared here so the
+    /// shared viewport row parses and builds only its active page on the UI actor. Byte/count
+    /// admission bounds how much provider text may await UI delivery.
     private func prepareRow(_ row: ConversationTimeline.Row, at index: Int) {
         let source: String?
         switch row {
@@ -954,13 +955,13 @@ final class NativeWorkspaceSession {
         pendingRenderBytes += bytes
         let snapshot = RowSnapshot(rows: [row])
         worker.async { [weak self] in
-            let blocks = source.map(Markdown.sourceBlocks)
+            let pages = source.map { MarkdownView.preparePages($0) }
             NativeConversationDelivery.callbacks.receive {
                 guard let self else { return }
                 self.pendingRenderCount -= 1
                 self.pendingRenderBytes -= bytes
                 guard !self.stopped else { return }
-                self.onRow?(index, snapshot.rows[0], blocks)
+                self.onRow?(index, snapshot.rows[0], pages)
                 self.changed()
             }
         }
@@ -969,9 +970,9 @@ final class NativeWorkspaceSession {
     private func changed() { revision += 1; onChange?() }
     private func report(_ message: String) { failure = message; status = message; changed() }
 
-    private nonisolated static func markdownBlocks(for row: ConversationTimeline.Row) -> [String]? {
+    private nonisolated static func markdownPages(for row: ConversationTimeline.Row) -> [[String]]? {
         switch row {
-        case .assistant(let text), .thinking(let text): return Markdown.sourceBlocks(text)
+        case .assistant(let text), .thinking(let text): return MarkdownView.preparePages(text)
         default: return nil
         }
     }

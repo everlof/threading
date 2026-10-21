@@ -3,11 +3,6 @@ import AppKit
 // MARK: - Conversation Defaults
 
 enum ConversationDefaults {
-    /// Used only until an automatic table row has been measured. Most collapsed tool/fold rows
-    /// land near this value; prose replaces it with a cached identity-specific height as soon as
-    /// it enters the viewport.
-    static let estimatedRowHeight: CGFloat = 48
-
     /// How hard a transcript row insists on being exactly as wide as its column — see
     /// `ConversationVirtualRowHost.setColumnWidth`. One below required so that a row which
     /// cannot fit loses the argument in its own content rather than in an unsatisfiable

@@ -395,6 +395,12 @@
       "reason": "The mouseDown activates nothing of its own: a press in the band disclosureHitOutsets names around a row's chevron is handed to AppKit's own disclosure button through performClick, and every other press goes to super's table tracking unchanged. That button keeps the disclosure-triangle accessibility role, the enabled state and the outline's arrow-key expansion, so nothing becomes mouse-only — the override only widens a 13pt target. Subclassing ThemedControl would make a whole list one control."
     },
     {
+      "path": "Sources/Threading/UI/Design/ConversationVirtualRowHost.swift",
+      "kind": "interactiveComponent",
+      "symbol": "ConversationVirtualRowHost",
+      "reason": "This recyclable table cell routes a press on transcript prose into the shared cross-row text selection gesture. It has no activation or enabled state. Copy and Select All are keyboard actions on its owning ThemedTableView, and links keep their ordinary browser action; turning every recycled transcript cell into a themed control would give text a false button role."
+    },
+    {
       "path": "Sources/Threading/UI/Design/WindowTitleBandView.swift",
       "kind": "interactiveComponent",
       "symbol": "WindowTitleBandView",

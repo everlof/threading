@@ -992,6 +992,7 @@ public enum NSAccessibility {
         case menu
         case menuItem
         case popUpButton
+        case disclosureTriangle
     }
 }
 

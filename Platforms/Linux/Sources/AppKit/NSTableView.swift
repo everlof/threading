@@ -60,6 +60,7 @@ public protocol NSTableViewDelegate: AnyObject {
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool
     func tableViewSelectionDidChange(_ notification: Notification)
+    func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int)
 }
 
 public extension NSTableViewDelegate {
@@ -67,6 +68,7 @@ public extension NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { tableView.rowHeight }
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { true }
     func tableViewSelectionDidChange(_ notification: Notification) {}
+    func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {}
 }
 
 public extension Notification.Name {
@@ -80,6 +82,19 @@ public extension Notification.Name {
 @MainActor
 open class NSTableView: NSView, NSClipViewDocumentObserver {
     public enum Style { case fullWidth, inset }
+    public enum SelectionHighlightStyle { case regular, none }
+    public enum ColumnAutoresizingStyle { case noColumnAutoresizing, uniformColumnAutoresizingStyle }
+    public enum FocusRingType { case none }
+
+    /// A transcript has no table header. A nonnil header needs its own document geometry.
+    open var headerView: NSView? {
+        didSet { precondition(headerView == nil, "table header layout is unavailable") }
+    }
+    open var selectionHighlightStyle: SelectionHighlightStyle = .regular
+    open var focusRingType: FocusRingType = .none
+    open var columnAutoresizingStyle: ColumnAutoresizingStyle = .noColumnAutoresizing {
+        didSet { resizeColumnsToFit() }
+    }
 
     /// The inset table's ten-point document breathing scrolls with its rows. Hosts still
     /// own cell content and row chrome; this is table geometry, not an outer viewport gap.
@@ -145,6 +160,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         didSet {
             precondition(intercellSpacing.height.isFinite && intercellSpacing.height >= 0,
                          "invalid intercell spacing")
+            resizeColumnsToFit()
             updateDocumentGeometry()
         }
     }
@@ -184,13 +200,28 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
     open override var frame: NSRect {
         didSet {
             guard !changingDocumentGeometry, frame.size != oldValue.size else { return }
-            if frame.width != oldValue.width { measuredRows.removeAll() }
+            if frame.width != oldValue.width {
+                resizeColumnsToFit()
+                measuredRows.removeAll()
+            }
             reconcileVisibleRows()
         }
     }
 
     open func addTableColumn(_ column: NSTableColumn) {
         tableColumns.append(column)
+        resizeColumnsToFit()
+    }
+
+    private func resizeColumnsToFit() {
+        guard columnAutoresizingStyle == .uniformColumnAutoresizingStyle else { return }
+        let resizable = tableColumns.filter { $0.resizingMask.contains(.autoresizingMask) }
+        guard !resizable.isEmpty else { return }
+        let fixed = tableColumns.filter { !$0.resizingMask.contains(.autoresizingMask) }
+            .reduce(CGFloat.zero) { $0 + $1.width }
+        let gaps = CGFloat(max(0, tableColumns.count - 1)) * intercellSpacing.width
+        let width = max(1, (bounds.width - fixed - gaps) / CGFloat(resizable.count))
+        for column in resizable { column.width = width }
     }
 
     open func removeTableColumn(_ column: NSTableColumn) {
@@ -391,6 +422,13 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
               point.y >= rowOffset(index),
               point.y < rowOffset(index) + rowHeights[index] else { return -1 }
         return index
+    }
+
+    open func rows(in rect: NSRect) -> NSRange {
+        guard numberOfRows > 0, !rect.isEmpty else { return NSRange(location: 0, length: 0) }
+        let lower = max(0, min(numberOfRows, firstOffset(after: rect.minY) - 1))
+        let upper = max(lower, min(numberOfRows, firstOffset(atOrAfter: rect.maxY)))
+        return NSRange(location: lower, length: upper - lower)
     }
 
     open func selectRowIndexes(_ indexes: IndexSet, byExtendingSelection extend: Bool) {
@@ -611,6 +649,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
             rowView.addSubview(view)
             addSubview(rowView)
             mounted[row] = MountedRow(identity: rowIdentity(at: row), rowView: rowView, view: view)
+            (delegate as? NSTableViewDelegate)?.tableView(self, didAdd: rowView, forRow: row)
         }
         for row in visible {
             guard let cell = mounted[row] else { continue }

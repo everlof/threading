@@ -29,13 +29,19 @@ def selected_outline_row(process_id, identity):
         if app.get_process_id() != process_id or app.get_name() != 'Threading Linux':
             continue
         frame = app.get_child_at_index(0)
+        if frame is None:
+            continue
         for child in range(frame.get_child_count()):
             listed = frame.get_child_at_index(child)
+            if listed is None:
+                continue
             if listed.get_role_name() != 'list' or listed.get_name() != 'Projects':
                 continue
             assert listed.get_child_count() <= 32, 'navigator exceeded TW_NAVIGATOR_MAX_ROWS'
             for row_index in range(listed.get_child_count()):
                 row = listed.get_child_at_index(row_index)
+                if row is None:
+                    continue
                 if row.get_accessible_id() == identity and row.get_state_set().contains(Atspi.StateType.SELECTED):
                     return row
     return None

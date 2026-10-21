@@ -1,4 +1,7 @@
 import AppKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 // MARK: - Conversation Row Presentation
 
@@ -46,16 +49,24 @@ extension ConversationRowView {
     ///
     /// `startsTurn` is the row's own property rather than the caller's guess: what deserves
     /// space above it is a user turn beginning, which only the row kind knows.
-    static func make(for row: ConversationTimeline.Row) -> (view: NSView, startsTurn: Bool) {
+    static func make(
+        for row: ConversationTimeline.Row,
+        preparedPages: [[String]]? = nil
+    ) -> (view: NSView, startsTurn: Bool) {
         switch row {
         case .userMessage(let message):
             return (userBubble(message.text), true)
 
         case .assistant(let markdown):
-            return (MarkdownView(markdown: markdown), false)
+            let view = preparedPages.map { MarkdownView(preparedPages: $0) }
+                ?? MarkdownView(markdown: markdown)
+            return (view, false)
 
         case .thinking(let text):
-            return (thinking(text), false)
+            let view: NSView
+            if let preparedPages { view = MarkdownView(preparedPages: preparedPages, style: .thinking) }
+            else { view = thinking(text) }
+            return (view, false)
 
         case .turnOutcome(let outcome):
             return (turnOutcome(outcome), false)
@@ -68,7 +79,12 @@ extension ConversationRowView {
             // result still matters when it failed, so a refused call falls back to the ordinary
             // tool row and shows what the panel said about it.
             if let spec = call.chart, call.result?.outcome != .failed {
+                #if !os(Linux)
                 return (ChartCardView(spec: spec), false)
+                #else
+                // The Linux host has no chart canvas yet; keep the tool and its result legible.
+                _ = spec
+                #endif
             }
             let view = ToolCallView(tool: call.tool, summary: call.summary, diff: call.diff)
             if let result = call.result {

@@ -9444,14 +9444,10 @@ inside the selected capsule; those journey changes also need their complete inst
 
 The audit still has shared-view work, so this checkpoint does **not** claim one complete UI:
 
-* The Mac `PromptView` owns editor behavior, media tiles and rich drag/drop. Linux still uses
-  `WorkspacePlaceholderPane` / `WorkspaceConversationPane`, `PromptTextView` and a Linux tile.
-  Port the remaining AppKit and application-service boundary APIs so the hosts instantiate
-  `PromptView` itself.
-* The Mac `ConversationTranscriptTable` and `ConversationRowView` own transcript ordering and
-  cell presentation. Linux still has `DocumentRowSource` and its own conversation pane. Move
-  the surface adapter and host event delivery behind the shared transcript classes without
-  eagerly materializing hidden rows.
+* The Mac `PromptView` owns editor behavior and rich drag/drop. Linux still uses
+  `WorkspacePlaceholderPane` / `WorkspaceConversationPane` and `PromptTextView` around the
+  shared prompt content and attachment views. Port the remaining AppKit and
+  application-service boundary APIs so the hosts instantiate `PromptView` itself.
 * `Specimen.Row` still assembles project, session and terminal sidebar wrappers separately from
   the Mac `ProjectRowView`, `SessionRowView` and `ProjectTerminalRowView`, although the inner
   Design content views are shared. Keep the virtual row slot host-owned and reuse the row shell.
@@ -9551,3 +9547,35 @@ through its pane host. The diagnostic link was removed after recording the error
 checked Linux target remains buildable. Porting the full view should migrate these services
 behind AppKit and host adapters before replacing either Linux pane; declaring an empty
 `PromptView` counterpart would only hide the duplicate.
+
+## 263. The native Linux conversation uses the production transcript table, 2026-10-22
+
+The real saved-conversation pane now mounts `ConversationTranscriptTable` from the same source
+as macOS. The shared table owns row order, dividers, adjacent-tool folding, viewport recycling,
+Markdown block paging, disclosure state, row rhythm and text selection. Its production
+`ConversationRowView` factory builds visible cells. Linux's pane supplies only the local
+streaming line, decision cards and input/composer host. `DocumentRowSource` no longer builds
+native conversation rows; it remains for isolated document and diff fixtures. The unused
+`ConversationContentTable` adapter was removed.
+
+The AppKit compatibility layer gained the table callbacks, event click count and text hit
+offset needed by those exact sources. Linux's event loop feeds drag and release events to the
+same `TranscriptTextSelection` object, which owns range, highlight and copy behavior on both
+platforms. Live and replayed assistant Markdown page boundaries are prepared on the session's
+bounded worker before UI delivery. The common table materializes only viewport content and
+parses only an active page. Transcript spacing metrics were extracted from `Design.swift` into
+a source linked unchanged by both builds.
+
+`WindowHarness` and the unsigned macOS Debug app build. The full native Xvfb conversation
+journey passed three turns on one daemon child, multiline and Unicode input, cross-block
+selection/copy, light and dark appearance, retained draft, restart replay and same-thread
+resume. The first reply, highlighted selection and replayed transcript were inspected in the
+real product shell under `out/transcript-table-port/`. The native permission journey covers
+the production tool row, decision card, deny/allow and two-page question flow. Theme and
+structure checks pass without increasing the Linux-only view or constraint baselines.
+
+Full parity still requires the production chart canvas on Linux (the shared row factory
+currently shows the tool row when chart rendering is unavailable), selection autoscroll when
+a drag leaves the transcript viewport, and the enclosing `PromptView` port. The sidebar row
+shells, complete General settings composition and alert interaction model remain the other
+duplicated UI assemblies identified in §262.

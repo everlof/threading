@@ -1996,6 +1996,7 @@ struct WindowHarness {
                                 y: navigatorRoot.bounds.height - CGFloat(event.y) / scale)
             guard let delivered = contentWindow.dispatch(NavigatorMouseEvent(locationInWindow: point))
             else { return nil }
+            defer { NSApp.currentEvent = nil }
             navigatorRoot.hitTest(point)?.mouseDown(with: delivered)
             if actions == nil, accountPicker == nil, savedPicker == nil,
                !projects.isEmpty, let index = outlineRowIndex(at: event),

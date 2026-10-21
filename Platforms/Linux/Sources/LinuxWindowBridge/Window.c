@@ -1199,6 +1199,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 out->x = e.button.x < w->sidebarWidth ? 0 : e.button.x - w->sidebarWidth;
                 out->y = e.button.y - w->terminalTopInset;
                 out->action = e.type == SDL_MOUSEBUTTONUP ? 3 : 1;
+                out->clickCount = e.button.clicks;
                 out->modifiers = tw_modifiers(SDL_GetModState());
             }
         } else if (w->sidebarWidth && e.type == SDL_MOUSEMOTION) {
@@ -1224,6 +1225,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             else continue;
             out->kind = 15; out->x = e.button.x; out->y = e.button.y;
             out->action = e.type == SDL_MOUSEBUTTONUP ? 3 : 1;
+            out->clickCount = e.button.clicks;
             out->modifiers = tw_modifiers(SDL_GetModState());
         } else if (w->terminal && e.type == SDL_MOUSEMOTION &&
                    ((e.motion.state & SDL_BUTTON_LMASK) || w->promptMode)) {

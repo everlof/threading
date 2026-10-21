@@ -403,7 +403,7 @@ enum DocumentUIFixture {
                 root.appearance = LinuxTheme.appearance
                 sidebar.setThemeAppearance()
                 LinuxTheme.appearance.performAsCurrentDrawingAppearance {
-                    rows?.refreshTheme()
+                    NotificationCenter.default.post(AppThemeDidChange())
                 }
                 table?.noteHeightOfRows(withIndexesChanged: table?.visibleRowIndexes ?? [])
                 dirty = true

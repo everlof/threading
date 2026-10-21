@@ -14,7 +14,6 @@ extension Design {
         static let readingCodeSize: CGFloat = 13
         static let readingLineHeight: CGFloat = 1.625
         static let codeLineHeight: CGFloat = 1.45
-        static let headingLeading = Design.Spacing.large
         static func lineSpacing(for font: NSFont, multiple: CGFloat) -> CGFloat {
             let natural = (font.ascender - font.descender + font.leading).rounded(.up)
             return max(0, (font.pointSize * multiple).rounded() - natural)
@@ -27,8 +26,6 @@ extension Design {
         static let turnDividerHeight = ConversationUserRowDefaults.turnDividerHeight
         static let bubbleMaxWidthFraction = ConversationUserRowDefaults.bubbleMaxWidthFraction
         static var bubbleFill: NSColor { LinuxTheme.color("accentMuted") }
-        static let blockSpacing = Design.Spacing.inset
-        static let arrivalRise = Design.Spacing.medium
         // The production tool row: nothing at rest, the control face under the pointer or open.
         static let toolIconWidth: CGFloat = 16
         static var toolRowResting: NSColor { .clear }
@@ -106,6 +103,5 @@ extension ThemedScrollView {
 
 extension Design.Motion {
     // This host retains Core Animation values but has no animation compositor.
-    static let reducesMotion = true
     static let transcriptArrive: TimeInterval = 0.26
 }

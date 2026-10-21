@@ -1,6 +1,7 @@
 @testable import CoreSlice
 
 typealias ConversationContextAttachment = CoreSlice.ConversationContextAttachment
+typealias ConversationTimeline = CoreSlice.ConversationTimeline
 typealias CodeContextPreview = CoreSlice.CodeContextPreview
 typealias DiffDefaults = CoreSlice.DiffDefaults
 typealias GitDiffLine = CoreSlice.GitDiffLine

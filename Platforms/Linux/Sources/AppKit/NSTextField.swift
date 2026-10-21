@@ -32,6 +32,8 @@ open class NSTextFieldCell {
     }
 }
 
+public typealias NSCell = NSTextFieldCell
+
 /// A bounded, Pango-shaped label with attributed style runs and read-only selection.
 /// Editing and IME remain the separate NSTextView/platform input path.
 @MainActor
@@ -579,7 +581,7 @@ open class NSTextField: NSView {
         return max(0, (bounds.height - CGFloat(metrics(at: scale).height) / scale) / 2)
     }
 
-    private func textOffset(at point: NSPoint) -> Int {
+    public func textOffset(at point: NSPoint) -> Int {
         let scale = window?.backingScaleFactor ?? 1
         guard let layout = selectableLayout(at: scale) else { return 0 }
         return layout.textOffset(x: point.x * scale, y: (point.y - textTop(at: scale)) * scale)

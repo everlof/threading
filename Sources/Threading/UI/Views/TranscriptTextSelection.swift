@@ -204,6 +204,9 @@ final class TranscriptTextSelection {
 
     private let appEvents = AppEventObservations()
     private let layout = TranscriptTextLayout()
+#if os(Linux)
+    private var linuxGesture: (hit: Hit, extends: Bool, dragged: Bool)?
+#endif
 
     // MARK: - Initialization
 
@@ -247,6 +250,11 @@ final class TranscriptTextSelection {
             }
         }
 
+#if os(Linux)
+        linuxGesture = (hit, extends, false)
+        return
+#else
+
         var dragged = false
         var lastDrag = event
         NSEvent.startPeriodicEvents(
@@ -288,7 +296,28 @@ final class TranscriptTextSelection {
                 continue
             }
         }
+#endif
     }
+
+#if os(Linux)
+    func track(mouseDragged event: NSEvent) {
+        guard linuxGesture != nil else { return }
+        linuxGesture?.dragged = true
+        extend(toWindowPoint: event.locationInWindow)
+    }
+
+    func track(mouseUp event: NSEvent) {
+        guard let gesture = linuxGesture else { return }
+        linuxGesture = nil
+        if !gesture.dragged, !gesture.extends, event.clickCount == 1 {
+            let link = self.link(at: gesture.hit)
+            clear()
+            if let link { NSWorkspace.shared.open(link) }
+        } else if let range, !range.isEmpty {
+            _ = tableView?.window?.makeFirstResponder(tableView)
+        }
+    }
+#endif
 
     /// Selects what a drag from one point of the table to another would — the gesture's two
     /// ends without its event loop, for callers that already know where they are.
@@ -350,6 +379,9 @@ final class TranscriptTextSelection {
     }
 
     func clear() {
+#if os(Linux)
+        linuxGesture = nil
+#endif
         guard range != nil else { return }
         range = nil
         snapshots.removeAll()
@@ -623,6 +655,7 @@ final class TranscriptTextLayout {
         let character: Int?
     }
 
+    #if !os(Linux)
     private struct Laid {
         weak var field: NSTextField?
         let width: CGFloat
@@ -633,12 +666,18 @@ final class TranscriptTextLayout {
     }
 
     private var laid: Laid?
+    #endif
 
     func location(in field: NSTextField, at point: NSPoint, from view: NSView) -> Location {
         let text = field.attributedStringValue
         guard text.length > 0, let cell = field.cell else { return Location(insertion: 0, character: nil) }
 
         let local = field.convert(point, from: view)
+        #if os(Linux)
+        let insertion = min(text.length, field.textOffset(at: local))
+        let character = field.bounds.contains(local) && insertion < text.length ? insertion : nil
+        return Location(insertion: insertion, character: character)
+        #else
         let flippedY = field.isFlipped ? local.y : field.bounds.height - local.y
         let title = cell.titleRect(forBounds: field.bounds)
         let (manager, container) = layout(of: field, text: text, cell: cell, width: title.width)
@@ -656,8 +695,10 @@ final class TranscriptTextLayout {
         let glyphRect = manager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container)
         let character = glyphRect.contains(inText) ? index : nil
         return Location(insertion: insertion, character: character)
+        #endif
     }
 
+    #if !os(Linux)
     /// The highlight changes only colours, so a label of the same width and length lays out the
     /// same; a streamed update or a resize does not, and is laid out again.
     private func layout(
@@ -691,6 +732,7 @@ final class TranscriptTextLayout {
         )
         return (manager, container)
     }
+    #endif
 }
 
 // MARK: - Defaults

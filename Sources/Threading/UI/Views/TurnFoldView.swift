@@ -1,4 +1,7 @@
 import AppKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 /// The one-line fold a settled turn collapses behind — "Worked for 42s".
 ///

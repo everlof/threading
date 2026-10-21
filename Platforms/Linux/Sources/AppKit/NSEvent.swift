@@ -64,6 +64,7 @@ open class NSEvent {
     private nonisolated let storedCharacters: String?
     private nonisolated let storedScrollingDeltaX: CGFloat
     private nonisolated let storedScrollingDeltaY: CGFloat
+    private nonisolated let storedClickCount: Int
     public private(set) weak var trackingArea: NSTrackingArea?
 
     public init(
@@ -75,7 +76,8 @@ open class NSEvent {
         charactersIgnoringModifiers: String? = nil,
         trackingArea: NSTrackingArea? = nil,
         scrollingDeltaX: CGFloat = 0,
-        scrollingDeltaY: CGFloat = 0
+        scrollingDeltaY: CGFloat = 0,
+        clickCount: Int = 1
     ) {
         storedType = type
         storedWindow = window
@@ -85,6 +87,7 @@ open class NSEvent {
         storedCharacters = charactersIgnoringModifiers
         storedScrollingDeltaX = scrollingDeltaX
         storedScrollingDeltaY = scrollingDeltaY
+        storedClickCount = max(1, clickCount)
         self.trackingArea = trackingArea
     }
 
@@ -96,6 +99,7 @@ open class NSEvent {
     open nonisolated var charactersIgnoringModifiers: String? { storedCharacters }
     open nonisolated var scrollingDeltaX: CGFloat { storedScrollingDeltaX }
     open nonisolated var scrollingDeltaY: CGFloat { storedScrollingDeltaY }
+    open nonisolated var clickCount: Int { storedClickCount }
 
     /// The host may provide an event without a window; the receiving content window supplies
     /// the owner before local monitors inspect its screen-space location.

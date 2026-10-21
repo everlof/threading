@@ -244,8 +244,9 @@ line, a stderr flood, a Unicode stdin echo and the EOF diagnostic on both platfo
 through that transport, the production parser and timeline into the shared conversation rows;
 `tests/stream_conversation_smoke.py` runs it against `tests/stream_agent_fixture.py`, with F10
 sending a second turn to the same process and F11 ending the session.
-This remains a diagnostic document surface:
-ordinary native conversation hosting, the transcript table/controller and web-link activation are still open.
+This remains a diagnostic document surface. The ordinary native conversation now mounts the
+shared `ConversationTranscriptTable`; this fixture still exercises document paging and copy in
+isolation. Web-link activation and complete `PromptView` hosting remain open.
 `WindowHarness --automatic-rows-ui-fixture OUTPUT_DIRECTORY` places assistant blocks in the
 shared conversation cell host with shim-owned automatic heights. Its native journey checks
 viewport-only materialization, released/reused content, Unicode copy, resize and return navigation,
