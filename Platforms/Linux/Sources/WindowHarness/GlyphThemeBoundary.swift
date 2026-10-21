@@ -137,7 +137,8 @@ public enum Design {
                          || name == "exclamationmark.triangle"
                          || name == "checkmark.circle.fill" || name == "return"
                          || name == "stop.fill" || name == "stop.circle"
-                         || name == "arrow.clockwise.circle",
+                         || name == "arrow.clockwise.circle" || name == "xmark"
+                         || name == "play.fill",
                          "No Linux diagnostic symbol artwork for \(name)")
             precondition(slot.isFinite && pointSize.isFinite && slot > 0 && pointSize > 0)
             // Keep the artwork at its optical point size inside the requested layout slot.
@@ -151,7 +152,24 @@ public enum Design {
             let size = NSSize(width: canvasSide, height: canvasSide)
             let image = NSImage(size: size, flipped: false) { canvas in
                 NSColor.white.setFill()
-                if name == "stop.fill" {
+                if name == "xmark" {
+                    let mark = NSBezierPath()
+                    mark.move(to: NSPoint(x: origin + side * 0.22, y: origin + side * 0.22))
+                    mark.line(to: NSPoint(x: origin + side * 0.78, y: origin + side * 0.78))
+                    mark.move(to: NSPoint(x: origin + side * 0.22, y: origin + side * 0.78))
+                    mark.line(to: NSPoint(x: origin + side * 0.78, y: origin + side * 0.22))
+                    mark.lineWidth = max(0.8, side * 0.12 * weightFactor)
+                    mark.lineCapStyle = .round
+                    NSColor.white.setStroke()
+                    mark.stroke()
+                } else if name == "play.fill" {
+                    let play = NSBezierPath()
+                    play.move(to: NSPoint(x: origin + side * 0.26, y: origin + side * 0.15))
+                    play.line(to: NSPoint(x: origin + side * 0.82, y: origin + side * 0.50))
+                    play.line(to: NSPoint(x: origin + side * 0.26, y: origin + side * 0.85))
+                    play.close()
+                    play.fill()
+                } else if name == "stop.fill" {
                     NSBezierPath(roundedRect: NSRect(x: origin + side * 0.18, y: origin + side * 0.18,
                         width: side * 0.64, height: side * 0.64), xRadius: side * 0.06, yRadius: side * 0.06).fill()
                 } else if name == "stop.circle" {

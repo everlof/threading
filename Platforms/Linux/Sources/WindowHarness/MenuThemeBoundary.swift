@@ -47,6 +47,8 @@ extension Design.Spacing {
 extension Design.Radius {
     static let panel: CGFloat = 10
 
+    static func pill(height: CGFloat) -> CGFloat { max(0, height / 2) }
+
     static func edgeReach(of radius: CGFloat, clearing margin: CGFloat) -> CGFloat {
         guard radius > margin, margin >= 0 else { return 0 }
         return radius - (2 * radius * margin - margin * margin).squareRoot()

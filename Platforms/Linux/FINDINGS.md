@@ -9517,3 +9517,16 @@ were inspected after the model extraction.
 93 constraint sites and 8 stack constructors, excluding links to shared Design sources. A new
 Linux-only view hierarchy therefore requires an explicit baseline change and review while the
 remaining sites are migrated.
+
+The opening and reply composers now mount the production `PromptAttachmentThumbnail` from the
+same source as macOS. Its image crop, border, remove control and constraints are no longer
+reimplemented by `LinuxPromptAttachmentTile` and `LinuxPromptAttachmentRemoveButton`; both
+Linux-only classes were removed. The Linux host still owns bounded decoding, file admission,
+submission and AT-SPI registration. The shared tile exposes its existing identity and remove
+rect to that host, while Linux's symbol and radius adapters provide the required AppKit roles.
+`WindowHarness` and the unsigned macOS Debug app build. The real Xvfb attachment journey passed
+Xdnd, URI-list, TIFF, PNG, text paste, image-only submission and removal. Its one- and two-tile
+captures, including the compact window, were inspected in `out/tile-port/`. Opening a tile in
+the media inspector and its context menu remain Mac-only services; Linux leaves those actions
+unadvertised until the host implements them. The enclosing `PromptView`/Linux pane duplication
+remains open.
