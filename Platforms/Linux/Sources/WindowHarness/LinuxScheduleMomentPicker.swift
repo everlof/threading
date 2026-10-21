@@ -13,7 +13,11 @@ enum LinuxScheduleMomentPicker {
         LinuxTheme.setDark(ProcessInfo.processInfo.environment["THREADING_LINUX_PROMPT_DARK"] == "1")
 
         let scale = WorkspaceDisplay.scale
-        let view = LinuxScheduleMomentPickerView()
+        let view = ScheduleMomentPickerView(
+            title: L10n.string("Snooze session"),
+            note: ScheduleMomentPickerStrings.note(
+                L10n.string("The session keeps running while snoozed."), locale: .current),
+            confirmTitle: L10n.string("Snooze"))
         view.appearance = LinuxTheme.appearance
         let size = view.frame.size
         let width = Int(size.width * scale)

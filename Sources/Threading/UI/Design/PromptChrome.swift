@@ -152,28 +152,3 @@ enum PromptChrome {
             glow: true, bevel: .sunken)
     }
 }
-
-#if os(Linux)
-/// The same attachment / editor / footer constraint tree that `PromptView` mounts on macOS.
-/// The Linux host supplies the surface height; the stack allocates that height to the editor.
-@MainActor
-final class LinuxPromptContentLayout {
-    init(surface: NSView, editor: NSView, attachments: LinuxPromptAttachmentStrip,
-         footer: NSStackView) {
-        let stack = NSStackView()
-        PromptChrome.configureContentStack(stack, views: [attachments, editor, footer])
-        surface.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: surface.topAnchor,
-                                       constant: PromptChrome.footerVerticalInset),
-            stack.bottomAnchor.constraint(equalTo: surface.bottomAnchor,
-                                          constant: -PromptChrome.footerVerticalInset),
-            stack.leadingAnchor.constraint(equalTo: surface.leadingAnchor,
-                                           constant: Design.Spacing.inset),
-            stack.trailingAnchor.constraint(equalTo: surface.trailingAnchor,
-                                            constant: -Design.Spacing.inset)
-        ] + PromptChrome.contentSizingConstraints(stack: stack, attachments: attachments,
-            editor: editor, footer: footer))
-    }
-}
-#endif

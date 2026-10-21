@@ -27,45 +27,7 @@ enum SettingsUI {
             )
         }
 
-        let stack = NSStackView(views: sections)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.large
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        let document = SettingsFlippedView()
-        document.addSubview(stack)
-
-        let scrollView = ThemedScrollView()
-        scrollView.hasVerticalScroller = true
-        scrollView.automaticallyAdjustsContentInsets = false
-        scrollView.documentView = document
-        document.translatesAutoresizingMaskIntoConstraints = false
-
-        NSLayoutConstraint.activate([
-            document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
-            document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
-
-            // The column keeps `Design.Size.glowGutter` clear of the scroll view's edges: a
-            // card's halo is a layer shadow, and the scroll view clips at its own bounds, so
-            // a card pinned flush to them loses its glow on that side — cut off flat, while
-            // the vertical spill survives in the section spacing. The top and bottom padding
-            // double as the gutter for the first and last card.
-            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: Design.Spacing.large),
-            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: Design.Size.glowGutter),
-            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -Design.Size.glowGutter),
-            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -Design.Spacing.large)
-        ])
-
-        // Every section fills the column, so cards and their rows share one width — otherwise a
-        // card with no stretchy row (a lone field, a full-width preview) hugs its content and
-        // sits narrower than the rest.
-        for section in sections {
-            section.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        }
-
-        return scrollView
+        return SettingsPageStructure.scrolling(sections)
     }
 
     /// A page under a fixed header: the title, an optional one-line summary and the page-level
@@ -177,44 +139,11 @@ enum SettingsUI {
         actions: [NSView],
         localizes: Bool
     ) -> (view: NSView, summaryField: NSTextField?) {
-        let heading = heading(title, localizes: localizes)
-        // The header's trailing actions are operable content; a long destination summary must
-        // truncate before it pushes them—or the page and its scrolling body—past the pane.
-        // `lineBreakMode` only chooses *how* a field shortens after Auto Layout gives it less
-        // room. The low resistance is what permits that smaller width in the first place.
-        heading.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        var labelViews: [NSView] = [heading]
-        var summaryField: NSTextField?
-        if let summary {
-            let line = NSTextField(labelWithString: localized(summary, if: localizes))
-            line.applyFont(.subheading)
-            line.textColor = Design.Text.secondary
-            line.lineBreakMode = .byTruncatingTail
-            line.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            labelViews.append(line)
-            summaryField = line
-        }
-
-        let labels = NSStackView(views: labelViews)
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.distribution = .fill
-        row.spacing = Design.Spacing.medium
-        row.addArrangedSubview(labels)
-
-        for action in actions {
-            action.setContentHuggingPriority(.required, for: .horizontal)
-            row.addArrangedSubview(action)
-        }
-
-        return (row, summaryField)
+        SettingsPageStructure.header(
+            title: localized(title, if: localizes),
+            summary: summary.map { localized($0, if: localizes) },
+            actions: actions
+        )
     }
 
     /// A collapsible card: a disclosure header carrying the section's name, an optional
@@ -373,21 +302,11 @@ enum SettingsUI {
         help: HelpTopic? = nil,
         localizesTitle: Bool = true
     ) -> NSView {
-        var views: [NSView] = []
-        if let title {
+        let captionView = title.map { title -> NSView in
             let label = caption(title, localizes: localizesTitle)
-            views.append(help.map { titleLine(label, help: $0) } ?? label)
+            return help.map { titleLine(label, help: $0) } ?? label
         }
-        views.append(content)
-
-        let stack = NSStackView(views: views)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = Design.Spacing.small
-        content.translatesAutoresizingMaskIntoConstraints = false
-        content.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
-        content.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
-        return stack
+        return SettingsPageStructure.section(caption: captionView, content: content)
     }
 
     /// The heading for a page — larger than a caption, the one emphasised string.
@@ -405,12 +324,7 @@ enum SettingsUI {
     }
 
     static func caption(_ text: String, localizes: Bool = true) -> NSTextField {
-        let label = NSTextField(
-            labelWithString: localized(text, if: localizes).localizedUppercase
-        )
-        label.applyFont(.caption)
-        label.textColor = Design.Text.tertiary
-        return label
+        SettingsPageStructure.caption(localized(text, if: localizes))
     }
 
     /// What a row's or a section's "?" explains, from English source strings.
@@ -536,38 +450,8 @@ enum SettingsUI {
         if let help, let title = labelViews.first {
             labelViews[0] = titleLine(title, help: help)
         }
-        let labels = NSStackView(views: labelViews)
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-        fill(labels)
-
-        // The labels take the row's slack, rather than a spacer taking it.
-        //
-        // A wrapping subtitle has no intrinsic *width* — the trap this project has already hit
-        // once — so it cannot argue for any. Against a spacer that was willing to grow, it lost
-        // every time and collapsed to its narrowest wrap: measured, the App theme row's
-        // description wrapped to the same six lines at 420pt and at 620pt, with most of the row
-        // empty beside it. The control still sits trailing, because the row fills its width
-        // either way; what changed is which view absorbs what is left over.
-        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        // A highlighted line is single-line where the plain subtitle wraps, so it *has* an
-        // intrinsic width and will happily claim more of the row than there is. Capping it at the
-        // label column turns that claim back into a truncation — the same slack, spent the same
-        // way, whether or not a search is running.
-        for view in highlighted {
-            view.trailingAnchor.constraint(lessThanOrEqualTo: labels.trailingAnchor).isActive = true
-        }
-
-        guard let control else {
-            let row = NSStackView(views: [labels])
-            row.orientation = .horizontal
-            row.distribution = .fill
-            return padded(row)
-        }
-        holdsItsWidth(control)
-        return padded(SettingsAdaptiveControlRow(labels: labels, control: control))
+        return SettingsRowStructure.assemble(labelViews, highlighted: highlighted,
+                                             control: control)
     }
 
     /// A wrapping secondary line, and the two things that decide how wide it comes out.
@@ -584,11 +468,7 @@ enum SettingsUI {
     /// pins it to the column. Either alone would settle today's arrangement; together they leave
     /// nothing for a later layout pass to decide.
     private static func wrappingSubtitle(_ text: String) -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.applyFont(.subheading)
-        label.textColor = Design.Text.secondary
-        label.setContentHuggingPriority(.init(1), for: .horizontal)
-        return label
+        SettingsRowStructure.wrappingSubtitle(text)
     }
 
     /// Pins every wrapping line in a label column to the column's own width, with a floor.
@@ -608,18 +488,7 @@ enum SettingsUI {
     /// says so at `.required` and wins; a control whose 380 points are a wish yields them to the
     /// sentence beside it, which is the trade a narrow pane should make.
     private static func fill(_ labels: NSStackView) {
-        for view in labels.arrangedSubviews {
-            guard let field = view as? NSTextField, field.cell?.wraps == true else { continue }
-            let pin = field.widthAnchor.constraint(equalTo: labels.widthAnchor)
-            pin.priority = NSLayoutConstraint.Priority(
-                NSLayoutConstraint.Priority.defaultLow.rawValue + 1
-            )
-            let floor = field.widthAnchor.constraint(
-                greaterThanOrEqualToConstant: SettingsUIDefaults.minimumTextWidth
-            )
-            floor.priority = .defaultHigh
-            NSLayoutConstraint.activate([pin, floor])
-        }
+        SettingsRowStructure.fill(labels)
     }
 
     /// A row's title with the "?" that carries what used to be its third and fourth sentences.
@@ -671,15 +540,7 @@ enum SettingsUI {
     /// The trailing half of a row keeps its fitting width, so the labels absorb the slack — the
     /// contract `assemble` documents, stated for a stack as well as for a plain control.
     private static func holdsItsWidth(_ control: NSView) {
-        control.setContentHuggingPriority(.required, for: .horizontal)
-        // The line above said nothing to a stack: `setContentHuggingPriority` is an `NSView`
-        // property a stack view does not lay out by, which the composer's column had already
-        // found out the hard way. `huggingPriority` is the one it reads, and it starts at 250 —
-        // the same willingness to grow the label column has. Nothing else is touched: a stack's
-        // clipping resistance is already required — measured for `ControlRowView`, see
-        // `design-system.md` — so the group keeps its content width under pressure and the row's
-        // own labels are what give.
-        (control as? NSStackView)?.setHuggingPriority(.required, for: .horizontal)
+        SettingsRowStructure.holdsItsWidth(control)
     }
 
     /// The common case — no caller needs the subtitle back.
@@ -818,26 +679,7 @@ enum SettingsUI {
     }
 
     private static func padded(_ content: NSView) -> NSView {
-        let container = NSView()
-        content.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(content)
-
-        // A row is full-bleed inside its `SettingsCard`, so the card's corner is what decides how
-        // far in this column of labels can start — see `Design.Spacing.inset(inside:)`. Every row
-        // asks the same question, which is what keeps the column straight down a card whose first
-        // and last rows are the only ones the curve actually reaches.
-        let sideMargins = [
-            content.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Design.Spacing.inset),
-            content.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Design.Spacing.inset)
-        ]
-        NSLayoutConstraint.activate(sideMargins + [
-            content.topAnchor.constraint(equalTo: container.topAnchor, constant: Design.Spacing.medium),
-            content.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Design.Spacing.medium),
-            container.heightAnchor.constraint(greaterThanOrEqualToConstant: SettingsUIDefaults.rowHeight)
-        ])
-        container.holdAtContentInset(sideMargins)
-
-        return container
+        SettingsRowStructure.padded(content)
     }
 
     // MARK: - Controls
@@ -911,69 +753,6 @@ enum SettingsUI {
     private static func localized(_ text: String, if localizes: Bool) -> String {
         localizes ? L10n.string(text) : text
     }
-}
-
-// MARK: - Fixed Settings Page
-
-/// A settings page whose title band stays fixed above a caller-owned body.
-///
-/// The summary field is retained so a live page can update its count without replacing the
-/// header — or, transitively, the scrolling view and all of its visible rows.
-final class SettingsPageView: NSView {
-    private let summaryField: NSTextField?
-
-    init(header: NSView, summaryField: NSTextField?, body: NSView) {
-        self.summaryField = summaryField
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-
-        let separator = SeparatorView()
-        for child in [header, separator, body] {
-            child.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(child)
-        }
-
-        NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.large),
-            // The title aligns to the panels, whose halo gutter is held inside the scroll clip.
-            header.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: Design.Size.glowGutter
-            ),
-            header.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -Design.Size.glowGutter
-            ),
-
-            separator.topAnchor.constraint(
-                equalTo: header.bottomAnchor,
-                constant: Design.Spacing.medium
-            ),
-            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
-
-            body.topAnchor.constraint(equalTo: separator.bottomAnchor),
-            body.leadingAnchor.constraint(equalTo: leadingAnchor),
-            body.trailingAnchor.constraint(equalTo: trailingAnchor),
-            body.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
-    }
-
-    func updateSummary(_ text: String) {
-        summaryField?.stringValue = text
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-}
-
-// MARK: - Flipped View
-
-/// Top-left origin, so a short page anchors to the top of a tall scroll view.
-final class SettingsFlippedView: NSView {
-    override var isFlipped: Bool { true }
 }
 
 // MARK: - Settings UI Defaults

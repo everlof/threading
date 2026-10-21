@@ -16,9 +16,6 @@ final class WorkspaceSettingsPane: WorkspacePane {
 
     private let owner = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
     private let root = NSView(frame: .zero)
-    private let page = NSView(frame: .zero)
-    private let scroll = ThemedScrollView(frame: .zero)
-    private let document = SettingsDocumentView(frame: .zero)
     private let done = ThemedButton()
     private var toggles: [(ConfirmationPrompt, ThemedToggle)] = []
     private var presentedSize = NSSize.zero
@@ -35,26 +32,9 @@ final class WorkspaceSettingsPane: WorkspacePane {
     func takeInitialViewport() -> (Int, Int)? { nil }
 
     private func buildPage() {
-        let heading = NSTextField(labelWithString: "General")
-        heading.font = Design.Typography.heading()
-        heading.textColor = Design.Text.label
-
         done.title = "Done"
         done.emphasis = .secondary
         done.action = { [weak self] in self?.onDone?() }
-
-        let header = NSStackView(views: [heading, NSView(), done])
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.distribution = .fill
-        header.spacing = Design.Spacing.small
-        header.translatesAutoresizingMaskIntoConstraints = false
-        let separator = SeparatorView()
-        separator.translatesAutoresizingMaskIntoConstraints = false
-
-        let section = NSTextField(labelWithString: "CONFIRMATIONS")
-        section.font = Design.Typography.subheading()
-        section.textColor = Design.Text.secondary
         let rows = ConfirmationPrompt.suppressible.compactMap { prompt -> NSView? in
             guard let copy = prompt.suppression else { return nil }
             let toggle = ThemedToggle()
@@ -69,101 +49,24 @@ final class WorkspaceSettingsPane: WorkspacePane {
                 self?.needsPresentation = true
             }
             toggles.append((prompt, toggle))
-            return makeRow(title: copy.settingsTitle, subtitle: copy.settingsSubtitle,
-                           control: toggle)
+            return SettingsRowStructure.make(title: copy.settingsTitle,
+                                             subtitle: copy.settingsSubtitle, control: toggle)
         }
         let card = SettingsCard(rows: rows)
-        let sections = NSStackView(views: [section, card])
-        sections.orientation = .vertical
-        sections.alignment = .leading
-        sections.spacing = Design.Spacing.small
-        sections.translatesAutoresizingMaskIntoConstraints = false
-        document.addSubview(sections)
-
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        document.translatesAutoresizingMaskIntoConstraints = false
-        scroll.documentView = document
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        page.addSubview(header)
-        page.addSubview(separator)
-        page.addSubview(scroll)
+        let section = SettingsPageStructure.section(
+            caption: SettingsPageStructure.caption("Confirmations"), content: card)
+        let body = SettingsPageStructure.scrolling([section])
+        let header = SettingsPageStructure.header(
+            title: "General", summary: nil, actions: [done])
+        let page = SettingsPageView(header: header.view,
+                                    summaryField: header.summaryField, body: body)
         SettingsPageCanvasLayout.install(page: page, in: root)
-        NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: page.topAnchor, constant: Design.Spacing.large),
-            header.leadingAnchor.constraint(equalTo: page.leadingAnchor,
-                                            constant: Design.Size.glowGutter),
-            header.trailingAnchor.constraint(equalTo: page.trailingAnchor,
-                                             constant: -Design.Size.glowGutter),
-            separator.topAnchor.constraint(equalTo: header.bottomAnchor,
-                                           constant: Design.Spacing.medium),
-            separator.leadingAnchor.constraint(equalTo: page.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: page.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: separator.bottomAnchor),
-            scroll.leadingAnchor.constraint(equalTo: page.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: page.trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: page.bottomAnchor),
-            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
-            document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
-            sections.topAnchor.constraint(equalTo: document.topAnchor,
-                                          constant: Design.Spacing.large),
-            sections.leadingAnchor.constraint(equalTo: document.leadingAnchor,
-                                              constant: Design.Size.glowGutter),
-            sections.trailingAnchor.constraint(equalTo: document.trailingAnchor,
-                                               constant: -Design.Size.glowGutter),
-            sections.bottomAnchor.constraint(equalTo: document.bottomAnchor,
-                                             constant: -Design.Spacing.large),
-            card.widthAnchor.constraint(equalTo: sections.widthAnchor)
-        ])
 
         for index in toggles.indices {
             toggles[index].1.nextKeyView = index + 1 < toggles.count
                 ? toggles[index + 1].1 : done
         }
         done.nextKeyView = toggles.first?.1
-    }
-
-    private func makeRow(title: String, subtitle: String, control: ThemedToggle) -> NSView {
-        let name = NSTextField(labelWithString: title)
-        name.font = Design.Typography.body()
-        name.textColor = Design.Text.label
-        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let explanation = NSTextField(wrappingLabelWithString: subtitle)
-        explanation.font = Design.Typography.subheading()
-        explanation.textColor = Design.Text.secondary
-        explanation.setContentHuggingPriority(.init(1), for: .horizontal)
-        let labels = NSStackView(views: [name, explanation])
-        labels.orientation = .vertical
-        labels.alignment = .leading
-        labels.spacing = Design.Spacing.hairline
-        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let pin = explanation.widthAnchor.constraint(equalTo: labels.widthAnchor)
-        pin.priority = .init(NSLayoutConstraint.Priority.defaultLow.rawValue + 1)
-        let floor = explanation.widthAnchor.constraint(
-            greaterThanOrEqualToConstant: SettingsAdaptiveControlMetrics.minimumTextWidth)
-        floor.priority = .defaultHigh
-        NSLayoutConstraint.activate([pin, floor])
-        control.setContentHuggingPriority(.required, for: .horizontal)
-        let adaptive = SettingsAdaptiveControlRow(labels: labels, control: control)
-        let container = NSView()
-        adaptive.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(adaptive)
-        let sides = [
-            adaptive.leadingAnchor.constraint(equalTo: container.leadingAnchor,
-                                              constant: Design.Spacing.inset),
-            adaptive.trailingAnchor.constraint(equalTo: container.trailingAnchor,
-                                               constant: -Design.Spacing.inset)
-        ]
-        NSLayoutConstraint.activate(sides + [
-            adaptive.topAnchor.constraint(equalTo: container.topAnchor,
-                                          constant: Design.Spacing.medium),
-            adaptive.bottomAnchor.constraint(equalTo: container.bottomAnchor,
-                                             constant: -Design.Spacing.medium),
-            container.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
-        ])
-        container.holdAtContentInset(sides)
-        return container
     }
 
     func setThemeAppearance() {
@@ -245,8 +148,4 @@ final class WorkspaceSettingsPane: WorkspacePane {
     }
 }
 
-@MainActor
-private final class SettingsDocumentView: NSView {
-    override var isFlipped: Bool { true }
-}
 #endif

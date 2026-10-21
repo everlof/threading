@@ -115,6 +115,9 @@ open class NSScrollView: NSView {
     open var hasVerticalScroller = false
     open var autohidesScrollers = false
     open var hasHorizontalScroller = false
+    /// The SDL content root has no system safe-area adjustment. Keep AppKit's setting so
+    /// production views can explicitly turn the adjustment off without a Linux-only fork.
+    open var automaticallyAdjustsContentInsets = false
     /// Breathing belongs inside the scroll surface; the clip, not the scroll view, is inset.
     open var contentInsets = NSEdgeInsets() {
         didSet {

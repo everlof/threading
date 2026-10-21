@@ -100,7 +100,8 @@ def assert_sidebar_region_colors(path, palette, scale=1):
     well = tuple(round(channel * 255) for channel in palette['sidebar.navigatorWell'][:3])
     assert pixel(100, height // 2) == well, 'navigator painted the generic surface instead of its authored well'
     selection = tuple(round(channel * 255) for channel in palette['accent'][:3])
-    assert pixel(9 * scale, 54 * scale) == selection, 'saved-session selection still uses the diagnostic blue'
+    # Sample the face of the capsule, clear of its antialiased edge, icon and row title.
+    assert pixel(100 * scale, 67 * scale) == selection, 'saved-session selection still uses the diagnostic blue'
     first = palette['sidebar.gradientStart'][:3]
     last = palette['sidebar.gradientEnd'][:3]
     # These samples miss the header's words, buttons and bottom rule. The wash spans the

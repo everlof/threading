@@ -314,7 +314,16 @@ def capture(name):
                 and conversation and 'prepared=true' in conversation)
 
     eventually(shell_prepared, 'complete native shell ready for capture')
-    subprocess.run(['import', '-window', window, str(output / name)], check=True, timeout=5)
+    def painted():
+        path = output / name
+        subprocess.run(['import', '-window', window, str(path)], check=True, timeout=5)
+        try:
+            assert_sidebar_pane_chrome(path, sidebar_width, scale)
+        except AssertionError:
+            return False
+        return True
+
+    eventually(painted, 'complete native shell painted for capture')
 
 
 def brightness(path, x, y, width, height, statistic):

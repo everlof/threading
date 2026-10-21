@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Inventory and ratchet AppKit structure outside the macOS design adapter.
+"""Inventory and ratchet AppKit structure outside the shared design components.
 
 This is a source-level ceiling, not a claim that the remaining sites are portable. The report
 names the files to migrate; the check keeps ordinary product work from adding more direct
-view/controller ownership, constraint construction, or backend drawing in feature code.
+view/controller ownership, constraint construction, or backend drawing in feature code. Linux
+runtime sources are counted separately so a new host-only hierarchy cannot hide behind Mac's
+existing allowance. Symlinks to production Design sources are excluded from the Linux count.
 """
 
 from __future__ import annotations
@@ -16,7 +18,9 @@ import re
 import sys
 
 
-CATEGORIES = ("controllers", "platform_views", "constraints", "drawing")
+MAC_CATEGORIES = ("controllers", "platform_views", "constraints", "drawing")
+LINUX_CATEGORIES = ("linux_platform_views", "linux_constraints", "linux_stacks")
+CATEGORIES = MAC_CATEGORIES + LINUX_CATEGORIES
 DECLARATION = re.compile(
     r"\bclass\s+[A-Za-z_][A-Za-z0-9_]*(?:\s*<[^>{}]*>)?\s*:\s*"
     r"(?:AppKit\s*\.\s*)?(NS[A-Za-z0-9_]+)\b"
@@ -29,6 +33,7 @@ CONSTRAINT = re.compile(
 DRAWING = re.compile(
     r"\boverride\s+func\s+draw\s*\(|\b(?:NSBezierPath|NSGraphicsContext|CGContext)\b"
 )
+STACK = re.compile(r"\bNSStackView\s*\(")
 
 
 def executable_text(source: str) -> str:
@@ -117,8 +122,27 @@ def inventory(root: Path) -> tuple[Counter[str], dict[str, dict[str, int]]]:
         counts = classify(path.read_text(encoding="utf-8"))
         if any(counts.values()):
             relative = path.relative_to(root).as_posix()
-            files[relative] = {name: counts[name] for name in CATEGORIES if counts[name]}
+            files[relative] = {name: counts[name] for name in MAC_CATEGORIES if counts[name]}
             totals.update(counts)
+
+    linux_root = root / "Platforms" / "Linux" / "Sources"
+    linux_runtime = list((linux_root / "WindowHarness").glob("*.swift"))
+    linux_runtime.append(linux_root / "Harness" / "Specimen.swift")
+    for path in sorted(linux_runtime):
+        if path.is_symlink():
+            continue
+        source = path.read_text(encoding="utf-8")
+        counts = classify(source)
+        linux_counts = Counter({
+            "linux_platform_views": counts["platform_views"],
+            "linux_constraints": counts["constraints"],
+            "linux_stacks": len(STACK.findall(executable_text(source))),
+        })
+        if any(linux_counts.values()):
+            relative = path.relative_to(root).as_posix()
+            files[relative] = {name: linux_counts[name] for name in LINUX_CATEGORIES
+                               if linux_counts[name]}
+            totals.update(linux_counts)
     return totals, files
 
 

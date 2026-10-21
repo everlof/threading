@@ -9417,3 +9417,50 @@ Five Codex permission combinations passed before the wider matrix was stopped. T
 report has no approved pixel baselines. All eight Mac `ComposerWindowFitTests` passed, including
 the shortest allowed window and the column's width cap. Theme-boundary, UI-structure, whitespace
 and both vendor verification checks passed.
+
+## 262. Shared view ownership audit, 2026-10-21
+
+Sharing only a constraint list still left two code paths assembling the same view. The General
+settings page and its rows now use `SettingsPageStructure` and `SettingsRowStructure` from
+production Design on both hosts. The Mac `SettingsComponents` facade and the Linux General pane
+delegate their common scrolling page, header, section and row hierarchy to those components.
+The opening and reply prompts now mount `PromptContentView` for the editor, attachment slot and
+footer. Both composers mount `PromptAttachmentStripView` for the scroll document, tile ordering
+and rail size. The custom-time Mac sheet controller and Linux SDL host now present the same
+`ScheduleMomentPickerView`; only window lifecycle and input dispatch remain with the hosts.
+
+The Linux build and settings-row constraint contract passed. The real X11 General page,
+opening composer, two-image attachment rail and custom Snooze picker were inspected. The
+opening-composer journey passed focus, resizing, menus, Unicode editing, accessibility and an
+exact one-agent launch. The picker keyboard journey selected tomorrow's quarter-hour. A
+clipboard-based attachment journey passed image-only submission, two previews, removal, URI
+paste, TIFF-to-PNG, raw PNG and text fallback. The separate Xdnd drag journey remains to be
+rerun under the bundle's installed X11 environment; its simulated drop was not received in the
+concurrently loaded development container. macOS render and picker tests are being rerun after
+the shared-view refactor.
+
+The audit still has shared-view work, so this checkpoint does **not** claim one complete UI:
+
+* The Mac `PromptView` owns editor behavior, media tiles and rich drag/drop. Linux still uses
+  `WorkspacePlaceholderPane` / `WorkspaceConversationPane`, `PromptTextView` and a Linux tile.
+  Port the remaining AppKit and application-service boundary APIs so the hosts instantiate
+  `PromptView` itself.
+* The Mac `ConversationTranscriptTable` and `ConversationRowView` own transcript ordering and
+  cell presentation. Linux still has `DocumentRowSource` and its own conversation pane. Move
+  the surface adapter and host event delivery behind the shared transcript classes without
+  eagerly materializing hidden rows.
+* `Specimen.Row` still assembles project, session and terminal sidebar wrappers separately from
+  the Mac `ProjectRowView`, `SessionRowView` and `ProjectTerminalRowView`, although the inner
+  Design content views are shared. Keep the virtual row slot host-owned and reuse the row shell.
+* Linux text prompts still construct `LinuxThemedTextPromptView` beside the Mac
+  `ThemedAlertContentView`; they currently share `ThemedAlertLayout` but not the content view.
+* The Linux General settings pane still presents fewer sections than the Mac General page.
+  Reuse the complete page composition after its model and settings-store adapters are portable.
+
+SDL bitmap roots, visible virtual row frames and popup-window placement are host geometry,
+not duplicate content views. The Pango-backed title label is likewise a rendering shim pending
+the shared label's animation backend. These exceptions need review whenever their content grows.
+`check_ui_structure.py` now also ratchets the runtime Linux host's 15 native-view declarations,
+93 constraint sites and 8 stack constructors, excluding links to shared Design sources. A new
+Linux-only view hierarchy therefore requires an explicit baseline change and review while the
+remaining sites are migrated.

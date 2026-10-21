@@ -16,10 +16,11 @@ final class PromptView: NSView, ThemedComponent {
 
     // MARK: - Properties
 
-    private let contentStack = NSStackView()
+    private lazy var contentStack = PromptContentView(
+        views: [contextRail, attachmentScrollView, scrollView, footerRow],
+        attachments: attachmentScrollView, editor: scrollView, footer: footerRow)
     private let contextRail = ConversationContextRailView(mode: .composer)
-    private let attachmentScrollView = ThemedScrollView()
-    private let attachmentStack = NSStackView()
+    private let attachmentScrollView = PromptAttachmentStripView()
     private let scrollView = ThemedScrollView()
     private let textView = PromptTextView(frame: .zero, textContainer: nil)
     private let textUndoManager = UndoManager()
@@ -430,7 +431,6 @@ final class PromptView: NSView, ThemedComponent {
         }
 
         setupTextView()
-        setupAttachmentStrip()
         setupFooterRow()
 
         submitButton.image = NSImage(
@@ -444,9 +444,6 @@ final class PromptView: NSView, ThemedComponent {
         submitButton.action = #selector(primaryAction)
         submitButton.setAccessibilityIdentifier("composer.prompt.submit")
         submitButton.translatesAutoresizingMaskIntoConstraints = false
-
-        PromptChrome.configureContentStack(contentStack,
-            views: [contextRail, attachmentScrollView, scrollView, footerRow])
 
         // The row takes the stack's own step rather than a tighter one. Closed up to `small` it
         // sat nearer the text than the box's padding held it off its own edges, and the two
@@ -503,9 +500,7 @@ final class PromptView: NSView, ThemedComponent {
 
             submitButton.widthAnchor.constraint(equalToConstant: PromptViewDefaults.submitSize),
             submitButton.heightAnchor.constraint(equalToConstant: PromptViewDefaults.submitSize)
-        ] + PromptChrome.contentSizingConstraints(stack: contentStack,
-            attachments: attachmentScrollView, editor: scrollView, footer: footerRow)
-            + submitPinnedConstraints)
+        ] + submitPinnedConstraints)
 
         contentTrailingBesideSubmit = contentStack.trailingAnchor.constraint(
             equalTo: submitButton.leadingAnchor,
@@ -621,24 +616,6 @@ final class PromptView: NSView, ThemedComponent {
         }
     }
 
-    private func setupAttachmentStrip() {
-        attachmentStack.orientation = .horizontal
-        attachmentStack.alignment = .centerY
-        attachmentStack.spacing = Design.Spacing.small
-        // The scroll view owns the document's frame. Auto Layout still owns each thumbnail
-        // inside the stack, while `layoutAttachmentStrip` states the document's scrollable
-        // width from their fixed semantic size.
-        attachmentStack.translatesAutoresizingMaskIntoConstraints = true
-
-        attachmentScrollView.documentView = attachmentStack
-        attachmentScrollView.hasHorizontalScroller = false
-        attachmentScrollView.hasVerticalScroller = false
-        attachmentScrollView.horizontalScrollElasticity = .automatic
-        attachmentScrollView.verticalScrollElasticity = .none
-        attachmentScrollView.isHidden = true
-        attachmentScrollView.translatesAutoresizingMaskIntoConstraints = false
-    }
-
     /// Which surface this composer belongs to, so what is typed matches what it becomes.
     ///
     /// `.chrome` for the session composer and the commit message; the conversation's reply box
@@ -695,7 +672,7 @@ final class PromptView: NSView, ThemedComponent {
     /// it converges because `updateHeight` only touches the constraint when the value moves.
     override func layout() {
         super.layout()
-        layoutAttachmentStrip()
+        attachmentScrollView.layoutTiles()
         updateHeight()
         completionPresenter.reposition()
     }
@@ -1054,12 +1031,7 @@ final class PromptView: NSView, ThemedComponent {
         attachmentPreparationTask = nil
         pendingAttachmentPaths.removeAll()
         attachments.removeAll()
-        attachmentStack.arrangedSubviews.forEach {
-            attachmentStack.removeArrangedSubview($0)
-            $0.removeFromSuperview()
-        }
-        attachmentScrollView.isHidden = true
-        attachmentScrollView.contentView.scroll(to: .zero)
+        attachmentScrollView.clearTiles()
         updateSubmitState()
         updateHeight()
     }
@@ -1300,9 +1272,7 @@ final class PromptView: NSView, ThemedComponent {
                 self?.onRequestImageComment?(attachment.path)
             }
         }
-        attachmentStack.addArrangedSubview(thumbnail)
-        attachmentScrollView.isHidden = false
-        layoutAttachmentStrip()
+        attachmentScrollView.appendTile(thumbnail)
     }
 
     /// The strip as a collection the lightbox can walk: every attachment, the pressed one
@@ -1356,10 +1326,7 @@ final class PromptView: NSView, ThemedComponent {
     private func removeAttachment(id: UUID, thumbnail: PromptAttachmentThumbnail) {
         guard let index = attachments.firstIndex(where: { $0.id == id }) else { return }
         attachments.remove(at: index)
-        attachmentStack.removeArrangedSubview(thumbnail)
-        thumbnail.removeFromSuperview()
-        attachmentScrollView.isHidden = attachments.isEmpty
-        layoutAttachmentStrip()
+        attachmentScrollView.removeTile(thumbnail)
         updateSubmitState()
         updateHeight()
         focus()
@@ -1383,25 +1350,6 @@ final class PromptView: NSView, ThemedComponent {
 
     private func appending(paths: [String], to text: String) -> String {
         PromptAttachment.appending(paths: paths, to: text)
-    }
-
-    private func layoutAttachmentStrip() {
-        guard !attachments.isEmpty else {
-            attachmentStack.frame = .zero
-            return
-        }
-
-        let count = CGFloat(attachments.count)
-        let contentWidth = count * Design.Size.promptAttachmentThumbnail
-            + max(0, count - 1) * Design.Spacing.small
-        attachmentStack.frame = NSRect(
-            origin: .zero,
-            size: NSSize(
-                width: max(contentWidth, attachmentScrollView.contentSize.width),
-                height: Design.Size.promptAttachmentThumbnail
-            )
-        )
-        attachmentStack.layoutSubtreeIfNeeded()
     }
 
     /// The submit control brightens once there is something to send, which is the only cue

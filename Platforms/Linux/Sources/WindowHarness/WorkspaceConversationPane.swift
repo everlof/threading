@@ -31,7 +31,6 @@ final class WorkspaceConversationPane: WorkspacePane {
     private let attachments = LinuxPromptAttachmentStrip(frame: .zero)
     private let composerFooter = NSStackView()
     private let composerSpacer = NSView(frame: .zero)
-    private var composerContentLayout: LinuxPromptContentLayout!
     private let modelChip = ChipView()
     private let modeChip = ChipView()
     private let effortChip = ChipView()
@@ -171,8 +170,9 @@ final class WorkspaceConversationPane: WorkspacePane {
         contextLabel.isHidden = true
         contextLabel.setAccessibilityIdentifier("conversation.context")
         submit.translatesAutoresizingMaskIntoConstraints = false
-        composerContentLayout = LinuxPromptContentLayout(surface: composer, editor: editor,
-            attachments: attachments, footer: composerFooter)
+        PromptContentView(views: [attachments, editor, composerFooter],
+                          attachments: attachments, editor: editor,
+                          footer: composerFooter).mount(in: composer)
         attachments.onChange = { [weak self] in self?.updateState() }
         attachments.onLiteralPath = { [weak self] path in
             guard let self else { return }

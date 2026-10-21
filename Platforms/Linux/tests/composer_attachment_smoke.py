@@ -136,7 +136,9 @@ try:
             time.sleep(.2)
             xdo('mousemove', '--sync', '--window', window,
                 str(bounds.x + bounds.width // 2), str(bounds.y + bounds.height // 2))
-            time.sleep(.3)
+            # Xdnd's enter/position handshake is processed by the same loop that paints the
+            # composer. Let it finish a frame before releasing under loaded build machines.
+            time.sleep(1.5)
             xdo('mouseup', '1')
 
         drop_on_editor()

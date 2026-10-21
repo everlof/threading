@@ -6,7 +6,7 @@ import LinuxWindowBridge
 /// The Linux prompt's image rail. The host owns submission; this Design component owns the
 /// bounded preview work, presentation and removal gesture for both composers.
 @MainActor
-final class LinuxPromptAttachmentStrip: ThemedScrollView {
+final class LinuxPromptAttachmentStrip: PromptAttachmentStripView {
     struct AccessibleTile {
         let id: String
         let name: String
@@ -53,7 +53,6 @@ final class LinuxPromptAttachmentStrip: ThemedScrollView {
         }
     }
 
-    private let content = NSStackView()
     private let queue = DispatchQueue(label: "threading.linux.composer-attachments",
                                       qos: .userInitiated)
     private let results = Results()
@@ -80,26 +79,6 @@ final class LinuxPromptAttachmentStrip: ThemedScrollView {
         onChange?()
     }
     var hasImages: Bool { !tiles.isEmpty }
-    var attachmentHeight: CGFloat {
-        hasImages ? Design.Size.promptAttachmentThumbnail + Design.Spacing.medium : 0
-    }
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        content.orientation = .horizontal
-        content.alignment = .centerY
-        content.spacing = Design.Spacing.small
-        content.translatesAutoresizingMaskIntoConstraints = true
-        documentView = content
-        hasHorizontalScroller = false
-        hasVerticalScroller = false
-        horizontalScrollElasticity = .automatic
-        verticalScrollElasticity = .none
-        isHidden = true
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
     /// Nonmedia paths remain literal editor text, as on macOS. Decode one media path at a time;
     /// no file read or image codec runs on the window's UI thread.
     @discardableResult
@@ -147,9 +126,8 @@ final class LinuxPromptAttachmentStrip: ThemedScrollView {
                     guard let self, let tile else { return }
                     self.remove(tile)
                 }
-                content.addArrangedSubview(tile)
+                appendTile(tile)
                 tiles.append(tile)
-                layoutTiles()
             } else {
                 onLiteralPath?(prepared.path)
             }
@@ -162,22 +140,9 @@ final class LinuxPromptAttachmentStrip: ThemedScrollView {
         results.reset(to: generation)
         preparingCount = 0
         clipboardReads = 0
-        content.setViews([], in: .leading)
+        clearTiles()
         tiles.removeAll(keepingCapacity: true)
-        layoutTiles()
         onChange?()
-    }
-
-    func layoutTiles() {
-        let side = Design.Size.promptAttachmentThumbnail
-        let gap = Design.Spacing.small
-        let total = CGFloat(tiles.count) * side + CGFloat(max(0, tiles.count - 1)) * gap
-        let documentFrame = NSRect(x: 0, y: 0, width: max(total, contentView.bounds.width),
-                                   height: side)
-        if content.frame != documentFrame { content.frame = documentFrame }
-        content.layoutSubtreeIfNeeded()
-        isHidden = tiles.isEmpty
-        content.needsDisplay = true
     }
 
     func submissionText(_ text: String) -> String {
@@ -211,9 +176,7 @@ final class LinuxPromptAttachmentStrip: ThemedScrollView {
     private func remove(_ tile: LinuxPromptAttachmentTile) {
         guard let index = tiles.firstIndex(where: { $0 === tile }) else { return }
         tiles.remove(at: index)
-        content.removeArrangedSubview(tile)
-        tile.removeFromSuperview()
-        layoutTiles()
+        removeTile(tile)
         onChange?()
     }
 }

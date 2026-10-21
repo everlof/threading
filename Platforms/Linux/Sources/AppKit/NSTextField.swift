@@ -13,6 +13,10 @@ open class NSTextFieldCell {
     /// The field this cell measures for; a themed cell reads its font.
     public internal(set) weak var owner: NSTextField?
     public required init() {}
+    public var wraps: Bool {
+        guard let owner, !owner.usesSingleLineMode else { return false }
+        return owner.lineBreakMode == .byWordWrapping || owner.lineBreakMode == .byCharWrapping
+    }
     /// Linux's Pango label has no private AppKit cell padding: its shaped bounds are its cell.
     public var cellSize: NSSize { owner?.intrinsicContentSize ?? .zero }
     public func cellSize(forBounds bounds: NSRect) -> NSSize { cellSize }

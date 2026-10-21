@@ -62,7 +62,6 @@ final class WorkspacePlaceholderPane {
     private let attachments = LinuxPromptAttachmentStrip(frame: .zero)
     private let composerFooter = NSStackView()
     private let composerFooterSpacer = NSView()
-    private var composerContentLayout: LinuxPromptContentLayout!
     private let composerStartButton = ThemedButton()
     private lazy var projectChip = ChipView()
     private lazy var providerChip = ChipView()
@@ -165,9 +164,9 @@ final class WorkspacePlaceholderPane {
         ] {
             chip.setContentCompressionResistancePriority(.init(Float(priority)), for: .horizontal)
         }
-        composerContentLayout = LinuxPromptContentLayout(
-            surface: composerSurface, editor: composerEditor,
-            attachments: attachments, footer: composerFooter)
+        PromptContentView(views: [attachments, composerEditor, composerFooter],
+                          attachments: attachments, editor: composerEditor,
+                          footer: composerFooter).mount(in: composerSurface)
         composerBottom = PromptChrome.mountOpeningColumn(composerColumn, in: composerRoot,
             prompt: composerSurface, actionRow: actionRow)
         composerRoot.addSubview(choiceSurface)
