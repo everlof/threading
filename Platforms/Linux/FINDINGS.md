@@ -9436,8 +9436,11 @@ exact one-agent launch. The picker keyboard journey selected tomorrow's quarter-
 clipboard-based attachment journey passed image-only submission, two previews, removal, URI
 paste, TIFF-to-PNG, raw PNG and text fallback. The separate Xdnd drag journey remains to be
 rerun under the bundle's installed X11 environment; its simulated drop was not received in the
-concurrently loaded development container. macOS render and picker tests are being rerun after
-the shared-view refactor.
+concurrently loaded development container. The Mac app compiled the changed Swift sources, but
+the render and picker tests remain unverified: Xcode's result bundle and the last Linux screenshot
+write hit `ENOSPC` before the tests finished. A storage cleanup proposal is pending. The native
+conversation capture now waits for the full-height sidebar paint and samples selection colour
+inside the selected capsule; those journey changes also need their complete installed rerun.
 
 The audit still has shared-view work, so this checkpoint does **not** claim one complete UI:
 
@@ -9459,7 +9462,10 @@ The audit still has shared-view work, so this checkpoint does **not** claim one 
 
 SDL bitmap roots, visible virtual row frames and popup-window placement are host geometry,
 not duplicate content views. The Pango-backed title label is likewise a rendering shim pending
-the shared label's animation backend. These exceptions need review whenever their content grows.
+the shared label's animation backend. The Linux `AgentActivityBeamView` is currently an inert
+placeholder because its saved-runtime rows have no verified working-state input; it must be
+replaced by the production beam when that state becomes available. These exceptions need review
+whenever their content grows.
 `check_ui_structure.py` now also ratchets the runtime Linux host's 15 native-view declarations,
 93 constraint sites and 8 stack constructors, excluding links to shared Design sources. A new
 Linux-only view hierarchy therefore requires an explicit baseline change and review while the
