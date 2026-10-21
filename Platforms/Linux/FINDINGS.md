@@ -9510,7 +9510,9 @@ The desktop text-prompt model is also shared now: `TextPromptRequest.swift` is t
 type on both hosts, and the worktree's wording comes from `WorktreePromptSpec.request`.
 Linux's modal host keeps only its native accessibility identity,
 input loop and window flags around that request. The Linux package compiled after this change;
-the X11 prompt journey and the macOS app build were not rerun at this checkpoint.
+the X11 prompt journey was not rerun at this checkpoint. An unsigned macOS Debug build and the
+`WorktreeCreationPromptRenderTests` shipping-shell test passed. Its light and dark dialog captures
+were inspected after the model extraction.
 `check_ui_structure.py` now also ratchets the runtime Linux host's 15 native-view declarations,
 93 constraint sites and 8 stack constructors, excluding links to shared Design sources. A new
 Linux-only view hierarchy therefore requires an explicit baseline change and review while the
