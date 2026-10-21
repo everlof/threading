@@ -9539,3 +9539,15 @@ AT-SPI, Unicode edit and selection actions; its selected-text and provider-menu 
 inspected in `out/selection-port/`. The production completion panel's selected row was rendered
 and inspected in both light and dark appearances. Linux still exposes only the checked theme
 snapshot, so other themes require their palette export before this proves visual parity there.
+
+A direct diagnostic link of the complete Mac `PromptView.swift` into `WindowHarness` still fails
+to compile. Most early missing model names (`ComposerCapability`, `ComposerCompletionQuery`,
+`WorkspaceFileReference`, `WorkspaceFileMentionQuery`, `SessionID`) already exist in Linux
+`CoreSlice`; they need explicit module imports or aliases. The next substantive seam is AppKit:
+`NSDraggingInfo`/`NSDragOperation`, drag registration, image pasteboard reads, bitmap decode,
+and text layout methods. The view also calls Mac application services for media inspection,
+attachment custody, file promises and thumbnail preparation. Linux currently implements those
+through its pane host. The diagnostic link was removed after recording the errors, so the
+checked Linux target remains buildable. Porting the full view should migrate these services
+behind AppKit and host adapters before replacing either Linux pane; declaring an empty
+`PromptView` counterpart would only hide the duplicate.
