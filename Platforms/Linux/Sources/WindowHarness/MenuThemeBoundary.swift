@@ -111,6 +111,13 @@ struct SelectionSurface {
 
     static func stated(over ground: NSColor) -> SelectionSurface {
         let fill = LinuxTheme.color("selection")
-        return SelectionSurface(fill: fill, ink: .selection)
+        let paintedGround = NSColor(name: NSColor.Name("threading.linux.selection.ground")) { appearance in
+            var resolved = NSColor.clear
+            appearance.performAsCurrentDrawingAppearance {
+                resolved = fill.composited(over: ground)
+            }
+            return resolved
+        }
+        return SelectionSurface(fill: fill, ink: Design.Ink(on: paintedGround))
     }
 }

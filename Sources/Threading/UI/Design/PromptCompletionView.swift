@@ -1,4 +1,7 @@
 import AppKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 /// Presentation-only completion value shared by commands, skills and workspace files.
 struct PromptCompletionItem: Equatable {

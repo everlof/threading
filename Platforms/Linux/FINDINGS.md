@@ -9483,6 +9483,20 @@ Pango/AppKit intrinsic-height difference needs a shim-level fix, not another pro
 The Linux worktree request also repeats Mac's `WorktreeCreation.promptRequest` title, message,
 button and placeholder values; that model should become portable with the shared prompt host. The
 broader prompt/transcript/sidebar migrations listed above remain open.
+
+The next `PromptView` dependency slice is now shared source on Linux: `ConversationContextRailView`,
+`PromptCompletionView` and `ThemedSurfaceView` compile unchanged apart from conditional CoreSlice
+imports and the appearance invalidation appropriate to Linux's retained dynamic colours. The
+completion panel was mounted from the production presenter in a Linux render fixture in both
+appearances; its three rows, unavailable state and selected state passed, and both renders were
+visually inspected. The shim now exposes selected accessibility state, middle-button down events,
+scroll content size and window resize/move notification names. This is preparation, not a claim
+that Linux mounts `PromptView`: the editor still needs undo, workspace-file, media, drag and text
+delegate APIs. The render exercise also found that Linux's `SelectionSurface` adapter measured
+selection ink against an accent role rather than the painted selection over its actual ground;
+it now measures against the painted result. This palette policy remains a separate Linux adapter
+and should be replaced by the production `SelectionSurface` when its contrast dependencies are
+portable.
 `check_ui_structure.py` now also ratchets the runtime Linux host's 15 native-view declarations,
 93 constraint sites and 8 stack constructors, excluding links to shared Design sources. A new
 Linux-only view hierarchy therefore requires an explicit baseline change and review while the

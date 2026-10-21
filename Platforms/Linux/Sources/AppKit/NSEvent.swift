@@ -6,13 +6,14 @@ import Foundation
 open class NSEvent {
     public enum EventType: Int, Sendable {
         case leftMouseDown, leftMouseUp, leftMouseDragged, mouseMoved, rightMouseDown, keyDown
+        case otherMouseDown
         case mouseEntered, mouseExited, scrollWheel
 
         var mask: EventTypeMask { EventTypeMask(rawValue: 1 << rawValue) }
         var carriesPointer: Bool {
             switch self {
             case .leftMouseDown, .leftMouseUp, .leftMouseDragged, .mouseMoved,
-                 .rightMouseDown, .mouseEntered, .mouseExited, .scrollWheel: true
+                 .rightMouseDown, .otherMouseDown, .mouseEntered, .mouseExited, .scrollWheel: true
             case .keyDown: false
             }
         }
@@ -26,6 +27,7 @@ open class NSEvent {
         public static let leftMouseDragged = EventTypeMask(rawValue: 1 << EventType.leftMouseDragged.rawValue)
         public static let mouseMoved = EventTypeMask(rawValue: 1 << EventType.mouseMoved.rawValue)
         public static let rightMouseDown = EventTypeMask(rawValue: 1 << EventType.rightMouseDown.rawValue)
+        public static let otherMouseDown = EventTypeMask(rawValue: 1 << EventType.otherMouseDown.rawValue)
         public static let keyDown = EventTypeMask(rawValue: 1 << EventType.keyDown.rawValue)
         public static let scrollWheel = EventTypeMask(rawValue: 1 << EventType.scrollWheel.rawValue)
     }

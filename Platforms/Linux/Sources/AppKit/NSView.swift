@@ -29,6 +29,7 @@ open class NSResponder: Equatable {
     open func mouseExited(with event: NSEvent) {}
     open func mouseMoved(with event: NSEvent) {}
     open func rightMouseDown(with event: NSEvent) {}
+    open func otherMouseDown(with event: NSEvent) {}
     open func keyDown(with event: NSEvent) {}
     open func scrollWheel(with event: NSEvent) {}
     open func performKeyEquivalent(with event: NSEvent) -> Bool { false }
@@ -109,7 +110,9 @@ open class NSView: NSResponder, NSLayoutItem {
             layer?.frame = NSRect(origin: .zero, size: frame.size)
             let widthDelta = frame.width - oldValue.width
             let heightDelta = frame.height - oldValue.height
-            if self === window?.contentView { window?.contentHeightDidChange(by: heightDelta) }
+            if self === window?.contentView {
+                window?.contentHeightDidChange(by: heightDelta)
+            }
             if widthDelta != 0 || heightDelta != 0 {
                 for child in subviews {
                     var resized = child.frame
@@ -124,6 +127,9 @@ open class NSView: NSResponder, NSLayoutItem {
             }
             needsDisplay = true
             needsLayout = true
+            if self === window?.contentView, widthDelta != 0 || heightDelta != 0 {
+                window?.contentSizeDidChange()
+            }
         }
     }
 
@@ -892,6 +898,7 @@ open class NSView: NSResponder, NSLayoutItem {
     private var accessibilityRoleValue: NSAccessibility.Role?
     private var accessibilityIdentifierValue: String?
     private var accessibilityStoredValue: Any?
+    private var accessibilitySelectedValue = false
     private var accessibilityTitleValue: String?
     private var accessibilityHelpValue: String?
     private weak var accessibilityExplicitParent: AnyObject?
@@ -906,6 +913,12 @@ open class NSView: NSResponder, NSLayoutItem {
     open func accessibilityIdentifier() -> String? { accessibilityIdentifierValue }
     open func setAccessibilityValue(_ value: Any?) { accessibilityStoredValue = value }
     open func accessibilityValue() -> Any? { accessibilityStoredValue }
+    open func setAccessibilitySelected(_ selected: Bool) {
+        guard accessibilitySelectedValue != selected else { return }
+        accessibilitySelectedValue = selected
+        NSAccessibility.post(element: self, notification: .valueChanged)
+    }
+    open func isAccessibilitySelected() -> Bool { accessibilitySelectedValue }
     open func accessibilityPerformPress() -> Bool { false }
     open func isAccessibilityEnabled() -> Bool { true }
     open func setAccessibilityTitle(_ title: String?) { accessibilityTitleValue = title }
@@ -956,7 +969,7 @@ public struct NSUserInterfaceItemIdentifier: RawRepresentable, Hashable, Sendabl
 }
 
 public enum NSAccessibility {
-    public enum Notification: Sendable { case valueChanged, layoutChanged }
+    public enum Notification: Sendable { case valueChanged, layoutChanged, created }
     @MainActor public static var notificationHandler: ((NSView, Notification) -> Void)?
 
     @MainActor public static func post(element: NSView, notification: Notification) {

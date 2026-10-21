@@ -106,6 +106,8 @@ open class NSScrollView: NSView {
         set { contentView.documentView = newValue }
     }
 
+    open var contentSize: NSSize { contentView.bounds.size }
+
     open var drawsBackground = false
     /// The Linux host draws no bezel; themed scroll views state `.noBorder`, and other kinds
     /// are refused rather than silently dropped.

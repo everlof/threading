@@ -35,10 +35,16 @@ final class ThemedSurfaceView: NSView, ThemedComponent {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+#if os(Linux)
+        // The Linux renderer retains the dynamic NSColor recipe and resolves it in this
+        // view's effective appearance on every draw. Invalidate its cached raster.
+        needsDisplay = true
+#else
         // Through `AppThemeRefresh` rather than by re-running the caller's `applySurface`: the
         // recorded surface is the one the view is actually wearing, including a state a caller
         // set later, and it is re-resolved in this view's *own* effective appearance — which is
         // not always the app's, since the Component Gallery previews both at once.
         AppThemeRefresh.repaint(self)
+#endif
     }
 }

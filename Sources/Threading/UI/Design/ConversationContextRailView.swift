@@ -1,4 +1,7 @@
 import AppKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 /// Compact receipts for references and review comments.
 ///

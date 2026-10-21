@@ -5,6 +5,9 @@ import Foundation
 /// lifecycle and first-responder ownership. Title bars and window ordering remain native-host work.
 @MainActor
 public final class NSWindow: NSResponder {
+    public static let didResizeNotification = Notification.Name("NSWindowDidResizeNotification")
+    public static let didMoveNotification = Notification.Name("NSWindowDidMoveNotification")
+    public static let willCloseNotification = Notification.Name("NSWindowWillCloseNotification")
     public var backgroundColor: NSColor = .windowBackgroundColor
     /// Native raster hosts observe this revision after yielding to asynchronous UI deliveries.
     public private(set) var displayRevision: UInt64 = 0
@@ -38,7 +41,13 @@ public final class NSWindow: NSResponder {
     public var firstResponder: NSResponder? { focusedResponder ?? self }
     public weak var initialFirstResponder: NSView?
     public var isKeyWindow = true
-    public var screenOrigin: NSPoint = .zero
+    public var screenOrigin: NSPoint = .zero {
+        didSet {
+            if screenOrigin != oldValue {
+                NotificationCenter.default.post(name: Self.didMoveNotification, object: self)
+            }
+        }
+    }
     public var mouseLocationOutsideOfEventStream: NSPoint { pointerLocation }
     /// The raster host chooses this from its drawable scale. It is fixed for the lifetime of
     /// this bounded content owner; display migration still belongs to the native window host.
@@ -106,6 +115,9 @@ public final class NSWindow: NSResponder {
             guard root !== newValue else { return }
 
             if let oldRoot = root {
+                if newValue == nil {
+                    NotificationCenter.default.post(name: Self.willCloseNotification, object: self)
+                }
                 oldRoot.notifyWillMove(toWindow: nil)
                 focusDidLeave(oldRoot)
                 discardCursorRects(in: oldRoot)
@@ -198,6 +210,8 @@ public final class NSWindow: NSResponder {
             recognizers.forEach { $0.pressEnded(delivered) }
         case .rightMouseDown:
             pointerTarget(at: delivered.locationInWindow)?.rightMouseDown(with: delivered)
+        case .otherMouseDown:
+            pointerTarget(at: delivered.locationInWindow)?.otherMouseDown(with: delivered)
         case .scrollWheel:
             root?.hitTest(delivered.locationInWindow)?.scrollWheel(with: delivered)
         case .keyDown:
@@ -282,6 +296,10 @@ public final class NSWindow: NSResponder {
         guard delta != 0, Self.pointerWindow === self else { return }
         pointerLocation.y += delta
         needsCursorUpdate = true
+    }
+
+    func contentSizeDidChange() {
+        NotificationCenter.default.post(name: Self.didResizeNotification, object: self)
     }
 
     private func discardCursorRects(in view: NSView) {
