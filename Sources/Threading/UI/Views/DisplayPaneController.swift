@@ -97,10 +97,10 @@ final class DisplayPaneController: NSViewController {
     slot.translatesAutoresizingMaskIntoConstraints = false
     let size = ThemedIconButton.Target.toolbar.size
     NSLayoutConstraint.activate([
-      // A docked pane never receives the window's one toggle, so its corner keeps no room for
-      // it: `+` takes the margin the toggle stands at in the side panel, instead of leaving a
-      // button-sized hole at the end of every docked row.
-      slot.widthAnchor.constraint(equalToConstant: dockID == nil ? size.width : 0),
+      // A docked or detached pane never receives the window's one toggle, so its corner keeps
+      // no room for it: `+` takes the margin the toggle stands at in the side panel, instead of
+      // leaving a button-sized hole at the end of every other row.
+      slot.widthAnchor.constraint(equalToConstant: isSidePanel ? size.width : 0),
       slot.heightAnchor.constraint(equalToConstant: size.height)
     ])
     return slot
@@ -384,15 +384,47 @@ final class DisplayPaneController: NSViewController {
 
   // MARK: - Lifecycle
 
-  let dockID: UUID?
-  private let dockSessionID: SessionID?
+  /// Where this panel stands, which decides whose tabs it holds and which slice of the session's
+  /// layout it reads and writes.
+  enum Scope: Equatable {
+    /// The window's own side panel. It follows the selection and holds the panel toggle.
+    case sidePanel
+    /// A docked group, pinned to the session whose layout holds it.
+    case dock(UUID, session: SessionID)
+    /// The whole of a detached window, pinned to one session for the window's life. It writes
+    /// no layout itself: the window's frame lives in the same record as its tabs, so the window
+    /// controller writes both (`onTabsChanged` is its cue, `detachedWindowSlice` its tabs).
+    case detachedWindow(UUID, session: SessionID)
+  }
+
+  let scope: Scope
+
+  var dockID: UUID? {
+    if case let .dock(id, _) = scope { return id }
+    return nil
+  }
+
+  var detachedWindowID: UUID? {
+    if case let .detachedWindow(id, _) = scope { return id }
+    return nil
+  }
+
+  /// The one session a docked or detached panel answers for; nil for the side panel.
+  private var pinnedSessionID: SessionID? {
+    switch scope {
+    case .sidePanel: return nil
+    case let .dock(_, session), let .detachedWindow(_, session): return session
+    }
+  }
+
+  private var isSidePanel: Bool { scope == .sidePanel }
+
   var onTabsChanged: (() -> Void)?
   var peerTabs: ((SessionID) -> [PaneTab])?
   var revealPeerTab: ((SessionID, (PaneTab) -> Bool) -> PaneTab?)?
 
   init(
-    dockID: UUID? = nil,
-    dockSessionID: SessionID? = nil,
+    scope: Scope = .sidePanel,
     extensionPanels: ExtensionPanelRouting? = nil,
     customizationLookup: @escaping ComponentCustomizationHost.Lookup = {
       ComponentCustomizationProviderSlot.shared.customization(for: $0)
@@ -407,8 +439,7 @@ final class DisplayPaneController: NSViewController {
     extensionBackdropImageResolver: @escaping ComponentCustomizationHost.ImageResolver =
       ExtensionComponentResourceResolver.image
   ) {
-    self.dockID = dockID
-    self.dockSessionID = dockSessionID
+    self.scope = scope
     self.extensionPanels = extensionPanels ?? ExtensionManager.shared
     self.customizationLookup = customizationLookup
     self.browserFactory = browserFactory
@@ -426,7 +457,7 @@ final class DisplayPaneController: NSViewController {
 
     appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
       self?.advanceContentRevision(for: event.sessionID)
-      if self?.dockID == nil { self?.ensureAttachmentsTab(for: event.sessionID) }
+      if self?.isSidePanel == true { self?.ensureAttachmentsTab(for: event.sessionID) }
     }
     appEvents.observe(ControlGrantsDidChange.self) { [weak self] event in
       guard let self, event.sessionID == self.currentSessionID else { return }
@@ -547,6 +578,11 @@ final class DisplayPaneController: NSViewController {
     if ControlGrantStore.shared.isManager(sessionID) {
       choices.insert(PanelCommands.supervision, at: 0)
     }
+    // A detached window offers only what it could hold. Offering the rest would build a tab the
+    // window then has to refuse, or one it would forget at the next launch.
+    if detachedWindowID != nil {
+      choices = choices.filter { Self.makesDetachableTab(id: $0.id, target: $0.target) }
+    }
     var entries = choices.map { entry in
       panelCommandEntry(id: entry.id, title: L10n.string(entry.title), icon: entry.icon,
                         target: entry.target, sessionID: sessionID)
@@ -557,7 +593,9 @@ final class DisplayPaneController: NSViewController {
                                       icon: "puzzlepiece.extension", target: command.panelTarget,
                                       sessionID: sessionID))
     }
-    if MCPToolCatalog.hasEnabledThemeTools {
+    // The theme document takes over the main window's side panel, so a detached window has
+    // nowhere to show it.
+    if MCPToolCatalog.hasEnabledThemeTools, detachedWindowID == nil {
       entries.append(.separator)
       entries.append(panelCommandEntry(id: AppCommands.ID.currentTheme,
                                       title: L10n.string("Current Theme"), icon: "paintbrush.pointed",
@@ -575,6 +613,20 @@ final class DisplayPaneController: NSViewController {
       })
     }
     return entries
+  }
+
+  /// Whether a `+` choice makes a tab a detached window could hold: the rule
+  /// `PaneTab.canLiveInDetachedWindow` states, asked before the tab exists.
+  private static func makesDetachableTab(id: String, target: PanelCommandTarget?) -> Bool {
+    switch target {
+    case .privateBrowser, .notificationTest, .webExtensions, .supervision:
+      return false
+    case .simulator, .androidDevice, .realDevice, .audit, .browser, .overview, .compare,
+      .nativePlugin, .nativePluginSection, .extensionPanel:
+      return true
+    case nil:
+      return id != AppCommands.ID.newTerminalTab
+    }
   }
 
   /// The real window routes through the host plane; standalone fixtures use the same panel
@@ -770,7 +822,7 @@ final class DisplayPaneController: NSViewController {
         lessThanOrEqualTo: headerView.heightAnchor
       ),
       newTabButton.trailingAnchor.constraint(
-        equalTo: panelToggleSlot.leadingAnchor, constant: dockID == nil ? -gap : 0),
+        equalTo: panelToggleSlot.leadingAnchor, constant: isSidePanel ? -gap : 0),
       newTabButton.centerYAnchor.constraint(equalTo: headerView.contentCenterYAnchor),
 
       // The toggle in the corner, the margin its own — `+` measures from it, and the strip and
@@ -1910,7 +1962,7 @@ final class DisplayPaneController: NSViewController {
         existing.supervision?.refresh()
         return
       }
-      guard dockID == nil, !(peerTabs?(sessionID).contains { $0.supervision != nil } ?? false) else { return }
+      guard isSidePanel, !(peerTabs?(sessionID).contains { $0.supervision != nil } ?? false) else { return }
       let controller = SupervisionListViewController(managerID: sessionID)
       controller.onOpen = { [weak self] in self?.onOpenSupervisedChat?($0) }
       controller.onMessage = { [weak self] in self?.onMessageSupervisedChat?($0) }
@@ -3036,15 +3088,26 @@ final class DisplayPaneController: NSViewController {
   /// comes back after a relaunch. A no-op once loaded; an empty marker is left for a session with
   /// nothing stored, so its layout file is not re-read on every access.
   private func restoreIfNeeded(_ sessionID: SessionID) {
-    guard dockSessionID == nil || dockSessionID == sessionID else { return }
+    guard pinnedSessionID == nil || pinnedSessionID == sessionID else { return }
     guard tabsBySession[sessionID] == nil else { return }
     guard let panel = DisplayPaneStore.shared.loadLayout(for: sessionID) else {
       tabsBySession[sessionID] = []
       return
     }
 
-    let storedTabs = dockID.map { id in panel.tabs.filter { $0.dockID == id } } ?? panel.panelTabs
-    let storedActiveID = dockID.map { id in panel.dockLayout?.nodes.first { $0.id == id }?.activeTabID } ?? panel.activeTabID
+    let storedTabs: [PersistedTab]
+    let storedActiveID: String?
+    switch scope {
+    case .sidePanel:
+      storedTabs = panel.panelTabs
+      storedActiveID = panel.activeTabID
+    case let .dock(id, _):
+      storedTabs = panel.tabs.filter { $0.dockID == id }
+      storedActiveID = panel.dockLayout?.nodes.first { $0.id == id }?.activeTabID
+    case let .detachedWindow(id, _):
+      storedTabs = panel.tabs(inDetachedWindow: id)
+      storedActiveID = panel.detachedWindows.first { $0.id == id.uuidString }?.activeTabID
+    }
     var tabs: [DisplayTab] = []
     // Image tabs written before a shown image became a row in the Attachments list. They are
     // converted rather than reopened, and the conversion is deferred to *after* the session's
@@ -3267,7 +3330,7 @@ final class DisplayPaneController: NSViewController {
     // Finish the migration in storage as well as memory. Transform the stored payload rather
     // than serializing the restored controllers: an extension panel can legitimately be
     // unavailable this early, and merging Overview must not erase unrelated tabs with it.
-    if dockID == nil, storedOverviewTabs.count > 1, let storedOverview {
+    if isSidePanel, storedOverviewTabs.count > 1, let storedOverview {
       let migratedPanelTabs = storedTabs.filter { tab in
         (tab.kind != .files && tab.kind != .info) || tab.id == storedOverview.id
       }
@@ -3385,6 +3448,24 @@ final class DisplayPaneController: NSViewController {
   /// Writes the session's current tabs and selection to disk.
   private func persist(_ sessionID: SessionID) {
     advanceContentRevision(for: sessionID)
+    let slice = persistedSlice(for: sessionID)
+    switch scope {
+    case .sidePanel:
+      DisplayPaneStore.shared.saveLayout(tabs: slice.tabs, activeID: slice.activeID, for: sessionID)
+    case let .dock(id, _):
+      DisplayPaneStore.shared.saveDockTabs(slice.tabs, activeID: slice.activeID, dockID: id, for: sessionID)
+    case .detachedWindow:
+      // The window writes its slice together with its frame, on the cue below. Written here
+      // alone, the tabs would name a window the document does not yet declare, and the decoder
+      // refuses that document.
+      break
+    }
+    onTabsChanged?()
+  }
+
+  /// What this panel would write for a session: its persistable tabs, the routes of plugin tabs
+  /// still waiting for discovery, and the selection among them.
+  private func persistedSlice(for sessionID: SessionID) -> (tabs: [PersistedTab], activeID: String?) {
     let tabs = tabsBySession[sessionID] ?? []
     var persistedTabs = tabs.compactMap(persisted)
     for pending in pendingNativeTabsBySession[sessionID] ?? [] {
@@ -3403,12 +3484,20 @@ final class DisplayPaneController: NSViewController {
           : nil
       }
       ?? persistedTabs.first?.id
-    if let dockID {
-      DisplayPaneStore.shared.saveDockTabs(persistedTabs, activeID: active, dockID: dockID, for: sessionID)
-    } else {
-      DisplayPaneStore.shared.saveLayout(tabs: persistedTabs, activeID: active, for: sessionID)
+    return (persistedTabs, active)
+  }
+
+  /// A detached window's tabs as its record stores them, each naming the window. Nil for any
+  /// other scope, which writes its own slice.
+  func detachedWindowSlice() -> (tabs: [PersistedTab], activeID: String?)? {
+    guard case let .detachedWindow(id, session) = scope else { return nil }
+    let slice = persistedSlice(for: session)
+    let tabs = slice.tabs.map { tab in
+      var tab = tab
+      tab.host = PersistedTab.detachedWindowHost(id)
+      return tab
     }
-    onTabsChanged?()
+    return (tabs, slice.activeID)
   }
 
   private func advanceContentRevision(for sessionID: SessionID) {
@@ -3686,11 +3775,20 @@ enum DisplayDocumentNavigationPolicy {
 /// non-optional session signatures; this bridges the "current scope" spelling onto them.
 extension DisplayPaneController: TabHosting {
 
-  var hostID: TabHostID { dockID.map(TabHostID.dock) ?? .displayPanel }
+  var hostID: TabHostID {
+    switch scope {
+    case .sidePanel: return .displayPanel
+    case let .dock(id, _): return .dock(id)
+    case let .detachedWindow(id, _): return .detachedWindow(id)
+    }
+  }
 
+  /// A pinned panel *checks* the session it is asked about rather than resolving one: it has
+  /// exactly one, and a caller naming another is asking about tabs that are not here. Answering
+  /// for it would hand another session's agent the wrong page.
   private func resolvedSession(_ sessionID: SessionID?) -> SessionID? {
-    let session = sessionID ?? currentSessionID
-    guard dockSessionID == nil || dockSessionID == session else { return nil }
+    let session = sessionID ?? pinnedSessionID ?? currentSessionID
+    guard pinnedSessionID == nil || pinnedSessionID == session else { return nil }
     return session
   }
 
@@ -3725,9 +3823,11 @@ extension DisplayPaneController: TabHosting {
     return moveTab(id: id, toIndex: index, for: session)
   }
 
-  /// The panel shows every tab kind there is — it is where each of them was built to live.
+  /// The panel shows every tab kind there is — it is where each of them was built to live. A
+  /// detached window takes only what it could bring back at the next launch.
   func canAdopt(_ tab: PaneTab) -> Bool {
-    dockSessionID == nil || tab.owningSessionID == nil || tab.owningSessionID == dockSessionID
+    if detachedWindowID != nil, !tab.canLiveInDetachedWindow { return false }
+    return pinnedSessionID == nil || tab.owningSessionID == nil || tab.owningSessionID == pinnedSessionID
   }
 
   func detachTab(id: UUID, for sessionID: SessionID?) -> PaneTab? {
@@ -3763,9 +3863,12 @@ extension DisplayPaneController: TabHosting {
   func adopt(_ tab: PaneTab, at index: Int?, for sessionID: SessionID?) {
     guard let session = resolvedSession(sessionID) else { return }
     restoreIfNeeded(session)
-    // See `DetachedBrowserHostViewController.adoptPageHook`: a browser's page hook captures the
-    // host that built it, so an adopted one has to be re-pointed here or navigations are
-    // reported to — and persisted by — whichever pane it came from.
+    // A tab in a pinned panel is that session's wherever it goes next. One that forgot whose it
+    // was is how a drag back from a window lands in the session on screen instead of its own.
+    if pinnedSessionID != nil { tab.owningSessionID = session }
+    // A browser's page hook captures the host that built it, so an adopted one has to be
+    // re-pointed here or navigations are reported to — and persisted by — whichever pane it came
+    // from. When that pane was a window that has since closed, nothing would persist it at all.
     tab.browser?.onPageChange = { [weak self] in
       guard let self else { return }
       persist(session)

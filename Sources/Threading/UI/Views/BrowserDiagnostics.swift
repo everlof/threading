@@ -158,6 +158,8 @@ extension BrowserViewController {
     /// Let synchronous handlers and a resulting navigation settle without letting an endlessly
     /// streaming page hold the action result forever.
     func settleAfterAgentAction() async {
+        let finishActivity = beginAgentOperation()
+        defer { finishActivity() }
         let startedAt = Date()
         let deadline = Date().addingTimeInterval(5)
         repeat {

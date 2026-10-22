@@ -9,8 +9,15 @@ final class BrowserExecutionActivity {
         let restore: () -> Void
     }
 
+    private struct RenderingEntry {
+        var count: Int
+        let host: BackgroundRenderingHost
+    }
+
     private var entries: [ObjectIdentifier: Entry] = [:]
+    private var renderingEntries: [ObjectIdentifier: RenderingEntry] = [:]
     private var processActivity: (any NSObjectProtocol)?
+    private var presentationUpdateScheduled = false
 
     func begin(for page: WKWebView) -> () -> Void {
         let preferences = page.configuration.preferences
@@ -35,7 +42,63 @@ final class BrowserExecutionActivity {
             }
             entries[key] = Entry(count: 1, restore: restore)
         }
-        return { self.end(key) }
+        let pageKey = ObjectIdentifier(page)
+        if var entry = renderingEntries[pageKey] {
+            entry.count += 1
+            renderingEntries[pageKey] = entry
+        } else if page.superview != nil {
+            renderingEntries[pageKey] = RenderingEntry(
+                count: 1, host: BackgroundRenderingHost(content: page)
+            )
+        }
+        var finished = false
+        return {
+            guard !finished else { return }
+            finished = true
+            self.endRendering(pageKey)
+            self.end(key)
+        }
+    }
+
+    func updatePresentation() {
+        // Only operations currently in flight, never all retained tabs or sessions.
+        for entry in renderingEntries.values { entry.host.update() }
+    }
+
+    func presentationDidChange() {
+        updatePresentation()
+        guard !renderingEntries.isEmpty, !presentationUpdateScheduled else { return }
+        presentationUpdateScheduled = true
+        // AppKit reports a child's window attachment before DisplayPane finishes unhiding its
+        // ancestor. Recheck once after that hierarchy transaction, coalescing its callbacks.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.presentationUpdateScheduled = false
+            self.updatePresentation()
+        }
+    }
+
+    func setFrame(_ frame: CGRect, for page: WKWebView) {
+        if let entry = renderingEntries[ObjectIdentifier(page)] {
+            entry.host.setFrame(frame)
+        } else {
+            page.frame = frame
+        }
+    }
+
+    func isRenderingInBackground(_ page: WKWebView) -> Bool {
+        renderingEntries[ObjectIdentifier(page)]?.host.isRenderingInBackground == true
+    }
+
+    private func endRendering(_ key: ObjectIdentifier) {
+        guard var entry = renderingEntries[key] else { return }
+        entry.count -= 1
+        if entry.count > 0 {
+            renderingEntries[key] = entry
+        } else {
+            renderingEntries.removeValue(forKey: key)
+            entry.host.restore()
+        }
     }
 
     private func end(_ key: ObjectIdentifier) {
@@ -54,6 +117,7 @@ final class BrowserExecutionActivity {
     }
 
     isolated deinit {
+        for entry in entries.values { entry.restore() }
         if let processActivity { ProcessInfo.processInfo.endActivity(processActivity) }
     }
 }

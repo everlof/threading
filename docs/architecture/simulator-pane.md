@@ -516,7 +516,7 @@ mirror's gestures, typing and Simulator chords call the pane's own handlers, so 
 window converges on one consented session; a consent sheet attaches to the presenter when that is
 the key window. Notes and the inspector stay in the pane. Closing the tab closes the window; ⌘W in
 the window closes only the window, because a nil-targeted Close Tab would otherwise walk past it to
-the main window (the failure `DetachedBrowserWindowController` documents).
+the main window (the failure `DetachedPaneWindowController` documents).
 
 **Stream demand follows viewers, not pane visibility.** `wantsFrames` is the pane being presented,
 its presenter window being open, or a stream recording running. Hiding the pane releases frames

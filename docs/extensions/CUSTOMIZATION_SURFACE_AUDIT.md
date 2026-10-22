@@ -976,4 +976,13 @@ navigation, the user-only website profile, window lifecycle and credential promp
 agent session identity and exposes no new extension props, slots or facts. Uncustomized behavior
 is the same production controller used for the `standalone-browser` evidence entry and the
 standalone browsing application journey. Native auxiliary-window chrome follows the detached
-browser boundary.
+window boundary.
+
+## Detached window
+
+A detached window is host-only chrome around an ordinary display panel. Its content is a
+`DisplayPaneController` scoped to the window, so the panel's published surfaces —
+`display.backdrop@1` and the tab-header decoration — apply there exactly as they do in a docked
+group, and the window adds no props, slots or facts of its own. Window lifecycle, placement,
+persistence, which tabs may travel and where menu commands land stay with the host. The window
+keeps native chrome under every theme, per `window-chrome.md`'s scope.

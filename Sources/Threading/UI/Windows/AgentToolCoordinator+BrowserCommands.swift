@@ -169,7 +169,7 @@ extension AgentToolCoordinator {
                 return
             }
 
-            Task { @MainActor in
+            browser.runAgentOperation {
                 let outcome = await browser.agentStopLoading(expectedURL: target)
                 _ = self.revealBrowserPane(for: sessionID)
                 completion(await self.browserActionResult(
@@ -478,7 +478,7 @@ extension AgentToolCoordinator {
                 return
             }
             self.revealBrowserPane(for: sessionID)
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let outcome = try await browser.agentChooseFiles(
                         ref: arguments.ref,
@@ -523,7 +523,7 @@ extension AgentToolCoordinator {
                 return
             }
             self.revealBrowserPane(for: sessionID)
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let outcome = try await browser.agentRequestDownload(
                         ref: arguments.ref,
@@ -1128,7 +1128,7 @@ extension AgentToolCoordinator {
                 completion(.success(message))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 let guarded = await browser.agentSetResponsiveViewport(
                     width: arguments.width,
                     height: arguments.height
@@ -1259,7 +1259,7 @@ extension AgentToolCoordinator {
                 return
             }
 
-            Task { @MainActor in
+            browser.runAgentOperation {
                 let outcome = await browser.agentSetBrowserEmulation(
                     colorScheme: colorScheme,
                     userAgent: userAgent,
@@ -1344,13 +1344,13 @@ extension AgentToolCoordinator {
             return
         }
 
-        Task { @MainActor in
+        browser.runAgentOperation {
             guard let authorizedPage = browser.agentPageIdentity,
                   let finalURL = URL(string: authorizedPage.url) else {
                 completion(.failure("The navigation finished without a page URL."))
                 return
             }
-            let allowed = await authorizeBrowserAccess(
+            let allowed = await self.authorizeBrowserAccess(
                 to: finalURL,
                 for: sessionID,
                 purpose: "read after navigating to"

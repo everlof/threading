@@ -15,9 +15,9 @@ enum TabHostID: Hashable {
   /// The drawer strip at the content pane's bottom edge.
   case drawer
   case dock(UUID)
-  /// A browser window detached from the main window, named by its own id because a session may
-  /// have more than one. Unlike the two panes, this host is *pinned* to one session rather than
-  /// following the selection — see `DetachedBrowserHostViewController`.
+  /// A window of its own, detached from the main window and named by its own id because a session
+  /// may have more than one. Unlike the two panes, this host is *pinned* to one session rather
+  /// than following the selection — see `DetachedPaneWindowController`.
   case detachedWindow(UUID)
 }
 
@@ -132,6 +132,34 @@ final class PaneTab {
   var holdsAgentDrivableBrowser: Bool {
     if case .audit(let audit) = body { return audit.mode == .browserSplit }
     return browser != nil
+  }
+
+  /// Whether this tab may live in a detached window. Asked of the tab rather than of a window,
+  /// so the menu offering "Open in New Window" and the move that follows it cannot disagree.
+  ///
+  /// **A window holds what its layout can bring back.** Detached windows are restored at launch,
+  /// so a tab the layout later forgets would come back as a window quietly emptier than the one
+  /// the user left, or as no window at all. That excludes a private browser, which is ephemeral
+  /// by definition, and the runtime-only surfaces no layout persists.
+  ///
+  /// A shell is refused for a second reason: `WindowBackdrop` is one app-wide value describing
+  /// the *main* window's terminal palette, and a shell in another window would ink itself for
+  /// the window it left.
+  ///
+  /// Exhaustive on purpose: a new kind of tab has to state its answer.
+  var canLiveInDetachedWindow: Bool {
+    switch body {
+    case .browser(let browser):
+      return browser.contextKind == .shared
+    case .content, .audit, .review, .overview, .attachments, .simulator, .realDevice,
+      .nativePlugin, .extensionPanel, .compare:
+      return true
+    case .terminal:
+      return false
+    case .subagents, .sharing, .supervision, .notificationTest, .webExtensions,
+      .browserComparison:
+      return false
+    }
   }
 
   var audit: ExecutionAuditViewController? {

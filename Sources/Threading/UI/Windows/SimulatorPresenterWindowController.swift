@@ -9,7 +9,7 @@ import AppKit
 /// on purpose: every picker lists those, and a frameless or panel-level window is exactly what a
 /// picker tends to skip.
 ///
-/// **Native chrome, deliberately** — the same reasoning `DetachedBrowserWindowController` gives:
+/// **Native chrome, deliberately** — the same reasoning `DetachedPaneWindowController` gives:
 /// the theme takeover belongs to the main window.
 ///
 /// The pane owns this controller and everything behind it. Closing the window only stops the
@@ -138,7 +138,7 @@ final class SimulatorPresenterWindowController: ThemedWindowController {
 
 /// ⌘W closes this window. Menu items are nil-targeted, and without an answer here the command
 /// walks past this window to the app delegate and closes a tab in the main window behind it —
-/// the failure `DetachedBrowserWindowController` documents.
+/// the failure `DetachedPaneWindowController` documents.
 extension SimulatorPresenterWindowController {
 
     @objc func closeActiveTab() {

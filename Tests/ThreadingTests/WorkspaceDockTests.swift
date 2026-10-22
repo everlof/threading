@@ -200,7 +200,7 @@ final class WorkspaceDockTests: HostedStoreTestCase {
 
   func testDockHostRefusesTabOwnedByAnotherSession() {
     let session = SessionID()
-    let destination = DisplayPaneController(dockID: UUID(), dockSessionID: session)
+    let destination = DisplayPaneController(scope: .dock(UUID(), session: session))
     let foreign = PaneTab(body: .content(.init(body: .html("foreign"), title: "Other", subtitle: "")),
       owningSessionID: SessionID())
     XCTAssertFalse(destination.canAdopt(foreign))
@@ -212,7 +212,7 @@ final class WorkspaceDockTests: HostedStoreTestCase {
     layout.insert(group, beside: nil, edge: .bottom)
     DisplayPaneStore.shared.saveDockLayout(layout, for: session)
     let source = DisplayPaneController()
-    let destination = DisplayPaneController(dockID: group, dockSessionID: session)
+    let destination = DisplayPaneController(scope: .dock(group, session: session))
     let audit = ExecutionAuditViewController(sessionID: session, browser: BrowserViewController())
     let tab = PaneTab(body: .audit(audit), owningSessionID: session)
     source.adopt(tab, at: nil, for: session)
@@ -430,7 +430,7 @@ final class WorkspaceDockTests: HostedStoreTestCase {
       return pane.panelToggleSlot.frame.width
     }
     XCTAssertEqual(corner(DisplayPaneController()), ThemedIconButton.Target.toolbar.size.width)
-    XCTAssertEqual(corner(DisplayPaneController(dockID: UUID(), dockSessionID: SessionID())), 0)
+    XCTAssertEqual(corner(DisplayPaneController(scope: .dock(UUID(), session: SessionID()))), 0)
   }
 
   func testDeviceLogsAndBluetoothCommandsEachOpenOnlyTheirOwnTab() throws {
@@ -506,7 +506,7 @@ final class WorkspaceDockTests: HostedStoreTestCase {
     try XCTSkipIf(NativePluginCatalog.deviceLogsBundle == nil, "Device Logs is not bundled in this build")
     let session = SessionID()
     let source = DisplayPaneController()
-    let destination = DisplayPaneController(dockID: UUID(), dockSessionID: session)
+    let destination = DisplayPaneController(scope: .dock(UUID(), session: session))
     source.showSession(session)
     destination.showSession(session)
     let owner = try XCTUnwrap(source.activateDeviceLog(for: session))

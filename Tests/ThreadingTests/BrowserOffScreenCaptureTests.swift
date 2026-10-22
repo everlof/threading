@@ -13,8 +13,14 @@ final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
         /// A page that is one flat, unmistakable colour, so "did it render" is one pixel read
         /// rather than an image comparison.
         static let html = """
-            <html><body style='margin:0;background:#FF0000'>
-            <button id='change' onclick="document.body.style.background='#00FF00'">Change</button>
+            <html><style>@keyframes reveal { from { opacity:0 } to { opacity:1 } }</style>
+            <body style='margin:0;background:#FF0000'>
+            <button id='change' onclick="requestAnimationFrame(() => {
+              this.textContent='Frame rendered';
+              const field=document.querySelector('#text');
+              field.onanimationend=() => { document.body.style.background='#00FF00'; };
+              field.style.animation='reveal 0.05s linear';
+            })">Change</button>
             <input id='text' aria-label='Text'>
             </body></html>
             """
@@ -133,6 +139,10 @@ final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
         let elapsed = Date().timeIntervalSince(started)
         XCTAssertLessThan(elapsed, Fixture.operationLimit)
         print("[off-screen capture] screenshot completed in \(elapsed)s")
+        let attachment = XCTAttachment(data: shot.data, uniformTypeIdentifier: "public.png")
+        attachment.name = green ? "background-rendered-frame" : "initial-frame"
+        attachment.lifetime = .keepAlways
+        add(attachment)
         guard let bitmap = NSBitmapImageRep(data: shot.data),
               let colour = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)
         else { return .none }
@@ -227,6 +237,8 @@ final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
         let context = try await browser.captureContext()
         XCTAssertGreaterThan(context.viewportWidth, 0)
         XCTAssertGreaterThan(context.viewportHeight, 0)
+        let snapshot = try await browser.agentSnapshot()
+        XCTAssertTrue(snapshot.agentText.contains("Frame rendered"), snapshot.agentText)
     }
 
     func testActionsAndElementCaptureDoNotDependOnPageTimers() async throws {
@@ -323,6 +335,255 @@ final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
         XCTAssertEqual(reading, .rendered)
         XCTAssertFalse(window.isVisible)
     }
+
+    func testRenderingFollowsChatSwitchesWithoutMovingTheControllerOrFocus() async throws {
+        let host = DisplayPaneController(browserFactory: { _, _ in
+            BrowserViewController(
+                urlSchemeHandlers: ["threading-capture": FlatColourSchemeHandler(html: Fixture.html)],
+                contextKind: .private
+            )
+        })
+        let window = UnconstrainedCaptureWindow(
+            contentRect: NSRect(origin: .zero, size: Fixture.size),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = host
+        // A view controller's initial frame can resize its window during installation. Use a
+        // realistic pane after mounting; a clipped, few-pixel viewport is not handoff evidence.
+        window.setContentSize(NSSize(width: 1_024, height: 768))
+        host.view.frame = try XCTUnwrap(window.contentView).bounds
+        window.center()
+        window.orderFrontRegardless()
+        self.window = window
+        let session = SessionID()
+        let otherSession = SessionID()
+        host.showSession(session)
+        let browser = try XCTUnwrap(host.addBrowserTab(for: session, contextKind: .private))
+        self.browser = browser
+        host.view.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(browser.webView.bounds.height, 400)
+        let success = await withCheckedContinuation { continuation in
+            browser.navigate(to: "threading-capture://fixture/switch") { ok, _ in
+                continuation.resume(returning: ok)
+            }
+        }
+        XCTAssertTrue(success)
+        try await settle()
+        let parent = try XCTUnwrap(browser.webView.superview)
+        let keyWindow = NSApp.keyWindow
+        let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let finish = browser.beginAgentOperation()
+        defer { finish() }
+
+        host.showSession(otherSession)
+        try await settle()
+        let renderWindow = try XCTUnwrap(browser.webView.window)
+        XCTAssertNil(browser.view.window, "Only the page moves; dialogs keep their ordinary host")
+        XCTAssertFalse(renderWindow === window)
+        XCTAssertEqual(renderWindow.alphaValue, 0)
+        XCTAssertTrue(renderWindow.ignoresMouseEvents)
+        XCTAssertFalse(renderWindow.canBecomeKey)
+        XCTAssertFalse(renderWindow.canBecomeMain)
+        XCTAssertTrue(NSApp.keyWindow === keyWindow)
+        XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, frontmost)
+        try await changeWhileHidden(browser)
+        let reading = await capture(browser, green: true)
+        XCTAssertEqual(reading, .rendered)
+
+        _ = try await browser.evaluate("document.querySelector('#text').focus()")
+        host.showSession(session)
+        try await settle()
+        XCTAssertTrue(browser.view.window === window)
+        XCTAssertTrue(browser.webView.superview === parent)
+        XCTAssertTrue(browser.webView.window === window)
+        XCTAssertFalse(renderWindow.isVisible)
+        let focusedField = try await browser.evaluate("document.activeElement.id") as? String
+        XCTAssertEqual(focusedField, "text")
+        finish()
+        XCTAssertTrue(browser.webView.superview === parent)
+    }
+
+    func testOverlappingPagesShareOnePanelAndReleaseItAfterTheLastOperation() async throws {
+        let first = try await loadedBrowser()
+        first.view.removeFromSuperview()
+        window?.orderOut(nil)
+        let second = BrowserViewController(
+            urlSchemeHandlers: ["threading-capture": FlatColourSchemeHandler(html: Fixture.html)],
+            contextKind: .private
+        )
+        let success = await withCheckedContinuation { continuation in
+            second.navigate(to: "threading-capture://fixture/second") { ok, _ in
+                continuation.resume(returning: ok)
+            }
+        }
+        XCTAssertTrue(success)
+        let firstParent = try XCTUnwrap(first.webView.superview)
+        let secondParent = try XCTUnwrap(second.webView.superview)
+        let finishes = (0..<64).map { _ in first.beginAgentOperation() }
+        let finishSecond = second.beginAgentOperation()
+        defer {
+            finishes.forEach { $0() }
+            finishSecond()
+        }
+        let panel = try XCTUnwrap(first.webView.window)
+        XCTAssertTrue(second.webView.window === panel)
+        XCTAssertEqual(panel.contentView?.subviews.count, 2)
+        try await changeWhileHidden(first)
+        let firstReading = await capture(first, green: true)
+        let secondReading = await capture(second)
+        XCTAssertEqual(firstReading, .rendered)
+        XCTAssertEqual(secondReading, .rendered, "Concurrent pages must retain their own pixels")
+        finishes.forEach { $0() }
+        finishes.forEach { $0() }
+        XCTAssertTrue(first.webView.superview === firstParent)
+        XCTAssertNil(first.webView.window)
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertTrue(second.webView.window === panel)
+        finishSecond()
+        XCTAssertTrue(second.webView.superview === secondParent)
+        XCTAssertNil(second.webView.window)
+        XCTAssertFalse(panel.isVisible)
+    }
+
+    func testRenderReadinessTimeoutReleasesThePanel() async throws {
+        let browser = try await loadedBrowser()
+        let _: Void = try await withCheckedThrowingContinuation { continuation in
+            browser.webView.callAsyncJavaScript(
+                """
+                globalThis.fixtureFrame = requestAnimationFrame;
+                globalThis.pendingFrames = [];
+                globalThis.requestAnimationFrame = callback => { pendingFrames.push(callback); return 1; };
+                return true;
+                """,
+                arguments: [:], in: nil, in: .defaultClient
+            ) { continuation.resume(with: $0.map { _ in () }) }
+        }
+        browser.view.removeFromSuperview()
+        window?.orderOut(nil)
+        let parent = try XCTUnwrap(browser.webView.superview)
+        do {
+            _ = try await browser.agentClick(ref: nil, selector: "#change")
+            XCTFail("Missing render callbacks must time out instead of returning empty content")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains(
+                "WebKit did not resume background rendering"
+            ), error.localizedDescription)
+        }
+        XCTAssertTrue(browser.webView.superview === parent)
+        XCTAssertNil(browser.webView.window)
+        if #available(macOS 14.0, *) {
+            XCTAssertEqual(browser.webView.configuration.preferences.inactiveSchedulingPolicy, .suspend)
+        }
+        let finish = browser.beginAgentOperation()
+        defer { finish() }
+        let _: Void = try await withCheckedThrowingContinuation { continuation in
+            browser.webView.callAsyncJavaScript(
+                "globalThis.requestAnimationFrame = fixtureFrame; return true;",
+                arguments: [:], in: nil, in: .defaultClient
+            ) { continuation.resume(with: $0.map { _ in () }) }
+        }
+        finish()
+        // A rendering timeout happened before dispatching the click. Ordinary page-owned form
+        // submission must not stay blocked by the late-action guard used for real click timeouts.
+        _ = try await browser.evaluate("""
+            const form = document.createElement('form');
+            form.method = 'POST'; form.action = 'threading-capture://fixture/submitted';
+            document.body.appendChild(form); form.submit();
+            """)
+        await browser.settleAfterAgentAction()
+        XCTAssertEqual(browser.currentURL?.path, "/submitted")
+    }
+
+    func testDOMFocusSurvivesSeparateBackgroundOperations() async throws {
+        let browser = try await loadedBrowser()
+        browser.view.removeFromSuperview()
+        window?.orderOut(nil)
+        _ = try await browser.evaluate("document.querySelector('#text').focus()")
+        _ = try await browser.evaluate("document.querySelector('#change').focus()")
+        let button = try await browser.evaluate("document.activeElement.id") as? String
+        XCTAssertEqual(button, "change")
+        _ = try await browser.evaluate("document.querySelector('#text').focus()")
+        let field = try await browser.evaluate("document.activeElement.id") as? String
+        XCTAssertEqual(field, "text")
+    }
+
+    func testLoadingBackgroundDocumentCanBeReadAndStoppedBeforeFramesAreReady() async throws {
+        let browser = BrowserViewController(
+            urlSchemeHandlers: [
+                "threading-capture": FlatColourSchemeHandler(html: Fixture.html, finishes: false)
+            ],
+            contextKind: .private
+        )
+        self.browser = browser
+        let committed = await withCheckedContinuation { continuation in
+            browser.navigate(to: "threading-capture://fixture/stream", waitUntil: .commit) { ok, _ in
+                continuation.resume(returning: ok)
+            }
+        }
+        XCTAssertTrue(committed)
+        let started = Date()
+        var label: String?
+        repeat {
+            label = try await browser.evaluate("document.querySelector('#change')?.textContent") as? String
+            if label == nil { try await settle(0.05) }
+        } while label == nil && Date().timeIntervalSince(started) < 2
+        XCTAssertEqual(label, "Change")
+        XCTAssertLessThan(Date().timeIntervalSince(started), Fixture.operationLimit)
+        XCTAssertTrue(browser.webView.isLoading)
+        let stopped = await browser.agentStopLoading(expectedURL: try XCTUnwrap(browser.currentURL))
+        XCTAssertTrue(stopped.ok, stopped.message)
+        XCTAssertFalse(browser.webView.isLoading)
+        let snapshot = try await browser.agentSnapshot()
+        XCTAssertTrue(snapshot.agentText.contains("Change"), snapshot.agentText)
+        XCTAssertNil(browser.webView.window)
+    }
+
+    func testHistoryAndReloadKeepRenderingFreshBackgroundContent() async throws {
+        let browser = try await loadedBrowser()
+        window?.orderOut(nil)
+        let loaded = await withCheckedContinuation { continuation in
+            browser.navigate(to: "threading-capture://fixture/second") { ok, _ in
+                continuation.resume(returning: ok)
+            }
+        }
+        XCTAssertTrue(loaded)
+        for action in [BrowserHistoryAction.back, .forward, .reload, .reloadFromOrigin] {
+            let target = try XCTUnwrap(browser.historyTarget(for: action))
+            let completed = await withCheckedContinuation { continuation in
+                browser.navigateHistory(action, expectedTarget: target) { ok, _ in
+                    continuation.resume(returning: ok)
+                }
+            }
+            XCTAssertTrue(completed)
+            _ = try await browser.evaluate("""
+                document.body.style.background = '#FF0000';
+                document.querySelector('#change').textContent = 'Change';
+                """)
+            try await changeWhileHidden(browser)
+        }
+        XCTAssertFalse(try XCTUnwrap(window).isVisible)
+    }
+
+    func testFailedEvaluationRestoresTheDetachedPageAndIdlePolicy() async throws {
+        let browser = try await loadedBrowser()
+        browser.view.removeFromSuperview()
+        window?.orderOut(nil)
+        let parent = try XCTUnwrap(browser.webView.superview)
+        do {
+            _ = try await browser.evaluate("throw new Error('deliberate fixture failure')")
+            XCTFail("The evaluation should fail")
+        } catch {
+            XCTAssertEqual((error as? WKError)?.code, .javaScriptExceptionOccurred)
+        }
+        XCTAssertTrue(browser.webView.superview === parent)
+        XCTAssertNil(browser.webView.window)
+        if #available(macOS 14.0, *) {
+            XCTAssertEqual(browser.webView.configuration.preferences.inactiveSchedulingPolicy, .suspend)
+        }
+        let reading = await capture(browser)
+        XCTAssertEqual(reading, .rendered, "A failed operation must not poison the next lease")
+    }
 }
 
 private final class UnconstrainedCaptureWindow: NSWindow {
@@ -337,9 +598,11 @@ private final class UnconstrainedCaptureWindow: NSWindow {
 /// and one flat page needs none of its request bookkeeping.
 private final class FlatColourSchemeHandler: NSObject, WKURLSchemeHandler {
     private let html: String
+    private let finishes: Bool
 
-    init(html: String) {
+    init(html: String, finishes: Bool = true) {
         self.html = html
+        self.finishes = finishes
     }
 
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
@@ -351,11 +614,11 @@ private final class FlatColourSchemeHandler: NSObject, WKURLSchemeHandler {
         task.didReceive(URLResponse(
             url: url,
             mimeType: "text/html",
-            expectedContentLength: data.count,
+            expectedContentLength: finishes ? data.count : -1,
             textEncodingName: "utf-8"
         ))
         task.didReceive(data)
-        task.didFinish()
+        if finishes { task.didFinish() }
     }
 
     func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {}

@@ -1579,7 +1579,7 @@ drift from the selected path.
 
 `EventLog.beginLaunch` has always known that the previous launch died — its marker was still
 lying there — and nothing consumed the fact. So the launch after a crash did what every other
-launch does: reopened the previously selected session and ordered every detached browser window
+launch does: reopened the previously selected session and ordered every detached window
 back on screen. Both of those run *because the app started*, which is the wrong reason when the
 last start ended by dying: the session that comes back may be the one that took the app down,
 and it comes back silently, so the user's only evidence is the app dying a second time.

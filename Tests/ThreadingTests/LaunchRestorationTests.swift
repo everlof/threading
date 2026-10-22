@@ -10,7 +10,7 @@ import XCTest
 ///
 /// The actions are closures, so the decision is testable without a window, an MCP listener or a
 /// store. What is asserted is *which* of them ran and in what order, because the order is the
-/// contract: the selected session comes back before the browser windows it would bring with it.
+/// contract: the selected session comes back before the detached windows it would bring with it.
 @MainActor
 final class LaunchRestorationTests: XCTestCase {
 
@@ -19,7 +19,7 @@ final class LaunchRestorationTests: XCTestCase {
     private enum Call: String {
         case selectedSession
         case relaunch
-        case browserWindows
+        case detachedWindows
     }
 
     /// Records the restore paths in the order they ran, and keeps the offer the notice was
@@ -43,7 +43,7 @@ final class LaunchRestorationTests: XCTestCase {
                     self.calls.append(.relaunch)
                     if self.defersRelaunch { self.finishRelaunch = completion } else { completion() }
                 },
-                restoreDetachedBrowserWindows: { self.calls.append(.browserWindows) },
+                restoreDetachedWindows: { self.calls.append(.detachedWindows) },
                 presentNotice: { crashReport, escalation, restore in
                     self.noticeCount += 1
                     self.offeredCrashReport = crashReport
@@ -65,7 +65,7 @@ final class LaunchRestorationTests: XCTestCase {
         restoration.run(previousLaunch: .clean)
         XCTAssertEqual(recorder.calls, [.relaunch])
         try XCTUnwrap(recorder.finishRelaunch)()
-        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .detachedWindows])
     }
 
     func testRestoreOfferAlsoWaitsForHostOwnership() throws {
@@ -75,7 +75,7 @@ final class LaunchRestorationTests: XCTestCase {
         try XCTUnwrap(recorder.restoreOffer)()
         XCTAssertEqual(recorder.calls, [.relaunch])
         try XCTUnwrap(recorder.finishRelaunch)()
-        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .detachedWindows])
     }
 
     // MARK: - The Plan
@@ -93,14 +93,14 @@ final class LaunchRestorationTests: XCTestCase {
         restoration.run(previousLaunch: .unknown)
 
         XCTAssertEqual(recorder.noticeCount, 0)
-        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .detachedWindows])
     }
 
     func testAnUncleanPreviousLaunchHoldsBackBothWorkspacePaths() {
         let plan = LaunchRestorationPlan(previousLaunch: .unclean(crashReport: nil))
 
         XCTAssertFalse(plan.restoresSelectedSession)
-        XCTAssertFalse(plan.restoresDetachedBrowserWindows)
+        XCTAssertFalse(plan.restoresDetachedWindows)
     }
 
     /// **A restart the user asked for.** The reset flows leave without the quit path — they have
@@ -116,7 +116,7 @@ final class LaunchRestorationTests: XCTestCase {
         restoration.run(previousLaunch: .intentional(reason: .reset))
 
         XCTAssertEqual(recorder.noticeCount, 0)
-        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .detachedWindows])
     }
 
     // MARK: - Escalation
@@ -183,7 +183,7 @@ final class LaunchRestorationTests: XCTestCase {
         let (restoration, recorder) = restoration()
         restoration.run(previousLaunch: .clean)
 
-        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .detachedWindows])
         XCTAssertEqual(recorder.noticeCount, 0)
         XCTAssertFalse(restoration.hasOfferedNotice)
     }
@@ -248,7 +248,7 @@ final class LaunchRestorationTests: XCTestCase {
         try XCTUnwrap(recorder.restoreOffer)()
 
         XCTAssertEqual(
-            recorder.calls, [.selectedSession, .browserWindows],
+            recorder.calls, [.selectedSession, .detachedWindows],
             "Restore must be the suppressed restoration and nothing else"
         )
     }
@@ -262,7 +262,7 @@ final class LaunchRestorationTests: XCTestCase {
 
         restoration.restoreHeldBackWorkspace()
 
-        XCTAssertEqual(recorder.calls, [.selectedSession, .browserWindows])
+        XCTAssertEqual(recorder.calls, [.selectedSession, .detachedWindows])
     }
 
     /// Restoring must not spend the relaunch record a second time. It was consumed on the run
@@ -291,7 +291,7 @@ final class LaunchRestorationTests: XCTestCase {
         restoration.run(previousLaunch: .unclean(crashReport: nil))
 
         XCTAssertEqual(recorder.noticeCount, 1, "the notice was offered twice for one crash")
-        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .browserWindows])
+        XCTAssertEqual(recorder.calls, [.relaunch, .selectedSession, .detachedWindows])
     }
 
     /// Nothing is written down to make the offer one-shot. The marker it is read from is
@@ -306,7 +306,7 @@ final class LaunchRestorationTests: XCTestCase {
         second.run(previousLaunch: .clean)
         XCTAssertEqual(secondRecorder.noticeCount, 0)
         XCTAssertEqual(
-            secondRecorder.calls, [.relaunch, .selectedSession, .browserWindows]
+            secondRecorder.calls, [.relaunch, .selectedSession, .detachedWindows]
         )
     }
 }

@@ -717,7 +717,13 @@ final class DrawerHostViewController: NSViewController {
     private func persist(_ sessionID: SessionID) {
         let state = statesBySession[sessionID] ?? TabListState()
         let persistedTabs = state.tabs.compactMap(persisted)
-        let active = state.activeTab?.id.uuidString
+        // The selection among what was written, as the panel chooses it. A pageless or private
+        // browser is not written, and a document naming one as the drawer's selection is one the
+        // decoder refuses — which quarantines the session's whole layout, panel and detached
+        // windows included, and refuses every write after it.
+        let active = state.activeTab.map(\.id.uuidString).flatMap { activeID in
+            persistedTabs.contains { $0.id == activeID } ? activeID : nil
+        } ?? persistedTabs.first?.id
         persistDrawer(persistedTabs, active, openSessions.contains(sessionID), sessionID)
     }
 

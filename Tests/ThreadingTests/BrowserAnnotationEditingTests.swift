@@ -162,7 +162,7 @@ final class BrowserAnnotationEditingTests: XCTestCase {
         var messages: [String] = []
         var complete: (@MainActor (SessionMessageDelivery.Outcome) -> Void)?
         browser.deliverAnnotations = { text, sessionID, completion in
-            XCTAssertEqual(sessionID, host.sessionID)
+            XCTAssertEqual(sessionID, host.currentSessionID)
             messages.append(text)
             complete = completion
         }
@@ -715,9 +715,12 @@ final class BrowserAnnotationEditingTests: XCTestCase {
     /// key status: the window server hands the keyboard to no window sitting on no display. So the
     /// one test that is about where the keystrokes go gets a panel where a person could see it,
     /// and is skipped from `fast` for exactly that reason.
-    private func fixture(width: CGFloat, keyPanel: Bool = false) throws -> (BrowserViewController, DetachedBrowserHostViewController, NSWindow) {
+    private func fixture(width: CGFloat, keyPanel: Bool = false) throws -> (BrowserViewController, DisplayPaneController, NSWindow) {
         let browser = BrowserViewController(urlSchemeHandlers: ["threading-annotation": AnnotationPageHandler()])
-        let host = DetachedBrowserHostViewController(sessionID: SessionID(), browserFactory: { _, _ in browser })
+        let sessionID = SessionID()
+        let host = DisplayPaneController(
+            scope: .detachedWindow(UUID(), session: sessionID), browserFactory: { _, _ in browser }
+        )
         let origin = keyPanel ? NSPoint(x: 120, y: 120) : NSPoint(x: -10_000, y: -10_000)
         let rect = NSRect(origin: origin, size: NSSize(width: width, height: 520))
         let window: NSWindow = keyPanel
@@ -726,7 +729,8 @@ final class BrowserAnnotationEditingTests: XCTestCase {
         window.animationBehavior = .none
         window.isReleasedWhenClosed = false
         window.contentViewController = host
-        host.addBrowserTab()
+        host.showSessionTabs(sessionID)
+        host.addBrowserTab(for: sessionID)
         window.setContentSize(NSSize(width: width, height: 520))
         window.setFrameOrigin(origin)
         window.orderFront(nil)

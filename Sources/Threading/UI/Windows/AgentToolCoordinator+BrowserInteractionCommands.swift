@@ -24,7 +24,7 @@ extension AgentToolCoordinator {
                 1,
                 min(arguments.maximumNodes ?? BrowserAgentDefaults.maximumSnapshotNodes, 400)
             )
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let snapshot = try await browser.agentSnapshot(
                         maximumNodes: maximum,
@@ -64,7 +64,7 @@ extension AgentToolCoordinator {
                 return
             }
 
-            Task { @MainActor in
+            browser.runAgentOperation {
                 await browser.awaitAnnotationTargets(for: browser.annotationsForActivePage)
                 guard browser.agentPageIdentity == authorizedPage else {
                     completion(.failure(
@@ -126,7 +126,7 @@ extension AgentToolCoordinator {
                 return
             }
             let javascript = Self.queryScript(selector: selector)
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let result = try await browser.evaluate(javascript)
                     let pageResult = (result as? String) ?? "No result."
@@ -202,7 +202,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let target: BrowserTargetDescription
                     if let point {
@@ -361,7 +361,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let target = try await browser.describeTarget(
                         ref: arguments.ref,
@@ -463,7 +463,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 guard let page = browser.agentPageIdentity,
                       let url = URL(string: page.url),
                       let origin = BrowserOrigin(url: url) else {
@@ -647,7 +647,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     // Inspect every live target before changing the first one. The bridge repeats
                     // validation in its isolated world so a rerender between these calls remains
@@ -720,7 +720,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let outcome = try await browser.agentHover(
                         ref: arguments.ref,
@@ -770,7 +770,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let outcome = try await browser.agentDrag(
                         sourceRef: arguments.sourceRef,
@@ -817,7 +817,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let inspectionSelector = arguments.ref == nil && arguments.selector == nil
                         && arguments.locator == nil ? ":focus"
@@ -892,7 +892,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let outcome = try await browser.agentSelect(
                         ref: arguments.ref,
@@ -936,7 +936,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let outcome = try await browser.agentSetChecked(
                         ref: arguments.ref,
@@ -983,7 +983,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let outcome = try await browser.agentScroll(
                         direction: direction,
@@ -1129,7 +1129,7 @@ extension AgentToolCoordinator {
                 completion(.failure("No authorized page is loaded. Use browser_navigate first."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     if let requestedTime = arguments.time {
                         let duration = min(

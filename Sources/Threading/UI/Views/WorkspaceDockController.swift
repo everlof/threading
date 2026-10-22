@@ -123,7 +123,7 @@ final class WorkspaceDockController: NSViewController {
 
   private func host(_ id: UUID, for session: SessionID) -> DisplayPaneController {
     if let existing = groups[session]?[id] { return existing }
-    let host = DisplayPaneController(dockID: id, dockSessionID: session)
+    let host = DisplayPaneController(scope: .dock(id, session: session))
     groups[session, default: [:]][id] = host
     hostIndex[id] = host
     configureHost?(host)

@@ -1330,29 +1330,74 @@ list/activate/close is still panel-scoped, so a browser resolved in the drawer i
 list the agent can act on — pre-existing, and the decision it waits on is whether an agent may
 close a tab in the user's own drawer.
 
-## The detached browser window
+## The detached window
 
-A browser tab moves into a window of its own, and back. The point is a developer's app on a
-second display at real size — fullscreen if they want — with an agent still driving it and the
-main window still holding the conversation.
+A panel tab moves into a window of its own, and back. The point is something the panel shows —
+a developer's app in a browser or a Simulator, a review, an execution audit — on a second display
+at real size, fullscreen if they want, with an agent still driving it and the main window still
+holding the conversation.
 
 It is a **third tab host** (`TabHostID.detachedWindow(UUID)`), not a new mechanism: the move
-goes through `TabTransferCoordinator` exactly as a pane-to-pane move does, so the browser keeps
-its page, history and signed-in state. One difference matters and everything else follows from
-it — **the window is pinned to one session** where both panes follow the selection. So
-`DetachedBrowserHostViewController` stores its session and *checks* the `sessionID` arguments
-the host contract carries rather than resolving them; a host that answered for whatever session
-it was asked about would hand another session's agent the wrong page.
+goes through `TabTransferCoordinator` exactly as a pane-to-pane move does, so a browser keeps its
+page, history and signed-in state and a Simulator its device. One difference matters and
+everything else follows from it — **the window is pinned to one session** where both panes follow
+the selection.
 
-**Browsers only, shared only.** `canAdopt` is bounded by what a host could restore, and a
-private context is ephemeral by definition. Shells are refused for a second reason:
-`WindowBackdrop` is one app-wide value describing the *main* window's terminal palette, and a
-shell dragged into another window would ink itself for the window it just left. `canHold` is a
-static so the menu offering the move and the move itself cannot disagree.
+**The window's content is the display panel itself.** `DetachedPaneWindowController` shows a
+`DisplayPaneController` scoped `.detachedWindow(windowID, session:)`, the same controller a docked
+group is (`.dock`). The first version had a browser-only host of its own, which rebuilt each
+stored tab itself; letting a review or a Simulator travel that way would have meant a second copy
+of every tab kind's construction and wiring. As the panel, the window renders, persists and
+restores every kind through the side panel's code, offers the same `+`, and gets the panel's
+callbacks from the same `configureSecondaryHost` a docked group does. The panel *checks* the
+`sessionID` the host contract carries rather than resolving one, for docks and windows alike
+(`pinnedSessionID`): a host that answered for whatever session it was asked about would hand
+another session's agent the wrong page. A pinned panel also writes its session onto every tab it
+adopts, and `MainWindowController.tabSession` answers with the window's session for a tab built
+from the window's own `+`, which was never told whose it is.
+
+**A window holds what its layout can bring back** — `PaneTab.canLiveInDetachedWindow`, an
+exhaustive switch, asked by both the menu offering the move and the panel's `canAdopt`, and
+mirrored for `+` by `makesDetachableTab`. Windows are restored at launch, so a tab the layout
+forgets would come back as a window quietly emptier than the one the user left, or none: that
+refuses a private browser, which is ephemeral by definition, and the runtime-only surfaces
+(Subagents, Sharing, Chats, Push Test, Web Extensions, browser comparisons). Shells are refused
+for a second reason: `WindowBackdrop` is one app-wide value describing the *main* window's
+terminal palette, and a shell dragged into another window would ink itself for the window it
+just left. The theme document is not offered either — it takes over the main window's side
+panel and joins no tab list.
+
+**One record per window, written by the window.** The frame and fullscreen are the window's
+knowledge and the tabs are the panel's, and they share one `PersistedDetachedWindow` record: a
+window's tabs written without it would name a window the document does not declare, which the
+decoder refuses. So the window-scoped panel writes nothing itself; `onTabsChanged` is the
+window's cue to write both through `saveDetachedWindowLayout`. A window holding anything other
+than a browser stamps format version 9: the browser-only build rebuilt every stored tab as a
+browser and would have saved the loss back.
+
+**A window with no tabs is no window.** The last tab closing or moving out closes it, on the
+next turn of the run loop because the emptying arrives inside the close or move. Closing a
+window with tabs in it ends them, as closing each tab would — a Simulator releases its device —
+and drops its record. A restored window none of whose tabs could be rebuilt yet (a plugin not
+discovered, a review for a project that has gone) is dismissed rather than shown as an empty
+frame, and keeps its record so a later restore can still bring it back.
+
+**Peers, events and commands reach it.** A session's singleton tabs — its one Simulator, Review,
+Attachments list — are found across every host through `peerHosts`, windows included, so a tab
+moved into a window is the one a command reopens rather than the reason a second one is built.
+A peer reveal *orders* the window front without making it key, because that path serves agents'
+tools as well as the user. Checkout moves and turn edges reach window panels as they reach
+docked ones, so a review there refreshes when its agent stops. Menu commands are nil-target and
+reach the main window controller from whichever window is key, so `commandDisplayHosts` answers
+with the key detached window's panel alone: Find, Simulator and device commands act on what the
+user is looking at, and Find does not fall back to the terminal behind it.
 
 **Native chrome**, following `window-chrome.md`'s scope decision and the Component Gallery's
 precedent. A takeover here would need a `TitlebarActionWindow` and a whole app-drawn content
-root, which is its own piece of work.
+root, which is its own piece of work. The panel sits below the transparent titlebar's safe area
+on the window's themed ground: its header reserves the band the main window's *toolbar*
+provides, and a window with no toolbar would have put the tab strip under the traffic lights.
+Below the safe area the header keeps its own band height, the shape a docked group takes.
 
 **Detached windows answer `SessionBrowserResolver` last**, after both panes: a browser the user
 is looking at in a pane is still the session's, and a window parked on another display answers
@@ -1366,11 +1411,13 @@ but nothing ever asks a window into existence. Hanging restore on session *selec
 therefore not "eager" in any useful sense: `relaunchSessionsFromLastQuit` relaunches sessions
 without selecting them, so the headline case — a fullscreen browser on a second display —
 would wait until the user happened to click that session.
-`restoreDetachedBrowserWindowsAtLaunch` scans the sessions' `panel_layout` rows instead, gated
+`restoreDetachedWindowsAtLaunch` scans the sessions' `panel_layout` rows instead, gated
 on the same two switches that decide how much of the workspace returns at all. That scan is
 cheap and reads no conversation: a layout is a small JSON document in its own table,
-deliberately not foreign-keyed to `session`, and building a browser needs a session id and
-nothing else. Ordering the window in restores the workspace the user left. Agent operations also work
+deliberately not foreign-keyed to `session`, and building a window's panel needs a session id and
+nothing else; the panel reads its own slice back as it is built, before the window is wired to
+persist, so reading the layout is never mistaken for a change. Ordering the window in restores
+the workspace the user left. Agent operations also work
 without a shown window: the browser owns its initial viewport and uses native action delays
 rather than throttled DOM timers (`BrowserOffScreenCaptureTests`, `agent-browser.md`). The
 restored window is ordered *front*, never made key: restoring a workspace is not a request to
@@ -1380,7 +1427,9 @@ type into a browser.
 so the two agreed until a host could be pinned: dragging a tab back from a window bound to
 session A while the main window showed B put it in B's panel and took the page with it. The
 move now reads `PaneTab.owningSessionID` and brings that session forward when it differs — a
-move that lands where the user is not looking is the same as losing it.
+move that lands where the user is not looking is the same as losing it. The drag refuses a drop
+on another session's window for the same reason it refuses the drawer and a docked group there:
+the destination would decline to adopt a tab that its source had already let go of.
 
 **The window answers the tab commands itself, and that is why the menu items are nil-target.**
 `AppDelegate` routes every command through the main window controller deliberately, which was

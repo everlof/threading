@@ -5,6 +5,19 @@ import XCTest
 
 @MainActor
 final class BrowserExecutionActivityTests: XCTestCase {
+    func testCompletionIsIdempotentWhileAnotherOperationIsOutstanding() throws {
+        guard #available(macOS 14.0, *) else { throw XCTSkip("Requires WebKit scheduling policy") }
+        let page = WKWebView()
+        let activity = BrowserExecutionActivity()
+        let finishFirst = activity.begin(for: page)
+        let finishSecond = activity.begin(for: page)
+        finishFirst()
+        finishFirst()
+        XCTAssertEqual(page.configuration.preferences.inactiveSchedulingPolicy, .none)
+        finishSecond()
+        XCTAssertEqual(page.configuration.preferences.inactiveSchedulingPolicy, .suspend)
+    }
+
     func testOverlappingOperationsRestoreTheOriginalPolicyOnlyAfterTheLastCompletion() throws {
         guard #available(macOS 14.0, *) else { throw XCTSkip("Requires WebKit scheduling policy") }
         let page = WKWebView()

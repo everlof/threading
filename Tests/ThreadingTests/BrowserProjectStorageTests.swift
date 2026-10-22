@@ -32,8 +32,8 @@ final class BrowserProjectStorageTests: HostedStoreTestCase {
         let privateBrowser = try XCTUnwrap(pane.addBrowserTab(for: first.id, contextKind: .private))
         let drawer = DrawerHostViewController(directoryProvider: { _ in nil })
         let drawerBrowser = try XCTUnwrap(drawer.addBrowserTab(for: second.id))
-        let detached = DetachedBrowserHostViewController(sessionID: second.id)
-        let detachedBrowser = try XCTUnwrap(detached.addBrowserTab())
+        let detached = DisplayPaneController(scope: .detachedWindow(UUID(), session: second.id))
+        let detachedBrowser = try XCTUnwrap(detached.addBrowserTab(for: second.id))
         let audit = try XCTUnwrap(pane.addAuditTab(for: first.id))
         let oldStore = browser.websiteDataStore
         let privateStore = privateBrowser.websiteDataStore
@@ -72,9 +72,21 @@ final class BrowserProjectStorageTests: HostedStoreTestCase {
         let secondBrowser = pane.activateBrowser(for: second.id)
         let drawer = DrawerHostViewController(directoryProvider: { _ in nil })
         let drawerBrowser = try XCTUnwrap(drawer.addBrowserTab(for: second.id))
-        let detached = DetachedBrowserHostViewController(sessionID: second.id)
-        let detachedBrowser = try XCTUnwrap(detached.addBrowserTab())
-        let restoredBrowser = detached.makeRestoredBrowser(url: "https://example.invalid")
+        let detached = DisplayPaneController(scope: .detachedWindow(UUID(), session: second.id))
+        let detachedBrowser = try XCTUnwrap(detached.addBrowserTab(for: second.id))
+        // A window's browser restores through the window's own slice of the layout.
+        let windowID = UUID()
+        DisplayPaneStore.shared.saveDetachedWindowLayout(
+            PersistedDetachedWindow(id: windowID.uuidString, frame: nil, activeTabID: nil, isFullScreen: nil),
+            tabs: [PersistedTab(
+                id: UUID().uuidString, kind: .browser, title: nil, subtitle: "",
+                url: "https://example.invalid", html: nil, cacheFile: nil,
+                host: PersistedTab.detachedWindowHost(windowID)
+            )],
+            for: second.id
+        )
+        let restoredWindow = DisplayPaneController(scope: .detachedWindow(windowID, session: second.id))
+        let restoredBrowser = try XCTUnwrap(restoredWindow.tabs(for: second.id).first?.browser)
         let audit = try XCTUnwrap(pane.addAuditTab(for: first.id))
 
         for browser in [secondBrowser, drawerBrowser, detachedBrowser, restoredBrowser, audit.browser] {

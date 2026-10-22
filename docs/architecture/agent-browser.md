@@ -844,7 +844,7 @@ JavaScript alert, confirm, and prompt dialogs are also native sheets tied to the
 browser window. Persistent website and chat-wide grants can be reviewed individually or revoked
 together on the Tools settings page.
 
-Do not wait on `requestAnimationFrame` **or DOM timers** in an agent action. WebKit pauses
+Do not use `requestAnimationFrame` **or DOM timers** as the polling clock in an agent action. WebKit pauses
 animation frames and can throttle a nominal 50 ms `setTimeout` beyond the native bridge's
 15-second deadline after a page has been hidden long enough. `BrowserAgentDelayHandler` supplies
 the action clock through `WKScriptMessageHandlerWithReply` in `.defaultClient` only. Stability,
@@ -892,6 +892,60 @@ timers and drives click, slow typing and element capture through the production 
 On macOS the [WebKit snapshot implementation](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/Cocoa/WKWebView.mm)
 uses a software capture and does not use `afterScreenUpdates` to wait for a screen presentation.
 Changing that flag is therefore not a fix for hidden-page action timers.
+
+### Rendering while another chat is selected
+
+The October 22 ALPHA audit found empty semantic snapshots while DOM queries still answered.
+Matched framework probes established a related boundary: a runnable WebKit process can answer
+DOM queries while its hidden page's animation frames and CSS animations remain suspended. Keeping
+`inactiveSchedulingPolicy` at `.none` is insufficient. A page that reveals its UI in a frame or
+animation callback can consequently produce an empty semantic snapshot. A longer timeout does
+not make that page render.
+
+`BackgroundRenderingHost` supplies a transparent, nonactivating, input-transparent AppKit panel
+on the current display during browser operations. Moving an ordinary window off-display did not
+resume rendering in the measured WebKit build; an ordered alpha-zero panel did. Only the existing
+WKWebView moves. Its controller, chrome, dialog presentation route, data store, document identity
+and logical session/window ownership stay in place. The page returns behind its native overlays
+when its ordinary host becomes visible, and returns to its original parent when work ends.
+Hierarchy and window visibility events drive that handoff; there is no polling of idle tabs.
+An attachment callback precedes the display pane unhiding its ancestor, so one coalesced
+main-queue recheck observes the completed hierarchy transaction. The transport refuses native
+first-responder assignments as well as key/main status: AppKit can otherwise assign WebKit a
+first responder in a non-key panel, which traverses back to the first form field on each attach
+and overwrites the page's DOM focus. Keyboard and password focus must survive separate operations.
+
+Before semantic inspection, actions or screenshots on a hosted background page, a separate, native-deadline-bounded bridge
+call waits for two rendered frames. This lets suspended frame-driven UI reveal itself, instead
+of racing the first DOM read against reattachment. The actual action then receives a fresh
+`callAsyncJavaScript` dispatch, preserving WebKit's user-gesture context for file inputs and
+popups. Action polling still uses the native clock. Missing render callbacks produce a timeout,
+not a successful empty snapshot. Tool scopes span action, settling and result reads; navigation
+holds the scope until its completion, failure or deadline, and nested scopes are idempotent.
+While navigation is still loading, reads skip the frame wait: a streaming response can expose
+partial DOM while suppressing painting indefinitely. Commit-readiness reads and `browser_stop`
+must still work in that state. The rendering host and process activity remain in force.
+Raw DOM evaluation is always independent of painting, including title/URL queries during history
+restoration. It still holds the rendering/process lease and a native deadline. A dedicated history
+test drives new frame-dependent content after Back, Forward, Reload and Reload from Origin.
+Readiness timeouts are distinct from dispatched-action timeouts: no mutation was started, so
+there is no late action whose form-submission guard must remain installed.
+
+All concurrent background pages share one transport window and reuse their existing views.
+The normal cardinality is one active page; the stress contract is overlapping operations and
+multiple active pages, without multiplying panels or touching retained idle sessions. Begin/end
+bookkeeping is O(1) per active page/preferences object. Presentation changes visit only active
+entries, and the panel and its observers disappear after the final operation. This is host-owned
+rendering infrastructure, not an extension surface: themes and extensions cannot change its
+visibility, focus behavior, page custody or operation lifetime.
+
+The isolated macOS 26.5 probes exercised frame callbacks, CSS animations, ResizeObserver, fresh
+pixels after 70 seconds detached, and another foreground application. They explain the mechanism;
+the shipping regression is `BrowserOffScreenCaptureTests`. The focused app-hosted suite passed
+91 tests with one viewport-scroll test skipped; measured cardinalities and latency are recorded
+in [performance.md](performance.md). This is not an exact replay of ALPHA's original timeouts.
+Screen lock, actual Space switches, multi-display behavior and older macOS releases require
+separate verification. No private WebKit preferences are used.
 
 ## Visual baselines
 
@@ -1194,7 +1248,7 @@ The standalone browser explicitly uses WebKit's default persistent website store
 browsers continue to use their named project stores (ephemeral on macOS 13); an unknown project
 owner still gets a fresh ephemeral store. Standalone windows have no session ID, are not
 registered with `SessionBrowserResolver`, and grant no agent access. WebKit and the system own
-credential prompts. The window frame is native, like a detached browser; all content uses the
+credential prompts. The window frame is native, like a detached window; all content uses the
 existing themed browser controls. This is a host-only surface: URL delivery, profile ownership,
 navigation and credentials are not extension presentation hooks.
 

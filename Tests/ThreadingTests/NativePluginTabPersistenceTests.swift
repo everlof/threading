@@ -89,7 +89,7 @@ final class NativePluginTabPersistenceTests: HostedStoreTestCase {
         XCTAssertEqual(panelPlugin.paneSection, "bluetooth")
         XCTAssertEqual(panel.activeTabID(for: session)?.uuidString, panelTab.id)
 
-        let dock = DisplayPaneController(dockID: dockID, dockSessionID: session)
+        let dock = DisplayPaneController(scope: .dock(dockID, session: session))
         dock.showSession(session)
         let dockPlugin = try plugin(in: dock.tabs(for: session))
         XCTAssertEqual(dockPlugin.bundleURL, NativePluginCatalog.deviceLogsBundle)

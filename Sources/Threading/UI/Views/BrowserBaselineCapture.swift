@@ -69,6 +69,8 @@ extension BrowserViewController {
         guard let page = agentPageIdentity, currentURL != nil else {
             throw BrowserBaselineCaptureError.noPage
         }
+        let finishActivity = beginAgentOperation()
+        defer { finishActivity() }
 
         let context = try await captureContext()
         guard agentPageIdentity == page else {
@@ -277,6 +279,8 @@ extension BrowserViewController {
         includesAttribution: Bool = false,
         commitSHA: String? = nil
     ) async throws -> BrowserBaselineCapture {
+        let finishActivity = beginAgentOperation()
+        defer { finishActivity() }
         let previous = agentViewportSize
         let resized = await agentSetResponsiveViewport(
             width: Int(viewport.width.rounded()),

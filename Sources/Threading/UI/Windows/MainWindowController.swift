@@ -277,12 +277,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         return [
             (.displayPanel, displayPaneController),
             (.drawer, containerViewController.drawerHostController),
-        ] + workspaceDock.allHosts.map { ($0.hostID, $0) } + orderedDetachedWindows.map { (.detachedWindow($0.windowID), $0.host) }
+        ] + workspaceDock.allHosts.map { ($0.hostID, $0) } + orderedDetachedWindows.map { ($0.host.hostID, $0.host) }
     })
 
-    /// The session's detached browser windows, by their own id. Window-owned like every other
-    /// host: only this controller can see all of them at once.
-    private var detachedBrowserWindows: [UUID: DetachedBrowserWindowController] = [:]
+    /// Every session's detached windows, by their own id. Window-owned like every other host:
+    /// only this controller can see all of them at once.
+    private var detachedWindows: [UUID: DetachedPaneWindowController] = [:]
 
     /// The same windows in a **stable** order. `Dictionary.values` reorders itself as the
     /// dictionary mutates, so with two windows for one session the resolver's answer could flip
@@ -290,8 +290,21 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// unrelated window happened to open. Creation order is arbitrary but it does not move.
     private var detachedWindowOrder: [UUID] = []
 
-    private var orderedDetachedWindows: [DetachedBrowserWindowController] {
-        detachedWindowOrder.compactMap { detachedBrowserWindows[$0] }
+    private var orderedDetachedWindows: [DetachedPaneWindowController] {
+        detachedWindowOrder.compactMap { detachedWindows[$0] }
+    }
+
+    /// One session's detached panels, in the same stable order — the hosts its singleton tabs,
+    /// checkout and turn events have to reach beside the panes on screen.
+    private func detachedHosts(for sessionID: SessionID) -> [DisplayPaneController] {
+        orderedDetachedWindows.filter { $0.sessionID == sessionID }.map(\.host)
+    }
+
+    /// The detached window in front of the user, when one is. Its panel is what menu commands
+    /// act on, because it is what the user is looking at.
+    private var keyDetachedWindow: DetachedPaneWindowController? {
+        guard let key = NSApp.keyWindow else { return nil }
+        return orderedDetachedWindows.first { $0.window === key }
     }
 
     /// Owns agent-originated browser, display, storage, and theme requests.
@@ -311,7 +324,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 // Ordered front, never made key: an agent acting on a page must not take the
                 // keyboard out from under whatever the user is typing into. `showWindow` is
                 // what the *user's* own "Focus" does.
-                detachedBrowserWindows[id]?.window?.orderFront(nil)
+                detachedWindows[id]?.window?.orderFront(nil)
             }
         },
         windowProvider: { [weak self] in self?.window }
@@ -1541,7 +1554,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 .map { controller in
                     DisplayPaneController.DetachedWindowProxy(
                         windowID: controller.windowID,
-                        title: controller.host.windowTitle,
+                        title: controller.windowTitle,
                         onFocus: { [weak controller] in controller?.showWindow(nil) },
                         onBringBack: { [weak self, weak controller] in
                             guard let self, let controller else { return }
@@ -1617,7 +1630,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         appEvents.observe(SessionCheckoutDidMove.self) { [weak self] event in
             guard let self else { return }
             self.displayPaneController.noteSessionCheckoutMoved(event.sessionID)
-            workspaceDock.hosts(for: event.sessionID).forEach { $0.noteSessionCheckoutMoved(event.sessionID) }
+            (workspaceDock.hosts(for: event.sessionID) + detachedHosts(for: event.sessionID))
+                .forEach { $0.noteSessionCheckoutMoved(event.sessionID) }
             environment.agentRuntime.preserveCheckoutMoveOutbox(sessionID: event.sessionID)
             // Durable ownership and the launch directory change together. An observed tool cwd
             // proves where the finished turn worked, but the provider's root process may still
@@ -1760,7 +1774,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         for sessionID: SessionID
     ) -> Bool {
         let drawer = containerViewController.drawerHostController
-        for host in workspaceDock.hosts {
+        for host in workspaceDock.hosts + detachedHosts(for: sessionID) {
             if let existing = host.tabs(for: sessionID).first(where: {
                 if case let .nativePlugin(plugin) = $0.body {
                     return plugin.bundleURL == bundleURL && plugin.paneSection == section
@@ -2081,9 +2095,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // their first *ask* and that is invisible because a pane is not on screen until its
         // session is either — but nothing ever asks a window into existence, so this is the
         // ask. Existing windows stay exactly where they are: a window is not a pane, and
-        // switching sessions must not sweep another session's browser off the screen.
+        // switching sessions must not sweep another session's window off the screen.
         if let sessionID {
-            restoreDetachedBrowserWindows(for: sessionID)
+            restoreDetachedWindows(for: sessionID)
         }
 
         // The theme document is app-wide, so changing or temporarily clearing the selected
@@ -3041,35 +3055,32 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         case .displayPanel: return displayPaneController
         case .drawer: return containerViewController.drawerHostController
         case let .dock(id): return workspaceDock.resolve(id)
-        case let .detachedWindow(id): return detachedBrowserWindows[id]?.host
+        case let .detachedWindow(id): return detachedWindows[id]?.host
         }
     })
 
-    // MARK: - Detached Browser Windows
+    // MARK: - Detached Windows
 
     /// Moves a tab into a window of its own, and shows it.
     ///
     /// The window is built empty and the tab moved into it through the same transfer path every
-    /// other move uses — detach without teardown, adopt — so the browser keeps its page, its
-    /// history and its signed-in state, exactly as it does travelling between the two panes.
+    /// other move uses — detach without teardown, adopt — so a browser keeps its page and its
+    /// signed-in state, a review its place and a Simulator its device, exactly as they do
+    /// travelling between the panes.
     @discardableResult
     func detachTabIntoWindow(
         _ tabID: UUID,
         from sourceID: TabHostID,
         droppedAt screenPoint: NSPoint? = nil
     ) -> Bool {
-        guard let source = tabTransfer.resolve(sourceID),
-              let tab = source.tabs(for: nil).first(where: { $0.id == tabID })
-              ?? currentSessionID.flatMap({ session in
-                  source.tabs(for: session).first { $0.id == tabID }
-              }),
-              let sessionID = tab.owningSessionID ?? currentSessionID
+        guard canDetachTabIntoWindow(tabID, from: sourceID),
+              let sessionID = tabSession(of: tabID, in: sourceID)
         else {
             SystemAlert.refuse()
             return false
         }
 
-        let controller = makeDetachedBrowserWindow(
+        let controller = makeDetachedWindow(
             for: sessionID,
             droppedAt: screenPoint
         )
@@ -3080,8 +3091,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             sessionID: sessionID
         ) else {
             // Nothing moved, so nothing should have been built.
-            forgetDetachedWindow(controller.windowID)
-            controller.close()
+            dismissDetachedWindow(controller)
             SystemAlert.refuse()
             return false
         }
@@ -3091,67 +3101,37 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         return true
     }
 
-    private func makeDetachedBrowserWindow(
+    private func makeDetachedWindow(
         for sessionID: SessionID,
         windowID: UUID = UUID(),
         restoredFrame: NSRect? = nil,
         droppedAt screenPoint: NSPoint? = nil
-    ) -> DetachedBrowserWindowController {
-        let host = DetachedBrowserHostViewController(sessionID: sessionID, windowID: windowID)
-        let controller = DetachedBrowserWindowController(
-            host: host,
+    ) -> DetachedPaneWindowController {
+        let controller = DetachedPaneWindowController(
+            sessionID: sessionID,
+            windowID: windowID,
             restoredFrame: restoredFrame,
-            droppedAt: screenPoint
+            droppedAt: screenPoint,
+            configureHost: { [weak self] host in self?.configureSecondaryHost(host) }
         )
-
-        host.sessionBrowserCount = { [weak self] in
-            self?.browserResolver.locations(for: sessionID).count ?? 0
-        }
-        host.transferEntries = { [weak self, weak controller] tabID in
-            guard let self, let controller else { return [] }
-            return transferMenuEntries(
-                from: TabHostID.detachedWindow(controller.windowID),
-                tabID: tabID
-            )
-        }
-        // The window's strip drags by the same rules the panes' do, already in screen space.
-        host.dragOutDestination = { [weak self, weak controller] tabID, screenPoint in
-            guard let self, let controller else { return false }
-            return trackDrag(
-                from: .detachedWindow(controller.windowID),
-                tabID: tabID,
-                at: screenPoint
-            ) != nil
-        }
-        host.performDragOut = { [weak self, weak controller] tabID, screenPoint in
-            guard let self, let controller else { return }
-            dropDraggedTab(
-                from: .detachedWindow(controller.windowID),
-                tabID: tabID,
-                at: screenPoint
-            )
-        }
-        host.dragOutEnded = { [weak self] _ in
-            self?.dragDidSettle()
-        }
         controller.onPersist = { [weak self] controller in
             guard let self else { return }
             persistDetachedWindow(controller)
-            // The chip carries the page's own title, so it follows the page.
+            // The chip carries the tab's own title, so it follows the tab.
             refreshDetachedWindowProxies()
         }
         controller.onClose = { [weak self] windowID in
             self?.forgetDetachedWindow(windowID)
         }
 
-        detachedBrowserWindows[windowID] = controller
+        detachedWindows[windowID] = controller
         detachedWindowOrder.append(windowID)
         refreshDetachedWindowProxies()
         return controller
     }
 
-    /// The proxy chips are drawn from `detachedBrowserWindows`, so the panel is asked to redraw
-    /// whenever that set changes — a window opening, closing, or renaming itself.
+    /// The proxy chips are drawn from `detachedWindows`, so the panel is asked to redraw whenever
+    /// that set changes — a window opening, closing, or renaming itself.
     private func refreshDetachedWindowProxies() {
         // A redraw, not a re-point. `showSessionTabs` also dismisses the app-theme document —
         // right for a keystroke, catastrophic here, where this fires on every window move,
@@ -3160,10 +3140,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         displayPaneController.refreshDetachedWindowProxies()
     }
 
-    private func persistDetachedWindow(_ controller: DetachedBrowserWindowController) {
+    private func persistDetachedWindow(_ controller: DetachedPaneWindowController) {
+        let layout = controller.persistedLayout
         DisplayPaneStore.shared.saveDetachedWindowLayout(
-            controller.persistedWindow,
-            tabs: controller.host.persistedTabs,
+            layout.window,
+            tabs: layout.tabs,
             for: controller.sessionID
         )
     }
@@ -3192,35 +3173,42 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     func closeDetachedWindows(forSessions sessionIDs: Set<SessionID>) {
         let controllers = orderedDetachedWindows.filter { sessionIDs.contains($0.sessionID) }
         guard !controllers.isEmpty else { return }
-        for controller in controllers {
-            detachedBrowserWindows.removeValue(forKey: controller.windowID)
-            detachedWindowOrder.removeAll { $0 == controller.windowID }
-            controller.onPersist = nil
-            controller.onClose = nil
-            controller.close()
-        }
+        controllers.forEach(dismissDetachedWindow)
+    }
+
+    /// Closes a window without touching its record: its session is going, or its tabs could not
+    /// be rebuilt and a later restore may yet bring it back. What it held still ends here, as a
+    /// closed tab's does — a Simulator would otherwise keep its device leased to nothing.
+    private func dismissDetachedWindow(_ controller: DetachedPaneWindowController) {
+        detachedWindows.removeValue(forKey: controller.windowID)
+        detachedWindowOrder.removeAll { $0 == controller.windowID }
+        controller.onPersist = nil
+        controller.onClose = nil
+        controller.host.removeSession(controller.sessionID)
+        controller.close()
         refreshDetachedWindowProxies()
     }
 
-    /// Moves every page in a detached window back into the panel. The window empties as its
-    /// last tab leaves and closes itself, which is the same path a drag back takes — nothing
-    /// here knows how to close a window, and nothing needs to.
-    private func bringDetachedWindowBack(_ controller: DetachedBrowserWindowController) {
+    /// Moves every tab in a detached window back into the panel. The window empties as its last
+    /// tab leaves and closes itself, which is the same path a drag back takes — nothing here
+    /// knows how to close a window, and nothing needs to.
+    private func bringDetachedWindowBack(_ controller: DetachedPaneWindowController) {
         let sessionID = controller.sessionID
         for tab in controller.host.tabs(for: sessionID) {
             moveTab(tab.id, from: .detachedWindow(controller.windowID), to: .displayPanel)
         }
     }
 
+    /// The user closed the window, or its last tab left. A window closed with tabs still in it
+    /// ends what they held, exactly as closing a tab does; one emptied by a move has nothing left
+    /// to end. Its record goes either way — including the route of a plugin tab still waiting
+    /// for discovery, which would otherwise bring back a window the user closed.
     private func forgetDetachedWindow(_ windowID: UUID) {
-        guard let controller = detachedBrowserWindows.removeValue(forKey: windowID) else { return }
+        guard let controller = detachedWindows.removeValue(forKey: windowID) else { return }
         detachedWindowOrder.removeAll { $0 == windowID }
+        controller.host.removeSession(controller.sessionID)
+        DisplayPaneStore.shared.removeDetachedWindow(windowID, for: controller.sessionID)
         refreshDetachedWindowProxies()
-        // A window closed with tabs still in it ends what they held, exactly as closing a tab
-        // does; one emptied by a move has nothing left to forget and already wrote that.
-        if !controller.host.isEmpty {
-            DisplayPaneStore.shared.removeDetachedWindow(windowID, for: controller.sessionID)
-        }
     }
 
     /// Brings back every session's detached windows at launch.
@@ -3234,53 +3222,47 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     ///
     /// The scan is over `panel_layout` rows, not conversations: a session's layout is a small
     /// JSON document in its own table, deliberately not foreign-keyed to `session`, and building
-    /// a browser needs a session id and nothing else. Gated on the same switches that decide how
-    /// much of the workspace comes back at all.
-    func restoreDetachedBrowserWindowsAtLaunch() {
+    /// a window's panel needs a session id and nothing else. Gated on the same switches that
+    /// decide how much of the workspace comes back at all.
+    func restoreDetachedWindowsAtLaunch() {
         guard environment.settings.restoresLastSession
             || environment.settings.restoresSessionsAtLaunch else { return }
 
         for session in environment.projectStore.projects.flatMap(\.sessions) where !session.isArchived {
-            restoreDetachedBrowserWindows(for: session.id)
+            restoreDetachedWindows(for: session.id)
         }
     }
 
     /// Brings back the detached windows a session left behind.
     ///
-    /// Eager, and it has to be: every pane restores on first *ask* — selecting the session asks
-    /// — but nothing ever asks a window into existence. Ordered on screen for a second reason
-    /// the measurement found: WebKit renders nothing for a view in a window that was never
-    /// shown, so a window restored but never ordered in would hand an agent blank captures
-    /// forever (`BrowserOffScreenCaptureTests`).
-    func restoreDetachedBrowserWindows(for sessionID: SessionID) {
+    /// Each window's panel reads its own slice of the layout as it is built, through the restore
+    /// every pane uses, so a tab comes back as the kind it left as. Ordered on screen for a
+    /// reason the measurement found: WebKit renders nothing for a view in a window that was
+    /// never shown, so a window restored but never ordered in would hand an agent blank
+    /// captures forever (`BrowserOffScreenCaptureTests`).
+    func restoreDetachedWindows(for sessionID: SessionID) {
         guard let panel = DisplayPaneStore.shared.loadLayout(for: sessionID) else { return }
 
         for window in panel.detachedWindows {
             guard let windowID = UUID(uuidString: window.id),
-                  detachedBrowserWindows[windowID] == nil
+                  detachedWindows[windowID] == nil,
+                  !panel.tabs(inDetachedWindow: windowID).isEmpty
             else { continue }
 
-            let persistedTabs = panel.tabs(inDetachedWindow: windowID)
-            guard !persistedTabs.isEmpty else { continue }
-
-            let controller = makeDetachedBrowserWindow(
+            let controller = makeDetachedWindow(
                 for: sessionID,
                 windowID: windowID,
                 restoredFrame: window.frame.map(NSRectFromString)
             )
-            let tabs = persistedTabs.map { persisted in
-                PaneTab(
-                    id: UUID(uuidString: persisted.id) ?? UUID(),
-                    body: .browser(controller.host.makeRestoredBrowser(url: persisted.url)),
-                    owningSessionID: sessionID
-                )
+            // A window none of whose tabs could be rebuilt — a plugin not discovered yet, a review
+            // for a project that is gone — is not shown as an empty frame. Its record stays, so a
+            // later restore can bring it back once its tabs can be.
+            guard !controller.isEmpty else {
+                dismissDetachedWindow(controller)
+                continue
             }
-            controller.host.restore(
-                tabs,
-                activeID: window.activeTabID.flatMap(UUID.init(uuidString:))
-            )
             // Ordered in, never made key: selecting a session in the sidebar is not a request
-            // to type into a browser, and with several windows each would have grabbed the
+            // to type into a window, and with several windows each would have grabbed the
             // keyboard in turn. Being ordered in at all is still required — WebKit renders
             // nothing for a view in a window that was never shown.
             controller.window?.orderFront(nil)
@@ -3305,22 +3287,67 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         source.peerTabs = { [weak self, weak source] session in
             guard let self, let source else { return [] }
-            let peers: [TabHosting] = [displayPaneController, containerViewController.drawerHostController]
-                + workspaceDock.hosts(for: session)
-            return peers.filter { $0.hostID != source.hostID }.flatMap { $0.tabs(for: session) }
+            return peerHosts(of: source, for: session).flatMap { $0.tabs(for: session) }
         }
         source.revealPeerTab = { [weak self, weak source] session, predicate in
             guard let self, let source else { return nil }
-            let peers: [TabHosting] = [displayPaneController, containerViewController.drawerHostController]
-                + workspaceDock.hosts(for: session)
-            for host in peers where host.hostID != source.hostID {
+            for host in peerHosts(of: source, for: session) {
                 guard let tab = host.tabs(for: session).first(where: predicate) else { continue }
                 _ = host.activateTab(id: tab.id, for: session)
-                if session == currentSessionID { revealBrowserHost(host.hostID, for: session) }
+                guard session == currentSessionID else { return tab }
+                if case let .detachedWindow(id) = host.hostID {
+                    // Ordered front, never made key: this path serves an agent's tools as well as
+                    // the user's commands, and a tool must not take the keyboard from under
+                    // whatever the user is typing into.
+                    detachedWindows[id]?.window?.orderFront(nil)
+                } else {
+                    revealBrowserHost(host.hostID, for: session)
+                }
                 return tab
             }
             return nil
         }
+    }
+
+    /// Every other host holding the session's tabs. A session's one Simulator, one Review and
+    /// one Attachments list are found across all of them, so a tab moved into a detached window
+    /// is still the one a command reopens rather than the reason a second one gets built.
+    private func peerHosts(of source: TabHosting, for session: SessionID) -> [TabHosting] {
+        let hosts: [TabHosting] = [displayPaneController, containerViewController.drawerHostController]
+            + workspaceDock.hosts(for: session) + detachedHosts(for: session)
+        return hosts.filter { $0.hostID != source.hostID }
+    }
+
+    /// The wiring a docked group and a detached window's panel share with the side panel: the
+    /// same callbacks, the same peers, and tab movement by the same rules. Each caller then says
+    /// what its own emptiness means — a group folds its split, a window closes itself.
+    private func configureSecondaryHost(_ host: DisplayPaneController) {
+        configurePeerTabs(host)
+        host.onShowCurrentTheme = displayPaneController.onShowCurrentTheme
+        host.onSubagentSelection = displayPaneController.onSubagentSelection
+        host.onShareSession = displayPaneController.onShareSession
+        host.onOpenSupervisedChat = displayPaneController.onOpenSupervisedChat
+        host.onMessageSupervisedChat = displayPaneController.onMessageSupervisedChat
+        host.onArchiveSupervisedChat = displayPaneController.onArchiveSupervisedChat
+        host.onReleaseSupervisedChat = displayPaneController.onReleaseSupervisedChat
+        host.onReviewLoadingChange = displayPaneController.onReviewLoadingChange
+        host.shellRootResolver = displayPaneController.shellRootResolver
+        host.sessionBrowserCount = displayPaneController.sessionBrowserCount
+        host.transferEntries = { [weak self, weak host] tabID in
+            guard let self, let host else { return [] }
+            return transferMenuEntries(from: host.hostID, tabID: tabID)
+        }
+        // A strip reports its own window's points; the drag is asked in screen space because it
+        // can end in another window entirely.
+        host.dragOutDestination = { [weak self, weak host] tabID, point in
+            guard let self, let host, let screen = screenPoint(point, in: host.view) else { return false }
+            return trackDrag(from: host.hostID, tabID: tabID, at: screen) != nil
+        }
+        host.performDragOut = { [weak self, weak host] tabID, point in
+            guard let self, let host, let screen = screenPoint(point, in: host.view) else { return }
+            dropDraggedTab(from: host.hostID, tabID: tabID, at: screen)
+        }
+        host.dragOutEnded = { [weak self] _ in self?.dragDidSettle() }
     }
 
     private func configureTabTransfer() {
@@ -3336,35 +3363,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         workspaceDock.configureHost = { [weak self] host in
             guard let self else { return }
-            configurePeerTabs(host)
-            host.onShowCurrentTheme = displayPaneController.onShowCurrentTheme
-            host.onSubagentSelection = displayPaneController.onSubagentSelection
-            host.onShareSession = displayPaneController.onShareSession
-            host.onOpenSupervisedChat = displayPaneController.onOpenSupervisedChat
-            host.onMessageSupervisedChat = displayPaneController.onMessageSupervisedChat
-            host.onArchiveSupervisedChat = displayPaneController.onArchiveSupervisedChat
-            host.onReleaseSupervisedChat = displayPaneController.onReleaseSupervisedChat
-            host.onReviewLoadingChange = displayPaneController.onReviewLoadingChange
-            host.shellRootResolver = displayPaneController.shellRootResolver
-            host.sessionBrowserCount = displayPaneController.sessionBrowserCount
+            configureSecondaryHost(host)
             host.onClose = { [weak self, weak host] in
                 guard let self, let host, let session = host.currentSessionID else { return }
                 for tab in host.tabs(for: session) { _ = host.closeTab(id: tab.id, for: session) }
                 workspaceDock.pruneEmptyGroups()
             }
-            host.transferEntries = { [weak self, weak host] tabID in
-                guard let self, let host else { return [] }
-                return transferMenuEntries(from: host.hostID, tabID: tabID)
-            }
-            host.dragOutDestination = { [weak self, weak host] tabID, point in
-                guard let self, let host, let screen = screenPoint(point, in: host.view) else { return false }
-                return trackDrag(from: host.hostID, tabID: tabID, at: screen) != nil
-            }
-            host.performDragOut = { [weak self, weak host] tabID, point in
-                guard let self, let host, let screen = screenPoint(point, in: host.view) else { return }
-                dropDraggedTab(from: host.hostID, tabID: tabID, at: screen)
-            }
-            host.dragOutEnded = { [weak self] _ in self?.dragDidSettle() }
         }
 
         displayPaneController.transferEntries = { [weak self] tabID in
@@ -3443,7 +3447,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             (.displayPanel, displayPaneController),
             (.drawer, containerViewController.drawerHostController),
         ] + workspaceDock.hosts.map { ($0.hostID, $0) }
-            + detachedBrowserWindows.values.map { (.detachedWindow($0.windowID), $0.host) }
+            + orderedDetachedWindows.map { ($0.host.hostID, $0.host) }
     }
 
     /// Keeps the destination row's wash and the docking preview in step with the hand. Every
@@ -3532,6 +3536,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             // anyone can see. The chip menu already refuses this; the drag has to agree.
             if hostID == .drawer, sessionID != currentSessionID { return nil }
             if case .dock = hostID, sessionID != currentSessionID { return nil }
+            // A window is pinned to its session, and its panel refuses to adopt for another — so
+            // without this a tab dropped on another session's window would be detached from its
+            // pane and adopted nowhere.
+            if case let .detachedWindow(id) = hostID, detachedWindows[id]?.sessionID != sessionID {
+                return nil
+            }
             guard tabTransfer.canMove(tabID: tabID, from: sourceID, to: hostID, sessionID: sessionID)
             else { return nil }
             return .host(hostID)
@@ -3566,7 +3576,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // A window's only tab has nowhere to go: the source would close as the destination
         // opened, which is an expensive way to move a window.
         if case let .detachedWindow(id) = sourceID,
-           detachedBrowserWindows[id]?.host.tabCount ?? 0 <= 1
+           detachedWindows[id]?.tabCount ?? 0 <= 1
         {
             return false
         }
@@ -3770,13 +3780,18 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
               let sessionID = tabSession(of: tabID, in: sourceID),
               let tab = source.tabs(for: sessionID).first(where: { $0.id == tabID })
         else { return false }
-        return DetachedBrowserHostViewController.canHold(tab)
+        return tab.canLiveInDetachedWindow
     }
 
     /// Which session a tab belongs to. Its own answer first: a detached window is pinned to a
     /// session that may not be the one on screen, so reading the *selection* would move its tab
     /// into a different session's panel and take the page with it.
     private func tabSession(of tabID: UUID, in hostID: TabHostID) -> SessionID? {
+        // A window's tabs are its session's, whoever built them: a tab opened from the window's
+        // own `+` was never told whose it is.
+        if case let .detachedWindow(id) = hostID, let controller = detachedWindows[id] {
+            return controller.sessionID
+        }
         guard let host = tabTransfer.resolve(hostID) else { return currentSessionID }
         if let owned = host.tabs(for: nil).first(where: { $0.id == tabID })?.owningSessionID {
             return owned
@@ -3831,7 +3846,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             displayPaneController.showSessionTabs(sessionID)
             setDisplayPaneVisible(true)
         case let .detachedWindow(id):
-            detachedBrowserWindows[id]?.showWindow(nil)
+            detachedWindows[id]?.showWindow(nil)
         }
     }
 
@@ -4352,7 +4367,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         case let .detachedWindow(id):
             // The user's own gesture, so this one does take the keyboard — unlike the agent's
             // reveal, which only orders the window forward.
-            detachedBrowserWindows[id]?.showWindow(nil)
+            detachedWindows[id]?.showWindow(nil)
         }
     }
 
@@ -5050,8 +5065,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     // MARK: - Find
 
-    /// Commands follow visible docked content, with the focused pane taking precedence.
+    /// Commands follow visible docked content, with the focused pane taking precedence — and a
+    /// detached window's panel alone while that window is key. The menu items are nil-target and
+    /// reach this controller from whichever window is in front, so without that a command given
+    /// in a detached window acted on the pane behind it.
     private var commandDisplayHosts: [DisplayPaneController] {
+        if let detached = keyDetachedWindow { return [detached.host] }
         let hosts = [displayPaneController] + workspaceDock.hosts
         let visible = hosts.filter {
             $0.isViewLoaded && $0.view.window === window && !$0.view.isHiddenOrHasHiddenAncestor
@@ -5091,7 +5110,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         } else if let review = host?.currentReview, review.canShowFind {
             review.showFind()
             return true
-        } else if let terminal = containerViewController.activeTerminalSession {
+        } else if keyDetachedWindow == nil, let terminal = containerViewController.activeTerminalSession {
+            // Not from a detached window: the terminal is in the window behind it, and a find bar
+            // opening there is a keystroke landing somewhere the user is not looking.
             terminal.terminalView.showFindInterface()
             return true
         }
@@ -5136,7 +5157,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             review.repeatFind(backwards: backwards)
             return true
         }
-        if let terminal = containerViewController.activeTerminalSession {
+        if keyDetachedWindow == nil, let terminal = containerViewController.activeTerminalSession {
             terminal.terminalView.repeatFind(backwards: backwards)
             return true
         }
@@ -5982,7 +6003,8 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
         if transition.beganTurn {
             displayPaneController.noteSessionStartedWorking(sessionID)
-            workspaceDock.hosts(for: sessionID).forEach { $0.noteSessionStartedWorking(sessionID) }
+            (workspaceDock.hosts(for: sessionID) + detachedHosts(for: sessionID))
+                .forEach { $0.noteSessionStartedWorking(sessionID) }
         }
 
         // A blocked turn, a read receipt and a visibility change are all non-working
@@ -6025,7 +6047,8 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
             // The tree probably changed too; an on-screen review tab refreshes itself.
             displayPaneController.noteSessionStoppedWorking(sessionID)
-            workspaceDock.hosts(for: sessionID).forEach { $0.noteSessionStoppedWorking(sessionID) }
+            (workspaceDock.hosts(for: sessionID) + detachedHosts(for: sessionID))
+                .forEach { $0.noteSessionStoppedWorking(sessionID) }
 
             // It also just spent tokens, so the finish is the moment the pill is most
             // likely stale. The service's spacing keeps a chatty session polite.

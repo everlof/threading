@@ -58,10 +58,13 @@ final class BrowserReloadShortcutTests: HostedStoreTestCase {
             fillToCap = { drawer.sessionBrowserCount = { _ in DisplayPaneDefaults.maximumBrowserTabs } }
             host = drawer
         case .detached:
-            let detached = DetachedBrowserHostViewController(sessionID: sessionID, browserFactory: factory)
+            let detached = DisplayPaneController(
+                scope: .detachedWindow(UUID(), session: sessionID), browserFactory: factory
+            )
             _ = detached.view
-            XCTAssertNotNil(detached.addBrowserTab())
-            fillToCap = { detached.sessionBrowserCount = { DisplayPaneDefaults.maximumBrowserTabs } }
+            detached.showSessionTabs(sessionID)
+            XCTAssertNotNil(detached.addBrowserTab(for: sessionID))
+            fillToCap = { detached.sessionBrowserCount = { _ in DisplayPaneDefaults.maximumBrowserTabs } }
             host = detached
         }
         let browsers = { host.tabs(for: sessionID).compactMap(\.browser) }
@@ -150,11 +153,12 @@ final class BrowserReloadShortcutTests: HostedStoreTestCase {
             XCTAssertTrue(drawer.addBrowserTab(for: sessionID) === browser)
             host = drawer
         case .detached:
-            let detached = DetachedBrowserHostViewController(
-                sessionID: sessionID, browserFactory: { _, _ in browser }
+            let detached = DisplayPaneController(
+                scope: .detachedWindow(UUID(), session: sessionID), browserFactory: { _, _ in browser }
             )
             _ = detached.view
-            XCTAssertTrue(detached.addBrowserTab() === browser)
+            detached.showSessionTabs(sessionID)
+            XCTAssertTrue(detached.addBrowserTab(for: sessionID) === browser)
             host = detached
         }
         let origin = throughApplication ? NSPoint(x: 120, y: 120) : NSPoint(x: -10_000, y: -10_000)

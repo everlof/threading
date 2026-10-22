@@ -563,6 +563,9 @@ final class BrowserViewController: NSViewController {
     private let viewportClipView = BrowserViewportClipView()
     private lazy var webViewHost: NSView = {
         let host = BrowserViewportCanvasView()
+        host.onPresentationChange = { [weak self] in
+            self?.executionActivity.presentationDidChange()
+        }
         host.translatesAutoresizingMaskIntoConstraints = false
         return host
     }()
@@ -649,6 +652,8 @@ final class BrowserViewController: NSViewController {
     var agentTraceNextSequence = 1
     private let agentNavigationPolicy = BrowserAgentNavigationPolicy()
     private let executionActivity = BrowserExecutionActivity()
+    private var agentOperationCount = 0
+    private var finishCurrentPageActivity: (() -> Void)?
 
     /// Fired when the page's title or address changes, so a host (the display pane's tab strip and
     /// header) can re-label the tab without polling. Not fired for progress, which ticks constantly.
@@ -1142,7 +1147,7 @@ final class BrowserViewController: NSViewController {
         ) else { return }
 
         webViewHost.frame = CGRect(origin: .zero, size: layout.canvasSize)
-        webViewStack.forEach { $0.frame = layout.viewportFrame }
+        webViewStack.forEach { executionActivity.setFrame(layout.viewportFrame, for: $0) }
         annotationOverlay.frame = layout.viewportFrame
         baselineOverlay.frame = layout.viewportFrame
         updateAnnotationOverlay()
@@ -1174,6 +1179,12 @@ final class BrowserViewController: NSViewController {
             passwordFocusedFrameTokens[ObjectIdentifier(candidate)]?.isEmpty == false
         )
         installWebView(candidate)
+        if changedDocument, agentOperationCount > 0 {
+            let finishPrevious = finishCurrentPageActivity
+            finishCurrentPageActivity = executionActivity.begin(for: candidate)
+            finishPrevious?()
+        }
+        executionActivity.updatePresentation()
         observeWebView()
         syncAddress()
         updateNavButtons()
@@ -1337,9 +1348,13 @@ final class BrowserViewController: NSViewController {
         waitUntil: BrowserNavigationReadiness,
         _ onLoad: @escaping (_ success: Bool, _ message: String) -> Void
     ) {
+        let finishActivity = beginAgentOperation()
         let navigationID = navigationCoordinator.begin(
             waitUntil: waitUntil,
-            completion: onLoad
+            completion: { success, message in
+                defer { finishActivity() }
+                onLoad(success, message)
+            }
         )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + BrowserDefaults.loadTimeout) { [weak self] in
@@ -1656,10 +1671,63 @@ final class BrowserViewController: NSViewController {
 
     // MARK: - Public — Agent Bridge
 
+    /// Shared tool-task boundary. Acquire synchronously so a navigation completion can hand its
+    /// rendering lease straight to the result read, before yielding to the next main-actor task.
+    func runAgentOperation(_ operation: @escaping @MainActor () async -> Void) {
+        let finishActivity = beginAgentOperation()
+        Task { @MainActor in
+            defer { finishActivity() }
+            await operation()
+        }
+    }
+
+    /// One tool may navigate, await handlers and read the resulting document. Keep the current
+    /// page rendering through that whole sequence, including a popup replacing the active page.
+    /// Nested bridge/capture scopes additionally retain the exact page they dispatched against.
+    func beginAgentOperation() -> () -> Void {
+        _ = view
+        if agentOperationCount == 0 {
+            finishCurrentPageActivity = executionActivity.begin(for: webView)
+        }
+        agentOperationCount += 1
+        var finished = false
+        return { [weak self] in
+            guard !finished, let self else { return }
+            finished = true
+            self.agentOperationCount -= 1
+            if self.agentOperationCount == 0 {
+                let finish = self.finishCurrentPageActivity
+                self.finishCurrentPageActivity = nil
+                finish?()
+            }
+        }
+    }
+
     /// Runs JavaScript in the page and returns its result, the primitive the DOM-query and
     /// click tools build on.
     func evaluate(_ javascript: String) async throws -> Any? {
-        try await webView.evaluateJavaScript(javascript)
+        let finishActivity = beginAgentOperation()
+        defer { finishActivity() }
+        // Raw DOM queries also inspect loading/restoring documents. They must not depend on
+        // a paint callback; semantic inspection and captures synchronize rendering separately.
+        let page = webView
+        return try await withCheckedThrowingContinuation { continuation in
+            let completion = BrowserBridgeCallCompletion<Any?>(continuation, onLateCompletion: nil)
+            page.evaluateJavaScript(javascript) { value, error in
+                if let error {
+                    completion.finish(.failure(error))
+                } else {
+                    completion.finish(.success(value))
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + BrowserDefaults.agentBridgeTimeout) {
+                [weak page] in
+                completion.timeout(BrowserBridgeError.timedOut(
+                    seconds: BrowserDefaults.agentBridgeTimeout,
+                    presentation: Self.presentationDescription(of: page)
+                ))
+            }
+        }
     }
 
     /// The page's semantic state, with stable references the next action can target.
@@ -2314,16 +2382,41 @@ final class BrowserViewController: NSViewController {
         ]
     }
 
+    private func prepareBackgroundRendering() async throws {
+        // Streaming navigations can suppress painting while exposing a useful partial DOM.
+        // Commit-readiness reads and browser_stop must remain available before the load ends.
+        guard !webView.isLoading, executionActivity.isRenderingInBackground(webView) else { return }
+        // Synchronize with actual rendering before a fresh bridge dispatch. Keeping this in a
+        // separate call preserves callAsyncJavaScript's user gesture for file inputs/popups.
+        do {
+            let _: Bool = try await callAgentScript(
+                """
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                return JSON.stringify(true);
+                """,
+                arguments: [:],
+                preparesRendering: false
+            )
+        } catch BrowserBridgeError.timedOut(let seconds, let presentation) {
+            // No action was dispatched. Do not retain its deferred-submission guard as if an
+            // actual page mutation were still outstanding after a bridge timeout.
+            throw BrowserBridgeError.renderingTimedOut(seconds: seconds, presentation: presentation)
+        }
+    }
+
     private func callAgentScript<Value: Decodable>(
         _ script: String,
         arguments: [String: Any],
         timeout: TimeInterval? = BrowserDefaults.agentBridgeTimeout,
-        onLateCompletion: (@MainActor () -> Void)? = nil
+        onLateCompletion: (@MainActor () -> Void)? = nil,
+        preparesRendering: Bool = true
     ) async throws -> Value {
-        let startedAt = Date()
         let page = webView
         let finishActivity = executionActivity.begin(for: page)
         defer { finishActivity() }
+        if preparesRendering { try await prepareBackgroundRendering() }
+        let startedAt = Date()
+        let phase = preparesRendering ? "javascript.dispatch" : "rendering.resume"
         let result: String? = try await withCheckedThrowingContinuation { continuation in
             let completion = BrowserBridgeCallCompletion(
                 continuation,
@@ -2350,7 +2443,7 @@ final class BrowserViewController: NSViewController {
                         detail = "\(nsError.domain) \(nsError.code)"
                     }
                     self?.recordAgentBridgePhase(
-                        "javascript.dispatch",
+                        phase,
                         startedAt: startedAt,
                         outcome: outcome,
                         detail: detail
@@ -2366,7 +2459,7 @@ final class BrowserViewController: NSViewController {
                         )
                     ) else { return }
                     self?.recordAgentBridgePhase(
-                        "javascript.dispatch",
+                        phase,
                         startedAt: startedAt,
                         outcome: "timeout",
                         detail: "limit \(Int(timeout))s; \(Self.presentationDescription(of: page))"
@@ -2403,6 +2496,8 @@ final class BrowserViewController: NSViewController {
         arguments: [String: Any],
         allowsFormSubmission: Bool = false
     ) async throws -> BrowserActionOutcome {
+        let finishActivity = beginAgentOperation()
+        defer { finishActivity() }
         let actionID = agentNavigationPolicy.beginAction(
             allowsFormSubmission: allowsFormSubmission
         )
@@ -2465,6 +2560,8 @@ final class BrowserViewController: NSViewController {
         message: String,
         mutation: () -> Void
     ) async -> BrowserActionOutcome {
+        let finishActivity = beginAgentOperation()
+        defer { finishActivity() }
         let actionID = agentNavigationPolicy.beginAction(allowsFormSubmission: false)
         defer { agentNavigationPolicy.endAction(actionID) }
 
@@ -2485,6 +2582,8 @@ final class BrowserViewController: NSViewController {
     /// A PNG snapshot the agent can consume and the panel can optionally preserve.
     @MainActor
     func screenshot(fullPage: Bool = false) async throws -> BrowserScreenshotCapture {
+        let finishActivity = beginAgentOperation()
+        defer { finishActivity() }
         var rect: CGRect?
         var captureSize = webView.bounds.size
         // `WKSnapshotConfiguration.rect` is in the *view's* coordinates, where (0, 0) is the current
@@ -2542,6 +2641,8 @@ final class BrowserViewController: NSViewController {
         selector: String?,
         locator: BrowserSemanticLocator? = nil
     ) async throws -> (target: BrowserScreenshotTarget, capture: BrowserScreenshotCapture?) {
+        let finishActivity = beginAgentOperation()
+        defer { finishActivity() }
         let target = try await screenshotTarget(
             ref: ref,
             selector: selector,
@@ -2586,6 +2687,7 @@ final class BrowserViewController: NSViewController {
         let page = webView
         let finishActivity = executionActivity.begin(for: page)
         defer { finishActivity() }
+        try await prepareBackgroundRendering()
         let config = WKSnapshotConfiguration()
         config.afterScreenUpdates = true
         if let rect {
@@ -4739,7 +4841,24 @@ enum BrowserDefaults {
 /// A top-left document coordinate system keeps an oversized responsive viewport anchored where a
 /// browser page starts when the outer scroll view first presents it.
 private final class BrowserViewportCanvasView: NSView {
+    var onPresentationChange: (() -> Void)?
+
     override var isFlipped: Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onPresentationChange?()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        onPresentationChange?()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        onPresentationChange?()
+    }
 }
 
 /// The one geometry shared by the live page and its native overlays.
@@ -4903,11 +5022,17 @@ private final class WeakBrowserScriptMessageHandler: NSObject, WKScriptMessageHa
 private enum BrowserBridgeError: LocalizedError {
     case invalidResult
     case timedOut(seconds: TimeInterval, presentation: String)
+    case renderingTimedOut(seconds: TimeInterval, presentation: String)
 
     var errorDescription: String? {
         switch self {
         case .invalidResult:
             return "The page returned an invalid browser-bridge result."
+        case .renderingTimedOut(let seconds, let presentation):
+            return """
+                WebKit did not resume background rendering within \(Int(seconds)) seconds. \
+                \(presentation)
+                """
         case .timedOut(let seconds, let presentation):
             return """
                 WebKit did not answer the browser JavaScript bridge within \(Int(seconds)) \
@@ -4953,13 +5078,13 @@ private enum BrowserConsoleLevel {
 }
 
 @MainActor
-private final class BrowserBridgeCallCompletion {
-    private var continuation: CheckedContinuation<String?, Error>?
+private final class BrowserBridgeCallCompletion<Value> {
+    private var continuation: CheckedContinuation<Value, Error>?
     private var timedOut = false
     private var onLateCompletion: (@MainActor () -> Void)?
 
     init(
-        _ continuation: CheckedContinuation<String?, Error>,
+        _ continuation: CheckedContinuation<Value, Error>,
         onLateCompletion: (@MainActor () -> Void)?
     ) {
         self.continuation = continuation
@@ -4967,7 +5092,7 @@ private final class BrowserBridgeCallCompletion {
     }
 
     @discardableResult
-    func finish(_ result: Result<String?, Error>) -> Bool {
+    func finish(_ result: Result<Value, Error>) -> Bool {
         guard let continuation else {
             if timedOut {
                 let callback = onLateCompletion

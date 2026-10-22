@@ -1212,6 +1212,34 @@ loaded-page performance claims. The shipping regression lives in `BrowserOffScre
 `BrowserExecutionActivityTests` covers overlapping work and restoration. Screen lock and real
 Space switches were not exercised.
 
+The 2026-10-22 follow-up separates runnable JavaScript from active rendering. Matched framework
+probes on macOS 26.5 (25F71), WebKit 21624.2.5.11.4 left a detached or off-display page with
+zero animation-frame callbacks and an unfinished CSS animation even under continuous `.none`.
+Moving the same page into an on-display, alpha-zero, nonactivating panel resumed both. The
+shipping path now holds that rendering host only during operations, preserving the existing
+WKWebView and its profile. One panel serves all active pages; the normal case is one page and
+the stress fixture holds 64 overlapping operations on one page plus a second page. It asserts
+one panel with two existing content views, separate fresh pixels, and release after the final
+operation. Presentation events visit active entries only; idle sessions add no views, observers
+or polling. The panel refuses key/main and native first-responder status, and the actual display
+pane handoff test checks foreground identity and preserved DOM focus when switching chats.
+
+The focused Debug app-hosted run on October 22 passed 91 tests with one existing viewport-scroll
+test skipped. Its frame-driven fixture changes semantic text in `requestAnimationFrame` and
+turns the page green only after `animationend`; successful DOM evaluation alone cannot satisfy
+it. Across 12 click measurements, median/max latency was 252.5/271.2 ms; across 10 captures,
+48.2/67.7 ms. These include the production bridge and rendering synchronization, exclude fixture
+construction, and are not directly comparable to the smaller October 18 click-plus-capture
+probe. The 70-second detached-idle capture and the 1024 × 692 capture after a real chat switch
+were exported from the final xcresult and visually inspected. Background history/reload,
+streaming-document stop/read, timeout cleanup, and multiple pages also passed. Raw DOM queries
+remain independent of paint readiness so partial or restoring documents remain inspectable.
+The test log and attachments are under `.build/browser-background-research/`; source behavior
+is documented in [agent-browser.md](agent-browser.md#rendering-while-another-chat-is-selected).
+These are current-platform correctness/latency observations, not Release power or memory
+benchmarks. Screen lock, actual Space switches, multi-display behavior and older macOS versions
+remain unverified; the installed app was not replaced for this run.
+
 USB Device Logs must sustain roughly 5,800 rows/s with a 50,000-row ring while the table is
 onscreen. The regression workload uses 1,000-row batches, long messages and a full ring, and
 measures drain, AppKit layout and display together; the earlier dual-stream benchmark excluded

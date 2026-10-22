@@ -19,7 +19,10 @@ struct PersistedPanel: Codable {
   /// minus that member and saving the loss back.
   /// 8 is a native plugin pane route: older builds know only the Device Logs tab kind and would
   /// otherwise discard another plugin's tab when they next save this session's layout.
-  static let currentFormatVersion = 8
+  /// 9 is a detached window holding something other than a browser: older builds rebuilt every
+  /// tab in a window as a browser, so a review or a simulator there would come back as a blank
+  /// page, and be dropped from the layout by the window's next save.
+  static let currentFormatVersion = 9
 
   var tabs: [PersistedTab]
   var activeTabID: String?
@@ -171,6 +174,7 @@ extension PersistedPanel {
   /// every window slice. Stamping the version by what the document contains keeps the bump
   /// costing only the sessions that actually used the feature.
   var requiredFormatVersion: Int {
+    if tabs.contains(where: { $0.namesADetachedWindow && $0.kind != .browser }) { return 9 }
     if tabs.contains(where: { $0.kind == .nativePlugin }) { return 8 }
     if dockLayout != nil || tabs.contains(where: { $0.kind == .deviceLog && $0.mode != nil }) { return 7 }
     if tabs.contains(where: \.namesAnAndroidDevice) { return 6 }
@@ -323,8 +327,8 @@ struct PersistedTab: Codable {
 
 // MARK: - Detached Window
 
-/// One detached browser window's own state: which session tabs it holds is carried by those
-/// tabs' `host`, so this records only what the window itself knows.
+/// One detached window's own state: which session tabs it holds is carried by those tabs'
+/// `host`, so this records only what the window itself knows.
 ///
 /// The frame is a string because this model stays Foundation-only — the window controller
 /// converts, the way `setFrameAutosaveName` does for the main window.

@@ -6,7 +6,7 @@ import Foundation
 ///
 /// Two of the three restoration paths run *because the app started*, which is the wrong reason
 /// when the last start ended by dying: the previously selected session reopens and every
-/// detached browser window is ordered back on screen — potentially reopening the exact thing
+/// detached window is ordered back on screen — potentially reopening the exact thing
 /// that took the app down, and doing it silently. So an unclean previous exit holds those two
 /// back and offers them instead.
 ///
@@ -52,7 +52,7 @@ enum LaunchRestorationPlan: Equatable {
 
     var restoresSelectedSession: Bool { self == .restoresEverything }
 
-    var restoresDetachedBrowserWindows: Bool { self == .restoresEverything }
+    var restoresDetachedWindows: Bool { self == .restoresEverything }
 }
 
 // MARK: - Unclean Exit Escalation
@@ -103,7 +103,7 @@ final class LaunchRestoration {
     struct Actions {
         var restoreSelectedSession: () -> Void
         var relaunchSessionsFromLastQuit: (@escaping () -> Void) -> Void
-        var restoreDetachedBrowserWindows: () -> Void
+        var restoreDetachedWindows: () -> Void
 
         /// Puts the notice on screen. The closure it is handed performs exactly what was held
         /// back; the presenter decides where the notice lives and when it goes away.
@@ -158,8 +158,8 @@ final class LaunchRestoration {
             if plan.restoresSelectedSession {
                 self.actions.restoreSelectedSession()
             }
-            if plan.restoresDetachedBrowserWindows {
-                self.actions.restoreDetachedBrowserWindows()
+            if plan.restoresDetachedWindows {
+                self.actions.restoreDetachedWindows()
             }
         }
 
@@ -173,13 +173,13 @@ final class LaunchRestoration {
 
     /// Performs exactly the two calls `run` skipped, in the order it would have made them —
     /// the selected session first, so the detached windows it would bring back with it are not
-    /// built twice (`restoreDetachedBrowserWindows` skips ids it already holds).
+    /// built twice (`restoreDetachedWindows` skips ids it already holds).
     func restoreHeldBackWorkspace() {
         guard !isResolvingHost else {
             requestedWorkspaceRestore = true
             return
         }
         actions.restoreSelectedSession()
-        actions.restoreDetachedBrowserWindows()
+        actions.restoreDetachedWindows()
     }
 }

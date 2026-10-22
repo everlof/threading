@@ -1346,7 +1346,7 @@ settings page, so a rule you disagree with is one hover away from the switch tha
 
 **After an unexpected quit, the workspace waits to be asked for.** If Threading did not shut
 down the last time it ran, the next launch leaves the workspace closed: the session you had
-selected does not reopen, and neither do any detached browser windows, so a session that took
+selected does not reopen, and neither do any detached windows, so a session that took
 the app down does not immediately take it down again. A quiet band appears across the top of the
 session pane saying the last run ended unexpectedly. **Restore** opens exactly what was held
 back, **Show Crash Report** reveals the macOS report for that run in the Finder when one was
@@ -4213,6 +4213,24 @@ pane removes that split. When the side panel's last tab closes or moves away whi
 docked beneath or beside it, the nearest of those panes moves up into the side panel instead of
 leaving an empty half. Up to eight additional docked groups can be open in one workspace.
 Shell, browser and Device Logs tabs can also move to the existing shell drawer using the tab menu.
+
+**A tab in a window of its own.** Drag a panel tab out past the edge of the main window, or
+choose **Open in New Window** from its secondary-click menu, and it gets a window of its own:
+put your app's browser or Simulator on a second display at full size, or take it fullscreen,
+while the conversation stays in the main window and the agent keeps working with it. Browsers,
+the Simulator, a paired iPhone, Review, Execution audit, file comparisons, documents and charts,
+Attachments, Overview, Device Logs and other plugin panes, and extension panels can all move. A
+window shows the same tab row and **+** menu as the side panel, offering what can live there.
+Terminals, private browsers, Push Test, Web Extensions, Chats, Sharing and Subagents stay in the
+main window.
+
+The window belongs to its chat and stays on screen when you select another one. Drag more tabs
+into its row, drag them back, or choose **Move to Main Window**. The side panel keeps a chip
+naming the window: click it to bring the window forward, or choose **Bring Back to Panel** from
+its menu to return every tab. While the window is in front, **⌘W**, **⇧⌘[**, **⇧⌘]**, **⌘1**–**⌘9**,
+Find and the Simulator commands act on it. Closing the window closes its tabs, so a Simulator
+there lets go of its device. Windows come back at launch where you left them, fullscreen
+included.
 
 ### Physical iPhone in the panel
 

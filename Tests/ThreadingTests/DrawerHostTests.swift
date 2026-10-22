@@ -153,6 +153,27 @@ final class DrawerHostTests: XCTestCase {
         XCTAssertFalse(second.isOpen(for: sessionB))
     }
 
+    /// A browser that has loaded nothing is not written, so it cannot be the written selection
+    /// either: the decoder refuses a drawer whose active tab is not among its tabs, and a refused
+    /// document quarantines the session's whole layout.
+    func testAnUnwrittenTabIsNeverTheWrittenSelection() throws {
+        let host = makeHost()
+        let session = SessionID()
+        host.showSession(session)
+        _ = host.addTerminalTab(for: session)
+        XCTAssertNotNil(host.addBrowserTab(for: session))
+        let browserID = try XCTUnwrap(host.tabs(for: session).last?.id.uuidString)
+        XCTAssertEqual(host.activeTabID(for: session)?.uuidString, browserID)
+
+        let panel = try XCTUnwrap(store.panels[session])
+        let decoded = try JSONDecoder().decode(
+            PersistedPanel.self, from: JSONEncoder().encode(panel)
+        )
+        XCTAssertFalse(decoded.drawerTabs.contains { $0.id == browserID }, "the pageless browser was written")
+        XCTAssertNotNil(decoded.drawerActiveTabID)
+        XCTAssertEqual(decoded.drawerActiveTabID, decoded.drawerTabs.first?.id)
+    }
+
     func testBundledDeviceLogsCanMoveIntoTheDrawerAndRestoreThere() throws {
         let host = makeHost()
         let session = SessionID()

@@ -252,9 +252,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 window.relaunchSessionsFromLastQuit(completion: completion)
             },
             // After both session-restore paths, so a window whose session is coming back anyway
-            // is not built twice — `restoreDetachedBrowserWindows` skips ids it already holds.
-            restoreDetachedBrowserWindows: { [weak self] in
-                self?.mainWindowController?.restoreDetachedBrowserWindowsAtLaunch()
+            // is not built twice — `restoreDetachedWindows` skips ids it already holds.
+            restoreDetachedWindows: { [weak self] in
+                self?.mainWindowController?.restoreDetachedWindowsAtLaunch()
             },
             presentNotice: { [weak self] crashReport, escalation, restore in
                 EventLog.shared.record(.app, EventLogDefaults.heldBackWorkspaceMessage, [
@@ -1478,7 +1478,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // The main window's own visibility, not `flag`. The system's flag answers "is *any*
         // window visible", which stops being the same question the moment the app has a second
         // one: with the main window miniaturized behind a visible auxiliary window — the
-        // component gallery today, a detached browser window later — a Dock click reported
+        // component gallery, a detached window — a Dock click reported
         // `flag == true` and did nothing at all, which is the one gesture whose whole purpose is
         // to bring the app back. A miniaturized window reports `isVisible == false`, which is
         // exactly the case that should re-front it.

@@ -105,7 +105,7 @@ extension AgentToolCoordinator {
                 completion(.failure("The page closed before performance measurement began."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let report = try await browser.agentPerformanceReport(
                         maximumResources: maximumResources
@@ -181,7 +181,7 @@ extension AgentToolCoordinator {
                 completion(.failure("The page closed before the accessibility audit began."))
                 return
             }
-            Task { @MainActor in
+            browser.runAgentOperation {
                 do {
                     let report = try await browser.agentAccessibilityAudit(
                         maximumIssues: maximumIssues
@@ -255,7 +255,7 @@ extension AgentToolCoordinator {
                 return
             }
 
-            Task { @MainActor in
+            browser.runAgentOperation {
                 let capture: BrowserScreenshotCapture
                 let clippedTarget: Bool
                 do {

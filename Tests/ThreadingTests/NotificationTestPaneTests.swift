@@ -365,7 +365,7 @@ final class NotificationTestPaneTests: HostedStoreTestCase {
     )
 
     XCTAssertFalse(drawer.canAdopt(tab))
-    XCTAssertFalse(DetachedBrowserHostViewController.canHold(tab))
+    XCTAssertFalse(tab.canLiveInDetachedWindow)
     XCTAssertTrue(pane.activateNotificationTest(for: sessionID) === first)
     XCTAssertEqual(pane.tabs(for: sessionID).filter { $0.notificationTest != nil }.count, 1)
   }

@@ -6910,15 +6910,21 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         title: String
     ) async throws {
         let deadline = Date().addingTimeInterval(5)
+        var lastObservation = "no title read"
         while Date() < deadline {
-            if let currentTitle = try? await browser.evaluate("document.title") as? String,
-               currentTitle == title {
-                browser.view.layoutSubtreeIfNeeded()
-                return
+            do {
+                let currentTitle = try await browser.evaluate("document.title") as? String
+                lastObservation = "observed title: \(currentTitle ?? "nil")"
+                if currentTitle == title {
+                    browser.view.layoutSubtreeIfNeeded()
+                    return
+                }
+            } catch {
+                lastObservation = error.localizedDescription
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        throw BrowserTestError.timedOut("page load for \(title)")
+        throw BrowserTestError.timedOut("page load for \(title); \(lastObservation)")
     }
 
     private func performHistory(

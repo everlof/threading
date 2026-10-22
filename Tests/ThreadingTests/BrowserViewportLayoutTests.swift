@@ -82,7 +82,8 @@ final class BrowserViewportLayoutTests: XCTestCase {
 
     @MainActor
     func testAutomaticViewportFollowsItsTabHostAfterReturningToANarrowerWindow() throws {
-        let host = DetachedBrowserHostViewController(sessionID: SessionID())
+        let sessionID = SessionID()
+        let host = DisplayPaneController(scope: .detachedWindow(UUID(), session: sessionID))
         let window = NSWindow(
             contentRect: CGRect(x: 0, y: 0, width: 1_440, height: 600),
             styleMask: [.borderless], backing: .buffered, defer: false
@@ -90,12 +91,13 @@ final class BrowserViewportLayoutTests: XCTestCase {
         window.animationBehavior = .none
         window.contentViewController = host
         defer { window.contentViewController = nil }
-        let browser = try XCTUnwrap(host.addBrowserTab(contextKind: .private))
+        host.showSessionTabs(sessionID)
+        let browser = try XCTUnwrap(host.addBrowserTab(for: sessionID, contextKind: .private))
         host.view.layoutSubtreeIfNeeded()
-        _ = try XCTUnwrap(host.addBrowserTab(contextKind: .private))
+        _ = try XCTUnwrap(host.addBrowserTab(for: sessionID, contextKind: .private))
         window.setContentSize(CGSize(width: 430, height: 600))
         host.view.layoutSubtreeIfNeeded()
-        XCTAssertTrue(host.selectTab(atIndex: 0))
+        XCTAssertTrue(host.activateTab(index: 0, for: sessionID))
         host.view.layoutSubtreeIfNeeded()
         let scroll = try XCTUnwrap(browser.view.subviews.compactMap { $0 as? NSScrollView }.first)
         XCTAssertEqual(browser.webView.frame.size, scroll.contentView.bounds.size)
