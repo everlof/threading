@@ -607,13 +607,7 @@ private extension ProjectSidebarViewController {
     /// it. See `PaneBandMargin`.
     private func setupFooter() {
         applyHiddenProjectsState()
-        view.addSubview(footer)
-
-        NSLayoutConstraint.activate([
-            footer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            footer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            footer.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
+        navigatorContent.mountFooter(footer)
 
         applySilenceState()
         _ = toasts

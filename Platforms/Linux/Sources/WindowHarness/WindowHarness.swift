@@ -1862,6 +1862,17 @@ struct WindowHarness {
         let header = PaneHeaderView(
             leading: [headerBrand], trailing: [addProjectButton, actionsButton], margin: .paneEdge)
         navigatorRoot.mountNavigatorHeader(header)
+        let settingsButton = ThemedButton()
+        settingsButton.title = "Settings"
+        settingsButton.image = Design.Symbol.image(
+            "gearshape", slot: 12, pointSize: 12, weight: .regular)
+        settingsButton.isBordered = false
+        settingsButton.font = Design.Typography.controlRegular()
+        var settingsActivated = false
+        settingsButton.action = { settingsActivated = true }
+        let footer = PaneFooterView(leading: [settingsButton], compressing: settingsButton,
+                                    margin: .paneEdge)
+        if launch != nil { navigatorRoot.mountNavigatorFooter(footer) }
         // The workspace owns one structural seam. It follows the theme rather than borrowing
         // the standalone specimen's frame, which also outlined the window's other three edges.
         let sidebarDivider = SeparatorView(.vertical)
@@ -1977,6 +1988,11 @@ struct WindowHarness {
             tw_add_project_button(window, addProjectButton.isEnabled ? 1 : 0,
                                   addRect.x, addRect.y, addRect.width,
                                   launch == nil ? 0 : addRect.height)
+            if launch != nil {
+                let settingsRect = headerPixels(settingsButton)
+                tw_settings_button(window, settingsRect.x, settingsRect.y,
+                                   settingsRect.width, settingsRect.height)
+            }
         }
         tw_navigator_pointer_route(window, 1)
         defer { contentWindow.contentView = nil }
@@ -5678,6 +5694,7 @@ struct WindowHarness {
                     _ = contentWindow.dispatchToContent(NSEvent(type: eventType,
                         locationInWindow: point))
                 }
+                if launch != nil && settingsButton.needsDisplay { dirty = true }
                 if event.action == 1, let actionID = activatedOutlineSessionActionID {
                     activatedOutlineSessionActionID = nil
                     if pointerOutlineItem?.kind == .agent,
@@ -5747,6 +5764,11 @@ struct WindowHarness {
                     actionsActivated = false
                     if actions != nil { dismissActions() }
                     else { openActions(for: nil, returnToSidebar: sidebarFocused) }
+                    continue
+                }
+                if settingsActivated {
+                    settingsActivated = false
+                    toggleSettings()
                     continue
                 }
                 if let archiveID = activatedOutlineSessionArchiveID {

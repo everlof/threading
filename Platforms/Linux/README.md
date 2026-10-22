@@ -117,7 +117,7 @@ The current shared-view audit distinguishes reused components from reused page c
 
 | Surface | Shared UI mounted by Linux | Remaining host boundary |
 | --- | --- | --- |
-| Navigator rows and menus | `SidebarNavigatorContentView` mounts the header, outline and empty state with shared constraints; row assembly, titles and menu components are shared | Linux keeps an outer `Specimen.Window` for SDL layers and diagnostic modes; macOS still mounts its footer, extension backdrop and mascot around the shared core |
+| Navigator rows and menus | `SidebarNavigatorContentView` mounts the header, outline, empty state and footer with shared constraints; Linux mounts the production `PaneFooterView` with a working Settings destination | Linux keeps an outer `Specimen.Window` for SDL layers and diagnostic modes; macOS still supplies its additional footer actions, extension backdrop and mascot around the shared core |
 | Opening composer | `OpeningComposerContentView` owns the choice row, column, and hero region; `OpeningComposerActionRowView` places Start and optional import/time actions; `ComposerWelcomeStackView` assembles the mark, greeting and optional caption; prompt, chips, choice panels and menu rows are shared | Linux still supplies fewer action controls and its house-theme greeting; macOS owns its theme backdrop and extension plane |
 | Native conversation | `ConversationPaneContentView` mounts transcript, status and composer with the same constraints; transcript rows, prompt, chips and menu panels are shared | `WorkspaceConversationPane` still supplies a reduced control set and lifecycle; the Mac controller owns its additional rails and overlays |
 | General Settings | Page canvas, confirmation card, toggles and constraints | `WorkspaceSettingsPane` includes fewer sections than `GeneralPreferencesViewController` |
@@ -698,10 +698,13 @@ text now consumes the Mac's held secondary, tertiary
 and quaternary theme tiers; neutral ink is reserved for surfaces that supply their own ground.
 The sidebar now uses the exported production gradient and
 navigator well, and saved-session selections use the theme's selection fill. Its sampled region
-colors match the Mac Threading shell in both appearances. Sidebar footer controls and window
-chrome still need comparison and implementation. The header
+colors match the Mac Threading shell in both appearances. The sidebar now mounts the same
+`PaneFooterView` and constrained list-to-footer edge as macOS, with a working Settings control;
+the remaining footer actions and window chrome still need comparison and implementation. The header
 now uses the shared 24-point Threading mark geometry and 13-point wordmark in both appearances;
 brand hover/launch motion and theme-supplied brand variants remain unsupported on Linux.
+`tests/sidebar_footer_smoke.py` captures the native 2× footer and General page, then opens
+Settings through AT-SPI and pointer input with the same mounted button.
 The project outline uses the Mac's full-width row silhouette, inset content and disclosure
 slots, depth steps and four-point breathing below the header. Its disclosure hit target follows
 the mounted chevron, and accessibility describes the complete row at every depth. The inset

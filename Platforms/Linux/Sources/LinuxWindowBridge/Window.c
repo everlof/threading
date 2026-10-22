@@ -448,6 +448,15 @@ void tw_add_project_button(TWWindow *w, int enabled, int x, int y, int width, in
         || height > windowHeight - y))) return;
     tw_accessibility_add_project_button(w, enabled, x, y, width, height);
 }
+void tw_settings_button(TWWindow *w, int x, int y, int width, int height) {
+    if (!w) return;
+    int windowWidth, windowHeight;
+    SDL_GetWindowSize(w->window, &windowWidth, &windowHeight);
+    const int available = w->sidebarWidth ? w->sidebarWidth : windowWidth;
+    if (x < 0 || y < 0 || width <= 0 || height <= 0 || x >= available ||
+        width > available - x || y >= windowHeight || height > windowHeight - y) return;
+    tw_accessibility_settings_button(w, x, y, width, height);
+}
 static int actions_contains(TWWindow *w, int x, int y) {
     const SDL_Point point = {x, y};
     return w->actionsVisible && SDL_PointInRect(&point, &w->actionsBounds);
@@ -1096,6 +1105,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                 if (!tw_accessibility_project_action_identity(row, out->text, sizeof(out->text))) continue;
                 out->kind = 28; out->key = row; out->action = 1;
             } else if (e.user.code == 5) out->kind = 30;
+            else if (e.user.code == 21 && w->sidebarWidth) out->kind = 62;
             else if (e.user.code == 6) {
                 const int row = (int)(intptr_t)e.user.data1;
                 if (!tw_accessibility_project_create_identity(row, out->text, sizeof(out->text))) continue;

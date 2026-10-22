@@ -225,6 +225,9 @@ THREADING_LINUX_UI_SCALE=2 dbus-run-session -- python3 /native_permission_smoke.
 dbus-run-session -- python3 /native_activity_smoke.py \
   "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
   "$fixture/ui-scale-2" /evidence/restart-out/native-activity-light
+dbus-run-session -- python3 /sidebar_footer_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
+  "$fixture/ui-scale-2" /evidence/restart-out/sidebar-footer
 mkdir "$fixture/ui-scale-2-dark"
 THREADING_TEST_DARK=1 dbus-run-session -- python3 /native_activity_smoke.py \
   "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \

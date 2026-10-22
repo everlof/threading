@@ -202,6 +202,7 @@ void tw_accessibility_text_prompt(TWWindow *, const char *identity, const char *
 // Frame-level Add project button. Height0 hides it. Pointer input still comes through the
 // opt-in navigator view tree; this publishes only its matching accessible action and bounds.
 void tw_add_project_button(TWWindow *, int enabled, int x, int y, int width, int height);
+void tw_settings_button(TWWindow *, int x, int y, int width, int height);
 // Default-off input route for an AppKit-shim navigator. While enabled, its mounted view tree
 // receives raw pointer events instead of the bridge's legacy Actions pointer handling.
 // Keyboard/AT-SPI Actions activation and terminal input retain their existing routes.

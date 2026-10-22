@@ -111,6 +111,8 @@ final class WorkspaceSettingsPane: WorkspacePane {
         }
         guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
         if focused { tw_title(window, title) }
+        print("SETTINGS_FRAME \(width)x\(contentHeight) controls=\(toggles.count)")
+        fflush(nil)
         presentedSize = size
         displayRevision = owner.displayRevision
         needsPresentation = false

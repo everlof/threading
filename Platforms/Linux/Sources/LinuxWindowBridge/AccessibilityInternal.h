@@ -25,6 +25,7 @@ void tw_accessibility_actions_button(TWWindow *, const char *label, int enabled,
                                      int x, int y, int width, int height);
 void tw_accessibility_add_project_button(TWWindow *, int enabled,
                                          int x, int y, int width, int height);
+void tw_accessibility_settings_button(TWWindow *, int x, int y, int width, int height);
 void tw_window_geometry(TWWindow *window, int *x, int *y, int *width, int *height);
 int tw_workspace_sidebar_width(TWWindow *window);
 int tw_workspace_sidebar_focused(TWWindow *window);

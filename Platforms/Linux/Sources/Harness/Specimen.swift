@@ -128,6 +128,7 @@ enum Specimen {
         private var workspaceBackdropClip: NSView?
         private var workspaceWell: NSView?
         private var workspaceContent: SidebarNavigatorContentView?
+        private var workspaceFooter: NSView?
         private var mountedMenuDocument: ThemedMenuDocumentView?
         private var mountedMenuHeights: [CGFloat] = []
         #else
@@ -210,6 +211,14 @@ enum Specimen {
             workspaceContent.mountHeader(header, top: workspaceContent.topAnchor)
         }
 
+        func mountNavigatorFooter(_ footer: NSView) {
+            guard let workspaceContent else {
+                preconditionFailure("install the workspace sidebar before its footer")
+            }
+            workspaceContent.mountFooter(footer)
+            workspaceFooter = footer
+        }
+
         func mountNavigatorEmptyState(_ emptyState: NSView, over outline: NSView,
                                       inset: CGFloat) {
             guard let workspaceContent else {
@@ -248,7 +257,8 @@ enum Specimen {
                     preconditionFailure("install the workspace sidebar before its outline")
                 }
                 workspaceContent.mountOutline(
-                    scrollView, below: header, bottom: workspaceContent.bottomAnchor)
+                    scrollView, below: header,
+                    bottom: workspaceFooter?.topAnchor ?? workspaceContent.bottomAnchor)
                 #else
                 addSubview(scrollView, positioned: .below, relativeTo: menuLayer)
                 scrollView.translatesAutoresizingMaskIntoConstraints = false

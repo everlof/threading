@@ -125,6 +125,7 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/native_workspace_smoke.py:/native_workspace_smoke.py:ro" \
   -v "$PWD/tests/native_permission_smoke.py:/native_permission_smoke.py:ro" \
   -v "$PWD/tests/native_activity_smoke.py:/native_activity_smoke.py:ro" \
+  -v "$PWD/tests/sidebar_footer_smoke.py:/sidebar_footer_smoke.py:ro" \
   -v "$PWD/tests/native_background_activity_smoke.py:/native_background_activity_smoke.py:ro" \
   -v "$PWD/tests/archived_navigation_smoke.py:/archived_navigation_smoke.py:ro" \
   -v "$PWD/tests/session_rename_smoke.py:/session_rename_smoke.py:ro" \

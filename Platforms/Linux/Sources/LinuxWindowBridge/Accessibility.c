@@ -67,7 +67,7 @@ G_DEFINE_TYPE_WITH_CODE(ComposerEditorNode, composer_editor_node, component_node
                         G_IMPLEMENT_INTERFACE(ATK_TYPE_TEXT, composer_text_interface_init)
                         G_IMPLEMENT_INTERFACE(ATK_TYPE_EDITABLE_TEXT, composer_editable_interface_init))
 
-static AccessibleNode *app, *frame, *list, *actionsButton, *addProjectButton, *pageTitleButton;
+static AccessibleNode *app, *frame, *list, *actionsButton, *addProjectButton, *settingsButton, *pageTitleButton;
 static AccessibleNode *pageActionsButton, *openInPrimaryButton, *openInChooserButton;
 static AccessibleNode *sessionMenuList;
 static AccessibleNode *placeholder, *placeholderTitle, *placeholderDetail, *placeholderAction;
@@ -87,7 +87,7 @@ static char attachmentOwner[MAX_COMPOSER_ID];
 static int conversationConfigurationVisible[3], conversationConfigurationFocused[3];
 static int conversationConfigurationMenuKind, conversationConfigurationFirst;
 static char conversationConfigurationIdentity[MAX_COMPOSER_ID];
-static int actionsVisible, addProjectVisible, pageTitleVisible, placeholderVisible, placeholderActionVisible;
+static int actionsVisible, addProjectVisible, settingsVisible, pageTitleVisible, placeholderVisible, placeholderActionVisible;
 static int composerChipVisible[6], composerMenuVisible, composerMenuKind;
 static ComposerEditorNode *composerEditor;
 static int composerEditorVisible, composerEditorFocused, composerFocusKind = -1;
@@ -214,7 +214,8 @@ static AtkStateSet *node_state(AtkObject *object) {
         composer_chip_kind(node) != 0 ||
         node == (AccessibleNode *)terminal ||
         node == (AccessibleNode *)composerEditor ||
-        node == actionsButton || node == addProjectButton || node == pageTitleButton ||
+        node == actionsButton || node == addProjectButton || node == settingsButton ||
+        node == pageTitleButton ||
         node == pageActionsButton || node == openInPrimaryButton ||
         node == openInChooserButton || node == placeholderAction ||
         node == promptCancel || node == promptCreate || node == promptClear ||
@@ -429,7 +430,7 @@ static void show_content(AccessibleNode *content) {
         (!placeholderVisible || tw_workspace_terminal_top_inset_value(hostWindow) > 0);
     AccessibleNode *rightPane = placeholderVisible ? placeholder : (AccessibleNode *)terminal;
     const guint baseCount = workspace ? 2 + titleVisible : 1;
-    const guint count = baseCount + actionsVisible + addProjectVisible
+    const guint count = baseCount + actionsVisible + addProjectVisible + settingsVisible
         + pageActionsVisible + 2 * openInVisible + sessionMenuVisible;
     int same = frame->children->len == count
         && g_ptr_array_index(frame->children, 0) == (workspace ? list : content);
@@ -438,10 +439,15 @@ static void show_content(AccessibleNode *content) {
     if (same && actionsVisible) same = g_ptr_array_index(frame->children, baseCount) == actionsButton;
     if (same && addProjectVisible)
         same = g_ptr_array_index(frame->children, baseCount + actionsVisible) == addProjectButton;
-    if (same && pageActionsVisible)
+    if (same && settingsVisible)
         same = g_ptr_array_index(frame->children, baseCount + actionsVisible + addProjectVisible)
+            == settingsButton;
+    if (same && pageActionsVisible)
+        same = g_ptr_array_index(frame->children, baseCount + actionsVisible + addProjectVisible
+                                + settingsVisible)
             == pageActionsButton;
-    const guint openInIndex = baseCount + actionsVisible + addProjectVisible + pageActionsVisible;
+    const guint openInIndex = baseCount + actionsVisible + addProjectVisible + settingsVisible
+        + pageActionsVisible;
     if (same && openInVisible)
         same = g_ptr_array_index(frame->children, openInIndex) == openInPrimaryButton &&
             g_ptr_array_index(frame->children, openInIndex + 1) == openInChooserButton;
@@ -455,6 +461,7 @@ static void show_content(AccessibleNode *content) {
         if (workspace) add_child(frame, rightPane);
         if (actionsVisible) add_child(frame, actionsButton);
         if (addProjectVisible) add_child(frame, addProjectButton);
+        if (settingsVisible) add_child(frame, settingsButton);
         if (pageActionsVisible) add_child(frame, pageActionsButton);
         if (openInVisible) {
             add_child(frame, openInPrimaryButton);
@@ -536,6 +543,8 @@ static gint action_count(AtkAction *action) {
         return composerMenuVisible && !node->retired && node->enabled &&
             node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node == actionsButton) return actionsVisible && node->enabled ? 1 : 0;
+    if (node == settingsButton) return settingsVisible && node->enabled &&
+        node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node == pageActionsButton) return pageActionsVisible && node->enabled &&
         strcmp(pageActionsIdentity, pageTitleIdentity) == 0 &&
         node_mounted(ATK_OBJECT(node)) ? 1 : 0;
@@ -574,7 +583,8 @@ static const gchar *action_name(AtkAction *action, gint index) {
     if (composer_chip_kind(node) != 0 ||
         (node->row >= 0 && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(composerMenuList)))
         return index == 0 && action_count(action) ? "press" : NULL;
-    if (node == actionsButton || node == addProjectButton || node == pageTitleButton ||
+    if (node == actionsButton || node == addProjectButton || node == settingsButton ||
+        node == pageTitleButton ||
         node == pageActionsButton || node == openInPrimaryButton ||
         node == openInChooserButton ||
         node == placeholderAction || node == promptCancel || node == promptCreate ||
@@ -717,6 +727,15 @@ static gboolean action_do(AtkAction *action, gint index) {
         navigation_trace_enqueue(&event, pushed);
         return pushed == 1;
     }
+    if (node == settingsButton) {
+        if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
+        SDL_Event event = {0};
+        event.type = eventType; event.user.code = 21;
+        event.user.data2 = (void *)(uintptr_t)generation;
+        int pushed = SDL_PushEvent(&event);
+        navigation_trace_enqueue(&event, pushed);
+        return pushed == 1;
+    }
     if (node->projectControl) {
         if (index != 0 || !action_count(action) || !activeList ||
             node->actionRow < 0 || (guint)node->actionRow >= activeList->children->len ||
@@ -836,6 +855,7 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
     } else if (object == ATK_OBJECT(actionsButton) || object == ATK_OBJECT(addProjectButton) ||
+               object == ATK_OBJECT(settingsButton) ||
                object == ATK_OBJECT(pageTitleButton) || object == ATK_OBJECT(pageActionsButton) ||
                object == ATK_OBJECT(openInPrimaryButton) ||
                object == ATK_OBJECT(openInChooserButton) ||
@@ -1448,6 +1468,9 @@ void tw_accessibility_open(TWWindow *window) {
     addProjectButton = new_component(ATK_ROLE_PUSH_BUTTON, "Add Project");
     addProjectButton->id = g_strdup("linux.add-project");
     atk_object_set_accessible_id(ATK_OBJECT(addProjectButton), addProjectButton->id);
+    settingsButton = new_component(ATK_ROLE_PUSH_BUTTON, "Settings");
+    settingsButton->id = g_strdup("sidebar.settings");
+    atk_object_set_accessible_id(ATK_OBJECT(settingsButton), settingsButton->id);
     pageTitleButton = new_component(ATK_ROLE_PUSH_BUTTON, "Page title");
     pageTitleButton->id = g_strdup("linux.page-title");
     atk_object_set_accessible_id(ATK_OBJECT(pageTitleButton), pageTitleButton->id);
@@ -1555,6 +1578,7 @@ void tw_accessibility_open(TWWindow *window) {
                                  ((AccessibleNode *)composerEditor)->id);
     actionsVisible = 0;
     addProjectVisible = 0;
+    settingsVisible = 0;
     pageTitleVisible = pageActionsVisible = openInVisible = sessionMenuVisible = 0;
     placeholderVisible = placeholderActionVisible = composerEditorVisible = composerEditorFocused = 0;
     promptVisible = promptFocusKind = 0;
@@ -1602,6 +1626,7 @@ void tw_accessibility_close(void) {
     g_clear_object(&terminal);
     g_clear_object(&actionsButton);
     g_clear_object(&addProjectButton);
+    g_clear_object(&settingsButton);
     g_clear_object(&pageTitleButton);
     g_clear_object(&pageActionsButton);
     g_clear_object(&openInPrimaryButton);
@@ -1634,7 +1659,7 @@ void tw_accessibility_close(void) {
     g_clear_object(&conversationConfigurationMenu);
     g_clear_object(&attachmentList);
     g_clear_object(&composerEditor);
-    actionsVisible = addProjectVisible = pageTitleVisible = pageActionsVisible = 0;
+    actionsVisible = addProjectVisible = settingsVisible = pageTitleVisible = pageActionsVisible = 0;
     openInVisible = sessionMenuVisible = 0;
     placeholderVisible = placeholderActionVisible = composerEditorVisible = composerEditorFocused = 0;
     promptVisible = promptFocusKind = 0;
@@ -1849,6 +1874,14 @@ void tw_accessibility_add_project_button(TWWindow *window, int enabled,
                                        addProjectButton->enabled);
     }
     addProjectButton->bounds = (AtkRectangle){x, y, width, height};
+    show_content(activeList ? list : (AccessibleNode *)terminal);
+}
+void tw_accessibility_settings_button(TWWindow *window, int x, int y, int width, int height) {
+    if (!bridgeReady || window != hostWindow) return;
+    if (!settingsVisible) generation++;
+    settingsVisible = 1;
+    settingsButton->enabled = 1;
+    settingsButton->bounds = (AtkRectangle){x, y, width, height};
     show_content(activeList ? list : (AccessibleNode *)terminal);
 }
 void tw_accessibility_page_title(TWWindow *window, const char *identity, const char *name,

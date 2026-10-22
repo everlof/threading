@@ -11,6 +11,17 @@ final class SidebarNavigatorContentView: NSView {
     }
     #endif
 
+    func mountFooter(_ footer: NSView) {
+        precondition(footer.superview == nil, "navigator footer is already mounted")
+        footer.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(footer)
+        NSLayoutConstraint.activate([
+            footer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
     func mountHeader(_ header: NSView, top: NSLayoutYAxisAnchor) {
         precondition(header.superview == nil, "navigator header is already mounted")
         header.translatesAutoresizingMaskIntoConstraints = false

@@ -145,7 +145,8 @@ public enum Design {
         /// Images rasterize once per visible control at 2×, capped to a 44-point canvas.
         public static func image(_ name: String, slot: CGFloat, pointSize: CGFloat,
                                  weight: NSFont.Weight) -> NSImage? {
-            precondition(name == "ellipsis" || name == "plus" || name == "terminal"
+            precondition(name == "ellipsis" || name == "plus" || name == "gearshape"
+                         || name == "terminal"
                          || name == "archivebox" || name == "pin" || name == "pin.slash"
                          || name == "pin.fill" || name == "moon.zzz" || name == "bell"
                          || name == "calendar"
@@ -177,7 +178,28 @@ public enum Design {
             let size = NSSize(width: canvasSide, height: canvasSide)
             let image = NSImage(size: size, flipped: false) { canvas in
                 NSColor.white.setFill()
-                if name == "xmark" {
+                if name == "gearshape" {
+                    let center = NSPoint(x: origin + side / 2, y: origin + side / 2)
+                    let gear = NSBezierPath()
+                    for step in 0..<32 {
+                        let angle = CGFloat(step) * .pi / 16
+                        let radius = side * (step % 4 == 1 || step % 4 == 2 ? 0.43 : 0.33)
+                        let point = NSPoint(x: center.x + cos(angle) * radius,
+                                            y: center.y + sin(angle) * radius)
+                        if step == 0 { gear.move(to: point) }
+                        else { gear.line(to: point) }
+                    }
+                    gear.close()
+                    gear.lineWidth = max(0.8, side * 0.075 * weightFactor)
+                    gear.lineJoinStyle = .round
+                    NSColor.white.setStroke()
+                    gear.stroke()
+                    let hub = NSBezierPath(ovalIn: NSRect(
+                        x: center.x - side * 0.12, y: center.y - side * 0.12,
+                        width: side * 0.24, height: side * 0.24))
+                    hub.lineWidth = gear.lineWidth
+                    hub.stroke()
+                } else if name == "xmark" {
                     let mark = NSBezierPath()
                     mark.move(to: NSPoint(x: origin + side * 0.22, y: origin + side * 0.22))
                     mark.line(to: NSPoint(x: origin + side * 0.78, y: origin + side * 0.78))
