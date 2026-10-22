@@ -543,7 +543,7 @@ enum Specimen {
             let slot: NSView
             let leading: NSLayoutConstraint
             let trailing: NSLayoutConstraint
-            let width: NSLayoutConstraint
+            let width: NSLayoutConstraint?
         }
         private var productionSessionAssembly: SidebarSessionRowAssembly?
         private var productionSessionView: ThemedSessionRowContentView? {
@@ -572,7 +572,10 @@ enum Specimen {
                   productionSessionStack?.isHidden == false else { return nil }
             return mark
         }
-        private var productionTerminalView: ThemedTerminalRowContentView?
+        private var productionTerminalAssembly: SidebarTerminalRowAssembly?
+        private var productionTerminalView: ThemedTerminalRowContentView? {
+            productionTerminalAssembly?.visuals
+        }
         private var productionTerminalMount: ProductionContentMount?
         private var productionAttentionLabel: NSTextField?
         private var productionProjectActionsRevealed = false
@@ -767,33 +770,13 @@ enum Specimen {
             return bounds.contains(point) && point.x >= marker.frame.minX && point.x < marker.frame.maxX
         }
 
-        private func mountProductionContent(_ content: NSView, leadingInset: CGFloat,
-                                            slot: NSView = NSView())
-            -> ProductionContentMount {
-            slot.translatesAutoresizingMaskIntoConstraints = false
-            slot.setAccessibilityElement(false)
-            addSubview(content)
-            addSubview(slot)
-            let edges = SidebarRowDefaults.constrainContent(
-                content, trailingSlot: slot, in: self,
-                leadingInset: leadingInset,
-                trailingInset: productionTrailingInset + SidebarRowDefaults.trailingInset)
-            let width = slot.widthAnchor.constraint(
-                equalToConstant: SidebarRowDefaults.trailingSlotSize)
-            NSLayoutConstraint.activate([
-                width,
-                slot.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize)
-            ])
-            return ProductionContentMount(slot: slot, leading: edges.leading,
-                                          trailing: edges.trailing, width: width)
-        }
-
         private func updateProductionContent(_ mount: ProductionContentMount,
-                                             leadingInset: CGFloat) {
+                                             leadingInset: CGFloat,
+                                             trailingInset: CGFloat? = nil) {
             if mount.leading.constant != leadingInset { mount.leading.constant = leadingInset }
-            let trailingInset = productionTrailingInset + SidebarRowDefaults.trailingInset
-            if mount.trailing.constant != -trailingInset {
-                mount.trailing.constant = -trailingInset
+            let inset = trailingInset ?? productionTrailingInset + SidebarRowDefaults.trailingInset
+            if mount.trailing.constant != -inset {
+                mount.trailing.constant = -inset
             }
         }
 
@@ -864,8 +847,8 @@ enum Specimen {
             productionSessionActionsRevealed = revealsActions
             let width = revealsActions ? SidebarRowDefaults.sessionTrailingSlotWidth
                 : SidebarRowDefaults.trailingSlotSize
-            if productionSessionMount?.width.constant != width {
-                productionSessionMount?.width.constant = width
+            if productionSessionMount?.width?.constant != width {
+                productionSessionMount?.width?.constant = width
             }
             productionSessionHoverControls?.isHidden = !revealsActions
             productionSessionHoverControls?.alphaValue = revealsActions ? 1 : 0
@@ -898,22 +881,31 @@ enum Specimen {
             productionProjectView?.isHidden = true
             productionSessionStack?.isHidden = true
             productionSessionMount?.slot.isHidden = true
-            let content: ThemedTerminalRowContentView
-            if let productionTerminalView {
-                content = productionTerminalView
+            let assembly: SidebarTerminalRowAssembly
+            if let productionTerminalAssembly {
+                assembly = productionTerminalAssembly
             } else {
-                content = ThemedTerminalRowContentView(frame: .zero)
+                assembly = SidebarTerminalRowAssembly()
+                // The Linux host has no standalone-terminal menu route yet. Keep the shared
+                // control's layout, but do not expose an inert command to keyboard or AT-SPI.
+                assembly.actionButton.isEnabled = false
+                assembly.actionButton.setAccessibilityElement(false)
                 let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
-                let mount = mountProductionContent(content, leadingInset: leading)
-                mount.slot.setAccessibilityIdentifier("sidebar.terminal.trailing")
-                productionTerminalMount = mount
-                productionTerminalView = content
+                let edges = assembly.mount(in: self, leadingInset: leading,
+                    trailingInset: productionTrailingInset + SidebarRowDefaults.trailingInset)
+                productionTerminalMount = ProductionContentMount(
+                    slot: assembly.actionButton, leading: edges.leading,
+                    trailing: edges.trailing, width: nil)
+                productionTerminalAssembly = assembly
             }
             let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
             if let productionTerminalMount {
-                updateProductionContent(productionTerminalMount, leadingInset: leading)
+                let gutter = productionTrailingInset + SidebarRowDefaults.trailingInset
+                updateProductionContent(productionTerminalMount, leadingInset: leading,
+                    trailingInset: assembly.trailingSlotInset(for: gutter))
                 productionTerminalMount.slot.isHidden = false
             }
+            let content = assembly.visuals
             content.setTitle(title)
             content.setIcon(icon)
             content.iconView.contrastGround = { [weak self] in self?.contentGround ?? Specimen.bodyGround }

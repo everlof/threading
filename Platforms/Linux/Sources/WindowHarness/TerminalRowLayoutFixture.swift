@@ -15,6 +15,7 @@ enum TerminalRowLayoutFixture {
         else { preconditionFailure("terminal identity glyph is unavailable") }
         var retainedRow: Specimen.Row?
         var retainedContent: ThemedTerminalRowContentView?
+        var retainedAction: ThemedIconButton?
         var wideTitleWidth: CGFloat = 0
 
         for width in [CGFloat(400), 160, 400] {
@@ -29,13 +30,14 @@ enum TerminalRowLayoutFixture {
             guard let row = root.mountedRow(at: 0),
                   let content = row.subviews.compactMap({ $0 as? ThemedTerminalRowContentView }).first
             else { preconditionFailure("shared terminal content was not mounted") }
-            guard let slot = row.subviews.first(where: {
-                $0.accessibilityIdentifier() == "sidebar.terminal.trailing"
-            }) else { preconditionFailure("terminal trailing slot was not mounted") }
+            guard let action = row.subviews.compactMap({ $0 as? ThemedIconButton }).first(where: {
+                $0.accessibilityIdentifier() == "sidebar.terminal.actions"
+            }) else { preconditionFailure("shared terminal action was not mounted") }
             precondition(abs(content.frame.midY - row.bounds.midY) < 0.5 &&
                          content.frame.minX == SidebarRowDefaults.leadingInset &&
-                         content.frame.maxX <= slot.frame.minX - SidebarRowDefaults.horizontalSpacing &&
-                         slot.frame.maxX == row.bounds.maxX - SidebarRowDefaults.trailingInset,
+                         content.frame.maxX <= action.frame.minX - SidebarRowDefaults.horizontalSpacing &&
+                         action.frame.maxX == row.bounds.maxX
+                            - max(0, SidebarRowDefaults.trailingInset - action.opticalHorizontalInset),
                          "shared terminal content lost its Mac row constraints")
             precondition(content.iconView.frame.width == SidebarRowDefaults.iconSlotWidth &&
                          content.iconView.image === icon,
@@ -51,9 +53,13 @@ enum TerminalRowLayoutFixture {
             if let retainedContent {
                 precondition(content === retainedContent, "terminal content was rebuilt")
             }
+            if let retainedAction {
+                precondition(action === retainedAction, "terminal action was rebuilt")
+            }
             retainedRow = row
             retainedContent = content
+            retainedAction = action
         }
-        print("PASS shared terminal content layout in recycled navigator slot")
+        print("PASS shared terminal row assembly in recycled navigator slot")
     }
 }

@@ -9651,3 +9651,34 @@ mounted reply, opening composer and two-image rail were inspected under
 `out/prompt-view-native/evidence-3/`, `out/prompt-view-opening-1/` and
 `out/prompt-view-attachment-2/`. The Linux UI structure ratchet drops from 93 to 89 local
 constraint sites and from six to four local stack constructors.
+
+## 267. Terminal rows share their action slot and constraints, 2026-10-22
+
+`ProjectTerminalRowView` and the Linux outline cell now instantiate
+`SidebarTerminalRowAssembly` from production Design. It owns the terminal icon/title stack,
+the actual `ThemedIconButton`, and the same edge relationship to the cell. The Mac wrapper
+continues to own hover, menu and foreground spinner behavior; the Linux host owns virtual row
+placement and keeps the action disabled and absent from AT-SPI until it has a terminal-menu
+route. No separate blank Linux slot or local terminal constraints remain. The UI structure
+ratchet drops from 89 to 86 Linux constraint sites.
+
+The Linux `WindowHarness` build and wide/narrow/recycled terminal layout fixture pass. A native
+1120×480 Xvfb window with six saved terminals was rendered and inspected at
+`out/terminal-assembly.fcUHahEx/evidence/terminal-assembly-native.png`. The unsigned Mac Debug
+app build passes. The `sidebar-session-rows` evidence entry passes four macOS tests and renders
+50 states; the terminal row and shipping-window captures were inspected. This run had no
+checked-in baselines for that entry, so it establishes rendered evidence but no accepted pixel
+regression comparison. The full 5,100-project native-outline journey did not reach its row checks:
+its initial viewport began at row one while its selected project was row zero. The focused
+one-project window above verifies this mounted terminal row, but does not validate the large
+outline journey.
+
+The ownership audit still has substantive work: the Linux alert builds its own controls around
+the shared `ThemedAlertBodyView`; General settings uses shared page structure but omits Mac
+sections; Linux menu surfaces still draw their own panel around shared menu rows; the terminal
+menu and busy spinner are not yet hosted on Linux; and the saved-runtime beam remains a Linux
+placeholder. `WorkspacePlaceholderPane` still creates the opening host's
+choice and action stacks, but delegates their spacing and constraints to `PromptChrome` and
+mounts the exact `PromptView`; these stacks are host composition until the corresponding Mac
+presenter can be moved behind a shared owner. The remaining Linux structure count is an audit
+queue, not proof that every site duplicates macOS UI.

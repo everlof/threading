@@ -159,8 +159,9 @@ sibling disclosure leaves the selected child in place. `multi_project_outline_sm
 these behaviors in the native shell, including keyboard traversal and durable terminal identity.
 The indexed navigator excludes archived conversations from both counts and recent rows before
 its limit; archived records remain available by exact session ID for a future restore surface.
-`--session-row-layout-fixture` and `--terminal-row-layout-fixture` check the shared title/icon
-stacks at their native slot sizes. Plain Right expands a project while keeping it selected; Left collapses a project or selects
+`--session-row-layout-fixture` and `--terminal-row-layout-fixture` check the shared row
+assemblies, including the terminal action control and its constraint placement, at native slot
+sizes. Plain Right expands a project while keeping it selected; Left collapses a project or selects
 a child’s parent. The navigator restores each project's persisted `isExpanded` value, including
 empty projects, and inherits the shared expanded default for new projects. Pointer, keyboard and
 page-reveal expansion save the same exact project row on a worker. A refused write restores the

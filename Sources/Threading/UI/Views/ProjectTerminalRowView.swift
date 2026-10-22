@@ -2,15 +2,10 @@ import AppKit
 
 /// Sidebar row for a standalone terminal.
 final class ProjectTerminalRowView: NSTableCellView, ThemeDerivedContent {
-    private let rowVisuals = ThemedTerminalRowContentView()
+    private let assembly = SidebarTerminalRowAssembly()
+    private var rowVisuals: ThemedTerminalRowContentView { assembly.visuals }
     private var titleLabel: MorphingTitleLabel { rowVisuals.titleLabel }
-    private let actionButton = ThemedIconButton(
-        symbolName: SidebarRowDefaults.actionSymbol,
-        accessibility: L10n.string("Terminal actions"),
-        target: .inline,
-        inkSource: .chrome,
-        glyphMaterialization: .deferred
-    )
+    private var actionButton: ThemedIconButton { assembly.actionButton }
 
     /// The two gutters the column's width moves — see `SidebarDensity`. Held so a narrower
     /// column is a constant assignment on the rows already on screen.
@@ -94,34 +89,16 @@ final class ProjectTerminalRowView: NSTableCellView, ThemeDerivedContent {
             return SidebarHoverRowView.contentGround(for: self)
         }
 
-        actionButton.presentsMenu = true
-        actionButton.alphaValue = 0
         actionButton.onPress = { [weak self] in
             guard let self, let terminalID else { return }
             onAction?(terminalID, actionButton)
         }
-        actionButton.translatesAutoresizingMaskIntoConstraints = false
-        // Named the way the session and project rows name theirs, so the inspector — and a test
-        // sweeping all three — reads this row by the same convention.
-        actionButton.setAccessibilityIdentifier("sidebar.terminal.actions")
-
-        addSubview(rowVisuals)
-        addSubview(actionButton)
-
-        let edges = SidebarRowDefaults.constrainContent(
-            rowVisuals, trailingSlot: actionButton, in: self,
-            leadingInset: SidebarRowDefaults.leadingInset,
-            trailingInset: trailingSlotInset(for: SidebarRowDefaults.trailingInset))
+        let edges = assembly.mount(in: self, leadingInset: SidebarRowDefaults.leadingInset,
+                                   trailingInset: SidebarRowDefaults.trailingInset)
         contentLeadingConstraint = edges.leading
         trailingSlotConstraint = edges.trailing
 
         setAccessibilityRole(.staticText)
-    }
-
-    /// How far inside the row's trailing edge the `⋯` is pinned, for a given gutter. Never
-    /// negative — see `SessionRowView.trailingSlotInset(for:)` for the hit-testing rule.
-    private func trailingSlotInset(for gutter: CGFloat) -> CGFloat {
-        max(0, gutter - actionButton.opticalHorizontalInset)
     }
 
     override func updateTrackingAreas() {
@@ -240,6 +217,6 @@ extension ProjectTerminalRowView: SidebarDensityAdopting {
     /// Restates the row's two gutters at the width the column now has.
     func applySidebarDensity(_ density: SidebarDensity) {
         contentLeadingConstraint?.constant = density.rowLeadingInset
-        trailingSlotConstraint?.constant = -trailingSlotInset(for: density.rowTrailingInset)
+        trailingSlotConstraint?.constant = -assembly.trailingSlotInset(for: density.rowTrailingInset)
     }
 }
