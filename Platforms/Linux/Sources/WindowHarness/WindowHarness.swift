@@ -2111,7 +2111,7 @@ struct WindowHarness {
         var pendingSnoozeAcknowledgements: [String: String] = [:]
         var actions: NavigatorActions.Presentation?
         var sessionMenu: SidebarSessionMenu?
-        let sessionMenuSurface = SessionMenuSurface(frame: .zero)
+        let sessionMenuSurface = ThemedMenuPanelView(frame: .zero)
         let retainedSessionMenuRows = RetainedMenuRows()
         var sessionMenuSeparators: [ThemedMenuSeparatorView] = []
         var sessionMenuFrame = NSRect.zero

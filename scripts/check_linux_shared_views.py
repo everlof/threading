@@ -16,6 +16,7 @@ DECLARATION = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:")
 EXPECTED_DUPLICATES: set[str] = set()
 HOST_RENDER_LEAVES = {"LinuxActivityBeamHostView", "MorphingLabel"}
 VIEW_DECLARATION = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*NSView\b")
+CLASS_BASE = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)")
 MENU_ROW_FRAME = re.compile(r"\b(?:row|separator)\.frame\s*=")
 MENU_HOST_FILES = (
     "WorkspaceConversationPane.swift",
@@ -57,6 +58,15 @@ def main() -> int:
         print(f"linux-shared-views: new Linux NSView {name} needs a shared UI review", file=sys.stderr)
     for name in sorted(HOST_RENDER_LEAVES - host_views):
         print(f"linux-shared-views: {name} was removed; update the host leaf list", file=sys.stderr)
+    shared_view_subclasses = []
+    for path in linux_directory.glob("*.swift"):
+        if path.is_symlink():
+            continue
+        for name, base in CLASS_BASE.findall(executable_text(path.read_text(encoding="utf-8"))):
+            if base in mac and base.endswith("View"):
+                shared_view_subclasses.append((name, base, path))
+                print(f"linux-shared-views: {name} subclasses shared {base} in {path}; "
+                      "mount the shared view directly", file=sys.stderr)
     frame_assignments = []
     for name in MENU_HOST_FILES:
         path = linux_directory / name
@@ -67,7 +77,8 @@ def main() -> int:
             print(f"linux-shared-views: menu row frame in {path}:{line}; use the shared document",
                   file=sys.stderr)
     print(f"linux-shared-views: {len(duplicates)} named duplicate classes remain")
-    return 1 if added or removed or host_views != HOST_RENDER_LEAVES or frame_assignments else 0
+    return 1 if (added or removed or host_views != HOST_RENDER_LEAVES
+                 or shared_view_subclasses or frame_assignments) else 0
 
 
 if __name__ == "__main__":

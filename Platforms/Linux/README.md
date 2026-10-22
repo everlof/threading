@@ -104,6 +104,8 @@ menus now use the production `ThemedMenuDocumentView`. The floating session menu
 shared separator. `ThemedMenuPanelView` owns the menu surface and historical frame artwork on
 both platforms; the current Linux theme snapshot selects its automatic appearance. Linux supplies
 menu bounds and SDL overlay lifecycle; the shared document lays out the rows.
+The navigator's header Actions and account pickers still replace the column with menu rows;
+they have not yet adopted the Mac anchored menu placement and dismissal behavior.
 
 The window host also links the production backdrop overlay, text field, clip view, scroll view,
 table view, its default row view, and activity beam wrapper. `scripts/check_linux_shared_views.py`

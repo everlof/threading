@@ -16,38 +16,6 @@ enum SessionMenuCommand: String, CaseIterable {
     }
 }
 
-@MainActor
-final class SessionMenuSurface: ThemedMenuPanelView {
-    private var menuDocument: ThemedMenuDocumentView?
-    private var mountedRows: [NSView] = []
-    private var mountedHeights: [CGFloat] = []
-    private var mountedPadding: CGFloat = 6
-
-    func setRows(_ rows: [NSView], heights: [CGFloat], padding: CGFloat = 6) {
-        precondition(rows.count == heights.count)
-        if rows.count == mountedRows.count,
-           zip(rows, mountedRows).allSatisfy({ $0 === $1 }),
-           heights == mountedHeights, padding == mountedPadding { return }
-        menuDocument?.removeFromSuperview()
-        menuDocument = nil
-        mountedRows = rows
-        mountedHeights = heights
-        mountedPadding = padding
-        guard !rows.isEmpty else { return }
-
-        let document = ThemedMenuDocumentView(views: rows, heights: heights)
-        document.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(document)
-        NSLayoutConstraint.activate([
-            document.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
-            document.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
-            document.topAnchor.constraint(equalTo: topAnchor, constant: padding),
-            document.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding)
-        ])
-        menuDocument = document
-    }
-}
-
 /// Shared pane header and bounded menus. The content runtime owns input and lifecycle.
 @MainActor
 final class WorkspacePaneChrome {
@@ -83,7 +51,7 @@ final class WorkspacePaneChrome {
     private(set) var pageIdentity: String
     private var pageSymbolName: String
     private let menuWindow = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
-    private let menuRoot = SessionMenuSurface(frame: .zero)
+    private let menuRoot = ThemedMenuPanelView(frame: .zero)
     private var menuRows: [ThemedMenuRowView] = []
     private var menuPlan: ThemedMenuRowPlan?
     private var menuFirstVisible = 0

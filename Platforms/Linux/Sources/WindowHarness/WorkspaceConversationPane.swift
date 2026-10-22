@@ -36,7 +36,7 @@ final class WorkspaceConversationPane: WorkspacePane {
     private let effortChip = ChipView()
     private let speedChip = ChipView()
     private let contextLabel = NSTextField(labelWithString: "")
-    private let configurationMenu = SessionMenuSurface(frame: .zero)
+    private let configurationMenu = ThemedMenuPanelView(frame: .zero)
     private enum ConfigurationKind: Int { case model = 1, effort = 2, mode = 3 }
     private var configurationKind: ConfigurationKind?
     private var configurationChoices: [NativeConfigurationChoice] = []
@@ -48,7 +48,7 @@ final class WorkspaceConversationPane: WorkspacePane {
     private var configurationVisibleCount = 0
     private var configurationRowHeight: CGFloat = 44
     private var configurationWidth: CGFloat = 240
-    private let speedMenu = SessionMenuSurface(frame: .zero)
+    private let speedMenu = ThemedMenuPanelView(frame: .zero)
     private var speedRows: [ThemedMenuRowView] = []
     private var speedSession: ConversationChoiceSession?
     private var speedSelected = 0

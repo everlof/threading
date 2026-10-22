@@ -77,7 +77,7 @@ final class WorkspacePlaceholderPane {
     private var onHideModel: ((String) -> Void)?
     private var onShowHiddenModels: (() -> Void)?
     private let permissionChip = ChipView()
-    private let choiceSurface = SessionMenuSurface(frame: .zero)
+    private let choiceSurface = ThemedMenuPanelView(frame: .zero)
     private enum ChoiceKind: Int { case project = 1, identity = 2, permission = 3, model = 4, surface = 5, speed = 6 }
     private struct ChoiceOption {
         let id: String

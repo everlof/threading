@@ -4,6 +4,11 @@ import AppKit
 /// and historical frames belong to the design component.
 @MainActor
 class ThemedMenuPanelView: NSView, ThemedComponent {
+    private var mountedDocument: ThemedMenuDocumentView?
+    private var mountedRows: [NSView] = []
+    private var mountedHeights: [CGFloat] = []
+    private var mountedPadding: CGFloat = 6
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         applyMenuSurface()
@@ -32,6 +37,32 @@ class ThemedMenuPanelView: NSView, ThemedComponent {
             glow: ThemedMenuMetrics.panelHasGlow,
             bevel: paintsIndexedFrame ? .none : .automatic
         )
+    }
+
+    /// Mount a bounded page of rows in the same document the Mac menu uses. Preserve rows
+    /// through repaint and scrolling so a held press stays attached to its original view.
+    func setRows(_ rows: [NSView], heights: [CGFloat], padding: CGFloat = 6) {
+        precondition(rows.count == heights.count)
+        if rows.count == mountedRows.count,
+           zip(rows, mountedRows).allSatisfy({ $0 === $1 }),
+           heights == mountedHeights, padding == mountedPadding { return }
+        mountedDocument?.removeFromSuperview()
+        mountedDocument = nil
+        mountedRows = rows
+        mountedHeights = heights
+        mountedPadding = padding
+        guard !rows.isEmpty else { return }
+
+        let document = ThemedMenuDocumentView(views: rows, heights: heights)
+        document.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(document)
+        NSLayoutConstraint.activate([
+            document.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
+            document.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
+            document.topAnchor.constraint(equalTo: topAnchor, constant: padding),
+            document.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding)
+        ])
+        mountedDocument = document
     }
 
     override func draw(_ dirtyRect: NSRect) {
