@@ -184,12 +184,12 @@ The app greeting is selected once from the shared calendar policy, whose daypart
 portable grammar used by theme welcomes. Linux currently paints the house-theme static form;
 this does not implement theme-authored greetings, captions, alternate marks or motion.
 
-The Linux New Worktree and Rename Session questions use `LinuxThemedTextPromptView` in this
-design boundary. `ThemedAlertLayout` builds the copy, heading and section stacks and declares
-the modern alert's icon, top, edge, minimum-width and section-width constraints once for that
-view and the Mac `ThemedAlert`. The Linux SDL window takes its fitted size from the solved
-component. The prompt paints the informational
-title, optional message, one themed field and ordered themed actions of `TextPromptAlert`.
+The Linux New Worktree and Rename Session questions mount the production `ThemedAlert` model
+and `ThemedAlertContentView`. `ThemedAlertLayout` builds the copy, heading and section stacks
+and declares the modern alert's icon, top, edge, minimum-width and section-width constraints
+once for both platforms. The Linux SDL window takes its fitted size from the solved component.
+The prompt paints the informational title, optional message, one themed field and ordered
+themed actions of `TextPromptAlert`.
 The host owns the modal event loop and durable work; the Linux bridge publishes the actual
 constrained field, title and button bounds through AT-SPI. Appearance stays in the component
 boundary while repository and session behavior remain host-owned.

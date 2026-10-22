@@ -185,6 +185,7 @@ void tw_accessibility_text_prompt(TWWindow *, const char *identity, const char *
                                   const char *fieldLabel, const char *fieldDescription,
                                   const char *title, const char *message,
                                   const char *confirmTitle, const char *clearTitle,
+                                  const char *suppressionTitle, int suppressionChecked,
                                   const char *value, int length,
                                   int selectionStart, int selectionEnd, int focusKind,
                                   int titleX, int titleY, int titleWidth, int titleHeight,
@@ -192,7 +193,9 @@ void tw_accessibility_text_prompt(TWWindow *, const char *identity, const char *
                                   int fieldX, int fieldY, int fieldWidth, int fieldHeight,
                                   int cancelX, int cancelY, int cancelWidth, int cancelHeight,
                                   int createX, int createY, int createWidth, int createHeight,
-                                  int clearX, int clearY, int clearWidth, int clearHeight);
+                                  int clearX, int clearY, int clearWidth, int clearHeight,
+                                  int suppressionX, int suppressionY,
+                                  int suppressionWidth, int suppressionHeight);
 // Frame-level Add project button. Height0 hides it. Pointer input still comes through the
 // opt-in navigator view tree; this publishes only its matching accessible action and bounds.
 void tw_add_project_button(TWWindow *, int enabled, int x, int y, int width, int height);

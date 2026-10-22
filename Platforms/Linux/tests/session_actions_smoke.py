@@ -89,6 +89,8 @@ def application():
 
 def children():
     frame = app.get_child_at_index(0)
+    if frame is None:
+        return []
     return [frame.get_child_at_index(index) for index in range(frame.get_child_count())]
 
 
@@ -239,8 +241,10 @@ try:
     screenshot('session-actions-renamed-header.png')
 
     def session_row():
-        listing = next(item for item in children()
-                       if item.get_role_name() == 'list' and item.get_name() == 'Projects')
+        listing = next((item for item in children()
+                        if item.get_role_name() == 'list' and item.get_name() == 'Projects'), None)
+        if listing is None:
+            return None
         return next((listing.get_child_at_index(index)
                      for index in range(listing.get_child_count())
                      if listing.get_child_at_index(index).get_accessible_id() == session_id), None)
@@ -270,19 +274,33 @@ try:
     assert bounds.width > 0 and bounds.height > 0, bounds
     subprocess.run(['import', '-window', 'root', str(Path(evidence) / 'session-close-confirm.png')],
                    check=True, timeout=5)
+    suppression = next((confirmation.get_child_at_index(index)
+                        for index in range(confirmation.get_child_count())
+                        if confirmation.get_child_at_index(index).get_accessible_id()
+                        == 'linux.prompt.suppression'), None)
+    assert suppression and suppression.get_role_name() == 'check box'
+    assert not suppression.get_state_set().contains(Atspi.StateType.CHECKED)
+    assert suppression.get_action_iface().do_action(0)
+    eventually(lambda: suppression.get_state_set().contains(Atspi.StateType.CHECKED),
+               'Close Session suppression toggled')
     assert cancel.get_action_iface().do_action(0)
     eventually(lambda: 'SESSION_CLOSE_CANCELLED id=' + session_id in log_path.read_text(),
                'Close Session cancellation')
     assert input_log.read_bytes() == initial_input, 'confirmation input reached live agent PTY'
 
     confirmation = open_close()
+    suppression = next((confirmation.get_child_at_index(index)
+                        for index in range(confirmation.get_child_count())
+                        if confirmation.get_child_at_index(index).get_accessible_id()
+                        == 'linux.prompt.suppression'), None)
+    assert suppression and not suppression.get_state_set().contains(Atspi.StateType.CHECKED)
     confirm = next(confirmation.get_child_at_index(index)
                    for index in range(confirmation.get_child_count())
                    if confirmation.get_child_at_index(index).get_name() == 'Close Session')
     assert confirm.get_action_iface().do_action(0)
     eventually(lambda: 'SESSION_CLOSED id=' + session_id in log_path.read_text(),
                'confirmed Close Session')
-    assert session_row() is not None, 'Close Session removed the saved row'
+    eventually(session_row, 'saved row after Close Session')
     with sqlite3.connect(store / 'threading.db') as database:
         assert database.execute('SELECT COUNT(*) FROM session WHERE id=?',
                                 (session_id,)).fetchone()[0] == 1

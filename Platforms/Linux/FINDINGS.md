@@ -9682,3 +9682,28 @@ choice and action stacks, but delegates their spacing and constraints to `Prompt
 mounts the exact `PromptView`; these stacks are host composition until the corresponding Mac
 presenter can be moved behind a shared owner. The remaining Linux structure count is an audit
 queue, not proof that every site duplicates macOS UI.
+
+## 268. Linux alerts mount the production content view, 2026-10-22
+
+The Linux text prompt and Close Session confirmation now instantiate the exact
+`ThemedAlert` model and `ThemedAlertContentView` source used by the macOS app. The separate
+`LinuxThemedTextPromptView` and its alert mark were deleted. The shared source owns the title,
+message, symbol, accessory, checkbox, buttons, order, and `ThemedAlertBodyView` constraints.
+Linux supplies modal window dispatch and AT-SPI transport. Its symbol implementation and
+closure-based control actions are AppKit-shim boundaries, not another feature view.
+
+The port restored the field-to-actions Tab loop and revealed that SDL forwarded Space only as
+text input. Prompt mode now delivers its key event to a focused control while still inserting
+the matching text-input event into a focused field. AT-SPI now exposes the shared suppression
+checkbox with its bounds, focus, checked state and action. A canceled confirmation does not
+persist that choice.
+
+`WindowHarness` and the unsigned macOS Debug app build. The real X11 prompt smoke passes in
+light and dark, including typed text, a space in the field, Tab/Space cancellation and AT-SPI
+submission. Installed Rename Session and saved-session Actions journeys pass Unicode rename,
+clear, checkbox toggle/cancel, Close Session, dormant retention and resume. The two targeted
+macOS UI-evidence tests pass, and the New Worktree and Close Session captures were inspected
+beside the Linux renders. Linux's New Worktree panel still measures 400×203 versus macOS
+400×200. Linux text intrinsic sizing shifts content below the title by about three pixels;
+that remains a text-metrics shim task. General settings composition, floating menu shells,
+terminal menu/spinner and saved-runtime beam remain in the shared-view audit.

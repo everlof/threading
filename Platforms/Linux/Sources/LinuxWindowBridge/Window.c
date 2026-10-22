@@ -1341,6 +1341,7 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
             out->action = e.type == SDL_KEYUP ? 3 : (e.key.repeat ? 2 : 1);
             out->modifiers = tw_modifiers(e.key.keysym.mod);
             out->key = tw_function_key(e.key.keysym.sym);
+            if (w->promptMode && e.key.keysym.sym == SDLK_SPACE) out->key = SDLK_SPACE;
             if (out->key) out->kind = 7;
             else if (e.type == SDL_KEYDOWN && (e.key.keysym.mod & KMOD_CTRL)
                      && e.key.keysym.sym >= SDLK_a && e.key.keysym.sym <= SDLK_z) {

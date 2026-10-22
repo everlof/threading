@@ -158,6 +158,8 @@ public enum Design {
                          || name == "questionmark.bubble" || name == "circle"
                          || name == "eye.slash"
                          || name == "exclamationmark.triangle"
+                         || name == "info.circle.fill" || name == "exclamationmark.triangle.fill"
+                         || name == "xmark.octagon.fill"
                          || name == "checkmark.circle.fill" || name == "return"
                          || name == "stop.fill" || name == "stop.circle"
                          || name == "arrow.clockwise.circle" || name == "xmark"
@@ -351,6 +353,58 @@ public enum Design {
                     box.lineCapStyle = .round
                     NSColor.white.setStroke()
                     box.stroke()
+                } else if name == "info.circle.fill" {
+                    let mark = NSBezierPath(ovalIn: NSRect(
+                        x: origin + side * 0.07, y: origin + side * 0.07,
+                        width: side * 0.86, height: side * 0.86))
+                    mark.append(NSBezierPath(roundedRect: NSRect(
+                        x: origin + side * 0.45, y: origin + side * 0.22,
+                        width: side * 0.1, height: side * 0.37),
+                        xRadius: side * 0.04, yRadius: side * 0.04))
+                    mark.append(NSBezierPath(ovalIn: NSRect(
+                        x: origin + side * 0.45, y: origin + side * 0.66,
+                        width: side * 0.1, height: side * 0.1)))
+                    mark.windingRule = .evenOdd
+                    mark.fill()
+                } else if name == "exclamationmark.triangle.fill" {
+                    let mark = NSBezierPath()
+                    mark.move(to: NSPoint(x: origin + side * 0.5, y: origin + side * 0.92))
+                    mark.line(to: NSPoint(x: origin + side * 0.94, y: origin + side * 0.12))
+                    mark.line(to: NSPoint(x: origin + side * 0.06, y: origin + side * 0.12))
+                    mark.close()
+                    mark.append(NSBezierPath(roundedRect: NSRect(
+                        x: origin + side * 0.45, y: origin + side * 0.39,
+                        width: side * 0.1, height: side * 0.28),
+                        xRadius: side * 0.04, yRadius: side * 0.04))
+                    mark.append(NSBezierPath(ovalIn: NSRect(
+                        x: origin + side * 0.45, y: origin + side * 0.23,
+                        width: side * 0.1, height: side * 0.1)))
+                    mark.windingRule = .evenOdd
+                    mark.fill()
+                } else if name == "xmark.octagon.fill" {
+                    let mark = NSBezierPath()
+                    let corners: [(CGFloat, CGFloat)] = [
+                        (0.3, 0.94), (0.7, 0.94), (0.94, 0.7), (0.94, 0.3),
+                        (0.7, 0.06), (0.3, 0.06), (0.06, 0.3), (0.06, 0.7)
+                    ]
+                    mark.move(to: NSPoint(x: origin + side * corners[0].0,
+                                          y: origin + side * corners[0].1))
+                    for corner in corners.dropFirst() {
+                        mark.line(to: NSPoint(x: origin + side * corner.0,
+                                              y: origin + side * corner.1))
+                    }
+                    mark.close()
+                    mark.lineWidth = max(1, side * 0.09 * weightFactor)
+                    NSColor.white.setStroke()
+                    mark.stroke()
+                    let cross = NSBezierPath()
+                    cross.move(to: NSPoint(x: origin + side * 0.35, y: origin + side * 0.35))
+                    cross.line(to: NSPoint(x: origin + side * 0.65, y: origin + side * 0.65))
+                    cross.move(to: NSPoint(x: origin + side * 0.35, y: origin + side * 0.65))
+                    cross.line(to: NSPoint(x: origin + side * 0.65, y: origin + side * 0.35))
+                    cross.lineWidth = max(1, side * 0.1)
+                    NSColor.white.setStroke()
+                    cross.stroke()
                 } else if name == "exclamationmark.triangle" {
                     let outline = NSBezierPath()
                     outline.move(to: NSPoint(x: origin + side * 0.50, y: origin + side * 0.88))

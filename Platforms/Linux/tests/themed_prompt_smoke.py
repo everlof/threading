@@ -63,13 +63,15 @@ for dark in (False, True):
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                env=environment)
     window = window_for(process)
-    time.sleep(.4)
+    prompt = eventually(lambda: accessible_prompt(process), 'accessible prompt before capture')
     subprocess.run(['import', '-window', window,
                     str(output / ('worktree-prompt-dark.png' if dark
                                   else 'worktree-prompt-light.png'))], check=True, timeout=5)
     subprocess.run(['xdotool', 'windowfocus', '--sync', window], check=True)
     subprocess.run(['xdotool', 'type', '--clearmodifiers', 'feature/prompt'], check=True)
-    time.sleep(.2)
+    field = child_with_id(prompt, 'linux.prompt.branch')
+    eventually(lambda: Atspi.Text.get_text(field.get_text_iface(), 0, -1) == 'feature/prompt',
+               'typed prompt value before capture')
     subprocess.run(['import', '-window', window,
                     str(output / ('worktree-typed-dark.png' if dark
                                   else 'worktree-typed-light.png'))], check=True, timeout=5)
@@ -81,8 +83,32 @@ for dark in (False, True):
 process = subprocess.Popen([binary, '--text-prompt', 'worktree'],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 window = window_for(process)
+prompt = eventually(lambda: accessible_prompt(process), 'accessible prompt for space')
+subprocess.run(['xdotool', 'windowfocus', '--sync', window], check=True)
+subprocess.run(['xdotool', 'type', '--clearmodifiers', 'one two'], check=True)
+field = child_with_id(prompt, 'linux.prompt.branch')
+eventually(lambda: Atspi.Text.get_text(field.get_text_iface(), 0, -1) == 'one two',
+           'space typed in focused field')
+subprocess.run(['xdotool', 'key', 'Return'], check=True)
+stdout, stderr = process.communicate(timeout=8)
+assert process.returncode == 0, (process.returncode, stdout, stderr.decode())
+assert stdout == b'one two\n', stdout
+
+process = subprocess.Popen([binary, '--text-prompt', 'worktree'],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+window = window_for(process)
 subprocess.run(['xdotool', 'windowfocus', '--sync', window], check=True)
 subprocess.run(['xdotool', 'key', 'Escape'], check=True)
+stdout, stderr = process.communicate(timeout=8)
+assert process.returncode == 2, stderr.decode()
+assert stdout == b'', stdout
+
+process = subprocess.Popen([binary, '--text-prompt', 'worktree'],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+window = window_for(process)
+eventually(lambda: accessible_prompt(process), 'accessible prompt before tab')
+subprocess.run(['xdotool', 'windowfocus', '--sync', window], check=True)
+subprocess.run(['xdotool', 'key', 'Tab', 'space'], check=True)
 stdout, stderr = process.communicate(timeout=8)
 assert process.returncode == 2, stderr.decode()
 assert stdout == b'', stdout
@@ -115,4 +141,4 @@ assert child_with_id(prompt, 'linux.prompt.cancel').get_action_iface().do_action
 stdout, stderr = process.communicate(timeout=8)
 assert process.returncode == 2, stderr.decode()
 assert stdout == b'', stdout
-print('PASS themed text prompt light/dark, keyboard and AT-SPI submit/cancel')
+print('PASS themed text prompt light/dark, keyboard focus and AT-SPI submit/cancel')

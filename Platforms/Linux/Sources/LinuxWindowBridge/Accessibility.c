@@ -71,7 +71,7 @@ static AccessibleNode *app, *frame, *list, *actionsButton, *addProjectButton, *p
 static AccessibleNode *pageActionsButton, *openInPrimaryButton, *openInChooserButton;
 static AccessibleNode *sessionMenuList;
 static AccessibleNode *placeholder, *placeholderTitle, *placeholderDetail, *placeholderAction;
-static AccessibleNode *promptPanel, *promptTitle, *promptMessage, *promptCancel, *promptCreate, *promptClear;
+static AccessibleNode *promptPanel, *promptTitle, *promptMessage, *promptCancel, *promptCreate, *promptClear, *promptSuppression;
 static int promptVisible, promptFocusKind;
 static AccessibleNode *composerProjectChip, *composerProviderChip, *composerPermissionChip, *composerModelChip, *composerSurfaceChip, *composerSpeedChip, *composerMenuList;
 static AccessibleNode *conversationSpeedChip, *conversationSpeedMenu;
@@ -218,6 +218,7 @@ static AtkStateSet *node_state(AtkObject *object) {
         node == pageActionsButton || node == openInPrimaryButton ||
         node == openInChooserButton || node == placeholderAction ||
         node == promptCancel || node == promptCreate || node == promptClear ||
+        node == promptSuppression ||
         node->row >= 0 || node->projectControl) {
         atk_state_set_add_state(states, ATK_STATE_FOCUSABLE);
         if (node == focused) atk_state_set_add_state(states, ATK_STATE_FOCUSED);
@@ -226,6 +227,8 @@ static AtkStateSet *node_state(AtkObject *object) {
         atk_state_set_add_state(states, ATK_STATE_EDITABLE);
         if (!promptVisible) atk_state_set_add_state(states, ATK_STATE_MULTI_LINE);
     }
+    if (node == promptSuppression && node->selected)
+        atk_state_set_add_state(states, ATK_STATE_CHECKED);
     if (node == conversationSpeedChip) {
         atk_state_set_add_state(states, ATK_STATE_EXPANDABLE);
         if (conversationSpeedMenuVisible) atk_state_set_add_state(states, ATK_STATE_EXPANDED);
@@ -342,7 +345,8 @@ static void refresh_focus(void) {
         node_mounted(ATK_OBJECT(promptPanel))) {
         next = promptFocusKind == 1 ? promptCancel :
             promptFocusKind == 2 ? promptCreate :
-            promptFocusKind == 3 ? promptClear : (AccessibleNode *)composerEditor;
+            promptFocusKind == 3 ? promptClear :
+            promptFocusKind == 4 ? promptSuppression : (AccessibleNode *)composerEditor;
         set_focused(next);
         return;
     }
@@ -543,7 +547,8 @@ static gint action_count(AtkAction *action) {
         node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node == placeholderAction) return placeholderVisible && placeholderActionVisible &&
         node->enabled && node_mounted(ATK_OBJECT(node)) ? 1 : 0;
-    if (node == promptCancel || node == promptCreate || node == promptClear)
+    if (node == promptCancel || node == promptCreate || node == promptClear ||
+        node == promptSuppression)
         return promptVisible && node->enabled && node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (node == addProjectButton) return addProjectVisible && node->enabled &&
         node_mounted(ATK_OBJECT(node)) ? 1 : 0;
@@ -573,7 +578,7 @@ static const gchar *action_name(AtkAction *action, gint index) {
         node == pageActionsButton || node == openInPrimaryButton ||
         node == openInChooserButton ||
         node == placeholderAction || node == promptCancel || node == promptCreate ||
-        node == promptClear ||
+        node == promptClear || node == promptSuppression ||
         node->projectControl)
         return index == 0 && action_count(action) ? "press" : NULL;
     if (node->row >= 0 && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(sessionMenuList))
@@ -583,13 +588,14 @@ static const gchar *action_name(AtkAction *action, gint index) {
 }
 static gboolean action_do(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
-    if (node == promptCancel || node == promptCreate || node == promptClear) {
+    if (node == promptCancel || node == promptCreate || node == promptClear ||
+        node == promptSuppression) {
         if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
         SDL_Event event = {0};
         event.type = eventType;
         event.user.code = 20;
         event.user.data1 = (void *)(intptr_t)(node == promptCreate ? 1 :
-            node == promptClear ? 2 : 0);
+            node == promptClear ? 2 : node == promptSuppression ? 3 : 0);
         event.user.data2 = (void *)(uintptr_t)generation;
         int pushed = SDL_PushEvent(&event);
         navigation_trace_enqueue(&event, pushed);
@@ -825,7 +831,8 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
         *height = windowHeight > *y ? windowHeight - *y : 0;
     } else if (object == ATK_OBJECT(promptPanel) || object == ATK_OBJECT(promptTitle) ||
                object == ATK_OBJECT(promptMessage) || object == ATK_OBJECT(promptCancel) ||
-               object == ATK_OBJECT(promptCreate) || object == ATK_OBJECT(promptClear)) {
+               object == ATK_OBJECT(promptCreate) || object == ATK_OBJECT(promptClear) ||
+               object == ATK_OBJECT(promptSuppression)) {
         *x = node->bounds.x; *y = node->bounds.y;
         *width = node->bounds.width; *height = node->bounds.height;
     } else if (object == ATK_OBJECT(actionsButton) || object == ATK_OBJECT(addProjectButton) ||
@@ -1477,6 +1484,9 @@ void tw_accessibility_open(TWWindow *window) {
     promptClear = new_component(ATK_ROLE_PUSH_BUTTON, "Use Agent's Name");
     promptClear->id = g_strdup("linux.prompt.clear");
     atk_object_set_accessible_id(ATK_OBJECT(promptClear), promptClear->id);
+    promptSuppression = new_component(ATK_ROLE_CHECK_BOX, "Don't ask again");
+    promptSuppression->id = g_strdup("linux.prompt.suppression");
+    atk_object_set_accessible_id(ATK_OBJECT(promptSuppression), promptSuppression->id);
     composerProjectChip = new_component(ATK_ROLE_COMBO_BOX, "Project");
     composerProjectChip->id = g_strdup("linux.composer.project");
     atk_object_set_accessible_id(ATK_OBJECT(composerProjectChip), composerProjectChip->id);
@@ -1607,6 +1617,7 @@ void tw_accessibility_close(void) {
     g_clear_object(&promptCancel);
     g_clear_object(&promptCreate);
     g_clear_object(&promptClear);
+    g_clear_object(&promptSuppression);
     g_clear_object(&composerProjectChip);
     g_clear_object(&composerProviderChip);
     g_clear_object(&composerPermissionChip);
@@ -2264,6 +2275,7 @@ void tw_accessibility_text_prompt(TWWindow *window, const char *identity, const 
                                   const char *fieldLabel, const char *fieldDescription,
                                   const char *title, const char *message,
                                   const char *confirmTitle, const char *clearTitle,
+                                  const char *suppressionTitle, int suppressionChecked,
                                   const char *value, int length,
                                   int selectionStart, int selectionEnd, int focusKind,
                                   int titleX, int titleY, int titleWidth, int titleHeight,
@@ -2271,21 +2283,27 @@ void tw_accessibility_text_prompt(TWWindow *window, const char *identity, const 
                                   int fieldX, int fieldY, int fieldWidth, int fieldHeight,
                                   int cancelX, int cancelY, int cancelWidth, int cancelHeight,
                                   int createX, int createY, int createWidth, int createHeight,
-                                  int clearX, int clearY, int clearWidth, int clearHeight) {
+                                  int clearX, int clearY, int clearWidth, int clearHeight,
+                                  int suppressionX, int suppressionY,
+                                  int suppressionWidth, int suppressionHeight) {
     if (!bridgeReady || window != hostWindow || !identity || !fieldID || !fieldLabel ||
-        !fieldDescription || !title || !message || !confirmTitle || !clearTitle || !value ||
+        !fieldDescription || !title || !message || !confirmTitle || !clearTitle ||
+        !suppressionTitle || !value ||
         strnlen(identity, MAX_COMPOSER_ID) >= MAX_COMPOSER_ID ||
         strnlen(fieldID, MAX_COMPOSER_ID) >= MAX_COMPOSER_ID ||
         strnlen(fieldLabel, 512) >= 512 || strnlen(fieldDescription, 512) >= 512 ||
         strnlen(title, 512) >= 512 || strnlen(message, 512) >= 512 ||
         strnlen(confirmTitle, 512) >= 512 || strnlen(clearTitle, 512) >= 512 ||
+        strnlen(suppressionTitle, 512) >= 512 ||
         !g_utf8_validate(identity, -1, NULL) || !g_utf8_validate(fieldID, -1, NULL) ||
         !g_utf8_validate(fieldLabel, -1, NULL) ||
         !g_utf8_validate(fieldDescription, -1, NULL) ||
         !g_utf8_validate(title, -1, NULL) || !g_utf8_validate(message, -1, NULL) ||
         !g_utf8_validate(confirmTitle, -1, NULL) || !g_utf8_validate(clearTitle, -1, NULL) ||
+        !g_utf8_validate(suppressionTitle, -1, NULL) ||
         length < 0 || length > 4096 || memchr(value, 0, (size_t)length) ||
-        !g_utf8_validate(value, length, NULL) || focusKind < 0 || focusKind > 3) return;
+        !g_utf8_validate(value, length, NULL) || focusKind < 0 || focusKind > 4 ||
+        (suppressionChecked != 0 && suppressionChecked != 1)) return;
     int originX, originY, width, height;
     tw_window_geometry(window, &originX, &originY, &width, &height);
     const int hasField = fieldID[0] != '\0';
@@ -2306,6 +2324,10 @@ void tw_accessibility_text_prompt(TWWindow *window, const char *identity, const 
     if (clearTitle[0] && (clearX < 0 || clearY < 0 || clearWidth <= 0 ||
         clearHeight <= 0 || clearX > width - clearWidth ||
         clearY > height - clearHeight)) return;
+    if (suppressionTitle[0] && (suppressionX < 0 || suppressionY < 0 ||
+        suppressionWidth <= 0 || suppressionHeight <= 0 ||
+        suppressionX > width - suppressionWidth ||
+        suppressionY > height - suppressionHeight)) return;
     const int characters = (int)g_utf8_strlen(value, length);
     if (selectionStart < 0 || selectionStart > selectionEnd || selectionEnd > characters) return;
 
@@ -2326,6 +2348,7 @@ void tw_accessibility_text_prompt(TWWindow *window, const char *identity, const 
         add_child(promptPanel, promptTitle);
         if (message[0]) add_child(promptPanel, promptMessage);
         if (hasField) add_child(promptPanel, (AccessibleNode *)composerEditor);
+        if (suppressionTitle[0]) add_child(promptPanel, promptSuppression);
         add_child(promptPanel, promptCancel);
         if (clearTitle[0]) add_child(promptPanel, promptClear);
         add_child(promptPanel, promptCreate);
@@ -2338,6 +2361,7 @@ void tw_accessibility_text_prompt(TWWindow *window, const char *identity, const 
     set_name_if_changed(promptMessage, message);
     set_name_if_changed(promptCreate, confirmTitle);
     if (clearTitle[0]) set_name_if_changed(promptClear, clearTitle);
+    if (suppressionTitle[0]) set_name_if_changed(promptSuppression, suppressionTitle);
     promptPanel->bounds = (AtkRectangle){0, 0, width, height};
     promptTitle->bounds = (AtkRectangle){titleX, titleY, titleWidth, titleHeight};
     promptMessage->bounds = (AtkRectangle){messageX, messageY, messageWidth, messageHeight};
@@ -2346,6 +2370,13 @@ void tw_accessibility_text_prompt(TWWindow *window, const char *identity, const 
     promptCancel->bounds = (AtkRectangle){cancelX, cancelY, cancelWidth, cancelHeight};
     promptCreate->bounds = (AtkRectangle){createX, createY, createWidth, createHeight};
     promptClear->bounds = (AtkRectangle){clearX, clearY, clearWidth, clearHeight};
+    promptSuppression->bounds = (AtkRectangle){suppressionX, suppressionY,
+                                              suppressionWidth, suppressionHeight};
+    if (promptSuppression->selected != suppressionChecked) {
+        promptSuppression->selected = suppressionChecked;
+        atk_object_notify_state_change(ATK_OBJECT(promptSuppression), ATK_STATE_CHECKED,
+                                       suppressionChecked);
+    }
     if (hasField && g_queue_is_empty(composerEdits)) {
         composerPredictedCharacters = characters;
         composerPredictionValid = 1;

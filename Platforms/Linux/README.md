@@ -781,10 +781,11 @@ the selected checkout and branch on its worker before saving a record. Run
 `THREADING_LINUX_CHECKOUT_ONLY=1 ./window-smoke.sh` for terminal and native X11 journeys.
 The composer menu and repository root `+` create a sibling checkout on a new branch, import it,
 reveal it in the sidebar and move the composer there without losing its draft. The prompt and
-Git/import work run off the UI thread; Git has a 15-second timeout. The branch prompt is an
-app-owned dialog drawn with the shared themed field and buttons, with keyboard and AT-SPI
-editing and Create/Cancel actions. `tests/themed_prompt_smoke.py` exercises that dialog in
-light and dark appearances. An inotify
+Git/import work run off the UI thread; Git has a 15-second timeout. The branch prompt mounts
+the production `ThemedAlertContentView` and `ThemedAlert` model in a Linux modal window. The
+same source builds its heading, field accessory, buttons, section order and constraints on
+macOS. Linux owns SDL events and AT-SPI transport. `tests/themed_prompt_smoke.py` exercises
+keyboard focus, editing and Create/Cancel actions in light and dark appearances. An inotify
 worker watches each added checkout's Git metadata directory for a replaced `HEAD`; it wakes the
 window only when a branch changes. The composer chip and mounted checkout row update without
 reopening the window, while checkout discovery handles changed or missing identities.
@@ -1183,12 +1184,12 @@ prepopulates the custom name, and offers `Use Agent's Name` when one exists. The
 uses the same visible-name and history policy as macOS, and an empty answer clears the custom
 name. `tests/session_rename_smoke.py` exercises the installed row menu, Unicode input, history
 and clearing through AT-SPI and SQLite.
-An active agent row also offers `Close Session`. Its warning confirmation uses the shared alert
-content constraints; Cancel leaves the process alone, while confirmation asks the daemon to
+An active agent row also offers `Close Session`. Its warning confirmation mounts the same alert
+content view, including the “Don't ask again” checkbox. Cancel leaves the process alone, while
+confirmation asks the daemon to
 stop it and retains the saved session for a later resume. The selected row remains selected and
 the pane mounts the shared, constraint-laid-out dormant placeholder below its page header.
-Its action starts the saved session again. The macOS sheet also has a remembered “Don't ask
-again” checkbox that Linux has not ported yet. `tests/session_actions_smoke.py` checks the
+Its action starts the saved session again. `tests/session_actions_smoke.py` checks the
 installed confirmation, daemon exit, retained database row, dormant pane and restart action.
 The row menu checks the daemon on a worker when its session is not mounted locally, so a
 running detached child can also be closed without first opening its terminal.

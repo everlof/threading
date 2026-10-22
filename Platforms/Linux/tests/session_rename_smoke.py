@@ -154,7 +154,8 @@ try:
     assert confirm.get_name() == 'Rename'
     assert confirm.get_action_iface().do_action(0)
     eventually(lambda: stored().get('customTitle') == 'Renamed café 日本語', 'rename persisted')
-    eventually(lambda: 'Renamed café 日本語' in session_row().get_name(), 'renamed row')
+    eventually(lambda: (row := session_row()) and 'Renamed café 日本語' in row.get_name(),
+               'renamed row')
     assert stored()['nameHistory']['entries'][0]['name'] == 'Seed conversation'
 
     prompt = open_rename(window)
@@ -168,7 +169,8 @@ try:
     eventually(lambda: stored().get('customTitle') is None and
                len(stored().get('nameHistory', {}).get('entries', [])) >= 1,
                'clear persisted')
-    eventually(lambda: 'Renamed café 日本語' not in session_row().get_name(), 'row follows agent')
+    eventually(lambda: (row := session_row()) and 'Renamed café 日本語' not in row.get_name(),
+               'row follows agent')
     assert stored()['nameHistory']['entries'][0]['name'] == 'Renamed café 日本語'
 
     prompt = open_rename(window)

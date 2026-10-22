@@ -26,6 +26,97 @@ enum LinuxTextPrompt {
         var allowsEmpty: Bool { prompt.allowsEmpty }
     }
 
+    /// The window loop retains this model and the production alert content. It owns no views:
+    /// the same `ThemedAlertContentView` builds the buttons, icon, copy and accessory on Mac.
+    @MainActor private final class Dialog {
+        private final class Choice { var index: Int? }
+
+        let view: ThemedAlertContentView
+        let inputField: ThemedTextField
+        let alert: ThemedAlert
+        let clearIndex: Int?
+        let cancelIndex: Int
+        private let choice: Choice
+
+        init(_ request: Request) {
+            let choice = Choice()
+            let alert = ThemedAlert()
+            let field = ThemedTextField(frame: NSRect(origin: .zero, size: request.prompt.fieldSize))
+            field.isEditable = true
+            field.stringValue = request.current
+            field.font = Design.Typography.body()
+            field.textColor = Design.Text.label
+            field.placeholderString = request.placeholder
+            field.setAccessibilityLabel(request.placeholder)
+            field.action = { choice.index = 0 }
+
+            alert.messageText = request.title
+            alert.informativeText = request.message
+            alert.alertStyle = request.warning ? .warning : .informational
+            if request.showsField {
+                alert.accessoryView = field
+                alert.initialFirstResponder = field
+            }
+            alert.addButton(withTitle: request.confirmTitle)
+            let clearIndex: Int? = request.clearTitle.map { title in
+                let index = alert.buttons.count
+                alert.addButton(withTitle: title)
+                return index
+            }
+            let cancelIndex = alert.buttons.count
+            alert.addButton(withTitle: request.prompt.cancelTitle)
+            if request.suppressionPrompt != nil {
+                alert.showsSuppressionButton = true
+                alert.suppressionButton?.title = "Don't ask again"
+            }
+
+            self.choice = choice
+            self.alert = alert
+            self.inputField = field
+            self.clearIndex = clearIndex
+            self.cancelIndex = cancelIndex
+            view = alert.makeContentView { choice.index = $0 }
+
+            let confirm = view.button(at: 0)!
+            let cancel = view.button(at: cancelIndex)!
+            let clear = clearIndex.flatMap { view.button(at: $0) }
+            if request.showsField { field.nextKeyView = cancel }
+            cancel.nextKeyView = clear ?? view.checkbox ?? confirm
+            clear?.nextKeyView = view.checkbox ?? confirm
+            view.checkbox?.nextKeyView = confirm
+            confirm.nextKeyView = request.showsField ? field : cancel
+        }
+
+        var initialResponder: NSView {
+            (alert.initialFirstResponder as? NSView) ?? view.button(at: 0)!
+        }
+        var suppressionChecked: Bool { alert.suppressionButton?.state == .on }
+        var suppressionFrame: NSRect? {
+            view.checkbox.map { $0.convert($0.bounds, to: view) }
+        }
+        var titleFrame: NSRect { view.titleLabel.convert(view.titleLabel.bounds, to: view) }
+        var messageFrame: NSRect? {
+            view.messageLabel.isHidden ? nil
+                : view.messageLabel.convert(view.messageLabel.bounds, to: view)
+        }
+        func buttonFrame(at index: Int) -> NSRect {
+            let button = view.button(at: index)!
+            return button.convert(button.bounds, to: view)
+        }
+        func focusKind(in window: NSWindow) -> Int32 {
+            if window.firstResponder === view.button(at: cancelIndex) { return 1 }
+            if window.firstResponder === view.button(at: 0) { return 2 }
+            if let clearIndex, window.firstResponder === view.button(at: clearIndex) { return 3 }
+            if window.firstResponder === view.checkbox { return 4 }
+            return 0
+        }
+        func choose(_ index: Int) { choice.index = index }
+        func takeChoice() -> Int? {
+            defer { choice.index = nil }
+            return choice.index
+        }
+    }
+
     static func runWorktree() throws -> String? {
         try run(Request(prompt: WorktreePromptSpec.request,
             identity: "linux.prompt.worktree", fieldID: "linux.prompt.branch",
@@ -57,13 +148,8 @@ enum LinuxTextPrompt {
         NSFont.prepareSystemFonts()
         LinuxTheme.setDark(ProcessInfo.processInfo.environment["THREADING_LINUX_PROMPT_DARK"] == "1")
 
-        let view = LinuxThemedTextPromptView(
-            title: request.title, message: request.message,
-            placeholder: request.placeholder, confirmTitle: request.confirmTitle,
-            cancelTitle: request.prompt.cancelTitle,
-            current: request.current, clearTitle: request.clearTitle,
-            showsField: request.showsField, warning: request.warning,
-            suppressionTitle: request.suppressionPrompt == nil ? nil : "Don't ask again")
+        let dialog = Dialog(request)
+        let view = dialog.view
         view.appearance = LinuxTheme.appearance
         let size = view.fittingSize
         view.frame = NSRect(origin: .zero, size: size)
@@ -94,24 +180,28 @@ enum LinuxTextPrompt {
 
         let window = NSWindow(backingScaleFactor: scale)
         window.contentView = view
-        window.initialFirstResponder = view.initialResponder
-        _ = window.makeFirstResponder(view.initialResponder)
+        window.initialFirstResponder = dialog.initialResponder
+        // The field editor takes its frame from the solved accessory. Focusing before this
+        // layout gives it a zero-sized clip even though the field later fills the alert.
+        window.layoutIfNeeded()
+        _ = window.makeFirstResponder(dialog.initialResponder)
 
         var finished = false
         var answer: String?
-        view.onConfirm = {
+        func choose(_ index: Int) {
+            if index == dialog.cancelIndex { finished = true; return }
+            if index == dialog.clearIndex { answer = ""; finished = true; return }
+            guard index == 0 else { return }
             let value = request.showsField
-                ? view.inputField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+                ? dialog.inputField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) : ""
             if request.allowsEmpty || !value.isEmpty {
-                if let prompt = request.suppressionPrompt, view.suppressionChecked {
+                if let prompt = request.suppressionPrompt, dialog.suppressionChecked {
                     LinuxConfirmationSettings.setAsks(false, before: prompt)
                 }
                 answer = value
             }
             finished = true
         }
-        view.onCancel = { finished = true }
-        view.onClear = { answer = ""; finished = true }
 
         var needsPresentation = true
         var pressing = false
@@ -125,12 +215,12 @@ enum LinuxTextPrompt {
                 }
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
                 if request.showsField {
-                    let field = view.inputField.convert(view.inputField.bounds, to: view)
+                    let field = dialog.inputField.convert(dialog.inputField.bounds, to: view)
                     tw_text_input_rect(native, Int32(field.minX * scale),
                                        Int32((size.height - field.maxY) * scale),
                                        Int32(field.width * scale), Int32(field.height * scale))
                 }
-                publishAccessibility(native: native, view: view, window: window,
+                publishAccessibility(native: native, dialog: dialog, window: window,
                                      scale: scale, request: request)
                 needsPresentation = false
             }
@@ -145,25 +235,28 @@ enum LinuxTextPrompt {
             case 5:
                 finished = true
             case 6:
-                guard request.showsField else { continue }
-                handleText(&event, field: view.inputField, native: native)
+                guard request.showsField, dialog.focusKind(in: window) == 0 else { continue }
+                handleText(&event, field: dialog.inputField, native: native)
                 needsPresentation = true
             case 7:
                 guard event.action != 3 else { continue }
                 let key = WindowHarness.composerKeyEvent(event)
                 if key.keyCode == 53 { finished = true }
-                else if key.keyCode == 36 && view.focusKind(in: window) != 4 {
-                    view.onConfirm?()
+                else if key.keyCode == 36 && dialog.focusKind(in: window) != 4 {
+                    dialog.choose(0)
+                }
+                else if key.keyCode == 49 && dialog.focusKind(in: window) == 0 {
+                    // The matching TEXTINPUT inserts a space into the focused field.
                 }
                 else { _ = window.dispatchToContent(key) }
                 needsPresentation = true
             case 14:
                 guard request.showsField else { continue }
-                paste(field: view.inputField, native: native)
+                paste(field: dialog.inputField, native: native)
                 needsPresentation = true
             case 18:
                 guard request.showsField else { continue }
-                (view.inputField.currentEditor() as? NSTextView)?.copy(nil)
+                (dialog.inputField.currentEditor() as? NSTextView)?.copy(nil)
             case 15:
                 guard event.key == 0 else { continue }
                 pressing = event.action == 1
@@ -176,23 +269,30 @@ enum LinuxTextPrompt {
                 needsPresentation = true
             case 19:
                 guard request.showsField else { continue }
-                updatePreedit(&event, field: view.inputField)
+                updatePreedit(&event, field: dialog.inputField)
                 needsPresentation = true
             case 49:
                 guard request.showsField else { continue }
                 applyAccessibilityEdit(event, native: native,
-                                       field: view.inputField, window: window,
+                                       field: dialog.inputField, window: window,
                                        identity: request.identity)
                 needsPresentation = true
             case 61:
-                if event.action == 0 { view.onCancel?() }
-                else if event.action == 1 { view.onConfirm?() }
-                else if event.action == 2 { view.onClear?() }
+                if event.action == 0 { dialog.choose(dialog.cancelIndex) }
+                else if event.action == 1 { dialog.choose(0) }
+                else if event.action == 2, let clearIndex = dialog.clearIndex {
+                    dialog.choose(clearIndex)
+                }
+                else if event.action == 3 {
+                    _ = dialog.view.checkbox?.performPrimaryAction()
+                    needsPresentation = true
+                }
             case 45:
                 if event.action == 0 { window.cancelPointerGesture(); pressing = false }
                 needsPresentation = true
             default: break
             }
+            if let index = dialog.takeChoice() { choose(index) }
         }
         return answer
     }
@@ -204,47 +304,61 @@ enum LinuxTextPrompt {
     }
 
     private static func publishAccessibility(native: OpaquePointer,
-                                             view: LinuxThemedTextPromptView,
+                                             dialog: Dialog,
                                              window: NSWindow, scale: CGFloat,
                                              request: Request) {
-        let value = request.showsField ? view.inputField.stringValue : ""
+        let view = dialog.view
+        let value = request.showsField ? dialog.inputField.stringValue : ""
         guard value.utf8.count <= 4_096 else { return }
-        let selection = (view.inputField.currentEditor() as? NSTextView)?.selectedRange()
+        let selection = (dialog.inputField.currentEditor() as? NSTextView)?.selectedRange()
             ?? NSRange(location: (value as NSString).length, length: 0)
         let first = scalarOffset(selection.location, in: value)
         let last = scalarOffset(NSMaxRange(selection), in: value)
-        let field = pixelFrame(view.inputField.frame, height: view.bounds.height, scale: scale)
-        let cancel = pixelFrame(view.cancelFrame, height: view.bounds.height, scale: scale)
-        let confirm = pixelFrame(view.confirmFrame, height: view.bounds.height, scale: scale)
-        let titleFrame = pixelFrame(view.titleFrame, height: view.bounds.height, scale: scale)
-        let messageFrame = view.messageFrame.map {
+        let field = pixelFrame(dialog.inputField.convert(dialog.inputField.bounds, to: view),
+                               height: view.bounds.height, scale: scale)
+        let cancel = pixelFrame(dialog.buttonFrame(at: dialog.cancelIndex),
+                                height: view.bounds.height, scale: scale)
+        let confirm = pixelFrame(dialog.buttonFrame(at: 0),
+                                 height: view.bounds.height, scale: scale)
+        let titleFrame = pixelFrame(dialog.titleFrame, height: view.bounds.height, scale: scale)
+        let messageFrame = dialog.messageFrame.map {
             pixelFrame($0, height: view.bounds.height, scale: scale)
         } ?? (0, 0, 0, 0)
-        let clear = view.clearFrame.map {
+        let clear = dialog.clearIndex.map(dialog.buttonFrame(at:)).map {
             pixelFrame($0, height: view.bounds.height, scale: scale)
         } ?? (0, 0, 0, 0)
+        let suppression = dialog.suppressionFrame.map {
+            pixelFrame($0, height: view.bounds.height, scale: scale)
+        } ?? (0, 0, 0, 0)
+        let suppressionTitle = dialog.view.checkbox?.title ?? ""
         request.identity.withCString { identity in
             request.fieldID.withCString { fieldID in
                 request.fieldDescription.withCString { fieldDescription in
                     request.confirmTitle.withCString { confirmTitle in
                         (request.clearTitle ?? "").withCString { clearTitle in
-                            request.title.withCString { heading in
-                                request.message.withCString { explanation in
-                                    request.placeholder.withCString { fieldLabel in
-                                        value.withCString { text in
-                                            tw_accessibility_text_prompt(native, identity, fieldID,
-                                                fieldLabel, fieldDescription, heading, explanation,
-                                                confirmTitle, clearTitle, text,
-                                                Int32(value.utf8.count), Int32(first), Int32(last),
-                                                view.focusKind(in: window),
-                                                titleFrame.x, titleFrame.y,
-                                                titleFrame.width, titleFrame.height,
-                                                messageFrame.0, messageFrame.1,
-                                                messageFrame.2, messageFrame.3,
-                                                field.x, field.y, field.width, field.height,
-                                                cancel.x, cancel.y, cancel.width, cancel.height,
-                                                confirm.x, confirm.y, confirm.width, confirm.height,
-                                                clear.0, clear.1, clear.2, clear.3)
+                            suppressionTitle.withCString { suppressionTitle in
+                                request.title.withCString { heading in
+                                    request.message.withCString { explanation in
+                                        request.placeholder.withCString { fieldLabel in
+                                            value.withCString { text in
+                                                tw_accessibility_text_prompt(native, identity, fieldID,
+                                                    fieldLabel, fieldDescription, heading, explanation,
+                                                    confirmTitle, clearTitle,
+                                                    suppressionTitle, dialog.suppressionChecked ? 1 : 0,
+                                                    text,
+                                                    Int32(value.utf8.count), Int32(first), Int32(last),
+                                                    dialog.focusKind(in: window),
+                                                    titleFrame.x, titleFrame.y,
+                                                    titleFrame.width, titleFrame.height,
+                                                    messageFrame.0, messageFrame.1,
+                                                    messageFrame.2, messageFrame.3,
+                                                    field.x, field.y, field.width, field.height,
+                                                    cancel.x, cancel.y, cancel.width, cancel.height,
+                                                    confirm.x, confirm.y, confirm.width, confirm.height,
+                                                    clear.0, clear.1, clear.2, clear.3,
+                                                    suppression.0, suppression.1,
+                                                    suppression.2, suppression.3)
+                                            }
                                         }
                                     }
                                 }

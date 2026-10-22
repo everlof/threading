@@ -15,9 +15,11 @@ final class ThemedAlert {
         case critical
     }
 
+    #if !os(Linux)
     /// AppKit's documented first-button response value, kept here so callers reason in button
     /// indexes instead of coupling themselves to system alert chrome.
     static let firstButtonResponse = NSApplication.ModalResponse(rawValue: 1_000)
+    #endif
 
     final class Button {
         var title: String
@@ -67,6 +69,7 @@ final class ThemedAlert {
         }
     }
 
+    #if !os(Linux)
     private(set) var presentedWindow: NSWindow?
     private weak var parentWindow: NSWindow?
     private weak var previousKeyWindow: NSWindow?
@@ -77,6 +80,7 @@ final class ThemedAlert {
     private let attachmentEvents = AppEventObservations()
     private let parentInputMonitor = LocalEventMonitor()
     private var isModal = false
+    #endif
 
     init() {}
 
@@ -126,6 +130,13 @@ final class ThemedAlert {
         }
     }
 
+    #if os(Linux)
+    /// The native host owns modal event dispatch and answers the same button indices.
+    func makeContentView(onChoose: @escaping (Int) -> Void) -> ThemedAlertContentView {
+        if buttons.isEmpty { addButton(withTitle: L10n.string("OK")) }
+        return ThemedAlertContentView(alert: self, choose: onChoose)
+    }
+    #else
     /// The themed attached dialog is a child panel, not AppKit's native attachedSheet.
     /// Evidence capture follows this surface even when another app temporarily owns focus.
     static func isPresentationWindow(_ window: NSWindow) -> Bool {
@@ -366,10 +377,12 @@ final class ThemedAlert {
             window.makeFirstResponder(responder)
         }
     }
+    #endif
 }
 
 // MARK: - Panel
 
+#if !os(Linux)
 @MainActor
 private final class ThemedAlertPanel: NSPanel {
     var onCancel: (() -> Void)?
@@ -418,11 +431,12 @@ private final class ThemedAlertPanel: NSPanel {
         return super.performKeyEquivalent(with: event)
     }
 }
+#endif
 
 // MARK: - Content
 
 @MainActor
-private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent {
+final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent {
     private enum Layout {
         static let maximumTextWidth: CGFloat = 500
         static let checkboxHeight: CGFloat = Design.Size.chipHeight
@@ -430,30 +444,41 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
 
     private let alert: ThemedAlert
     private let choose: (Int) -> Void
-    private let titleLabel: NSTextField
-    private let messageLabel: NSTextField
+    let titleLabel: NSTextField
+    let messageLabel: NSTextField
+    #if !os(Linux)
     private let requesterTitleBand: ThemedAlertRequesterTitleBandView
+    #endif
     private let iconView = NSImageView()
     private var buttonControls: [ThemedButton] = []
-    private var checkbox: ThemedCheckbox?
+    private var buttonsByIndex: [Int: ThemedButton] = [:]
+    private(set) var checkbox: ThemedCheckbox?
     private let appEvents = AppEventObservations()
 
     /// Period requester materials do not carry the modern status-symbol heading. Their source
     /// dialogs are compact, square, and text-led; the same popover grammar that drives their
     /// transient cards is the data-backed signal for this presentation.
     private var usesClassicRequester: Bool {
+        #if os(Linux)
+        false
+        #else
         AppThemePalette.current
             .material(for: effectiveAppearance)
             .popoverStyle
             .glyphStyle == .classic
+        #endif
     }
 
     /// Indigo Magic's measured logout requester is still a square classic requester, but unlike
     /// Workbench it carries a bright green question mark field beside the message well.
     private var usesIRIXRequester: Bool {
+        #if os(Linux)
+        false
+        #else
         AppThemePalette.current
             .material(for: effectiveAppearance)
             .menuAppearance == .irix
+        #endif
     }
 
     var preferredFirstResponder: NSResponder? {
@@ -462,12 +487,16 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
             ?? buttonControls.first(where: \.isEnabled)
     }
 
+    func button(at index: Int) -> ThemedButton? { buttonsByIndex[index] }
+
     init(alert: ThemedAlert, choose: @escaping (Int) -> Void) {
         self.alert = alert
         self.choose = choose
         titleLabel = NSTextField(wrappingLabelWithString: alert.messageText)
         messageLabel = NSTextField(wrappingLabelWithString: alert.informativeText)
+        #if !os(Linux)
         requesterTitleBand = ThemedAlertRequesterTitleBandView(title: alert.messageText)
+        #endif
         super.init(frame: .zero)
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
@@ -482,7 +511,9 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
 
     override func layout() {
         super.layout()
+        #if !os(Linux)
         shapeCouponMask()
+        #endif
         guard copyStack != nil, bounds.width > 1 else { return }
         // The copy stack's width is partly answered by these labels' intrinsic widths. Reading
         // that frame here and feeding it straight back through preferredMaxLayoutWidth creates
@@ -507,7 +538,11 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
     }
 
     private func setup() {
+        #if os(Linux)
+        titleLabel.font = Design.Typography.heading()
+        #else
         titleLabel.applyFont(usesClassicRequester ? .controlRegular : .heading)
+        #endif
         titleLabel.isHidden = usesClassicRequester
         titleLabel.maximumNumberOfLines = 0
         // Fitting size is queried before the copy stack has bounds. Start at the narrowest real
@@ -516,7 +551,11 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
         let requesterInsets: CGFloat = usesClassicRequester ? 8 : 0
         titleLabel.preferredMaxLayoutWidth = ThemedAlertLayout.minimumCopyWidth - requesterInsets
 
+        #if os(Linux)
+        messageLabel.font = Design.Typography.body()
+        #else
         messageLabel.applyFont(usesClassicRequester ? .controlRegular : .body)
+        #endif
         messageLabel.maximumNumberOfLines = 0
         messageLabel.preferredMaxLayoutWidth = ThemedAlertLayout.minimumCopyWidth - requesterInsets
         messageLabel.isHidden = alert.informativeText.isEmpty
@@ -538,6 +577,12 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
             self.checkbox = checkbox
             sections.append(checkbox)
         }
+        #if os(Linux)
+        installContent(
+            icon: iconView, title: titleLabel, message: messageLabel,
+            additionalSections: sections, buttons: makeButtons()
+        )
+        #else
         installContent(
             icon: iconView, title: titleLabel, message: messageLabel,
             additionalSections: sections, buttons: makeButtons(),
@@ -546,6 +591,7 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
             classicBandHeight: WindowChromeAppearance.resolve()?.bandHeight ?? 18,
             classicInitially: usesClassicRequester
         )
+        #endif
 
         setAccessibilityRole(.group)
         setAccessibilityLabel(alert.messageText)
@@ -607,8 +653,14 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
             : Array(alert.buttons.indices.reversed())
         for index in indices {
             let model = alert.buttons[index]
+            #if os(Linux)
+            let button = ThemedButton()
+            button.title = model.title
+            button.action = { [weak self] in self?.choose(index) }
+            #else
             let button = ThemedButton(title: model.title, target: self, action: #selector(buttonPressed(_:)))
             button.tag = index
+            #endif
             button.isEnabled = model.isEnabled
             button.keyEquivalent = chords[index].keyEquivalent
             button.shortcut = chords[index].shortcut
@@ -617,6 +669,7 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
                 button.contentTintColor = Design.Status.negative
             }
             buttonControls.append(button)
+            buttonsByIndex[index] = button
         }
         // Modern sheets keep the whole row trailing. A classic requester uses the same spare
         // width as the source figure: its first action is leading and its cancellation gadget is
@@ -624,11 +677,23 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
         return buttonControls
     }
 
+    #if !os(Linux)
     @objc private func buttonPressed(_ sender: ThemedButton) {
         choose(sender.tag)
     }
+    #endif
 
     private func applyTheme() {
+        #if os(Linux)
+        titleLabel.font = Design.Typography.heading()
+        messageLabel.font = Design.Typography.body()
+        titleLabel.textColor = Design.Text.label
+        messageLabel.textColor = Design.Text.secondary
+        iconView.image = Design.Symbol.image(symbolName, slot: ThemedAlertLayout.iconSize,
+            pointSize: ThemedAlertLayout.iconSize, weight: .medium)
+        iconView.contentTintColor = symbolColor
+        refreshSurface()
+        #else
         if usesClassicRequester {
             titleLabel.applyFont(.controlRegular)
             messageLabel.applyFont(.controlRegular)
@@ -658,11 +723,13 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
         setClassicLayout(usesClassicRequester)
         refreshSurface()
         window?.invalidateShadow()
+        #endif
     }
 
     /// The source crop is a 30px square green field with a one-pixel black rule and a one-bit
     /// question mark. It is made as an indexed-looking image here instead of borrowing a modern
     /// SF Symbol, whose rounded outline and anti-aliased fill would erase the measured grammar.
+    #if !os(Linux)
     private static func irixQuestionImage() -> NSImage {
         let size = NSSize(width: 30, height: 30)
         let image = NSImage(size: size)
@@ -698,6 +765,7 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
         ))
         return image
     }
+    #endif
 
     private var symbolName: String {
         switch alert.alertStyle {
@@ -721,6 +789,11 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
     }
 
     fileprivate func refreshSurface() {
+        #if os(Linux)
+        setAppliedSurface(fill: LinuxTheme.color("floatingSurface"),
+                          radius: Design.Radius.panel, border: Design.Surface.border)
+        needsDisplay = true
+        #else
         let material = AppThemePalette.current.material(for: effectiveAppearance)
         let popover = material.popoverStyle
         // Anchored Help Tags and modal alerts share the presentation model but not their
@@ -745,8 +818,10 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
         )
         shapeCouponMask()
         needsDisplay = true
+        #endif
     }
 
+    #if !os(Linux)
     /// A coupon theme's alert is a ticket like its popovers and menus. The panel's window shadow
     /// follows this view's alpha, so masking it is all the scallops need to cast their shadow.
     private var wearsCoupon: Bool {
@@ -774,8 +849,10 @@ private final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent
         Design.Surface.border.setStroke()
         outline.stroke()
     }
+    #endif
 }
 
+#if !os(Linux)
 /// The title strip on an indexed requester is part of the dialog, not the host window. Keeping it
 /// as a design component lets the alert carry the Workbench depth gadget and one-bit caption even
 /// when it is rendered into a borderless sheet panel.
@@ -943,3 +1020,4 @@ private extension NSResponder {
         return (self as? NSView)?.window === window
     }
 }
+#endif
