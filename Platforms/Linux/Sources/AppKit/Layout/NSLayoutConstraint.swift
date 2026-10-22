@@ -52,14 +52,21 @@ public final class NSLayoutConstraint {
         didSet { invalidate() }
     }
     public var identifier: String?
+    /// The owner at activation time. Reparenting a control can change its current nearest
+    /// common ancestor before the old constraint is deactivated; removal must still visit the
+    /// container that actually holds the constraint.
+    private weak var installedContainer: NSView?
 
     public var isActive: Bool = false {
         didSet {
             guard isActive != oldValue else { return }
             if isActive {
-                container?.activeConstraints.append(self)
+                installedContainer = container
+                installedContainer?.activeConstraints.append(self)
             } else {
-                container?.activeConstraints.removeAll { $0 === self }
+                installedContainer?.activeConstraints.removeAll { $0 === self }
+                installedContainer?.setNeedsLayout()
+                installedContainer = nil
             }
             invalidate()
         }
@@ -124,7 +131,7 @@ public final class NSLayoutConstraint {
     }
 
     private func invalidate() {
-        container?.setNeedsLayout()
+        (installedContainer ?? container)?.setNeedsLayout()
     }
 }
 

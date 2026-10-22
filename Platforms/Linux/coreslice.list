@@ -90,6 +90,9 @@ Sources/Threading/Core/Agent/ConversationStreamSession.swift
 Sources/Threading/Core/Agent/ConversationTurnControl.swift
 Sources/Threading/Core/Agent/ComposerCapability.swift
 Sources/Threading/Core/Control/WorkspaceFileModels.swift
+Sources/Threading/Core/Settings/PromptReturnKey.swift
+Sources/Threading/Core/Session/ComposerAttachmentDefaults.swift
+Sources/Threading/Core/Session/ComposerAttachmentText.swift
 Sources/Threading/Core/Agent/SubagentTimeline.swift
 Sources/Threading/Core/Agent/ClaudeSubagentEvent.swift
 Sources/Threading/Core/Agent/ClaudeSubagentTranscriptReplay.swift

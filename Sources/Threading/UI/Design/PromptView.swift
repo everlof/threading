@@ -1,4 +1,7 @@
 import AppKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 /// A primary text input: a rounded container holding the field and its submit control.
 ///
@@ -72,6 +75,11 @@ final class PromptView: NSView, ThemedComponent {
     private var pendingAttachmentPaths: [String] = []
     private var attachmentPreparationTask: Task<Void, Never>?
     private var attachmentPreparationGeneration = 0
+    #if os(Linux)
+    private var linuxPreparingAttachment = false
+    private var linuxClipboardGeneration = 0
+    private var linuxClipboardReads = 0
+    #endif
     private(set) var contextAttachments: [ConversationContextAttachment] = []
     private var isTextFocused = false
 
@@ -401,7 +409,13 @@ final class PromptView: NSView, ThemedComponent {
     /// a frame or more later. This names that gap for the surfaces that have to wait it out,
     /// rather than each of them reaching for a private list or inferring it from a disabled
     /// button that is also disabled for three other reasons.
-    var isPreparingAttachments: Bool { !pendingAttachmentPaths.isEmpty }
+    var isPreparingAttachments: Bool {
+        #if os(Linux)
+        !pendingAttachmentPaths.isEmpty || linuxClipboardReads > 0
+        #else
+        !pendingAttachmentPaths.isEmpty
+        #endif
+    }
 
     /// The answer used by both an in-box submit and an owner-provided outside action.
     var isSubmissionAvailable: Bool {
@@ -440,8 +454,12 @@ final class PromptView: NSView, ThemedComponent {
         submitButton.isBordered = false
         submitButton.contentTintColor = Design.Text.tertiary
         refreshSubmitTitle()
+        #if os(Linux)
+        submitButton.action = { [weak self] in self?.primaryAction() }
+        #else
         submitButton.target = self
         submitButton.action = #selector(primaryAction)
+        #endif
         submitButton.setAccessibilityIdentifier("composer.prompt.submit")
         submitButton.translatesAutoresizingMaskIntoConstraints = false
 
@@ -684,6 +702,7 @@ final class PromptView: NSView, ThemedComponent {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
 
+        #if !os(Linux)
         unregisterDraggedTypes()
         guard window != nil else {
             dismissCompletions()
@@ -693,6 +712,9 @@ final class PromptView: NSView, ThemedComponent {
             [.fileURL, .png, .tiff, SessionReferencePasteboard.type]
                 + DroppedFilePromise.readableTypes
         )
+        #else
+        if window == nil { dismissCompletions() }
+        #endif
     }
 
     // MARK: - Public Methods
@@ -1025,10 +1047,23 @@ final class PromptView: NSView, ThemedComponent {
     /// file, and silently carrying one from one project's composer to another is worse than
     /// asking for it again.
     func clearAttachments() {
-        guard !attachments.isEmpty || !pendingAttachmentPaths.isEmpty else { return }
+        #if os(Linux)
+        let hadClipboardRead = linuxClipboardReads > 0
+        linuxClipboardGeneration &+= 1
+        linuxClipboardReads = 0
+        #endif
+        guard !attachments.isEmpty || !pendingAttachmentPaths.isEmpty else {
+            #if os(Linux)
+            if hadClipboardRead { updateSubmitState() }
+            #endif
+            return
+        }
         attachmentPreparationGeneration += 1
         attachmentPreparationTask?.cancel()
         attachmentPreparationTask = nil
+        #if os(Linux)
+        linuxPreparingAttachment = false
+        #endif
         pendingAttachmentPaths.removeAll()
         attachments.removeAll()
         attachmentScrollView.clearTiles()
@@ -1038,6 +1073,7 @@ final class PromptView: NSView, ThemedComponent {
 
     // MARK: - Dragging
 
+    #if !os(Linux)
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         let canRead = canAcceptDrop(sender.draggingPasteboard)
         isDropTarget = canRead
@@ -1092,6 +1128,15 @@ final class PromptView: NSView, ThemedComponent {
             self?.insertAttachments(delivered)
         }
     }
+    #endif
+
+    #if os(Linux)
+    /// The native window transport has already admitted these paths and routes its file-drop
+    /// event to the mounted prompt. The prompt keeps preview, overflow and submission policy.
+    func acceptDroppedPaths(_ paths: [String]) {
+        insertAttachments(paths)
+    }
+    #endif
 
     // MARK: - Actions
 
@@ -1100,7 +1145,10 @@ final class PromptView: NSView, ThemedComponent {
     /// Reachable from outside for `SubmitPlacement.outside`, where the button belongs to the
     /// owner: it has to submit *this* prompt's value, attachments included, rather than reading
     /// `stringValue` and quietly dropping the images.
-    @objc func submit() {
+    #if !os(Linux)
+    @objc
+    #endif
+    func submit() {
         submit(intent: .standard)
     }
 
@@ -1109,7 +1157,10 @@ final class PromptView: NSView, ThemedComponent {
     /// One control rather than two, because a send and a stop are never both meaningful and a
     /// second button is a second thing to aim at. The glyph is already reparented between
     /// placements, so it has the seam for this.
-    @objc private func primaryAction() {
+    #if !os(Linux)
+    @objc
+    #endif
+    private func primaryAction() {
         if composerMode.canStop {
             onStop?()
             return
@@ -1118,7 +1169,7 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     private func submit(intent: PromptSubmitIntent) {
-        guard isSubmissionEnabled, pendingAttachmentPaths.isEmpty else { return }
+        guard isSubmissionEnabled, !isPreparingAttachments else { return }
 
         // ⌘Return joins the running turn where the transport allows it. Everywhere else it is an
         // ordinary send — which, while a turn is in flight, the owner reads as "queue this".
@@ -1178,6 +1229,30 @@ final class PromptView: NSView, ThemedComponent {
     /// retained by the composer. A generation invalidates an in-flight worker when the draft is
     /// cleared, so a late frame cannot resurrect an attachment after submission or cancellation.
     private func prepareNextAttachmentIfNeeded() {
+        #if os(Linux)
+        guard !linuxPreparingAttachment, let path = pendingAttachmentPaths.first else { return }
+        linuxPreparingAttachment = true
+        let generation = attachmentPreparationGeneration
+        LinuxPromptImageLoader.prepare(at: path) { [weak self] decoded in
+            guard let self, self.attachmentPreparationGeneration == generation else { return }
+            self.linuxPreparingAttachment = false
+            guard self.pendingAttachmentPaths.first == path else {
+                self.prepareNextAttachmentIfNeeded()
+                return
+            }
+            self.pendingAttachmentPaths.removeFirst()
+            if let decoded,
+               let image = NSImage(rgba: decoded.rgba, width: decoded.width,
+                                   height: decoded.height) {
+                self.installAttachment(path: path, kind: .image, image: image)
+            } else {
+                self.handleUnpreviewableImagePaths([path], rejection: .unreadable(count: 1))
+            }
+            self.updateSubmitState()
+            self.updateHeight()
+            self.prepareNextAttachmentIfNeeded()
+        }
+        #else
         guard attachmentPreparationTask == nil, !pendingAttachmentPaths.isEmpty else { return }
         let expectedGeneration = attachmentPreparationGeneration
 
@@ -1212,6 +1287,9 @@ final class PromptView: NSView, ThemedComponent {
                         )
                     }
                 }.value
+                let image = frame.map {
+                    NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height))
+                }
 
                 guard !Task.isCancelled,
                       let self,
@@ -1221,8 +1299,8 @@ final class PromptView: NSView, ThemedComponent {
                 guard self.pendingAttachmentPaths.first == path else { continue }
                 self.pendingAttachmentPaths.removeFirst()
 
-                if let frame {
-                    self.installAttachment(path: path, kind: kind, frame: frame)
+                if let image {
+                    self.installAttachment(path: path, kind: kind, image: image)
                 } else {
                     self.handleUnpreviewableImagePaths(
                         [path],
@@ -1238,21 +1316,19 @@ final class PromptView: NSView, ThemedComponent {
             self.attachmentPreparationTask = nil
             self.updateSubmitState()
         }
+        #endif
     }
 
     private func installAttachment(
         path: String,
         kind: PromptMediaAttachment.Kind,
-        frame: CGImage
+        image: NSImage
     ) {
-        let image = NSImage(
-            cgImage: frame,
-            size: NSSize(width: frame.width, height: frame.height)
-        )
         let attachment = PromptMediaAttachment(path: path, kind: kind, image: image)
         attachments.append(attachment)
 
         let thumbnail = PromptAttachmentThumbnail(attachment: attachment)
+        #if !os(Linux)
         thumbnail.inspectorSelectionProvider = { [weak self] in
             guard let self,
                   let selectedIndex = self.attachments.firstIndex(where: {
@@ -1261,6 +1337,7 @@ final class PromptView: NSView, ThemedComponent {
             else { return nil }
             return self.mediaInspectorSelection(forAttachmentAt: selectedIndex)
         }
+        #endif
         thumbnail.onRemove = { [weak self, weak thumbnail] in
             guard let self, let thumbnail else { return }
             self.removeAttachment(id: attachment.id, thumbnail: thumbnail)
@@ -1282,6 +1359,7 @@ final class PromptView: NSView, ThemedComponent {
     /// rather than opening as a document Quick Look happens to know; its poster is handed over
     /// so the rail shows the recording rather than a file icon. `.document` is the fallback for
     /// a host with no player registered, made the same way the attachments pane makes it.
+    #if !os(Linux)
     func mediaInspectorSelection(forAttachmentAt index: Int) -> MediaInspectorSelection? {
         guard attachments.indices.contains(index) else { return nil }
         let items = attachments.map {
@@ -1294,6 +1372,7 @@ final class PromptView: NSView, ThemedComponent {
         }
         return MediaInspectorSelection(items: items, selectedIndex: index)
     }
+    #endif
 
     private func insertLiteralPaths(_ paths: [String]) {
         guard !paths.isEmpty else { return }
@@ -1345,11 +1424,11 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     private static func quotedPath(_ path: String) -> String {
-        PromptAttachment.quotedPath(path)
+        ComposerAttachmentText.quotedPath(path)
     }
 
     private func appending(paths: [String], to text: String) -> String {
-        PromptAttachment.appending(paths: paths, to: text)
+        ComposerAttachmentText.appending(paths: paths, to: text)
     }
 
     /// The submit control brightens once there is something to send, which is the only cue
@@ -1442,7 +1521,7 @@ final class PromptView: NSView, ThemedComponent {
 
     private func presentScheduleMenu() {
         guard let entries = scheduleMenuProvider?(), !entries.isEmpty else { return }
-        ThemedMenuPresenter.present(
+        _ = ThemedMenuPresenter.present(
             ThemedMenuPresentation(entries: entries, minimumWidth: 0),
             from: scheduleChevron,
             selectedEntryIndex: nil,
@@ -1541,6 +1620,43 @@ final class PromptView: NSView, ThemedComponent {
         heightConstraint?.constant = fitted
         onContentHeightChange?(fitted)
     }
+
+    #if os(Linux)
+    /// Native input and accessibility forward to the exact editor, action, and tiles owned by
+    /// this view. The host does not build another composer subtree around them.
+    var linuxEditor: PromptTextView { textView }
+    var linuxEditorScrollView: ThemedScrollView { scrollView }
+    var linuxSubmitButton: ThemedButton { submitButton }
+    var linuxAttachmentTiles: [PromptAttachmentThumbnail] {
+        attachmentScrollView.content.arrangedSubviews.compactMap { $0 as? PromptAttachmentThumbnail }
+    }
+
+    func beginLinuxClipboardRead() -> Int? {
+        guard linuxClipboardReads < 4 else { return nil }
+        linuxClipboardReads += 1
+        updateSubmitState()
+        return linuxClipboardGeneration
+    }
+
+    func finishLinuxClipboardRead(generation: Int) {
+        guard linuxClipboardGeneration == generation else { return }
+        linuxClipboardReads = max(0, linuxClipboardReads - 1)
+        updateSubmitState()
+    }
+
+    func acceptsLinuxClipboardRead(generation: Int) -> Bool {
+        linuxClipboardGeneration == generation
+    }
+
+    @discardableResult
+    func removeLinuxAttachment(id: String) -> Bool {
+        guard let tile = linuxAttachmentTiles.first(where: { $0.id.uuidString == id }) else {
+            return false
+        }
+        tile.onRemove?()
+        return true
+    }
+    #endif
 }
 
 // MARK: - NSTextViewDelegate
@@ -1562,6 +1678,7 @@ extension PromptView: NSTextViewDelegate {
 // MARK: - Prompt Attachment
 
 /// Turns whatever is on a pasteboard into file paths an agent can open.
+#if !os(Linux)
 enum PromptAttachment {
 
     /// Paths for the pasteboard's contents: dropped files as they are, and raw image data
@@ -1618,11 +1735,11 @@ enum PromptAttachment {
     }
 
     static func appending(paths: [String], to text: String) -> String {
-        ComposerAttachmentHandover.appending(paths: paths, to: text)
+        ComposerAttachmentText.appending(paths: paths, to: text)
     }
 
     static func quotedPath(_ path: String) -> String {
-        ComposerAttachmentHandover.quotedPath(path)
+        ComposerAttachmentText.quotedPath(path)
     }
 
     /// Whether `paths` would find anything, without doing the work.
@@ -1672,6 +1789,7 @@ enum PromptAttachment {
         }
     }
 }
+#endif
 
 // MARK: - Composer Mode
 

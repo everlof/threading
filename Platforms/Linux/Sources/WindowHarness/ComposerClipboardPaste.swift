@@ -11,44 +11,42 @@ enum ComposerClipboardPaste {
     private static let queue = DispatchQueue(label: "threading.linux.composer-clipboard",
                                              qos: .userInitiated)
 
-    static func paste(into editor: NSTextView, attachments: LinuxPromptAttachmentStrip,
-                      wakeIdentity: UInt64) {
-        guard let generation = attachments.beginClipboardRead() else { return }
+    static func paste(into prompt: PromptView) {
+        guard let generation = prompt.beginLinuxClipboardRead() else { return }
+        let editor = prompt.linuxEditor
         let anchor = ComposerPasteAnchor(text: editor.string, selection: editor.selectedRange())
         let wayland = tw_clipboard_is_wayland() != 0
-        queue.async { [weak editor, weak attachments] in
+        queue.async { [weak prompt] in
             let paths = localFileURLs(wayland: wayland)
             let image = paths.isEmpty ? pastedImagePath(wayland: wayland) : nil
-            NSWindowWorkerDelivery.shared.deliver { [weak editor, weak attachments] in
-                guard let attachments else {
+            NSWindowWorkerDelivery.shared.deliver { [weak prompt] in
+                guard let prompt else {
                     if let image { _ = unlink(image) }
                     return
                 }
-                defer { attachments.finishClipboardRead(generation: generation) }
-                guard attachments.pasteGeneration == generation, let editor else {
+                defer { prompt.finishLinuxClipboardRead(generation: generation) }
+                guard prompt.acceptsLinuxClipboardRead(generation: generation) else {
                     if let image { _ = unlink(image) }
                     return
                 }
                 if !paths.isEmpty || image != nil {
-                    for path in paths.prefix(32) {
-                        _ = attachments.addDroppedPath(path, wakeIdentity: wakeIdentity)
-                    }
-                    if let image { _ = attachments.addDroppedPath(image, wakeIdentity: wakeIdentity) }
-                } else {
-                    let currentText = editor.string
-                    guard let selection = anchor.selection(in: currentText) else { return }
-                    let laterSelection = editor.selectedRange()
-                    let preserveLaterSelection = currentText != anchor.text
-                        || laterSelection != anchor.selection
-                    editor.setSelectedRange(selection)
-                    editor.paste(nil)
-                    if preserveLaterSelection {
-                        let insertedLength = editor.string.utf16.count
-                            - currentText.utf16.count + selection.length
-                        editor.setSelectedRange(ComposerPasteAnchor.laterSelection(
-                            laterSelection, afterReplacing: selection,
-                            insertedUTF16Length: insertedLength))
-                    }
+                    prompt.attachFiles(at: Array(paths.prefix(32)) + (image.map { [$0] } ?? []))
+                    return
+                }
+                let editor = prompt.linuxEditor
+                let currentText = editor.string
+                guard let selection = anchor.selection(in: currentText) else { return }
+                let laterSelection = editor.selectedRange()
+                let preserveLaterSelection = currentText != anchor.text
+                    || laterSelection != anchor.selection
+                editor.setSelectedRange(selection)
+                editor.paste(nil)
+                if preserveLaterSelection {
+                    let insertedLength = editor.string.utf16.count
+                        - currentText.utf16.count + selection.length
+                    editor.setSelectedRange(ComposerPasteAnchor.laterSelection(
+                        laterSelection, afterReplacing: selection,
+                        insertedUTF16Length: insertedLength))
                 }
             }
         }

@@ -11,7 +11,7 @@ import AppKit
 final class PromptTextView: ThemedTextView {
 
     /// Virtual Return key code; the Linux event shim maps SDL Return to this AppKit code.
-    static let returnKeyCode: UInt16 = 36
+    nonisolated static let returnKeyCode: UInt16 = 36
 
     /// The same scroll and document wiring used by the production composer. A host can
     /// mount this without rebuilding TextKit setup or changing the editor's key semantics.
@@ -37,9 +37,7 @@ final class PromptTextView: ThemedTextView {
     var submitsOnReturn: () -> Bool = { true }
 
     /// Paths for whatever was dropped or pasted, already written to disk.
-    #if !os(Linux)
     var onAttach: (([String]) -> Void)?
-    #endif
 
     /// Lets the owning surface draw focus around the whole composer, not merely blink a caret
     /// inside one descendant.
@@ -49,9 +47,7 @@ final class PromptTextView: ThemedTextView {
     /// over the editor — the same reason as `onFocusChange`: AppKit routes the drag to the
     /// deepest registered view, so over the text this view is the destination and the box
     /// around it would otherwise never hear about the pointer it is supposed to answer.
-    #if !os(Linux)
     var onDropTargetChange: ((Bool) -> Void)?
-    #endif
 
     /// Common plain-text editor configuration for `PromptView` and platform hosts.
     /// The caller still chooses its font surface and submit policy.

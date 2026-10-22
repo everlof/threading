@@ -1,4 +1,5 @@
 import AppKit
+import CoreSlice
 
 // The installed Linux preview consumes a checked production palette. These app-owned role values
 // support the unchanged production menu row; no theme decisions belong in the AppKit shim.
@@ -33,7 +34,13 @@ extension AppThemePalette.Palette {
 
 @MainActor
 enum DesignSettings {
-    struct Settings { let chromeFontFamily: String? = nil }
+    struct Settings {
+        let chromeFontFamily: String? = nil
+        var promptReturnKey: PromptReturnKey {
+            let stored = UserDefaults.standard.string(forKey: "promptReturnKey")
+            return stored.flatMap(PromptReturnKey.init(rawValue:)) ?? .matchesComposer
+        }
+    }
     static let current = Settings()
 }
 

@@ -415,6 +415,13 @@ struct WindowHarness {
             try PromptCompletionLayoutFixture.run(output: CommandLine.arguments[2])
             return
         }
+        if mode == "--prompt-view-layout-fixture" {
+            guard CommandLine.arguments.count == 3 else {
+                throw WindowFailure("usage: WindowHarness --prompt-view-layout-fixture OUTPUT_PREFIX")
+            }
+            try PromptViewLayoutFixture.run(output: CommandLine.arguments[2])
+            return
+        }
         if mode == "--session-row-layout-fixture" {
             SessionRowLayoutFixture.run()
             return

@@ -30,11 +30,7 @@ final class WorkspaceConversationPane: WorkspacePane {
     private var preparedMarkdownPages: [Int: [[String]]] = [:]
     private var streamingLabel: ProseLabel?
     private var displayedDecisionIDs: [ObjectIdentifier] = []
-    private let editor = PromptTextView.scrollingPrompt()
-    private let composer = NSView(frame: .zero)
-    private let attachments = LinuxPromptAttachmentStrip(frame: .zero)
-    private let composerFooter = NSStackView()
-    private let composerSpacer = NSView(frame: .zero)
+    private let composer = PromptView(frame: .zero)
     private let modelChip = ChipView()
     private let modeChip = ChipView()
     private let effortChip = ChipView()
@@ -58,10 +54,8 @@ final class WorkspaceConversationPane: WorkspacePane {
     private var speedSelected = 0
     private var speedOpen = false
     private var speedRowHeight: CGFloat = 44
-    private let submit = ThemedButton()
+    private var submit: ThemedButton { composer.linuxSubmitButton }
     private let status: NSTextField
-    private lazy var composerHeightConstraint = composer.heightAnchor.constraint(
-        equalToConstant: Design.Size.inputHeight)
     private lazy var composerColumnCap = composer.widthAnchor.constraint(
         lessThanOrEqualToConstant: Design.Chat.columnWidth + 2 * Design.Spacing.inset)
     private lazy var composerColumnWidth: NSLayoutConstraint = {
@@ -82,7 +76,6 @@ final class WorkspaceConversationPane: WorkspacePane {
     private var lastPresentedActivity: NativeSessionActivity?
     private var followTail = true
     private var focused = false
-    private var composerFocused = false
     private var presentedPermission: Int?
     private var permissionCard: PermissionRequestView?
     private var questionCards: [UUID: ConversationQuestionCard] = [:]
@@ -108,26 +101,22 @@ final class WorkspaceConversationPane: WorkspacePane {
         }
         transcript.surface = self
         transcript.activate()
-        editor.textView.placeholder = "Reply to this conversation"
-        editor.textView.submitsOnReturn = { true }
-        editor.textView.onSubmit = { [weak self] _ in self?.send() }
-        editor.textView.onFocusChange = { [weak self] focused in
-            self?.composerFocused = focused
-            self?.refreshComposerSurface()
-        }
-        submit.isBordered = false
+        composer.placeholder = "Reply to this conversation"
+        composer.fontSurface = .conversation
+        composer.submitPlacement = .footer
+        composer.showsImageAttachments = true
+        composer.onSubmit = { [weak self] value in self?.send(value) }
+        composer.onStop = { [weak self] in self?.runtime.interrupt() }
+        composer.onChange = { [weak self] _ in self?.updateState() }
+        composer.onContentHeightChange = { [weak self] _ in self?.needsPresentation = true }
+        composer.onSubmissionAvailabilityChange = { [weak self] _ in self?.needsPresentation = true }
         submit.setAccessibilityIdentifier("composer.conversation-reply.submit")
-        submit.action = { [weak self] in
-            guard let self else { return }
-            if self.runtime.canInterrupt { self.runtime.interrupt() }
-            else { self.send() }
-        }
-        editor.textView.nextKeyView = modelChip
+        composer.linuxEditor.nextKeyView = modelChip
         modelChip.nextKeyView = modeChip
         modeChip.nextKeyView = effortChip
         effortChip.nextKeyView = speedChip
         speedChip.nextKeyView = submit
-        submit.nextKeyView = editor.textView
+        submit.nextKeyView = composer.linuxEditor
         root.addSubview(scroll)
         root.addSubview(status)
         root.addSubview(composer)
@@ -135,13 +124,6 @@ final class WorkspaceConversationPane: WorkspacePane {
         root.addSubview(configurationMenu)
         configurationMenu.isHidden = true
         speedMenu.isHidden = true
-        PromptChrome.configureFooter(composerFooter, spacer: composerSpacer)
-        composerFooter.insertArrangedSubview(modelChip, at: 0)
-        composerFooter.insertArrangedSubview(modeChip, at: 1)
-        composerFooter.insertArrangedSubview(effortChip, at: 2)
-        composerFooter.insertArrangedSubview(speedChip, at: 3)
-        composerFooter.addArrangedSubview(contextLabel)
-        composerFooter.addArrangedSubview(submit)
         modelChip.configure(symbolName: "cpu", title: "Default model")
         modelChip.isHidden = true
         modelChip.choicePresentationProvider = { [weak self] _, didDismiss in
@@ -171,15 +153,8 @@ final class WorkspaceConversationPane: WorkspacePane {
         contextLabel.textColor = Design.Text.tertiary
         contextLabel.isHidden = true
         contextLabel.setAccessibilityIdentifier("conversation.context")
-        submit.translatesAutoresizingMaskIntoConstraints = false
-        PromptContentView(views: [attachments, editor, composerFooter],
-                          attachments: attachments, editor: editor,
-                          footer: composerFooter).mount(in: composer)
-        attachments.onChange = { [weak self] in self?.updateState() }
-        attachments.onLiteralPath = { [weak self] path in
-            guard let self else { return }
-            self.insertLiteralPath(path)
-        }
+        composer.setFooterControls(leading: [modelChip, modeChip, effortChip, speedChip],
+                                   trailing: [contextLabel])
         NSLayoutConstraint.activate(ConversationPaneLayout.constraints(
             in: root,
             transcript: scroll,
@@ -189,11 +164,7 @@ final class WorkspaceConversationPane: WorkspacePane {
             composerBottom: root.bottomAnchor,
             columnCap: composerColumnCap,
             columnWidth: composerColumnWidth
-        ) + [
-            composerHeightConstraint,
-            submit.widthAnchor.constraint(equalToConstant: PromptChrome.submitSize),
-            submit.heightAnchor.constraint(equalToConstant: PromptChrome.submitSize)
-        ])
+        ))
         owner.contentView = root
         runtime.onRow = { [weak self] index, row, pages in
             guard let self else { return }
@@ -340,7 +311,7 @@ final class WorkspaceConversationPane: WorkspacePane {
     private func retire(_ card: NSView, returningFocus: Bool) {
         decisionOrder.removeAll { $0 === card }
         if returningFocus, let responder = owner.firstResponder as? NSView, responder.isDescendant(of: card) {
-            _ = owner.makeFirstResponder(editor.textView)
+            _ = owner.makeFirstResponder(composer.linuxEditor)
         }
     }
 
@@ -379,13 +350,9 @@ final class WorkspaceConversationPane: WorkspacePane {
         } else {
             contextLabel.isHidden = true
         }
-        let canSubmit = runtime.canSend
-            && !editor.textView.hasMarkedText()
-            && !attachments.isPreparing
-            && (!editor.textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || attachments.hasImages)
-        PromptChrome.updateSubmit(submit, canSubmit: canSubmit, isStop: runtime.canInterrupt)
-        submit.toolTip = runtime.canInterrupt ? "Stop · Esc" : "Send · Return"
+        composer.composerMode = activeAgent
+            ? .working(canStop: runtime.canInterrupt, canSteer: false) : .ready
+        composer.isSubmissionEnabled = runtime.canSend && !composer.linuxEditor.hasMarkedText()
         if let choice = runtime.modelChoice {
             modelChip.configure(symbolName: "cpu", title: choice.title)
             modelChip.isHidden = false
@@ -541,7 +508,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         case .mode: runtime.selectMode(id.flatMap(AgentPermissionMode.init(rawValue:)))
         case .effort: runtime.selectEffort(id)
         }
-        _ = owner.makeFirstResponder(editor.textView)
+        _ = owner.makeFirstResponder(composer.linuxEditor)
         needsPresentation = true
     }
 
@@ -653,7 +620,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         guard speedOpen, (0..<3).contains(index) else { return }
         dismissSpeedChoice()
         runtime.selectSpeed(index == 0 ? nil : index == 2)
-        _ = owner.makeFirstResponder(editor.textView)
+        _ = owner.makeFirstResponder(composer.linuxEditor)
         needsPresentation = true
     }
 
@@ -687,28 +654,18 @@ final class WorkspaceConversationPane: WorkspacePane {
         needsPresentation = true
     }
 
-    private func send() {
-        let prompt = attachments.submissionText(editor.textView.string)
-        guard !attachments.isPreparing, !editor.textView.hasMarkedText(),
-              runtime.send(prompt) else { updateState(); return }
-        editor.textView.string = ""
-        attachments.clear()
+    private func send(_ value: String) {
+        guard !composer.isPreparingAttachments, !composer.linuxEditor.hasMarkedText(),
+              runtime.send(value) else { updateState(); return }
+        composer.clear()
         followTail = true
         updateState()
     }
 
-    private func insertLiteralPath(_ path: String) {
-        let quoted = path.contains(" ") ? "\"\(path)\"" : path
-        let separator = editor.textView.string.isEmpty || editor.textView.string.hasSuffix(" ")
-            || editor.textView.string.hasSuffix("\n") ? "" : " "
-        editor.textView.insertText(separator + quoted, replacementRange: editor.textView.selectedRange())
-        updateState()
-    }
-
     @discardableResult
-    func removeAttachment(id: String) -> Bool { attachments.removeAttachment(id: id) }
+    func removeAttachment(id: String) -> Bool { composer.removeLinuxAttachment(id: id) }
 
-    func drainAttachments() { attachments.drainPrepared() }
+    func drainAttachments() {}
 
     func acceptFileDrop(_ path: String, windowX: Int, windowY: Int,
                         originX: Int, wakeIdentity: UInt64) -> Bool {
@@ -716,7 +673,8 @@ final class WorkspaceConversationPane: WorkspacePane {
             y: root.bounds.height - CGFloat(windowY - WorkspacePaneChrome.headerPixelHeight)
                 / WorkspaceDisplay.scale)
         guard composer.frame.contains(point) else { return false }
-        return attachments.addDroppedPath(path, wakeIdentity: wakeIdentity)
+        composer.acceptDroppedPaths([path])
+        return true
     }
 
     func setThemeAppearance() {
@@ -733,8 +691,6 @@ final class WorkspaceConversationPane: WorkspacePane {
     }
 
     private func refreshComposerSurface() {
-        PromptChrome.applySurface(to: composer, fill: Design.Surface.field,
-            emphasized: owner.isKeyWindow && composerFocused)
         needsPresentation = true
     }
 
@@ -743,7 +699,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         chrome.focus(focused, window: window)
         owner.isKeyWindow = focused
         _ = tw_workspace_composer_mode(window, 1)
-        if focused { _ = owner.makeFirstResponder(editor.textView) }
+        if focused { _ = owner.makeFirstResponder(composer.linuxEditor) }
         else { owner.cancelPointerGesture(); _ = owner.makeFirstResponder(nil) }
         _ = tw_workspace_editor_focus(window, focused ? 1 : 0)
         needsPresentation = true
@@ -754,14 +710,14 @@ final class WorkspaceConversationPane: WorkspacePane {
         let contentHeight = max(1, height - WorkspacePaneChrome.headerPixelHeight)
         let size = NSSize(width: CGFloat(width) / WorkspaceDisplay.scale, height: CGFloat(contentHeight) / WorkspaceDisplay.scale)
         let inset = Design.Spacing.inset
-        let lineHeight = (editor.textView.font ?? Design.Typography.body()).boundingRectForFont.height
-        let resting = PromptChrome.restingHeight(minimum: Design.Size.inputHeight,
-            lineHeight: lineHeight, showsFooter: true)
-        let attachmentHeight = attachments.attachmentHeight
         let statusHeight = status.intrinsicContentSize.height
-        let attachedMinimumContentHeight = resting + attachmentHeight + 2 * inset + statusHeight
+        let hasImages = !composer.linuxAttachmentTiles.isEmpty
+        let attachmentHeight = hasImages
+            ? Design.Size.promptAttachmentThumbnail + Design.Spacing.medium : 0
+        let attachedMinimumContentHeight = composer.minimumHeight + attachmentHeight
+            + 2 * inset + statusHeight
             + 2 * Design.Spacing.small + Design.Size.chipHeight
-        let minimumWindowHeight = attachments.hasImages
+        let minimumWindowHeight = hasImages
             ? Int((attachedMinimumContentHeight * WorkspaceDisplay.scale).rounded(.up))
                 + WorkspacePaneChrome.headerPixelHeight : 180
         tw_workspace_minimum_height(window, Int32(minimumWindowHeight))
@@ -774,23 +730,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         if composerColumnWidth.constant != composerWidth {
             composerColumnWidth.constant = composerWidth
         }
-        // Width changes reflow the same cached TextKit document the editor already paints.
-        // Reading its used rect adds no second string scan or alternate text measurement.
         owner.layoutIfNeeded()
-        let textHeight = editor.textView.layoutManager.flatMap { manager in
-            editor.textView.textContainer.map { manager.usedRect(for: $0).height }
-        } ?? 0
-        let fitted = PromptChrome.fittedHeight(textHeight: textHeight, restingHeight: resting,
-            showsFooter: true, attachmentHeight: attachmentHeight)
-        let composerHeight = min(fitted.height, max(1, size.height - 2 * inset - statusHeight
-            - 2 * Design.Spacing.small - Design.Size.chipHeight))
-        let needsScroller = fitted.scrolls || composerHeight < fitted.height
-        if editor.hasVerticalScroller != needsScroller { editor.hasVerticalScroller = needsScroller }
-        if composerHeightConstraint.constant != composerHeight {
-            composerHeightConstraint.constant = composerHeight
-        }
-        owner.layoutIfNeeded()
-        attachments.layoutTiles()
         // The clip view already sizes its document to the viewport, so the table's own width is
         // no signal; the column's is. Cells read it when they are built and state it as theirs.
         if table.tableColumns.first?.width != scroll.bounds.width || table.frame.width != scroll.bounds.width {
@@ -818,7 +758,7 @@ final class WorkspaceConversationPane: WorkspacePane {
                 Int32(max(1, caret.width * WorkspaceDisplay.scale)), Int32(max(1, caret.height * WorkspaceDisplay.scale)))
         }
         tw_accessibility_show_conversation(window, title)
-        ComposerAttachmentAccessibility.publish(window: window, strip: attachments,
+        ComposerAttachmentAccessibility.publish(window: window, prompt: composer,
             owner: runtime.id.uuidString, scope: 2, root: root, originX: originX,
             topInset: WorkspacePaneChrome.headerPixelHeight)
         publishConfigurationAccessibility(window: window, originX: originX, size: size)
@@ -833,7 +773,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         let prepared = runtime.rowsPrepared && !waiting(table) && !status.isWaitingForCompleteTextViewport
         let composerTop = WorkspacePaneChrome.headerPixelHeight + Int((size.height - composer.frame.maxY) * WorkspaceDisplay.scale)
         let sendPoint = submit.convert(NSPoint(x: submit.bounds.midX, y: submit.bounds.midY), to: root)
-        print("COMPOSER_FRAME x=\(originX + Int(composer.frame.minX * WorkspaceDisplay.scale)) y=\(composerTop) width=\(Int(composer.bounds.width * WorkspaceDisplay.scale)) height=\(Int(composer.bounds.height * WorkspaceDisplay.scale)) send=\(originX + Int(sendPoint.x * WorkspaceDisplay.scale)),\(WorkspacePaneChrome.headerPixelHeight + Int((size.height - sendPoint.y) * WorkspaceDisplay.scale)) enabled=\(submit.isEnabled) focused=\(composerFocused) scrolls=\(editor.hasVerticalScroller)")
+        print("COMPOSER_FRAME x=\(originX + Int(composer.frame.minX * WorkspaceDisplay.scale)) y=\(composerTop) width=\(Int(composer.bounds.width * WorkspaceDisplay.scale)) height=\(Int(composer.bounds.height * WorkspaceDisplay.scale)) send=\(originX + Int(sendPoint.x * WorkspaceDisplay.scale)),\(WorkspacePaneChrome.headerPixelHeight + Int((size.height - sendPoint.y) * WorkspaceDisplay.scale)) enabled=\(submit.isEnabled) focused=\(owner.firstResponder === composer.linuxEditor) scrolls=\(composer.linuxEditorScrollView.hasVerticalScroller)")
         for card in decisionOrder where card.window != nil {
             // Window-pixel centres of a decision card's controls, for journeys that use them.
             var controls: [String] = []
@@ -1053,14 +993,13 @@ final class WorkspaceConversationPane: WorkspacePane {
 
     private func paste(window: OpaquePointer) {
         let view = activeTextView
-        guard view === editor.textView else { view.paste(nil); return }
-        ComposerClipboardPaste.paste(into: view, attachments: attachments,
-                                     wakeIdentity: tw_worker_wake_identity(window))
+        guard view === composer.linuxEditor else { view.paste(nil); return }
+        ComposerClipboardPaste.paste(into: composer)
     }
 
     /// Native text input reaches the focused text view: a decision card's field editor while
     /// one is editing, the prompt otherwise.
-    private var activeTextView: NSTextView { (owner.firstResponder as? NSTextView) ?? editor.textView }
+    private var activeTextView: NSTextView { (owner.firstResponder as? NSTextView) ?? composer.linuxEditor }
 }
 
 extension WorkspaceConversationPane: ConversationTranscriptSurface {

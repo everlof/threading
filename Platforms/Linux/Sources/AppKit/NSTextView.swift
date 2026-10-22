@@ -74,6 +74,9 @@ open class NSLayoutManager {
     open func usedRect(for container: NSTextContainer) -> NSRect {
         container.textView?.textUsedRect ?? .zero
     }
+    open func ensureLayout(for container: NSTextContainer) {
+        _ = usedRect(for: container)
+    }
     fileprivate func storageDidChange(editedAt location: Int?) {
         containers.forEach { $0.textView?.storageDidChange(editedAt: location) }
     }
@@ -185,22 +188,26 @@ open class NSTextView: NSText, NSClipViewDocumentObserver {
     open var maxSize: NSSize = .zero { didSet { invalidateTextLayout() } }
 
     public init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
-        textContainer = container
+        if let container {
+            textContainer = container
+        } else {
+            let storage = NSTextStorage()
+            let manager = NSLayoutManager()
+            let created = NSTextContainer(size: NSSize(width: frameRect.width,
+                                                      height: .greatestFiniteMagnitude))
+            storage.addLayoutManager(manager)
+            manager.addTextContainer(created)
+            textContainer = created
+            ownedStorage = storage
+        }
         super.init(frame: frameRect)
-        container?.textView = self
+        textContainer?.textView = self
         setAccessibilityRole(.textArea)
         setAccessibilityValue("")
     }
 
     public override convenience init(frame frameRect: NSRect) {
-        let storage = NSTextStorage()
-        let manager = NSLayoutManager()
-        let container = NSTextContainer(size: NSSize(width: frameRect.width,
-                                                    height: .greatestFiniteMagnitude))
-        storage.addLayoutManager(manager)
-        manager.addTextContainer(container)
-        self.init(frame: frameRect, textContainer: container)
-        ownedStorage = storage
+        self.init(frame: frameRect, textContainer: nil)
     }
 
     public required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
@@ -651,6 +658,9 @@ open class NSTextView: NSText, NSClipViewDocumentObserver {
         layingOut = true
         frame.size.height = target
         layingOut = false
+        // A draft can be measured before its viewport has a width. When it reflows to fewer
+        // lines, the clip must release an origin that now lies past the document's last line.
+        if let clip = superview as? NSClipView { clip.scroll(to: clip.bounds.origin) }
     }
 
     private func fittedEnd(in source: NSString, from start: Int, through end: Int,

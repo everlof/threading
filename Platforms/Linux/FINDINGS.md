@@ -9625,3 +9625,29 @@ The full Mac `PromptView` is still not mounted on Linux. The current diagnostic 
 source reaches AppKit drag, pasteboard, bitmap/text-layout APIs and Mac attachment services,
 after the Linux core's composer/query model names. Those adapters are the next large seam;
 repeating the surrounding composer in a Linux-only view would preserve the duplication.
+
+## 266. Both Linux composers mount the production PromptView, 2026-10-22
+
+The opening and saved-conversation hosts now mount the exact `PromptView.swift` source used by
+macOS. Their separate editor, footer, submit and attachment subtrees are gone. The opening host
+keeps its external Start button and sets `.outside`; the reply host uses `.footer` and the view's
+own send/stop control. The hosts still own provider choices, transport, native event routing and
+AT-SPI publication. The old `LinuxPromptAttachmentStrip` has been deleted.
+
+The port exposed three shim defects that the separate Linux compositor had hidden. An active
+constraint must be removed from the container where it was installed even if its view has since
+been reparented. An empty `NSImageView` has no intrinsic size, or its required hugging conflicts
+with a real chip's fixed symbol slot. A text document that shrinks after its viewport gains a
+width must clamp the clip's scroll origin, or the text can sit outside the visible rect. The
+production prompt fixture now mounts and renders text, a model chip and footer send control in
+both appearances. Image preparation and clipboard reads enter the native bounded worker mailbox,
+which wakes the synchronous window loop and keeps submission disabled until delivery.
+
+`WindowHarness` builds and the real Xvfb Codex conversation journey passed three turns, growth,
+scrolling, selection, dark appearance and restart replay. The opening composer journey passed
+resizing, focus order, menus, Unicode editing, accessibility and launch. The attachment journey
+passed Xdnd, URI-list, TIFF-to-PNG, raw PNG, removal and image-only submission. Captures of the
+mounted reply, opening composer and two-image rail were inspected under
+`out/prompt-view-native/evidence-3/`, `out/prompt-view-opening-1/` and
+`out/prompt-view-attachment-2/`. The Linux UI structure ratchet drops from 93 to 89 local
+constraint sites and from six to four local stack constructors.

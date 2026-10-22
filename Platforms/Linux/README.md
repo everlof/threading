@@ -649,14 +649,16 @@ UI parity with the macOS product remains in progress. The native sidebar now fil
 without the drawing specimen's rounded gray outer frame; its trailing seam is the shared
 `SeparatorView`, using the Threading rule ink and weight. The native workspace journey checks
 the complete light/dark shell edges after both panes finish resizing and changing appearance.
-The reply field now shares the Mac prompt's surface, focus border, footer, send/stop symbols and
-bounded height policy through `PromptChrome`. Its native journey checks growth, scrolling, reset,
-focus pixels and pointer submission. Chrome text now consumes the Mac's held secondary, tertiary
+Both opening and reply composers now mount the production `PromptView` from the same source as
+macOS. The Linux host supplies native input, clipboard, file-drop and accessibility routing to
+that view; its own editor, footer and attachment rail have been removed. The native journeys
+check growth, scrolling, reset, focus pixels, pointer submission and image attachments. Chrome
+text now consumes the Mac's held secondary, tertiary
 and quaternary theme tiers; neutral ink is reserved for surfaces that supply their own ground.
 The sidebar now uses the exported production gradient and
 navigator well, and saved-session selections use the theme's selection fill. Its sampled region
-colors match the Mac Threading shell in both appearances. Attachments, the full composer footer,
-sidebar footer controls and window chrome still need comparison and implementation. The header
+colors match the Mac Threading shell in both appearances. Sidebar footer controls and window
+chrome still need comparison and implementation. The header
 now uses the shared 24-point Threading mark geometry and 13-point wordmark in both appearances;
 brand hover/launch motion and theme-supplied brand variants remain unsupported on Linux.
 The project outline uses the Mac's full-width row silhouette, inset content and disclosure

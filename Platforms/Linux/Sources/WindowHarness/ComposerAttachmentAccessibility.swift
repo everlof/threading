@@ -7,7 +7,7 @@ import LinuxWindowBridge
 /// host-owned; the Design strip supplies the same visible frames it draws in the window.
 @MainActor
 enum ComposerAttachmentAccessibility {
-    static func publish(window: OpaquePointer, strip: LinuxPromptAttachmentStrip,
+    static func publish(window: OpaquePointer, prompt: PromptView,
                         owner: String?, scope: Int32, root: NSView,
                         originX: Int, topInset: Int = 0) {
         if let owner {
@@ -23,11 +23,15 @@ enum ComposerAttachmentAccessibility {
              Int32((rect.height * scale).rounded()))
         }
         if owner != nil {
-            for tile in strip.accessibleTiles(in: root) {
-                let bounds = pixels(tile.bounds)
-                let remove = pixels(tile.removeBounds)
-                let label = String(decoding: tile.name.utf8.prefix(240), as: UTF8.self)
-                tile.id.withCString { id in
+            for tile in prompt.linuxAttachmentTiles {
+                let visible = tile.visibleRect
+                let removeVisible = tile.removeVisibleRect.intersection(visible)
+                guard !visible.isEmpty, !removeVisible.isEmpty else { continue }
+                let bounds = pixels(tile.convert(visible, to: root))
+                let remove = pixels(tile.convert(removeVisible, to: root))
+                let label = String(decoding: URL(fileURLWithPath: tile.path)
+                    .lastPathComponent.utf8.prefix(240), as: UTF8.self)
+                tile.id.uuidString.withCString { id in
                     label.withCString { name in
                         _ = tw_accessibility_attachments_add(window, id, name,
                             bounds.0, bounds.1, bounds.2, bounds.3,

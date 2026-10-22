@@ -52,7 +52,10 @@ open class NSImageView: NSView {
         setAccessibilityElement(false)
     }
 
-    open override var intrinsicContentSize: NSSize { displayedImage?.size ?? .zero }
+    open override var intrinsicContentSize: NSSize {
+        displayedImage?.size ?? NSSize(width: NSView.noIntrinsicMetric,
+                                      height: NSView.noIntrinsicMetric)
+    }
 
     open override func draw(_ dirtyRect: NSRect) {
         guard let image = displayedImage, image.size.width > 0, image.size.height > 0,

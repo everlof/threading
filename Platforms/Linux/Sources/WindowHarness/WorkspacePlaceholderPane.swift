@@ -57,11 +57,7 @@ final class WorkspacePlaceholderPane {
     private let composerColumn = NSStackView()
     private let destinationRow = NSStackView()
     private let actionRow = NSView(frame: .zero)
-    private let composerSurface = NSView(frame: .zero)
-    private let composerEditor = PromptTextView.scrollingPrompt()
-    private let attachments = LinuxPromptAttachmentStrip(frame: .zero)
-    private let composerFooter = NSStackView()
-    private let composerFooterSpacer = NSView()
+    private let composerSurface = PromptView(frame: .zero)
     private let composerStartButton = ThemedButton()
     private lazy var projectChip = ChipView()
     private lazy var providerChip = ChipView()
@@ -133,10 +129,8 @@ final class WorkspacePlaceholderPane {
     private var hasLaunchProject = false
     private var hasLaunchIdentity = false
     private var launchBlocked = false
-    private var composerFocused = false
     private var presentedSize = NSSize.zero
     private var needsPresentation = true
-    private var composerSurfaceHeight: NSLayoutConstraint!
     private var composerBottom: NSLayoutConstraint!
 
     init(onSubmit: @escaping () -> Void) {
@@ -153,28 +147,38 @@ final class WorkspacePlaceholderPane {
         composerStartButton.translatesAutoresizingMaskIntoConstraints = false
         PromptChrome.configureOpeningColumn(composerColumn, choices: destinationRow,
             prompt: composerSurface, actionRow: actionRow)
-        PromptChrome.configureFooter(composerFooter, spacer: composerFooterSpacer)
-        composerFooter.insertArrangedSubview(modelChip, at: 0)
-        composerFooter.insertArrangedSubview(permissionChip, at: 1)
-        composerFooter.insertArrangedSubview(speedChip, at: 2)
-        composerFooter.addArrangedSubview(surfaceChip)
+        composerSurface.minimumHeight = PromptChrome.openingMinimumHeight
+        composerSurface.submitPlacement = .outside
+        composerSurface.showsImageAttachments = true
+        composerSurface.placeholder = "Describe a task or ask a question"
+        composerSurface.onChange = { [weak self] _ in
+            self?.refreshStartButton()
+            self?.needsPresentation = true
+        }
+        composerSurface.onSubmissionAvailabilityChange = { [weak self] _ in
+            self?.refreshStartButton()
+            self?.needsPresentation = true
+        }
+        composerSurface.onContentHeightChange = { [weak self] _ in
+            self?.needsPresentation = true
+        }
+        composerSurface.onSubmit = { [weak self] _ in
+            guard let self, self.composerStartButton.isEnabled else { return }
+            onSubmit()
+        }
+        composerSurface.setFooterControls(leading: [modelChip, permissionChip, speedChip],
+                                          trailing: [surfaceChip])
         for (chip, priority) in [
             (modelChip, 239), (permissionChip, 263),
             (speedChip, 261), (surfaceChip, 260)
         ] {
             chip.setContentCompressionResistancePriority(.init(Float(priority)), for: .horizontal)
         }
-        PromptContentView(views: [attachments, composerEditor, composerFooter],
-                          attachments: attachments, editor: composerEditor,
-                          footer: composerFooter).mount(in: composerSurface)
         composerBottom = PromptChrome.mountOpeningColumn(composerColumn, in: composerRoot,
             prompt: composerSurface, actionRow: actionRow)
         composerRoot.addSubview(choiceSurface)
-        composerSurfaceHeight = composerSurface.heightAnchor.constraint(
-            equalToConstant: PromptChrome.openingMinimumHeight)
         NSLayoutConstraint.activate([
             destinationRow.widthAnchor.constraint(equalTo: composerColumn.widthAnchor),
-            composerSurfaceHeight,
             composerStartButton.trailingAnchor.constraint(equalTo: actionRow.trailingAnchor),
             composerStartButton.topAnchor.constraint(equalTo: actionRow.topAnchor),
             composerStartButton.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor),
@@ -214,22 +218,6 @@ final class WorkspacePlaceholderPane {
         surfaceChip.isHidden = true
         projectChip.configure(symbolName: "folder", title: "Project")
         providerChip.configure(symbolName: "terminal", title: "Choose an agent…")
-        composerEditor.textView.placeholder = "Describe a task or ask a question"
-        attachments.onChange = { [weak self] in
-            self?.refreshStartButton()
-            self?.needsPresentation = true
-        }
-        attachments.onLiteralPath = { [weak self] path in self?.insertLiteralPath(path) }
-        composerEditor.textView.submitsOnReturn = { false }
-        composerEditor.textView.onSubmit = { [weak self] _ in
-            guard let self, self.composerStartButton.isEnabled else { return }
-            onSubmit()
-        }
-        composerEditor.textView.onFocusChange = { [weak self] focused in
-            guard let self else { return }
-            self.composerFocused = focused
-            self.refreshComposerSurface()
-        }
         composerStartButton.title = "Start Session"
         composerStartButton.isProminent = true
         composerStartButton.shortcut = KeyboardShortcut(key: "\r", modifiers: .command)
@@ -241,14 +229,14 @@ final class WorkspacePlaceholderPane {
         }
         composerStartButton.isEnabled = false
         projectChip.nextKeyView = providerChip
-        providerChip.nextKeyView = composerEditor.textView
-        composerEditor.textView.nextKeyView = modelChip
+        providerChip.nextKeyView = composerSurface.linuxEditor
+        composerSurface.linuxEditor.nextKeyView = modelChip
         modelChip.nextKeyView = permissionChip
         permissionChip.nextKeyView = speedChip
         speedChip.nextKeyView = surfaceChip
         surfaceChip.nextKeyView = composerStartButton
         composerStartButton.nextKeyView = projectChip
-        window.initialFirstResponder = composerEditor.textView
+        window.initialFirstResponder = composerSurface.linuxEditor
         window.contentView = composerRoot
         setThemeAppearance()
         showComposer(projectName: "Choose a project…", providerName: "Choose an agent…")
@@ -265,8 +253,6 @@ final class WorkspacePlaceholderPane {
     }
 
     private func refreshComposerSurface() {
-        PromptChrome.applySurface(to: composerSurface, fill: Design.Surface.field,
-            emphasized: window.isKeyWindow && composerFocused)
         needsPresentation = true
     }
 
@@ -283,11 +269,10 @@ final class WorkspacePlaceholderPane {
         selectedLocationTitle = projectName
         selectedProviderName = providerName
         selectedIdentityName = providerName
-        composerEditor.textView.string = ""
-        attachments.clear()
+        composerSurface.clear()
         refreshStartButton()
         window.contentView = composerRoot
-        _ = window.makeFirstResponder(composerEditor.textView)
+        _ = window.makeFirstResponder(composerSurface.linuxEditor)
         needsPresentation = true
     }
 
@@ -335,7 +320,7 @@ final class WorkspacePlaceholderPane {
             selectedIdentityName = ""
             providerChip.configure(symbolName: "terminal", title: "Choose an agent…")
         }
-        composerEditor.textView.placeholder = selectedProjectName.isEmpty
+        composerSurface.placeholder = selectedProjectName.isEmpty
             ? "Choose a project first" : "Describe a task or ask a question"
         refreshStartButton()
         projectChip.isEnabled = !projects.isEmpty
@@ -798,19 +783,18 @@ final class WorkspacePlaceholderPane {
     }
 
     var isComposing: Bool { showsComposer }
-    var editorHasFocus: Bool { showsComposer && window.firstResponder === composerEditor.textView }
-    var composedPrompt: String { attachments.submissionText(composerEditor.textView.string) }
+    var editorHasFocus: Bool { showsComposer && window.firstResponder === composerSurface.linuxEditor }
+    var composedPrompt: String { composerSurface.submissionValue }
 
     @discardableResult
-    func removeAttachment(id: String) -> Bool { attachments.removeAttachment(id: id) }
+    func removeAttachment(id: String) -> Bool { composerSurface.removeLinuxAttachment(id: id) }
 
     func pasteClipboard(wakeIdentity: UInt64) {
         guard editorHasFocus else { return }
-        ComposerClipboardPaste.paste(into: composerEditor.textView, attachments: attachments,
-                                     wakeIdentity: wakeIdentity)
+        ComposerClipboardPaste.paste(into: composerSurface)
     }
 
-    func drainAttachments() { attachments.drainPrepared() }
+    func drainAttachments() {}
 
     func acceptFileDrop(_ path: String, windowX: Int, windowY: Int,
                         originX: Int, wakeIdentity: UInt64) -> Bool {
@@ -818,23 +802,13 @@ final class WorkspacePlaceholderPane {
             y: root.bounds.height - CGFloat(windowY) / WorkspaceDisplay.scale)
         guard composerSurface.convert(composerSurface.bounds, to: root).contains(point)
         else { return false }
-        return attachments.addDroppedPath(path, wakeIdentity: wakeIdentity)
-    }
-
-    private func insertLiteralPath(_ path: String) {
-        let quoted = path.contains(" ") ? "\"\(path)\"" : path
-        let separator = composerEditor.textView.string.isEmpty
-            || composerEditor.textView.string.hasSuffix(" ")
-            || composerEditor.textView.string.hasSuffix("\n") ? "" : " "
-        composerEditor.textView.insertText(separator + quoted,
-            replacementRange: composerEditor.textView.selectedRange())
-        refreshStartButton()
-        needsPresentation = true
+        composerSurface.acceptDroppedPaths([path])
+        return true
     }
 
     func focusEditor() {
         guard showsComposer else { return }
-        _ = window.makeFirstResponder(composerEditor.textView)
+        _ = window.makeFirstResponder(composerSurface.linuxEditor)
         needsPresentation = true
     }
 
@@ -847,29 +821,29 @@ final class WorkspacePlaceholderPane {
 
     func selectAllText() {
         guard showsComposer else { return }
-        let length = (composerEditor.textView.string as NSString).length
-        composerEditor.textView.setSelectedRange(NSRange(location: 0, length: length))
+        let length = (composerSurface.linuxEditor.string as NSString).length
+        composerSurface.linuxEditor.setSelectedRange(NSRange(location: 0, length: length))
         needsPresentation = true
     }
 
     var selectedText: String? {
         guard showsComposer else { return nil }
-        let range = composerEditor.textView.selectedRange()
+        let range = composerSurface.linuxEditor.selectedRange()
         guard range.length > 0 else { return nil }
-        return (composerEditor.textView.string as NSString).substring(with: range)
+        return (composerSurface.linuxEditor.string as NSString).substring(with: range)
     }
 
     func deleteSelection() {
         guard showsComposer else { return }
-        composerEditor.textView.insertText("",
-            replacementRange: composerEditor.textView.selectedRange())
+        composerSurface.linuxEditor.insertText("",
+            replacementRange: composerSurface.linuxEditor.selectedRange())
         refreshStartButton()
         needsPresentation = true
     }
 
     func insertCommittedText(_ text: String) {
         guard showsComposer else { return }
-        composerEditor.textView.insertText(text,
+        composerSurface.linuxEditor.insertText(text,
             replacementRange: NSRange(location: NSNotFound, length: 0))
         refreshStartButton()
         needsPresentation = true
@@ -882,7 +856,7 @@ final class WorkspacePlaceholderPane {
                                 text: String) -> Bool {
         guard showsComposer, let range = textRange(forScalarStart: Int(start),
                                                    end: Int(end)) else { return false }
-        let view = composerEditor.textView
+        let view = composerSurface.linuxEditor
         let source = view.string as NSString
         switch operation {
         case 1:
@@ -918,7 +892,7 @@ final class WorkspacePlaceholderPane {
 
     private func textRange(forScalarStart start: Int, end: Int) -> NSRange? {
         guard start >= 0, end >= start else { return nil }
-        let scalars = Array(composerEditor.textView.string.unicodeScalars)
+        let scalars = Array(composerSurface.linuxEditor.string.unicodeScalars)
         guard end <= scalars.count else { return nil }
         let lower = scalars[..<start].reduce(0) { $0 + String($1).utf16.count }
         let upper = scalars[start..<end].reduce(lower) { $0 + String($1).utf16.count }
@@ -927,15 +901,15 @@ final class WorkspacePlaceholderPane {
 
     func updatePreedit(_ text: String, selectedRange: NSRange) {
         guard showsComposer else { return }
-        composerEditor.textView.setMarkedText(text, selectedRange: selectedRange,
+        composerSurface.linuxEditor.setMarkedText(text, selectedRange: selectedRange,
             replacementRange: NSRange(location: NSNotFound, length: 0))
         refreshStartButton()
         needsPresentation = true
     }
 
     func cancelMarkedText() -> Bool {
-        guard showsComposer, composerEditor.textView.hasMarkedText() else { return false }
-        composerEditor.textView.setMarkedText("", selectedRange: NSRange(location: 0, length: 0),
+        guard showsComposer, composerSurface.linuxEditor.hasMarkedText() else { return false }
+        composerSurface.linuxEditor.setMarkedText("", selectedRange: NSRange(location: 0, length: 0),
             replacementRange: NSRange(location: NSNotFound, length: 0))
         refreshStartButton()
         needsPresentation = true
@@ -957,12 +931,9 @@ final class WorkspacePlaceholderPane {
     }
 
     private func refreshStartButton() {
-        let text = composerEditor.textView.string
         let canSubmit = showsComposer && !launchBlocked && hasLaunchProject && hasLaunchIdentity
-            && modelSelectionValid && !composerEditor.textView.hasMarkedText()
-            && !attachments.isPreparing
-            && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || attachments.hasImages)
+            && modelSelectionValid && !composerSurface.linuxEditor.hasMarkedText()
+            && composerSurface.isSubmissionAvailable
         composerStartButton.isEnabled = canSubmit
         composerStartButton.toolTip = launchBlocked ? "Wait for project selection"
             : !hasLaunchProject ? "Choose a project first"
@@ -1039,11 +1010,13 @@ final class WorkspacePlaceholderPane {
                  originX: Int) throws {
         let size = NSSize(width: CGFloat(width) / WorkspaceDisplay.scale, height: CGFloat(height) / WorkspaceDisplay.scale)
         _ = tw_workspace_composer_mode(nativeWindow, showsComposer ? 1 : 0)
-        let attachmentHeight = attachments.attachmentHeight
+        let hasImages = !composerSurface.linuxAttachmentTiles.isEmpty
+        let attachmentHeight = hasImages
+            ? Design.Size.promptAttachmentThumbnail + Design.Spacing.medium : 0
         let attachedMinimumHeight = PromptChrome.openingMinimumHeight + attachmentHeight
             + 2 * Design.Spacing.medium + max(24, Design.Size.choiceHeight)
             + max(26, composerStartButton.intrinsicContentSize.height) + Design.Spacing.pane
-        let minimumWindowHeight = attachments.hasImages
+        let minimumWindowHeight = hasImages
             ? Int((attachedMinimumHeight * WorkspaceDisplay.scale).rounded(.up)) : 180
         tw_workspace_minimum_height(nativeWindow, Int32(minimumWindowHeight))
         // The Mac prompt keeps an 80-point image rail. Let SDL enforce enough room for that
@@ -1059,25 +1032,7 @@ final class WorkspacePlaceholderPane {
             let columnSpacing: CGFloat = isShort ? 4 : Design.Spacing.medium
             if composerColumn.spacing != columnSpacing { composerColumn.spacing = columnSpacing }
             if composerBottom.constant != -bottomInset { composerBottom.constant = -bottomInset }
-            let actionHeight = max(26, composerStartButton.intrinsicContentSize.height)
-            let chipHeight = max(24, Design.Size.choiceHeight)
             window.layoutIfNeeded()
-            let textHeight = composerEditor.textView.layoutManager.flatMap { manager in
-                composerEditor.textView.textContainer.map { manager.usedRect(for: $0).height }
-            } ?? 0
-            let fitted = PromptChrome.fittedHeight(textHeight: textHeight,
-                restingHeight: PromptChrome.openingMinimumHeight, showsFooter: true,
-                attachmentHeight: attachmentHeight)
-            let availableEditorHeight = max(1, size.height - bottomInset - actionHeight
-                - 2 * composerColumn.spacing - chipHeight)
-            let editorHeight = min(fitted.height, availableEditorHeight)
-            let scrolls = fitted.scrolls || editorHeight < fitted.height
-            if composerEditor.hasVerticalScroller != scrolls { composerEditor.hasVerticalScroller = scrolls }
-            if composerSurfaceHeight.constant != editorHeight {
-                composerSurfaceHeight.constant = editorHeight
-            }
-            window.layoutIfNeeded()
-            attachments.layoutTiles()
             composerHero.updateVisibility()
             if choiceKind != nil {
                 let oldFrame = choiceSurface.frame
@@ -1120,10 +1075,10 @@ final class WorkspacePlaceholderPane {
             Int32(((root.bounds.height - greeting.maxY) * scale).rounded()),
             Int32((greeting.width * scale).rounded()), Int32((greeting.height * scale).rounded()))
         if showsComposer {
-            let view = composerEditor.textView
+            let view = composerSurface.linuxEditor
             let value = view.string
             let byteCount = value.utf8.prefix(65_537).count
-            let frame = composerEditor.convert(composerEditor.bounds, to: root)
+            let frame = composerSurface.linuxEditorScrollView.convert(composerSurface.linuxEditorScrollView.bounds, to: root)
             let editorX = originX + Int((frame.minX * scale).rounded())
             let editorY = Int(((root.bounds.height - frame.maxY) * scale).rounded())
             if editorHasFocus {
@@ -1156,14 +1111,14 @@ final class WorkspacePlaceholderPane {
         }
         publishComposerChoiceAccessibility(nativeWindow: nativeWindow, originX: originX,
                                            scale: scale)
-        ComposerAttachmentAccessibility.publish(window: nativeWindow, strip: attachments,
+        ComposerAttachmentAccessibility.publish(window: nativeWindow, prompt: composerSurface,
             owner: showsComposer ? composerIdentity : nil, scope: 1, root: root,
             originX: originX)
         if showsComposer, let identity = composerIdentity {
             let focused: Int32
             if window.firstResponder === projectChip { focused = 1 }
             else if window.firstResponder === providerChip { focused = 2 }
-            else if window.firstResponder === composerEditor.textView { focused = 3 }
+            else if window.firstResponder === composerSurface.linuxEditor { focused = 3 }
             else if window.firstResponder === composerStartButton { focused = 4 }
             else if window.firstResponder === permissionChip { focused = 5 }
             else if window.firstResponder === modelChip { focused = 6 }

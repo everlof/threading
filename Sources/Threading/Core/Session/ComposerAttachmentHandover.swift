@@ -129,30 +129,10 @@ enum ComposerAttachmentHandover {
     /// builds it on Monday from the copies the app took. One spelling, so a path with a space in
     /// it is quoted the same way in both.
     static func appending(paths: [String], to text: String) -> String {
-        guard !paths.isEmpty else { return text }
-
-        let addition = paths.map(quotedPath).joined(separator: " ")
-        guard !text.isEmpty else { return addition }
-        guard !text.hasSuffix(" "), !text.hasSuffix("\n") else {
-            return text + addition
-        }
-        return text + " " + addition
+        ComposerAttachmentText.appending(paths: paths, to: text)
     }
 
     static func quotedPath(_ path: String) -> String {
-        path.contains(" ") ? "\"\(path)\"" : path
+        ComposerAttachmentText.quotedPath(path)
     }
-}
-
-// MARK: - Constants
-
-enum ComposerAttachmentDefaults {
-    /// The name a composer writes bytes under when the bytes arrived without a name worth
-    /// showing: a pasted screenshot, or a phone upload the host re-names from its declared type.
-    ///
-    /// Load-bearing in two places — `record(paths:…)` reads it to decide whether the row needs a
-    /// human-readable name instead, and the staged-upload directory keeps it so a file the host
-    /// wrote is recognisable as one it wrote.
-    static let generatedPrefix = "threading-attachment-"
-    static let generatedImageExtension = "png"
 }
