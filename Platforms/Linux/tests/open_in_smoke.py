@@ -172,7 +172,8 @@ try:
         eventually(lambda: child('linux.open-in.choices') is None,
                    'Open In menu dismissed')
 
-        primary = child('linux.open-in.primary')
+        primary = eventually(lambda: child('linux.open-in.primary'),
+                             'Open In primary after chooser selection')
         assert primary.get_name().startswith('Open in Fixture B')
         bounds = primary.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
         eventually(lambda: icon_color_visible('open-in-selected-b.png', bounds, 'green'),
@@ -184,7 +185,9 @@ try:
                               'last-used primary app launched')
         assert repeated[-1] == {'app': 'B', 'path': str(project)}, repeated
 
-        assert child('linux.open-in.chooser').get_action_iface().do_action(0)
+        chooser = eventually(lambda: child('linux.open-in.chooser'),
+                             'Open In chooser after primary launch')
+        assert chooser.get_action_iface().do_action(0)
         menu = eventually(lambda: child('linux.open-in.choices'), 'long app chooser')
         first_page = [menu.get_child_at_index(index).get_name()
                       for index in range(menu.get_child_count())]
@@ -245,7 +248,8 @@ try:
 
         moved = project.with_name('Removed checkout')
         project.rename(moved)
-        primary = child('linux.open-in.primary')
+        primary = eventually(lambda: child('linux.open-in.primary'),
+                             'Open In primary after session menu')
         assert primary.get_action_iface().do_action(0)
         eventually(lambda: 'OPEN_IN_REFUSED' in log_path.read_text(),
                    'missing checkout refused')

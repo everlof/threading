@@ -99,6 +99,8 @@ workspace mounts that title in a separate
 navigator. Saved agent pages now show its production Actions control and a retained overlay
 of production `ThemedMenuRowView` rows. The scoped Linux menu copies the saved session ID or
 owning project path; the host revalidates the active page and project before each command.
+Its menu rows now use the production `ThemedMenuDocumentView` for their layout inside the
+Linux window adapter; the menu background and SDL overlay lifecycle remain host-owned.
 
 The window host also links the production backdrop overlay, text field, clip view, scroll view,
 table view, its default row view, and activity beam wrapper. `scripts/check_linux_shared_views.py`

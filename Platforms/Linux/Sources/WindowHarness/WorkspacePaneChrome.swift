@@ -61,6 +61,7 @@ final class WorkspacePaneChrome {
     private var pageSymbolName: String
     private let menuWindow = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
     private let menuRoot = SessionMenuSurface(frame: .zero)
+    private var menuDocument: ThemedMenuDocumentView?
     private var menuRows: [ThemedMenuRowView] = []
     private var menuPlan: ThemedMenuRowPlan?
     private var menuFirstVisible = 0
@@ -314,22 +315,33 @@ final class WorkspacePaneChrome {
         menuSize.height = Int(menuHeight * WorkspaceDisplay.scale)
         let menuWidth = CGFloat(menuSize.width) / WorkspaceDisplay.scale
         menuRoot.frame = NSRect(x: 0, y: 0, width: menuWidth, height: menuHeight)
-        for row in menuRows { row.removeFromSuperview() }
+        menuDocument?.removeFromSuperview()
+        menuDocument = nil
         menuRows.removeAll(keepingCapacity: true)
-        var top = padding
+        var heights: [CGFloat] = []
         for index in visible {
             guard let row = plan.row(at: index) else { continue }
-            let rowHeight = plan.heights[index]
-            row.frame = NSRect(x: padding, y: menuHeight - top - rowHeight,
-                               width: menuWidth - padding * 2, height: rowHeight)
             row.onChoose = { [weak self] selected, _ in
                 self?.recordMenuSelection(at: selected)
             }
             row.onHighlight = { [weak self] selected in self?.highlightMenuRow(selected) }
-            menuRoot.addSubview(row)
             menuRows.append(row)
-            top += rowHeight
+            heights.append(plan.heights[index])
         }
+        let document = ThemedMenuDocumentView(views: menuRows, heights: heights)
+        document.translatesAutoresizingMaskIntoConstraints = false
+        menuRoot.addSubview(document)
+        NSLayoutConstraint.activate([
+            document.leadingAnchor.constraint(equalTo: menuRoot.leadingAnchor,
+                                              constant: padding),
+            document.trailingAnchor.constraint(equalTo: menuRoot.trailingAnchor,
+                                               constant: -padding),
+            document.topAnchor.constraint(equalTo: menuRoot.topAnchor,
+                                          constant: padding),
+            document.bottomAnchor.constraint(equalTo: menuRoot.bottomAnchor,
+                                             constant: -padding)
+        ])
+        menuDocument = document
         for row in menuRows {
             row.isKeyboardHighlighted = row.entryIndex == menuSelected
         }
