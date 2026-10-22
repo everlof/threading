@@ -232,7 +232,7 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.section("Idle Agents", idleAgents),
             SettingsUI.section(
                 "Confirmations",
-                SettingsCard(rows: confirmationRows()),
+                confirmationCard(),
                 help: SettingsUI.help(
                     "Confirmations",
                     "Only interruptions you can safely stop are listed. Anything that deletes "
@@ -261,19 +261,23 @@ final class GeneralPreferencesViewController: NSViewController {
     /// localized), which is what keeps the row and the "Don't ask again" box describing the
     /// same thing — they were one setting over four prompts, and switching off the one you
     /// meant switched off three you did not.
-    private func confirmationRows() -> [NSView] {
-        var rows: [NSView] = ConfirmationPrompt.suppressible.compactMap { prompt in
+    private func confirmationCard() -> SettingsCard {
+        let choices: [SettingsConfirmationCard.Choice] = ConfirmationPrompt.suppressible.compactMap { prompt in
             guard let suppression = prompt.suppression,
                   let toggle = confirmationToggles[prompt] else { return nil }
-            return SettingsUI.row(
+            return SettingsConfirmationCard.Choice(
                 title: suppression.settingsTitle,
                 subtitle: suppression.settingsSubtitle,
-                control: toggle,
-                localizes: false
+                control: toggle
             )
         }
-        rows.append(hiddenNoticesRow())
-        return rows
+        let result = SettingsConfirmationCard.make(
+            choices: choices, trailingRows: [hiddenNoticesRow()]
+        )
+        for (choice, row) in zip(choices, result.choiceRows) {
+            SettingsRowAnchor.tag(row, title: choice.title)
+        }
+        return result.card
     }
 
     /// The notice register's way back, beside the confirmations because the two boxes read as

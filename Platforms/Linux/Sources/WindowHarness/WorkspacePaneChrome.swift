@@ -17,11 +17,34 @@ enum SessionMenuCommand: String, CaseIterable {
 }
 
 @MainActor
-final class SessionMenuSurface: NSView {
-    override func draw(_ dirtyRect: NSRect) {
-        ThemedSurface.draw(bounds.insetBy(dx: 0.5, dy: 0.5),
-            fill: Design.Surface.elevated, border: Design.Text.tertiary,
-            radius: Design.Radius.panel, borderWidth: 1)
+final class SessionMenuSurface: ThemedMenuPanelView {
+    private var menuDocument: ThemedMenuDocumentView?
+    private var mountedRows: [NSView] = []
+    private var mountedHeights: [CGFloat] = []
+    private var mountedPadding: CGFloat = 6
+
+    func setRows(_ rows: [NSView], heights: [CGFloat], padding: CGFloat = 6) {
+        precondition(rows.count == heights.count)
+        if rows.count == mountedRows.count,
+           zip(rows, mountedRows).allSatisfy({ $0 === $1 }),
+           heights == mountedHeights, padding == mountedPadding { return }
+        menuDocument?.removeFromSuperview()
+        menuDocument = nil
+        mountedRows = rows
+        mountedHeights = heights
+        mountedPadding = padding
+        guard !rows.isEmpty else { return }
+
+        let document = ThemedMenuDocumentView(views: rows, heights: heights)
+        document.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(document)
+        NSLayoutConstraint.activate([
+            document.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
+            document.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -padding),
+            document.topAnchor.constraint(equalTo: topAnchor, constant: padding),
+            document.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding)
+        ])
+        menuDocument = document
     }
 }
 
@@ -61,7 +84,6 @@ final class WorkspacePaneChrome {
     private var pageSymbolName: String
     private let menuWindow = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
     private let menuRoot = SessionMenuSurface(frame: .zero)
-    private var menuDocument: ThemedMenuDocumentView?
     private var menuRows: [ThemedMenuRowView] = []
     private var menuPlan: ThemedMenuRowPlan?
     private var menuFirstVisible = 0
@@ -315,8 +337,6 @@ final class WorkspacePaneChrome {
         menuSize.height = Int(menuHeight * WorkspaceDisplay.scale)
         let menuWidth = CGFloat(menuSize.width) / WorkspaceDisplay.scale
         menuRoot.frame = NSRect(x: 0, y: 0, width: menuWidth, height: menuHeight)
-        menuDocument?.removeFromSuperview()
-        menuDocument = nil
         menuRows.removeAll(keepingCapacity: true)
         var heights: [CGFloat] = []
         for index in visible {
@@ -328,20 +348,7 @@ final class WorkspacePaneChrome {
             menuRows.append(row)
             heights.append(plan.heights[index])
         }
-        let document = ThemedMenuDocumentView(views: menuRows, heights: heights)
-        document.translatesAutoresizingMaskIntoConstraints = false
-        menuRoot.addSubview(document)
-        NSLayoutConstraint.activate([
-            document.leadingAnchor.constraint(equalTo: menuRoot.leadingAnchor,
-                                              constant: padding),
-            document.trailingAnchor.constraint(equalTo: menuRoot.trailingAnchor,
-                                               constant: -padding),
-            document.topAnchor.constraint(equalTo: menuRoot.topAnchor,
-                                          constant: padding),
-            document.bottomAnchor.constraint(equalTo: menuRoot.bottomAnchor,
-                                             constant: -padding)
-        ])
-        menuDocument = document
+        menuRoot.setRows(menuRows, heights: heights, padding: padding)
         for row in menuRows {
             row.isKeyboardHighlighted = row.entryIndex == menuSelected
         }

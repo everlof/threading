@@ -99,14 +99,18 @@ workspace mounts that title in a separate
 navigator. Saved agent pages now show its production Actions control and a retained overlay
 of production `ThemedMenuRowView` rows. The scoped Linux menu copies the saved session ID or
 owning project path; the host revalidates the active page and project before each command.
-Its menu rows now use the production `ThemedMenuDocumentView` for their layout inside the
-Linux window adapter; the menu background and SDL overlay lifecycle remain host-owned.
+Its menu rows, the opening and conversation choice menus, and the navigator's Actions and account
+menus now use the production `ThemedMenuDocumentView`. The floating session menu also uses its
+shared separator. `ThemedMenuPanelView` owns the menu surface and historical frame artwork on
+both platforms; the current Linux theme snapshot selects its automatic appearance. Linux supplies
+menu bounds and SDL overlay lifecycle; the shared document lays out the rows.
 
 The window host also links the production backdrop overlay, text field, clip view, scroll view,
 table view, its default row view, and activity beam wrapper. `scripts/check_linux_shared_views.py`
 rejects a second Linux class for any existing Threading UI class and requires review of every new Linux `NSView`
-leaf. The Linux General settings pane still assembles fewer sections than the macOS General
-controller, and the native conversation pane still needs the complete production controller;
+leaf. Both General settings hosts now build their confirmation card with the same Design
+component and the byte-verified `ConfirmationPrompt` register. The Linux pane still assembles fewer
+sections than the macOS General controller, and the native conversation pane still needs the complete production controller;
 those page-level compositions remain parity work.
 Pointer, keyboard and AT-SPI actions reach the same menu and clipboard path. Terminal
 paint, PTY grid size, pointer input, IME caret and AT-SPI text geometry share the resulting

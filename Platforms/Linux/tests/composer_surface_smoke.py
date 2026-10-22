@@ -192,6 +192,8 @@ def eventually(read, label, timeout=25):
 
 
 def descendants(node):
+    if node is None:
+        return
     yield node
     for index in range(node.get_child_count()):
         yield from descendants(node.get_child_at_index(index))
@@ -617,7 +619,15 @@ try:
         send_x, send_y = map(int, compact_frame.split(' send=')[1].split(' ')[0].split(','))
         assert 0 <= send_x <= 560 * scale and 0 <= send_y <= 180 * scale, compact_frame
         capture('native-compact-configuration.png')
+        compact_model_y = bounds[0].y
         xdo('windowsize', window, 960 * scale, 600 * scale)
+        def resized_model():
+            current = control('linux.conversation.model')
+            if current is None:
+                return None
+            position = current.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            return current if position.y != compact_model_y else None
+        model = eventually(resized_model, 'resized reply Model chip')
         assert model.get_action_iface().do_action(0)
         model_menu = eventually(lambda: control('linux.conversation.model.choices'), 'reply Model choices')
         assert model_menu.get_child_count() <= 6, model_menu.get_child_count()

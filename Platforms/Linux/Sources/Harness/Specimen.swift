@@ -128,6 +128,8 @@ enum Specimen {
         private var workspaceBackdropClip: NSView?
         private var workspaceWell: NSView?
         private var workspaceScratchpadRule: SeparatorView?
+        private var mountedMenuDocument: ThemedMenuDocumentView?
+        private var mountedMenuHeights: [CGFloat] = []
         #else
         let bodyInk = Ink(on: Specimen.bodyGround)
         let headerInk = Ink(on: Specimen.headerGround)
@@ -261,30 +263,47 @@ enum Specimen {
         /// bounded visible page and retains command identity in its own presentation model.
         /// Rows that stay visible stay mounted: detaching a row mid-press would end the
         /// gesture its release is meant to complete.
-        func mountMenuRows(_ rows: [NSView], separatorBeforeRow: Int? = nil) {
+        #if THREADING_WINDOW_HARNESS
+        func mountMenuRows(_ rows: [NSView], heights: [CGFloat], topInset: CGFloat,
+                           separatorBeforeRow: Int? = nil) {
+            precondition(rows.count == heights.count)
             if subviews.last !== menuLayer {
                 addSubview(menuLayer, positioned: .above, relativeTo: nil)
             }
             mountedFloatingMenu?.removeFromSuperview()
             mountedFloatingMenu = nil
-            let kept = Set(rows.map(ObjectIdentifier.init))
-            for row in mountedMenuRows where !kept.contains(ObjectIdentifier(row)) {
-                row.removeFromSuperview()
+            let keepsDocument = rows.count == mountedMenuRows.count &&
+                zip(rows, mountedMenuRows).allSatisfy { $0 === $1 } &&
+                heights == mountedMenuHeights
+            if !keepsDocument {
+                mountedMenuDocument?.removeFromSuperview()
+                mountedMenuDocument = nil
+                if !rows.isEmpty {
+                    let document = ThemedMenuDocumentView(views: rows, heights: heights)
+                    menuLayer.addSubview(document)
+                    mountedMenuDocument = document
+                }
             }
             mountedMenuRows = rows
-            for row in rows where row.superview !== menuLayer { menuLayer.addSubview(row) }
-            #if THREADING_WINDOW_HARNESS
+            mountedMenuHeights = heights
+            let documentHeight = heights.reduce(0, +)
+            mountedMenuDocument?.frame = NSRect(
+                x: 6, y: bounds.height - topInset - documentHeight,
+                width: max(1, bounds.width - 12), height: documentHeight
+            )
             workspaceScratchpadRule?.isHidden = true
             if let index = separatorBeforeRow, index > 0, rows.indices.contains(index),
                let workspaceScratchpadRule {
                 // The third choice follows the two folder choices. Measure their actual
                 // boundary; the old fixed offset ran the rule through the second label.
                 workspaceScratchpadRule.isHidden = false
-                workspaceScratchpadRule.frame = NSRect(x: 8, y: rows[index].frame.maxY - 0.25,
+                let above = heights.prefix(index).reduce(0, +)
+                workspaceScratchpadRule.frame = NSRect(
+                    x: 8, y: bounds.height - topInset - above - 0.25,
                     width: max(0, bounds.width - 16), height: 0.5)
             }
-            #endif
         }
+        #endif
 
         /// Keep an anchored menu over the standing outline, with the same production menu rows
         /// used by the navigator's older full-column menus. Retain row identity through a press.
@@ -292,6 +311,11 @@ enum Specimen {
             if subviews.last !== menuLayer {
                 addSubview(menuLayer, positioned: .above, relativeTo: nil)
             }
+            #if THREADING_WINDOW_HARNESS
+            mountedMenuDocument?.removeFromSuperview()
+            mountedMenuDocument = nil
+            mountedMenuHeights.removeAll(keepingCapacity: true)
+            #endif
             if mountedFloatingMenu !== surface {
                 mountedFloatingMenu?.removeFromSuperview()
                 mountedFloatingMenu = surface
@@ -303,7 +327,7 @@ enum Specimen {
                 row.removeFromSuperview()
             }
             mountedMenuRows = rows
-            for row in rows where row.superview !== surface { surface.addSubview(row) }
+            for row in rows where row.superview == nil { surface.addSubview(row) }
         }
 
         func mountedMenuRow(at slot: Int) -> NSView? {

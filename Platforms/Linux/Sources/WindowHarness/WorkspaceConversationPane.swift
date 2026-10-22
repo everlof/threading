@@ -452,14 +452,10 @@ final class WorkspaceConversationPane: WorkspacePane {
         guard configurationFirst < end else { return }
         if configurationMountedFirst == configurationFirst && configurationRows.count == end - configurationFirst {
             for (slot, row) in configurationRows.enumerated() {
-                row.frame = NSRect(x: 6,
-                    y: configurationMenu.bounds.height - 6 - CGFloat(slot + 1) * configurationRowHeight,
-                    width: configurationMenu.bounds.width - 12, height: configurationRowHeight)
                 row.isKeyboardHighlighted = configurationFirst + slot == configurationSelected
             }
             return
         }
-        for row in configurationRows { row.removeFromSuperview() }
         configurationRows.removeAll(keepingCapacity: true)
         configurationMountedFirst = configurationFirst
         let entries = configurationChoices[configurationFirst..<end].map { choice in
@@ -470,15 +466,15 @@ final class WorkspaceConversationPane: WorkspacePane {
         for slot in 0..<entries.count {
             guard let row = plan.row(at: slot) else { continue }
             let index = configurationFirst + slot
-            row.frame = NSRect(x: 6,
-                y: configurationMenu.bounds.height - 6 - CGFloat(slot + 1) * configurationRowHeight,
-                width: configurationMenu.bounds.width - 12, height: configurationRowHeight)
             row.isKeyboardHighlighted = index == configurationSelected
             row.onChoose = { [weak self] _, _ in self?.chooseConfiguration(index) }
             row.onHighlight = { [weak self] _ in self?.highlightConfiguration(index) }
-            configurationMenu.addSubview(row)
             configurationRows.append(row)
         }
+        configurationMenu.setRows(
+            configurationRows,
+            heights: Array(repeating: configurationRowHeight, count: configurationRows.count)
+        )
     }
 
     private func highlightConfiguration(_ index: Int) {
@@ -516,7 +512,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         guard configurationKind != nil else { return }
         configurationKind = nil
         configurationMenu.isHidden = true
-        for row in configurationRows { row.removeFromSuperview() }
+        configurationMenu.setRows([], heights: [])
         configurationRows.removeAll(keepingCapacity: true)
         configurationChoices.removeAll(keepingCapacity: true)
         configurationVisibleCount = 0
@@ -569,9 +565,10 @@ final class WorkspaceConversationPane: WorkspacePane {
             guard let row = plan.row(at: index) else { continue }
             row.onChoose = { [weak self] _, _ in self?.chooseSpeed(index) }
             row.onHighlight = { [weak self] _ in self?.highlightSpeed(index) }
-            speedMenu.addSubview(row)
             speedRows.append(row)
         }
+        speedMenu.setRows(speedRows,
+                          heights: Array(repeating: speedRowHeight, count: speedRows.count))
         speedOpen = true
         speedMenu.isHidden = false
         let session = ConversationChoiceSession(didDismiss: didDismiss)
@@ -603,10 +600,6 @@ final class WorkspaceConversationPane: WorkspacePane {
         let above = root.bounds.height - source.maxY
         let y = above >= height + 8 ? source.maxY + 4 : max(4, source.minY - height - 4)
         speedMenu.frame = NSRect(x: x, y: y, width: width, height: height)
-        for (index, row) in speedRows.enumerated() {
-            row.frame = NSRect(x: 6, y: height - 6 - CGFloat(index + 1) * speedRowHeight,
-                               width: width - 12, height: speedRowHeight)
-        }
     }
 
     private func highlightSpeed(_ index: Int) {
@@ -646,7 +639,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         guard speedOpen else { return }
         speedOpen = false
         speedMenu.isHidden = true
-        for row in speedRows { row.removeFromSuperview() }
+        speedMenu.setRows([], heights: [])
         speedRows.removeAll(keepingCapacity: true)
         let session = speedSession
         speedSession = nil

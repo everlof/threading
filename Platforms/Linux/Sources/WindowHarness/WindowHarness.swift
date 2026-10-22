@@ -2113,7 +2113,7 @@ struct WindowHarness {
         var sessionMenu: SidebarSessionMenu?
         let sessionMenuSurface = SessionMenuSurface(frame: .zero)
         let retainedSessionMenuRows = RetainedMenuRows()
-        var sessionMenuSeparators: [SeparatorView] = []
+        var sessionMenuSeparators: [ThemedMenuSeparatorView] = []
         var sessionMenuFrame = NSRect.zero
         var sessionMenuVisibleEntries: [Int] = []
         var activatedSessionMenuEntry: Int?
@@ -4241,6 +4241,7 @@ struct WindowHarness {
                 let accent = Design.Surface.selectionFill
                 let selectedInk = LinuxTheme.neutralInk(on: accent, dark: LinuxTheme.isDark)
                 var menuRows: [NSView] = []
+                var menuHeights: [CGFloat] = []
                 let end: Int
                 if let menu = actions {
                     end = min(menu.commands.count, menu.first + count)
@@ -4255,14 +4256,11 @@ struct WindowHarness {
                     let plan = ThemedMenuRowPlan(entries: entries)
                     retainedMenuRows.prepare(menu: "actions:\(menu.kind)", entries: entries,
                                              visible: menu.first..<end)
-                    var top = navigatorHeaderHeight + 2
                     for index in menu.first..<end {
                         guard let row = retainedMenuRows.row(at: index, plan: plan) else {
                             throw WindowFailure("host command was not a menu item")
                         }
                         let rowHeight = plan.heights[index]
-                        row.frame = NSRect(x: 6, y: root.bounds.height - top - rowHeight,
-                                           width: root.bounds.width - 12, height: rowHeight)
                         row.isKeyboardHighlighted = index == menu.selected
                         row.onChoose = { entry, _ in activatedMenuEntry = entry }
                         row.onHighlight = { entry in
@@ -4273,7 +4271,7 @@ struct WindowHarness {
                             dirty = true
                         }
                         menuRows.append(row)
-                        top += rowHeight
+                        menuHeights.append(rowHeight)
                     }
                 } else if let accountPicker {
                     let provider = accountPicker == .claude ? "Claude" : "Codex"
@@ -4290,14 +4288,11 @@ struct WindowHarness {
                     let plan = ThemedMenuRowPlan(entries: entries)
                     retainedMenuRows.prepare(menu: "accounts:\(provider)", entries: entries,
                                              visible: accountFirst..<end)
-                    var top = navigatorHeaderHeight + 2
                     for index in accountFirst..<end {
                         guard let row = retainedMenuRows.row(at: index, plan: plan) else {
                             throw WindowFailure("account choice was not a menu item")
                         }
                         let rowHeight = plan.heights[index]
-                        row.frame = NSRect(x: 6, y: root.bounds.height - top - rowHeight,
-                                           width: root.bounds.width - 12, height: rowHeight)
                         row.isKeyboardHighlighted = index == accountSelected
                         row.onChoose = { _, item in
                             activatedAccountHandle = item.representedValue as? AccountHandle
@@ -4309,7 +4304,7 @@ struct WindowHarness {
                             dirty = true
                         }
                         menuRows.append(row)
-                        top += rowHeight
+                        menuHeights.append(rowHeight)
                     }
                 } else if let savedPicker {
                     retainedMenuRows.reset()
@@ -4365,6 +4360,7 @@ struct WindowHarness {
                 }
                 var floatingMenuRows: [ThemedMenuRowView] = []
                 var floatingMenuViews: [NSView] = []
+                var floatingMenuHeights: [CGFloat] = []
                 sessionMenuVisibleEntries.removeAll(keepingCapacity: true)
                 if var menu = sessionMenu {
                     root.layoutSubtreeIfNeeded()
@@ -4415,28 +4411,18 @@ struct WindowHarness {
                         retainedSessionMenuRows.prepare(
                             menu: "session:\(menu.sessionID):\(menu.page)",
                             entries: entries, visible: visible)
-                        var top: CGFloat = 6
                         var separatorCount = 0
                         for entry in visible {
                             let rowHeight = plan.heights[entry]
                             if case .separator = entries[entry] {
                                 if separatorCount == sessionMenuSeparators.count {
-                                    let separator = SeparatorView()
-                                    separator.translatesAutoresizingMaskIntoConstraints = true
-                                    sessionMenuSeparators.append(separator)
+                                    sessionMenuSeparators.append(ThemedMenuSeparatorView())
                                 }
                                 let separator = sessionMenuSeparators[separatorCount]
                                 separatorCount += 1
-                                let inset = ThemedMenuMetrics.contentInset
-                                separator.frame = NSRect(
-                                    x: 6 + inset,
-                                    y: menuHeight - top - rowHeight / 2 - Design.Radius.border / 2,
-                                    width: max(0, menuWidth - 12 - inset * 2),
-                                    height: Design.Radius.border)
                                 floatingMenuViews.append(separator)
+                                floatingMenuHeights.append(rowHeight)
                             } else if let row = retainedSessionMenuRows.row(at: entry, plan: plan) {
-                                row.frame = NSRect(x: 6, y: menuHeight - top - rowHeight,
-                                    width: menuWidth - 12, height: rowHeight)
                                 row.isKeyboardHighlighted = entry == menu.selected
                                 row.onChoose = { chosen, _ in activatedSessionMenuEntry = chosen }
                                 row.onHighlight = { highlighted in
@@ -4449,9 +4435,9 @@ struct WindowHarness {
                                 }
                                 floatingMenuRows.append(row)
                                 floatingMenuViews.append(row)
+                                floatingMenuHeights.append(rowHeight)
                                 sessionMenuVisibleEntries.append(entry)
                             }
-                            top += rowHeight
                         }
                     } else {
                         dismissSessionMenu()
@@ -4479,10 +4465,13 @@ struct WindowHarness {
                 root.finishNavigatorRows()
                 let scratchpadBoundary = actions.flatMap { $0.kind == .addProject ? 2 - $0.first : nil }
                 if sessionMenu != nil {
+                    sessionMenuSurface.setRows(floatingMenuViews, heights: floatingMenuHeights)
                     root.mountFloatingMenu(sessionMenuSurface, frame: sessionMenuFrame,
                         rows: floatingMenuViews)
                 } else {
-                    root.mountMenuRows(menuRows, separatorBeforeRow: scratchpadBoundary)
+                    root.mountMenuRows(menuRows, heights: menuHeights,
+                        topInset: navigatorHeaderHeight + 2,
+                        separatorBeforeRow: scratchpadBoundary)
                 }
                 let focusedSlot: Int
                 if let menu = actions { focusedSlot = menu.selected - menu.first }

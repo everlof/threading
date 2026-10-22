@@ -643,7 +643,7 @@ final class WorkspacePlaceholderPane {
         modelShowHiddenButton = nil
         modelMenuToken = ""
         choiceOptions.removeAll(keepingCapacity: true)
-        for row in choiceRows { row.removeFromSuperview() }
+        choiceSurface.setRows([], heights: [])
         choiceRows.removeAll(keepingCapacity: true)
         choiceSurface.isHidden = true
         let session = choiceSession
@@ -688,7 +688,6 @@ final class WorkspacePlaceholderPane {
         if choiceSelected >= choiceFirst + choiceVisibleCount {
             choiceFirst = choiceSelected - choiceVisibleCount + 1
         }
-        for row in choiceRows { row.removeFromSuperview() }
         choiceRows.removeAll(keepingCapacity: true)
         let visible = Array(choiceOptions[choiceFirst..<min(choiceOptions.count,
                                                            choiceFirst + choiceVisibleCount)])
@@ -699,19 +698,16 @@ final class WorkspacePlaceholderPane {
                 isSelected: option.id == selectedID))
         }
         let plan = ThemedMenuRowPlan(entries: entries)
-        var top: CGFloat = 6
         for slot in visible.indices {
             guard let row = plan.row(at: slot) else { continue }
             let index = choiceFirst + slot
-            let rowHeight = choiceRowHeight
-            row.frame = NSRect(x: 6, y: choiceSurface.bounds.height - top - rowHeight,
-                               width: max(1, choiceSurface.bounds.width - 12), height: rowHeight)
             row.onChoose = { [weak self] _, _ in self?.chooseChoice(index) }
             row.onHighlight = { [weak self] _ in self?.highlightChoice(index) }
-            choiceSurface.addSubview(row)
             choiceRows.append(row)
-            top += rowHeight
         }
+        choiceSurface.setRows(
+            choiceRows, heights: Array(repeating: choiceRowHeight, count: choiceRows.count)
+        )
         for (slot, row) in choiceRows.enumerated() {
             row.isKeyboardHighlighted = choiceFirst + slot == choiceSelected
         }

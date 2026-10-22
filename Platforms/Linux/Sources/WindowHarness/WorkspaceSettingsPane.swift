@@ -35,7 +35,7 @@ final class WorkspaceSettingsPane: WorkspacePane {
         done.title = "Done"
         done.emphasis = .secondary
         done.action = { [weak self] in self?.onDone?() }
-        let rows = ConfirmationPrompt.suppressible.compactMap { prompt -> NSView? in
+        let choices = ConfirmationPrompt.suppressible.compactMap { prompt -> SettingsConfirmationCard.Choice? in
             guard let copy = prompt.suppression else { return nil }
             let toggle = ThemedToggle()
             toggle.state = LinuxConfirmationSettings.asks(before: prompt) ? .on : .off
@@ -49,10 +49,11 @@ final class WorkspaceSettingsPane: WorkspacePane {
                 self?.needsPresentation = true
             }
             toggles.append((prompt, toggle))
-            return SettingsRowStructure.make(title: copy.settingsTitle,
-                                             subtitle: copy.settingsSubtitle, control: toggle)
+            return SettingsConfirmationCard.Choice(title: copy.settingsTitle,
+                                                   subtitle: copy.settingsSubtitle,
+                                                   control: toggle)
         }
-        let card = SettingsCard(rows: rows)
+        let card = SettingsConfirmationCard.make(choices: choices).card
         let section = SettingsPageStructure.section(
             caption: SettingsPageStructure.caption("Confirmations"), content: card)
         let body = SettingsPageStructure.scrolling([section])
