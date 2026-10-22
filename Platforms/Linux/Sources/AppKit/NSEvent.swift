@@ -4,6 +4,13 @@ import Foundation
 /// invoked in registration order before a window delivers the event to its view tree.
 @MainActor
 open class NSEvent {
+    public struct Phase: OptionSet, Sendable {
+        public let rawValue: UInt
+        public init(rawValue: UInt) { self.rawValue = rawValue }
+        public static let began = Phase(rawValue: 1)
+        public static let ended = Phase(rawValue: 2)
+        public static let cancelled = Phase(rawValue: 4)
+    }
     public enum EventType: Int, Sendable {
         case leftMouseDown, leftMouseUp, leftMouseDragged, mouseMoved, rightMouseDown, keyDown
         case otherMouseDown
@@ -64,6 +71,12 @@ open class NSEvent {
     private nonisolated let storedCharacters: String?
     private nonisolated let storedScrollingDeltaX: CGFloat
     private nonisolated let storedScrollingDeltaY: CGFloat
+    private nonisolated let storedPhase: Phase
+    private nonisolated let storedMomentumPhase: Phase
+    private nonisolated let storedHasPreciseScrollingDeltas: Bool
+    open nonisolated var phase: Phase { storedPhase }
+    open nonisolated var momentumPhase: Phase { storedMomentumPhase }
+    open nonisolated var hasPreciseScrollingDeltas: Bool { storedHasPreciseScrollingDeltas }
     private nonisolated let storedClickCount: Int
     public private(set) weak var trackingArea: NSTrackingArea?
 
@@ -77,7 +90,10 @@ open class NSEvent {
         trackingArea: NSTrackingArea? = nil,
         scrollingDeltaX: CGFloat = 0,
         scrollingDeltaY: CGFloat = 0,
-        clickCount: Int = 1
+        clickCount: Int = 1,
+        phase: Phase = [],
+        momentumPhase: Phase = [],
+        hasPreciseScrollingDeltas: Bool = false
     ) {
         storedType = type
         storedWindow = window
@@ -87,6 +103,9 @@ open class NSEvent {
         storedCharacters = charactersIgnoringModifiers
         storedScrollingDeltaX = scrollingDeltaX
         storedScrollingDeltaY = scrollingDeltaY
+        storedPhase = phase
+        storedMomentumPhase = momentumPhase
+        storedHasPreciseScrollingDeltas = hasPreciseScrollingDeltas
         storedClickCount = max(1, clickCount)
         self.trackingArea = trackingArea
     }

@@ -1,5 +1,7 @@
 import Foundation
 
+@MainActor public protocol NSDraggingInfo: AnyObject {}
+
 /// A baseline's position in the solver's top-down local coordinates. A centred text line moves
 /// by half the extra height its view receives; keeping that fraction in the linear expression
 /// lets baseline constraints remain correct when another constraint stretches the label.
@@ -32,6 +34,9 @@ open class NSResponder: Equatable {
     open func otherMouseDown(with event: NSEvent) {}
     open func keyDown(with event: NSEvent) {}
     open func scrollWheel(with event: NSEvent) {}
+    open func quickLook(with event: NSEvent) {}
+    open func draggingExited(_ sender: NSDraggingInfo?) {}
+    open func draggingEnded(_ sender: NSDraggingInfo) {}
     open func performKeyEquivalent(with event: NSEvent) -> Bool { false }
 }
 
@@ -45,6 +50,8 @@ open class NSResponder: Equatable {
 /// separate measurements.
 @MainActor
 open class NSView: NSResponder, NSLayoutItem {
+    open var nextResponder: NSResponder? { superview }
+    open func validateProposedFirstResponder(_ responder: NSResponder, for event: NSEvent?) -> Bool { true }
     public enum BackgroundStyle { case normal, emphasized }
 
     // Key-view edges do not own controls. A pane supplies its semantic loop; traversal skips
@@ -605,6 +612,7 @@ open class NSView: NSResponder, NSLayoutItem {
 
     // MARK: - Drawing
 
+    open func viewWillDraw() {}
     open func draw(_ dirtyRect: NSRect) {}
 
     open func layout() {}
@@ -623,6 +631,7 @@ open class NSView: NSResponder, NSLayoutItem {
 
     private func renderLaidOut(in context: NSGraphicsContext) {
         guard !isHidden, alphaValue > 0 else { return }
+        viewWillDraw()
         effectiveAppearance.performAsCurrentDrawingAppearance {
             context.saveGraphicsState()
             defer { context.restoreGraphicsState() }

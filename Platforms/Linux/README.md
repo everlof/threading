@@ -92,11 +92,20 @@ open menu and visible terminal grid. `scripts/export_theme_snapshot.py` regenera
 Linux AppKit shim only resolves the selected named colors. Full theme configuration and complete
 navigator/menu presentation remain open.
 `tests/page_title/run.sh` links the production `PageTitleView` with a Linux Pango label adapter
-for its Apple-only title animation. The native workspace mounts that title in a separate
+for its Apple-only title animation. The native workspace now links the production
+`MorphingTitleLabel` wrapper too; only its glyph renderer is Pango-backed on Linux. The
+workspace mounts that title in a separate
 41-point right-pane header. Its press reveals the active project or saved runtime in the
 navigator. Saved agent pages now show its production Actions control and a retained overlay
 of production `ThemedMenuRowView` rows. The scoped Linux menu copies the saved session ID or
 owning project path; the host revalidates the active page and project before each command.
+
+The window host also links the production backdrop overlay, text field, clip view, scroll view,
+table view and activity beam wrapper. `scripts/check_linux_shared_views.py` rejects a second
+Linux class for any existing Threading UI class and requires review of every new Linux `NSView`
+leaf. The Linux General settings pane still assembles fewer sections than the macOS General
+controller, and the native conversation pane still needs the complete production controller;
+those page-level compositions remain parity work.
 Pointer, keyboard and AT-SPI actions reach the same menu and clipboard path. Terminal
 paint, PTY grid size, pointer input, IME caret and AT-SPI text geometry share the resulting
 41-point content inset (41 pixels at 1×, 82 at 2×). The right header is retained separately from terminal frames, so PTY

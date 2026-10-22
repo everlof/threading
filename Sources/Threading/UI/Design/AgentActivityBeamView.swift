@@ -1,5 +1,7 @@
 import AppKit
+#if !os(Linux)
 import BorderBeamKit
+#endif
 
 enum ActivityBeamDefaults {
     /// One working agent reads clearly (the beam library's own playground
@@ -48,7 +50,11 @@ final class AgentActivityBeamView: NSView {
 
         @MainActor var borderRadius: CGFloat {
             switch self {
+            #if os(Linux)
+            case .panel: return Design.Radius.panel
+            #else
             case .panel: return SurfaceRadius.panel.current
+            #endif
             case .sidebarRow: return SidebarRowDefaults.systemHoverHighlightRadius
             }
         }

@@ -8,6 +8,8 @@ public final class NSWindow: NSResponder {
     public static let didResizeNotification = Notification.Name("NSWindowDidResizeNotification")
     public static let didMoveNotification = Notification.Name("NSWindowDidMoveNotification")
     public static let willCloseNotification = Notification.Name("NSWindowWillCloseNotification")
+    public static let didBecomeKeyNotification = Notification.Name("NSWindowDidBecomeKeyNotification")
+    public static let didResignKeyNotification = Notification.Name("NSWindowDidResignKeyNotification")
     public var backgroundColor: NSColor = .windowBackgroundColor
     /// Native raster hosts observe this revision after yielding to asynchronous UI deliveries.
     public private(set) var displayRevision: UInt64 = 0
@@ -40,7 +42,15 @@ public final class NSWindow: NSResponder {
     private var needsCursorUpdate = true
     public var firstResponder: NSResponder? { focusedResponder ?? self }
     public weak var initialFirstResponder: NSView?
-    public var isKeyWindow = true
+    public var isKeyWindow = true {
+        didSet {
+            guard isKeyWindow != oldValue else { return }
+            NotificationCenter.default.post(
+                name: isKeyWindow ? Self.didBecomeKeyNotification : Self.didResignKeyNotification,
+                object: self
+            )
+        }
+    }
     public var screenOrigin: NSPoint = .zero {
         didSet {
             if screenOrigin != oldValue {

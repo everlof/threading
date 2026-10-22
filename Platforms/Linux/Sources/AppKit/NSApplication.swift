@@ -13,6 +13,9 @@ public final class NSApplication {
 @MainActor
 public final class NSWorkspace {
     public static let shared = NSWorkspace()
+    public var accessibilityDisplayShouldReduceMotion: Bool {
+        ProcessInfo.processInfo.environment["THREADING_LINUX_REDUCE_MOTION"] == "1"
+    }
     private init() {}
 
     @discardableResult

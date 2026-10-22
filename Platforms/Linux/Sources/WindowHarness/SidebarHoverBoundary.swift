@@ -45,24 +45,8 @@ protocol OutlineDisclosureInkProviding: AnyObject {
     var outlineDisclosureInk: NSColor { get }
 }
 
-@MainActor
-protocol SelectionStrengthStating: AnyObject {
-    var drawsSelectionAtFullStrength: Bool { get }
-}
-
 extension NSOutlineView: SelectionStrengthStating {
-    var drawsSelectionAtFullStrength: Bool { window?.isKeyWindow ?? true }
-}
-
-extension NSTableRowView {
-    func listSelectionStrength(insteadOf appKitsAnswer: Bool) -> Bool {
-        (superview as? SelectionStrengthStating)?.drawsSelectionAtFullStrength ?? appKitsAnswer
-    }
-
-    func adoptListSelectionStrength() {
-        let strength = listSelectionStrength(insteadOf: isEmphasized)
-        if isEmphasized != strength { isEmphasized = strength }
-    }
+    public var drawsSelectionAtFullStrength: Bool { window?.isKeyWindow ?? true }
 }
 
 extension NSView {
@@ -82,30 +66,11 @@ extension NSView {
     }
 }
 
-// The saved-runtime snapshot carries no truthful working state. Keep the production row's
-// inactive beam contract explicit until the host can supply that fact. A nonzero workload is
-// rejected rather than rendered as an invented Linux activity indicator.
+// The saved-runtime snapshot carries no truthful working state. The shared beam stays inactive
+// until the host can supply an agent workload.
 struct AgentWorkload: Equatable {
     let workingCount: Int
     let anyAtTopEffort: Bool
 
     static let none = AgentWorkload(workingCount: 0, anyAtTopEffort: false)
-}
-
-@MainActor
-final class AgentActivityBeamView: NSView {
-    enum Surface { case sidebarRow }
-
-    init(surface: Surface) {
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    func update(workload: AgentWorkload) {
-        precondition(workload == .none, "Linux sidebar has no verified working state")
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

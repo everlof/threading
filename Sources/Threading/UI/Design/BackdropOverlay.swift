@@ -212,6 +212,8 @@ public class BackdropOverlay: NSView, BackdropOverlayContent, InkSourced, Pointe
     /// notification there is no drawing appearance in force, so asking here rather than there is
     /// the difference between measuring the ground the view is actually on and measuring
     /// whichever one AppKit last had in hand.
+    public func invalidateBackdropInk() { inkDidChange() }
+
     private func inkDidChange() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             applyInk(ink)
@@ -306,6 +308,8 @@ public class BackdropThemedControl: ThemedControl, BackdropOverlayContent, InkSo
         super.viewDidChangeEffectiveAppearance()
         inkDidChange()
     }
+
+    public func invalidateBackdropInk() { inkDidChange() }
 
     private func inkDidChange() {
         effectiveAppearance.performAsCurrentDrawingAppearance {

@@ -81,6 +81,10 @@ public extension Notification.Name {
 /// direct documentView of an NSScrollView.
 @MainActor
 open class NSTableView: NSView, NSClipViewDocumentObserver {
+    open var backgroundColor: NSColor = .clear {
+        didSet { precondition(backgroundColor.alphaComponent == 0,
+                              "Linux table rows own their surface") }
+    }
     public enum Style { case fullWidth, inset }
     public enum SelectionHighlightStyle { case regular, none }
     public enum ColumnAutoresizingStyle { case noColumnAutoresizing, uniformColumnAutoresizingStyle }
@@ -445,6 +449,16 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         guard !selectedIdentities.isEmpty else { return }
         selectedIdentities.removeAll()
         selectionDidChange()
+    }
+
+    open func selectAll(_ sender: Any?) {
+        guard allowsMultipleSelection else { return }
+        selectRowIndexes(IndexSet(integersIn: 0..<numberOfRows), byExtendingSelection: false)
+    }
+
+    open func sizeLastColumnToFit() {
+        guard tableColumns.count == 1 else { return }
+        tableColumns[0].width = bounds.width
     }
 
     open func scrollRowToVisible(_ row: Int) {

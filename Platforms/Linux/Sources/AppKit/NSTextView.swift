@@ -142,7 +142,7 @@ open class NSTextView: NSText, NSClipViewDocumentObserver {
     open private(set) var textContainer: NSTextContainer?
     open var layoutManager: NSLayoutManager? { textContainer?.layoutManager }
     open var textStorage: NSTextStorage? { layoutManager?.textStorage }
-    open var string: String {
+    open override var string: String {
         get { textStorage?.string ?? "" }
         set {
             marked = nil

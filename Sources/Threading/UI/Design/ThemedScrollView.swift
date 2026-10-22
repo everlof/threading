@@ -1,5 +1,7 @@
 import AppKit
 
+#if !os(Linux)
+
 /// The scroll thumb and track owned by Threading's chrome.
 ///
 /// System remains exactly AppKit's scroller: its drawing methods are handed straight back to
@@ -2414,23 +2416,7 @@ public final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
     }
 }
 
-/// A clip view whose default is the only background a themed scroll surface wants: none.
-///
-/// Kept separate because conversations replace the ordinary clip view with a flipped subclass.
-/// Subclassing this preserves the invariant without every call site remembering to turn the
-/// AppKit background off after construction.
-public class ThemedClipView: NSClipView, ThemedComponent {
-
-    public override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        drawsBackground = false
-    }
-
-    @available(*, unavailable)
-    public required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-}
+#endif
 
 /// A scroll view that starts transparent, replacing `NSScrollView`.
 ///
@@ -2638,8 +2624,10 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
         super.init(frame: frameRect)
         drawsBackground = false
         contentView = ThemedClipView(frame: contentView.frame)
+        #if !os(Linux)
         verticalScroller = ThemedScroller(frame: .zero)
         horizontalScroller = ThemedScroller(frame: .zero)
+        #endif
         applyScrollerPresentation()
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             self?.applyScrollerPresentation()
@@ -2677,9 +2665,12 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
     /// a legacy scroller owns layout space and an overlay one floats, so restoring the wrong one
     /// hands the document the full width and leaves the scroller sitting on top of the text it
     /// was reserving room beside. Nil while no override is in force.
+    #if !os(Linux)
     private var scrollerStyleBeforePeriodAppearance: NSScroller.Style?
+    #endif
 
     private func applyScrollerPresentation() {
+        #if !os(Linux)
         let appearance = AppThemePalette.current.material(
             for: effectiveAppearance
         ).scrollerAppearance
@@ -2695,6 +2686,7 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
         }
         guard scrollerStyle != desired else { return }
         scrollerStyle = desired
+        #endif
     }
 
     /// Extra room the caller states between the surface's edge and its content — breathing
@@ -2839,6 +2831,9 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
     /// under every short code block and table in Windows 98 and the other classic themes.
     /// A host that knows both widths before layout says whether the document overflows.
     public func heightToFitContent(_ height: CGFloat, overflowsHorizontally: Bool? = nil) -> CGFloat {
+        #if os(Linux)
+        return height + contentInsets.top + contentInsets.bottom
+        #else
         let reservesTrack = hasHorizontalScroller
             && (!autohidesScrollers || (overflowsHorizontally ?? documentOverflowsHorizontally))
         return Self.frameSize(
@@ -2847,6 +2842,7 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
             verticalScrollerClass: hasVerticalScroller ? ThemedScroller.self : nil,
             borderType: borderType, controlSize: .regular, scrollerStyle: scrollerStyle
         ).height + contentInsets.top + contentInsets.bottom
+        #endif
     }
 
     /// Whether the document is wider than the strip — the only time a horizontal scroller has
@@ -2907,6 +2903,7 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
     /// background is still ours to neutralise.
     public override func tile() {
         super.tile()
+        #if !os(Linux)
         if AppThemePalette.current.material(
             for: effectiveAppearance
         ).scrollerPlacement == .leading,
@@ -2938,6 +2935,7 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
                 )
             }
         }
+        #endif
         for case let clip as NSClipView in subviews where clip !== contentView {
             clip.drawsBackground = false
         }
@@ -2945,6 +2943,7 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
     }
 
     public func permitsSystemChrome(_ view: NSView) -> Bool {
+        #if !os(Linux)
         // macOS 26 inserts visual-effect views into overlay-scrolling chrome. Depending on
         // the scroll view's state, the effect is either direct or nested under private
         // NSScrollPocket/NSHardPocketView wrappers. Permit that AppKit-owned side of the tree
@@ -2959,6 +2958,7 @@ public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBounda
             }
             return ancestor === self
         }
+        #endif
 
         // The only raw clip AppKit may add is the direct, transparent header clip described
         // above. This does not grant permission to a raw clip in the document subtree.

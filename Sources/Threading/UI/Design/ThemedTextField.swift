@@ -432,6 +432,7 @@ private final class ThemedTextFieldCell: NSTextFieldCell, ThemedFieldCell {
         super.drawingRect(forBounds: adjusted(rect))
     }
 
+    #if !os(Linux)
     /// The field editor is placed by these two, not by `drawingRect`, so text would jump on
     /// click without them — and coloured by them, for the reason `ThemedTextSelection` states:
     /// the editor is AppKit's own view, shared between every field in the window, so the moment
@@ -466,9 +467,12 @@ private final class ThemedTextFieldCell: NSTextFieldCell, ThemedFieldCell {
         )
         ThemedTextSelection.apply(to: editor, in: controlView)
     }
+    #endif
 }
 
 // MARK: - Secure
+
+#if !os(Linux)
 
 /// A masked field with AppKit's secure field owner, editor and cell. Its visible chrome shares
 /// the ordinary field's drawing; AppKit requires the secure editor's delegate to be an
@@ -663,6 +667,7 @@ private final class ThemedSecureFieldCell: NSSecureTextFieldCell, ThemedFieldCel
 }
 
 // MARK: - Search
+#endif
 
 /// A search field drawn from the theme, replacing `NSSearchField`.
 ///
@@ -762,6 +767,21 @@ public final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
 
     /// Creates the action once. Hidden until `isTrailingActionVisible` says otherwise, because
     /// with nothing typed there is nothing for it to act on.
+    #if os(Linux)
+    public func installTrailingAction(
+        title: String,
+        accessibilityLabel: String,
+        accessibilityIdentifier: String,
+        target: AnyObject,
+        action: @escaping Selector
+    ) {
+        installTrailingActionButton(
+            ThemedButton(title: title, target: target, action: action),
+            accessibilityLabel: accessibilityLabel,
+            accessibilityIdentifier: accessibilityIdentifier
+        )
+    }
+    #else
     public func installTrailingAction(
         title: String,
         accessibilityLabel: String,
@@ -769,8 +789,20 @@ public final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
         target: AnyObject,
         action: Selector
     ) {
+        installTrailingActionButton(
+            ThemedButton(title: title, target: target, action: action),
+            accessibilityLabel: accessibilityLabel,
+            accessibilityIdentifier: accessibilityIdentifier
+        )
+    }
+    #endif
+
+    private func installTrailingActionButton(
+        _ button: ThemedButton,
+        accessibilityLabel: String,
+        accessibilityIdentifier: String
+    ) {
         guard trailingActionButton == nil else { return }
-        let button = ThemedButton(title: title, target: target, action: action)
         button.emphasis = .tertiary
         button.setAccessibilityLabel(accessibilityLabel)
         button.setAccessibilityIdentifier(accessibilityIdentifier)

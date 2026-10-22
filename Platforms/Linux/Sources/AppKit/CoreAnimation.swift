@@ -103,6 +103,7 @@ public final class CAAnimationGroup: CAAnimation {
 open class CALayer {
     public enum CornerCurve { case circular, continuous }
 
+    open var masksToBounds = false
     open var frame: CGRect = .zero
     open var backgroundColor: CGColor?
     open var bounds: CGRect { CGRect(origin: .zero, size: frame.size) }

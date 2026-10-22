@@ -60,6 +60,10 @@ extension NSLayoutManager {
 open class NSText: NSView {
     public static let didChangeNotification = Notification.Name("NSTextDidChangeNotification")
     public weak var delegate: AnyObject?
+    open var string: String {
+        get { preconditionFailure("A concrete NSText editor must supply string") }
+        set { preconditionFailure("A concrete NSText editor must supply string") }
+    }
 }
 
 /// Font selection for the bounded Pango-backed plain and attributed label paths. Editing,
@@ -167,6 +171,9 @@ public final class NSFont: Equatable, Hashable {
     }
     public var ascender: CGFloat { boundingRectForFont.maxY }
     public var descender: CGFloat { boundingRectForFont.minY }
+    /// Pango's current metrics bridge exposes the line box, so use its ascent for the
+    /// optical centre until the font bridge exposes a glyph cap-height metric.
+    public var capHeight: CGFloat { ascender * 0.72 }
     /// The current Pango font-metrics leaf's line box is ascent plus descent.
     public var leading: CGFloat { 0 }
 

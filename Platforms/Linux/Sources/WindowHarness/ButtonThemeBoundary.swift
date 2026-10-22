@@ -92,7 +92,18 @@ struct WindowBackdropDidChange: AppEvent {
 
 @MainActor
 enum WindowBackdrop {
-    static var color: NSColor { InkSource.backdropGround }
+    static var color: NSColor { LinuxTheme.color("terminal.background") }
+    static var ink: Design.Ink { Design.Ink(on: color) }
+}
+
+@MainActor
+enum WindowChromeAppearance {
+    static var bandGround: NSColor { LinuxTheme.color("surface") }
+    static var bandInk: Design.Ink { Design.Ink(on: bandGround) }
+}
+
+extension Design.Surface {
+    static var primaryActionFace: NSColor { LinuxTheme.color("accent") }
 }
 
 extension SurfaceRadius {

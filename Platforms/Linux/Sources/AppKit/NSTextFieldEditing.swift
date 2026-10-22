@@ -72,7 +72,7 @@ extension NSTextField {
 
     /// Asked by the window when focus lands on this field; answers the editor to focus instead.
     func beginEditingSession() -> NSTextView? {
-        guard isEditable, window != nil else { return nil }
+        guard isEnabled, isEditable, window != nil else { return nil }
         if let fieldEditor { return fieldEditor }
         let editor = NSTextFieldEditor(frame: editingRect)
         editor.field = self
@@ -101,7 +101,9 @@ extension NSTextField {
             delegate?.controlTextDidBeginEditing(notice(NSControl.textDidBeginEditingNotification))
         }
         stringValue = fieldEditor.string
-        delegate?.controlTextDidChange(notice(NSControl.textDidChangeNotification))
+        let change = notice(NSControl.textDidChangeNotification)
+        textDidChange(change)
+        delegate?.controlTextDidChange(change)
     }
 
     /// AppKit ends the edit, sends the action, and keeps the editor with its text selected.
@@ -132,7 +134,10 @@ extension NSTextField {
         self.fieldEditor = nil
         fieldEditor.removeFromSuperview()
         needsDisplay = true
-        if let ended { delegate?.controlTextDidEndEditing(ended) }
+        if let ended {
+            textDidEndEditing(ended)
+            delegate?.controlTextDidEndEditing(ended)
+        }
     }
 
     /// Ends editing without a notice, keeping the editor's text, as AppKit's `abortEditing`.
@@ -148,6 +153,7 @@ extension NSTextField {
     }
 
     var editingRect: NSRect { cell?.drawingRect(forBounds: bounds) ?? bounds }
+
 
     /// One line of the field's font. An editable field has no intrinsic width in AppKit; its
     /// width is the layout's to give, and a themed field states its own taller well.

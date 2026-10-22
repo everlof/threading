@@ -61,9 +61,11 @@ public enum ThemedTextSelection {
         if let field = host as? ThemedTextField {
             return field.textSelectionGround()
         }
+        #if !os(Linux)
         if let field = host as? ThemedSecureField {
             return field.textSelectionGround()
         }
+        #endif
         return host?.resolvedGround() ?? Design.Surface.ground
     }
 

@@ -155,7 +155,7 @@
       "reason": "The menu bar is the one place the platform's menu objects are the contract; every in-window menu is ThemedMenuPresenter."
     },
     {
-      "path": "Sources/Threading/UI/Design/ThemedScrollView.swift",
+      "path": "Sources/Threading/UI/Design/ThemedClipView.swift",
       "kind": "inherit",
       "symbol": "NSClipView",
       "reason": "The themed boundary has to subclass the AppKit surface it contains."
@@ -179,7 +179,7 @@
       "reason": "The themed boundary has to subclass the AppKit surface it contains."
     },
     {
-      "path": "Sources/Threading/UI/Design/ThemedTables.swift",
+      "path": "Sources/Threading/UI/Design/ThemedTableView.swift",
       "kind": "inherit",
       "symbol": "NSTableView",
       "reason": "The themed boundary has to subclass the AppKit surface it contains."

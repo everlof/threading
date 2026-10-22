@@ -1918,7 +1918,7 @@ struct WindowHarness {
         func projectControlPixels(_ rowIndex: Int, create: Bool)
             -> (x: Int32, y: Int32, width: Int32, height: Int32)? {
             guard let row = outline.view(atColumn: 0, row: rowIndex,
-                                         makeIfNecessary: false) as? Specimen.Row,
+                                         makeIfNecessary: true) as? Specimen.Row,
                   let control = row.productionProjectControl(create: create) else {
                 return nil
             }
@@ -1934,7 +1934,7 @@ struct WindowHarness {
         func outlineRowPixels(_ rowIndex: Int)
             -> (x: Int32, y: Int32, width: Int32, height: Int32)? {
             guard let cell = outline.view(atColumn: 0, row: rowIndex,
-                                          makeIfNecessary: false) else { return nil }
+                                          makeIfNecessary: true) else { return nil }
             let viewport = outlineScroll.convert(outlineScroll.bounds, to: navigatorRoot)
             let rect = cell.convert(cell.bounds, to: navigatorRoot).intersection(viewport)
             guard !rect.isEmpty else { return nil }
@@ -4694,13 +4694,19 @@ struct WindowHarness {
                     let label = savedPicker.isAgent ? "AGENT_PICKER_FRAME" : "TERMINAL_PICKER_FRAME"
                     print("\(label) \(width)x\(height) mounted=\(end - savedFirst) selected=\(selectedID) total=\(total) capped=\(capped) dark=\(LinuxTheme.isDark)")
                 } else {
+                    // Rendering and automatic row measurement may change the clip's actual
+                    // viewport after the earlier estimated range was chosen. Publish only
+                    // cells AppKit has mounted and laid out in that final viewport.
+                    let visibleOutlineRows = outline.visibleRowIndexes.filter {
+                        outlineRowPixels($0) != nil
+                    }
                     let listY = Int32(navigatorHeaderHeight * scale)
-                    tw_accessibility_begin_list(window, "Projects", Int32(first),
+                    tw_accessibility_begin_list(window, "Projects", Int32(visibleOutlineRows.first ?? 0),
                                                 Int32(sidebarRows.totalCount),
                                                 launch == nil ? 0 : 1, 0, listY,
                                                 Int32(navigatorWidth), Int32(height) - listY)
                     do {
-                        for index in first..<end {
+                        for index in visibleOutlineRows {
                             guard let item = outline.item(atRow: index) as? NavigatorOutlineItem,
                                   let row = item.resolvedRow(in: projects, indexes: projectIndexes)
                             else { continue }
@@ -4813,7 +4819,7 @@ struct WindowHarness {
                     }
                     let title = projects.isEmpty ? "Threading experiment - empty store" : "Threading experiment - \(projects[selected].path)"
                     setNavigatorTitle(title)
-                    print("FRAME \(width)x\(height) mounted=\(end - first) selected=\(projects.isEmpty ? "none" : projects[selected].id) total=\(sidebarRows.totalCount)")
+                    print("FRAME \(width)x\(height) mounted=\(visibleOutlineRows.count) selected=\(projects.isEmpty ? "none" : projects[selected].id) total=\(sidebarRows.totalCount)")
                     if !projects.isEmpty {
                         print("OUTLINE_FRAME total=\(outline.numberOfRows) first=\(first) visible=\(end - first) mounted=\(outline.mountedViewCount) reusable=\(outline.reusableViewCount) scrollY=\(outlineScroll.contentView.bounds.minY)")
                     }

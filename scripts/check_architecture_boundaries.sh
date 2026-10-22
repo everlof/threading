@@ -70,6 +70,11 @@ if ! python3 "${script_directory}/check_ui_structure.py" "${repository_directory
   failed=1
 fi
 
+if ! python3 "${script_directory}/check_linux_shared_views.py" "${repository_directory}"; then
+  echo "architecture-boundary: link the production Design class instead of defining it again" >&2
+  failed=1
+fi
+
 if ! python3 "${script_directory}/tests/test_ui_structure.py"; then
   echo "architecture-boundary: UI structural-site checker regression tests failed" >&2
   failed=1

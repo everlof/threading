@@ -23,10 +23,6 @@ enum ControlPermissionDecision: String, Equatable, Sendable {
     case deny
 }
 
-/// The conversation's flipped clip, under the production component's name.
-@MainActor
-public class ThemedClipView: NSClipView {}
-
 extension NSView {
     func applySurface(fill: NSColor, radius: SurfaceRadius, border: NSColor?) {
         setAppliedSurface(fill: fill, radius: radius.current, border: border)

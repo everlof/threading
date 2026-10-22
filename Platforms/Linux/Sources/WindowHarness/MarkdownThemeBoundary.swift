@@ -114,14 +114,6 @@ extension L10n {
         String(format: value, arguments: arguments)
     }
 }
-extension ThemedScrollView {
-    enum VerticalScrollHandoff { case never, always, atContentEnds }
-    var verticalScrollHandoff: VerticalScrollHandoff {
-        get { forwardsVerticalScroll ? .always : .never }
-        set { forwardsVerticalScroll = newValue == .always }
-    }
-}
-
 extension Design.Motion {
     // This host retains Core Animation values but has no animation compositor.
     static let transcriptArrive: TimeInterval = 0.26

@@ -13,10 +13,11 @@ open class NSTextFieldCell {
     /// The field this cell measures for; a themed cell reads its font.
     public internal(set) weak var owner: NSTextField?
     public required init() {}
-    public var wraps: Bool {
-        guard let owner, !owner.usesSingleLineMode else { return false }
-        return owner.lineBreakMode == .byWordWrapping || owner.lineBreakMode == .byCharWrapping
+    public var wraps = false {
+        didSet { owner?.lineBreakMode = wraps ? .byWordWrapping : .byClipping }
     }
+    public var isScrollable = true
+    public var font: NSFont? { owner?.font }
     /// Linux's Pango label has no private AppKit cell padding: its shaped bounds are its cell.
     public var cellSize: NSSize { owner?.intrinsicContentSize ?? .zero }
     public func cellSize(forBounds bounds: NSRect) -> NSSize { cellSize }
@@ -108,12 +109,16 @@ open class NSTextField: NSView {
         didSet { invalidateTextMetrics() }
     }
     private lazy var labelCell: NSTextFieldCell = {
-        let cell = type(of: self).cellClass.init()
+        let cellType = type(of: self).cellClass as? NSTextFieldCell.Type ?? NSTextFieldCell.self
+        let cell = cellType.init()
         cell.owner = self
         return cell
     }()
     open var cell: NSTextFieldCell? { labelCell }
-    open class var cellClass: NSTextFieldCell.Type { NSTextFieldCell.self }
+    open class var cellClass: AnyClass? {
+        get { NSTextFieldCell.self }
+        set { preconditionFailure("A Linux text field chooses its cell in a subclass") }
+    }
 
     // MARK: Editing
 
@@ -131,6 +136,8 @@ open class NSTextField: NSView {
         needsDisplay = true
     }
     open weak var delegate: NSTextFieldDelegate?
+    open func textDidChange(_ notification: Notification) {}
+    open func textDidEndEditing(_ notification: Notification) {}
     open var placeholderString: String? {
         didSet {
             placeholderAttributedString = nil
@@ -160,6 +167,12 @@ open class NSTextField: NSView {
     open var isBordered = false {
         didSet { precondition(!isBordered, "Linux NSTextField label has no control border") }
     }
+    open var isBezeled = false {
+        didSet { precondition(!isBezeled, "Linux NSTextField has no system bezel") }
+    }
+    public enum FocusRingType { case none }
+    open var focusRingType: FocusRingType = .none
+    open var isEnabled = true { didSet { needsDisplay = true } }
     open var drawsBackground = false {
         didSet { precondition(!drawsBackground, "Linux NSTextField label has no control background") }
     }

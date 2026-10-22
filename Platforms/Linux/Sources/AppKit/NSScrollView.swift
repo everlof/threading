@@ -127,6 +127,9 @@ open class NSScrollView: NSView {
             tile()
         }
     }
+    /// There is no Linux system scroller track; keep the AppKit layout property for shared
+    /// components that place one when a theme requests it.
+    open var scrollerInsets = NSEdgeInsets()
     /// Elasticity is a request; this renderer currently keeps the viewport clamped.
     open var horizontalScrollElasticity: Elasticity = .none
     /// The clip view clamps to the document bounds; there is no rubber-band animation in the
