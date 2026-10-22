@@ -274,6 +274,23 @@ try:
         eventually(lambda: listing().get_name() == 'Add Project',
                    'idle Add Project opened menu')
         snapshot('add-project-menu')
+        existing_folder = listing().get_child_at_index(1)
+        assert existing_folder.get_accessible_id() == 'project.add'
+        row = existing_folder.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        sidebar_edge = children()[0].get_component_iface().get_extents(
+            Atspi.CoordType.WINDOW).width - 640
+        assert row.x < sidebar_edge < row.x + row.width
+        xdo('mousemove', '--window', window, str(sidebar_edge + 20),
+            str(row.y + row.height // 2), 'click', '1')
+        dialog = eventually(lambda: xdo('search', '--onlyvisible', '--name',
+                                        '^Add project folder$').splitlines()[0],
+                            'cross-divider menu row opened folder chooser')
+        xdo('windowfocus', '--sync', dialog, 'key', 'Escape')
+        eventually(lambda: 'PROJECT_IMPORT_CANCELLED' in log_path.read_text(),
+                   'cross-divider menu command cancelled')
+        assert idle_add.get_action_iface().do_action(0)
+        eventually(lambda: listing().get_name() == 'Add Project',
+                   'Add Project reopened after cross-divider choice')
         key('Escape')
         eventually(lambda: listing().get_name() == 'Projects',
                    'idle Add Project menu dismissed')
@@ -376,7 +393,7 @@ try:
         eventually(lambda: child_state()['input'] == b'iv'.hex(), 'menu keys did not reach child')
         press_accessible()
         # Click outside the picker dismisses without replaying that event into the old pane.
-        xdo('mousemove', '--window', window, '500', '100', 'click', '1')
+        xdo('mousemove', '--window', window, '1000', '100', 'click', '1')
         eventually(terminal_focus, 'outside click restored terminal focus')
         key('x')
         eventually(lambda: child_state()['input'] == b'ivx'.hex(), 'dismiss preserved raw input owner')
@@ -387,7 +404,7 @@ try:
         eventually(lambda: listing().get_name() == 'Projects' and not terminal_focus(),
                    'sidebar focused before second outside dismissal')
         press_accessible()
-        xdo('mousemove', '--window', window, '500', '100', 'click', '1')
+        xdo('mousemove', '--window', window, '1000', '100', 'click', '1')
         eventually(lambda: listing().get_name() == 'Projects' and not terminal_focus(),
                    'outside dismissal restored original sidebar focus')
         assert child_state()['input'] == b'ivx'.hex()
@@ -463,7 +480,7 @@ while True:
             assert listing().get_component_iface().get_extents(Atspi.CoordType.WINDOW).width < 480
             snapshot('account-' + provider)
             if provider == 'codex':
-                xdo('mousemove', '--window', window, '600', '100', 'click', '1')
+                xdo('mousemove', '--window', window, '1000', '100', 'click', '1')
                 eventually(lambda: listing().get_name() == 'Projects',
                            'outside click dismissed account chooser')
                 press_accessible()

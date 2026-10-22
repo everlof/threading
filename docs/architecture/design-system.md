@@ -95,11 +95,12 @@ The Add Project divider is a `ThemedMenuSeparatorView` inside that document, so 
 pointer gap and accessibility row offsets come from the same visible sequence as the choices.
 The Linux host still routes menu selection and dismissal through its SDL event bridge. Porting
 the full `ThemedMenuPresenter` interaction model remains separate from the shared view tree.
-Navigator panels are currently rasterized into the sidebar viewport; unlike the Mac presenter,
-that host boundary cannot let a panel cross the divider into the content pane. A window-level
-overlay and matching pointer route are still needed for that placement parity.
+Navigator panels are rasterized from the shared panel into a window-level SDL overlay. Their
+pointer route and accessibility bounds use the panel's full-window placement, including the
+portion across the sidebar divider. The Mac presenter's remaining interaction behavior still
+needs a matching Linux host route.
 The account picker uses the header Actions anchor after the command panel closes; a true
-parent-and-submenu presentation depends on that overlay route too.
+parent-and-submenu presentation needs that presenter interaction work too.
 The row menu now uses the same Snooze wall-clock moments as macOS. Its Linux host owns the
 persisted visibility overlay, one process-wide deadline map, worker-side expiry reconciliation,
 and exact-session wake receipts. The shared menu rows draw the choices; no snooze timer or

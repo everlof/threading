@@ -15,10 +15,13 @@ struct TWWindow {
     SDL_Renderer *renderer;
     SDL_Texture *texture;
     SDL_Texture *sidebarTexture, *terminalTexture, *terminalHeaderTexture, *sessionMenuTexture;
+    SDL_Texture *navigatorMenuTexture;
     int sidebarTextureWidth, sidebarTextureHeight, terminalTextureWidth, terminalTextureHeight;
     int terminalHeaderTextureWidth, terminalHeaderTextureHeight;
     SDL_Rect sessionMenuBounds;
     int sessionMenuTracking, sessionMenuHovered;
+    SDL_Rect navigatorMenuBounds;
+    int navigatorMenuTracking;
     int sidebarWidth, sidebarFocused, terminalTopInset, placeholderMode, editorFocused, composerMode;
     uint32_t terminalButtons;
     int terminalHeaderTracking, terminalHeaderHovered;
@@ -153,6 +156,7 @@ void tw_close(TWWindow *w) {
     SDL_DestroyTexture(w->terminalTexture);
     SDL_DestroyTexture(w->terminalHeaderTexture);
     SDL_DestroyTexture(w->sessionMenuTexture);
+    SDL_DestroyTexture(w->navigatorMenuTexture);
     SDL_DestroyRenderer(w->renderer);
     SDL_DestroyWindow(w->window);
     free(w);
@@ -292,6 +296,15 @@ int tw_repaint(TWWindow *w) {
                 if (SDL_RenderCopy(w->renderer, w->sessionMenuTexture, &source, &clipped) != 0) return -1;
             }
         }
+        if (w->navigatorMenuTexture) {
+            SDL_Rect clipped;
+            const SDL_Rect window = {0, 0, width, height};
+            if (SDL_IntersectRect(&w->navigatorMenuBounds, &window, &clipped)) {
+                const SDL_Rect source = {clipped.x - w->navigatorMenuBounds.x,
+                    clipped.y - w->navigatorMenuBounds.y, clipped.w, clipped.h};
+                if (SDL_RenderCopy(w->renderer, w->navigatorMenuTexture, &source, &clipped) != 0) return -1;
+            }
+        }
         SDL_RenderPresent(w->renderer);
         return !w->explicitSurfaceUpdate || SDL_UpdateWindowSurface(w->window) == 0 ? 0 : -1;
     }
@@ -379,6 +392,38 @@ void tw_hide_session_menu(TWWindow *w) {
     tw_accessibility_session_menu_end(w);
     tw_repaint(w);
 }
+int tw_present_navigator_menu(TWWindow *w, const uint8_t *rgba, int width, int height,
+                              int x, int y) {
+    if (!w || !w->sidebarWidth || !rgba || width < 1 || width > 1024 ||
+        height < 1 || height > 900) return -1;
+    int windowWidth, windowHeight;
+    SDL_GetWindowSize(w->window, &windowWidth, &windowHeight);
+    if (x < 0 || y < 0 || width > windowWidth - x || height > windowHeight - y) return -1;
+    if (!w->navigatorMenuTexture || w->navigatorMenuBounds.w != width ||
+        w->navigatorMenuBounds.h != height) {
+        SDL_DestroyTexture(w->navigatorMenuTexture);
+        w->navigatorMenuTexture = SDL_CreateTexture(w->renderer, SDL_PIXELFORMAT_RGBA32,
+                                                    SDL_TEXTUREACCESS_STREAMING, width, height);
+        if (!w->navigatorMenuTexture) return -1;
+        SDL_SetTextureBlendMode(w->navigatorMenuTexture, SDL_BLENDMODE_BLEND);
+    }
+    if (SDL_UpdateTexture(w->navigatorMenuTexture, NULL, rgba, width * 4) != 0) return -1;
+    w->navigatorMenuBounds = (SDL_Rect){x, y, width, height};
+    // A project control can open the menu while its press is held. Keep that captured gesture
+    // with the panel so release may choose a row across the sidebar divider.
+    if (w->navigatorTracking) w->navigatorMenuTracking = 1;
+    return tw_repaint(w);
+}
+void tw_hide_navigator_menu(TWWindow *w) {
+    if (!w || !w->navigatorMenuTexture) return;
+    if (w->navigatorMenuTracking) SDL_CaptureMouse(SDL_FALSE);
+    w->navigatorMenuTracking = 0;
+    SDL_DestroyTexture(w->navigatorMenuTexture);
+    w->navigatorMenuTexture = NULL;
+    w->navigatorMenuBounds = (SDL_Rect){0};
+    tw_repaint(w);
+}
+int tw_navigator_menu_visible(TWWindow *w) { return w && w->navigatorMenuTexture != NULL; }
 void tw_actions_button(TWWindow *w, const char *label, int enabled,
                        int x, int y, int width, int height) {
     if (!w) return;
@@ -437,6 +482,7 @@ int tw_workspace_sidebar_focused(TWWindow *w) { return w && w->sidebarWidth && w
 int tw_workspace_reset_terminal(TWWindow *w) {
     if (!w || !w->sidebarWidth) return -1;
     if (w->sessionMenuTexture) tw_hide_session_menu(w);
+    if (w->navigatorMenuTexture) tw_hide_navigator_menu(w);
     tw_open_in_shortcut_state(w, NULL, 0);
     tw_accessibility_page_title(w, NULL, NULL, 0, 0, 0, 0);
     w->terminalButtons = 0;
@@ -512,6 +558,7 @@ void tw_workspace_minimum_height(TWWindow *w, int height) {
 void tw_workspace_placeholder_mode(TWWindow *w, int enabled) {
     if (!w || !w->sidebarWidth || w->placeholderMode == (enabled != 0)) return;
     if (w->sessionMenuTexture) tw_hide_session_menu(w);
+    if (w->navigatorMenuTexture) tw_hide_navigator_menu(w);
     tw_open_in_shortcut_state(w, NULL, 0);
     if (w->terminalHeaderTracking || w->placeholderTracking) SDL_CaptureMouse(SDL_FALSE);
     w->terminalHeaderTracking = w->terminalHeaderHovered = 0;
@@ -552,6 +599,7 @@ void tw_workspace_mode(TWWindow *w, int sidebarWidth, int sidebarFocused) {
         return;
     }
     if (w->sessionMenuTexture) tw_hide_session_menu(w);
+    if (w->navigatorMenuTexture) tw_hide_navigator_menu(w);
     tw_open_in_shortcut_state(w, NULL, 0);
     w->sidebarWidth = sidebarWidth;
     w->terminalButtons = 0;
@@ -777,6 +825,46 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
         }
         if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)
             w->navigatorSuppressLeftUp = 0;
+        // A navigator menu is a window overlay, even when its anchor is in the sidebar. The
+        // host receives window coordinates and dispatches into its mounted shared panel.
+        if (w->navigatorMenuTexture) {
+            const SDL_Rect bounds = w->navigatorMenuBounds;
+            if (e.type == SDL_MOUSEMOTION) {
+                out->kind = 27; out->action = w->navigatorMenuTracking ? 2 : 0;
+                out->x = e.motion.x; out->y = e.motion.y;
+                return 1;
+            }
+            if (e.type == SDL_MOUSEBUTTONDOWN) {
+                const SDL_Point point = {e.button.x, e.button.y};
+                const int inside = SDL_PointInRect(&point, &bounds);
+                out->kind = 27;
+                out->action = inside && e.button.button == SDL_BUTTON_LEFT ? 1 : 4;
+                out->x = e.button.x; out->y = e.button.y;
+                if (out->action == 1) {
+                    w->navigatorMenuTracking = 1;
+                    SDL_CaptureMouse(SDL_TRUE);
+                } else if (e.button.button == SDL_BUTTON_LEFT) w->navigatorSuppressLeftUp = 1;
+                return 1;
+            }
+            if (e.type == SDL_MOUSEBUTTONUP) {
+                if (w->navigatorMenuTracking && e.button.button == SDL_BUTTON_LEFT) {
+                    w->navigatorMenuTracking = w->navigatorTracking = 0;
+                    SDL_CaptureMouse(SDL_FALSE);
+                    out->kind = 27; out->action = 3;
+                    out->x = e.button.x; out->y = e.button.y;
+                    return 1;
+                }
+                continue;
+            }
+            if (e.type == SDL_MOUSEWHEEL) {
+                const int vertical = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED
+                    ? -e.wheel.y : e.wheel.y;
+                if (!vertical) continue;
+                out->kind = vertical > 0 ? 3 : 4; out->action = 1;
+                out->key = vertical > 6 ? 6 : vertical < -6 ? 6 : abs(vertical);
+                return 1;
+            }
+        }
         // The menu is modal over the right pane. Route its gestures before header, terminal or
         // navigator input so a menu press can never become PTY mouse input or switch projects.
         if (w->sessionMenuTexture) {
@@ -1077,6 +1165,10 @@ int tw_next_timeout(TWWindow *w, TWEvent *out, int milliseconds) {
                     if (w->sessionMenuTracking) SDL_CaptureMouse(SDL_FALSE);
                     w->sessionMenuTracking = w->sessionMenuHovered = 0;
                     out->kind = 41; out->action = 4;
+                } else if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST && w->navigatorMenuTexture) {
+                    if (w->navigatorMenuTracking) SDL_CaptureMouse(SDL_FALSE);
+                    w->navigatorMenuTracking = w->navigatorTracking = 0;
+                    out->kind = 27; out->action = 4;
                 } else if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST &&
                     (w->placeholderTracking || w->placeholderHovered)) {
                     if (w->placeholderTracking) SDL_CaptureMouse(SDL_FALSE);

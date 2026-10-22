@@ -107,17 +107,17 @@ Linux supplies the SDL overlay lifecycle; `ThemedMenuLayout` places the navigato
 account, composer, conversation, session, and pane-header menus from their host anchors.
 The shared panel and document lay out their surface and rows. The Linux host still routes
 menu events and dismissal; it has not yet ported the full Mac `ThemedMenuPresenter` interaction model.
-Navigator panels still render in the sidebar SDL texture, so a menu at the sidebar's right edge
-cannot cross the divider as a macOS popover can. That remaining overlay boundary is a host
-bridge task, not a second view implementation.
+Navigator panels render into a window-level SDL overlay, so the shared menu panel can cross the
+sidebar divider. SDL forwards pointer gestures to that panel in window coordinates; its rows,
+layout, focus and accessibility bounds come from the mounted shared views.
 The account picker currently opens from the header Actions anchor after its parent command
-panel closes; retaining the parent as a true submenu needs the same window-level overlay work.
+panel closes; retaining the parent as a true submenu still needs presenter interaction work.
 
 The current shared-view audit distinguishes reused components from reused page composition:
 
 | Surface | Shared UI mounted by Linux | Remaining host boundary |
 | --- | --- | --- |
-| Navigator rows and menus | Sidebar row assembly, menu panel, document, rows, separator, layout | SDL viewport and a window-level overlay for menus crossing the divider |
+| Navigator rows and menus | Sidebar row assembly, menu panel, document, rows, separator, layout | SDL viewport, overlay lifecycle and menu interaction |
 | Opening composer | Prompt, chips, choice panels, menu rows and placement | `WorkspacePlaceholderPane` still assembles the page separately from the macOS controller |
 | Native conversation | Transcript table and row components, prompt, chips, pane constraints, menu panels | `WorkspaceConversationPane` still assembles a reduced page separately from `ConversationViewController` |
 | General Settings | Page canvas, confirmation card, toggles and constraints | `WorkspaceSettingsPane` includes fewer sections than `GeneralPreferencesViewController` |

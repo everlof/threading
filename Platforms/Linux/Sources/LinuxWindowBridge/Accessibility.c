@@ -2617,7 +2617,8 @@ int tw_accessibility_add_row(TWWindow *window, const char *id, const char *name,
     if (!bridgeReady) return 0;
     int originX, originY, windowWidth, windowHeight;
     tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
-    if (tw_workspace_sidebar_width(window)) windowWidth = tw_workspace_sidebar_width(window);
+    if (tw_workspace_sidebar_width(window) && !tw_navigator_menu_visible(window))
+        windowWidth = tw_workspace_sidebar_width(window);
     if (!id || !name || pending.count >= MAX_VISIBLE_ROWS
         || strnlen(id, MAX_ROW_ID) == MAX_ROW_ID
         || strnlen(name, MAX_ROW_NAME) == MAX_ROW_NAME

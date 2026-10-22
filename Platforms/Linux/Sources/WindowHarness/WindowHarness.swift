@@ -180,15 +180,6 @@ struct WindowHarness {
                 Int32(row.width * WorkspaceDisplay.scale), Int32(row.height * WorkspaceDisplay.scale))
     }
 
-    @MainActor private static func menuRowPixels(_ slot: Int, in root: Specimen.Window,
-                                                   scale: CGFloat)
-        -> (x: Int32, y: Int32, width: Int32, height: Int32)? {
-        guard let view = root.mountedMenuRow(at: slot) else { return nil }
-        let row = view.convert(view.bounds, to: root)
-        return (Int32(row.minX * scale), Int32((root.bounds.height - row.maxY) * scale),
-                Int32(row.width * scale), Int32(row.height * scale))
-    }
-
     private static func readableNavigatorText(_ text: String) -> String {
         text.unicodeScalars.prefix(256).map { scalar -> String in
             if CharacterSet.controlCharacters.contains(scalar) ||
@@ -1837,6 +1828,10 @@ struct WindowHarness {
         // root for the native window's lifetime so attachment callbacks describe that lifetime.
         let contentWindow = NSWindow(backingScaleFactor: scale)
         contentWindow.isKeyWindow = tw_window_has_focus(window) != 0
+        // The sidebar root is clipped to its SDL viewport. Mount a menu in its own shim
+        // window so the same shared panel can render and receive input across the divider.
+        let navigatorMenuWindow = NSWindow(backingScaleFactor: scale)
+        navigatorMenuWindow.isKeyWindow = contentWindow.isKeyWindow
         let navigatorRoot = Specimen.Window(frame: NSRect(x: 0, y: 0, width: 400, height: 240))
         contentWindow.contentView = navigatorRoot
         navigatorRoot.installWorkspaceBackdrop()
@@ -2120,6 +2115,9 @@ struct WindowHarness {
         let retainedSessionMenuRows = RetainedMenuRows()
         var sessionMenuSeparators: [ThemedMenuSeparatorView] = []
         var sessionMenuFrame = NSRect.zero
+        var navigatorFloatingSurface: ThemedMenuPanelView?
+        var navigatorFloatingRows: [NSView] = []
+        var navigatorFloatingFrame = NSRect.zero
         var sessionMenuVisibleEntries: [Int] = []
         var activatedSessionMenuEntry: Int?
         var activatedMenuEntry: Int?
@@ -4130,6 +4128,9 @@ struct WindowHarness {
                 navigatorRoot.prepareNavigatorFrame(NSRect(x: 0, y: 0,
                     width: CGFloat(navigatorWidth) / scale, height: CGFloat(height) / scale))
             }
+            let menuLayoutBounds = NSRect(x: 0, y: 0,
+                width: CGFloat(hasSplitPane ? width : navigatorWidth) / scale,
+                height: CGFloat(height) / scale)
             func actionMenuAnchor(in menu: NavigatorActions.Presentation) -> NSRect {
                 if menu.kind == .addProject {
                     return addProjectButton.convert(addProjectButton.bounds, to: navigatorRoot)
@@ -4163,7 +4164,7 @@ struct WindowHarness {
                 let frame = ThemedMenuLayout.frame(
                     anchor: actionMenuAnchor(in: menu),
                     desiredSize: NSSize(width: 190, height: fullHeight),
-                    in: navigatorRoot.bounds, flipped: navigatorRoot.isFlipped)
+                    in: menuLayoutBounds, flipped: navigatorRoot.isFlipped)
                 menuHeightBudget = frame.height - ThemedMenuMetrics.verticalOuterInset * 2
             } else if accountPicker != nil {
                 navigatorRoot.layoutSubtreeIfNeeded()
@@ -4173,7 +4174,7 @@ struct WindowHarness {
                     anchor: actionsButton.convert(actionsButton.bounds, to: navigatorRoot),
                     desiredSize: NSSize(width: width,
                         height: ThemedMenuMetrics.height(for: accountMenuEntries)),
-                    in: navigatorRoot.bounds, flipped: navigatorRoot.isFlipped)
+                    in: menuLayoutBounds, flipped: navigatorRoot.isFlipped)
                 menuHeightBudget = frame.height - ThemedMenuMetrics.verticalOuterInset * 2
             } else {
                 menuHeightBudget = navigatorContentHeight
@@ -4203,13 +4204,28 @@ struct WindowHarness {
                 } ?? 0
                 return index - menu.first + separatorOffset
             }
+            func floatingMenuRowRect(_ slot: Int) -> NSRect? {
+                if hasSplitPane, let surface = navigatorFloatingSurface,
+                   navigatorFloatingRows.indices.contains(slot) {
+                    let row = navigatorFloatingRows[slot]
+                    return row.convert(row.bounds, to: surface).offsetBy(
+                        dx: navigatorFloatingFrame.minX, dy: navigatorFloatingFrame.minY)
+                }
+                guard let row = navigatorRoot.mountedMenuRow(at: slot) else { return nil }
+                return row.convert(row.bounds, to: navigatorRoot)
+            }
+            func floatingMenuRowPixels(_ slot: Int) ->
+                (x: Int32, y: Int32, width: Int32, height: Int32)? {
+                guard let row = floatingMenuRowRect(slot) else { return nil }
+                return (Int32(row.minX * scale),
+                    Int32((menuLayoutBounds.height - row.maxY) * scale),
+                    Int32(row.width * scale), Int32(row.height * scale))
+            }
             func actionMenuIndex(at x: Int32, y: Int32) -> Int? {
                 guard let menu = actions else { return nil }
                 let end = min(menu.commands.count, menu.first + count)
                 for index in menu.first..<end {
-                    guard let row = menuRowPixels(actionMenuSlot(index, in: menu),
-                                                  in: navigatorRoot,
-                                                  scale: contentWindow.backingScaleFactor)
+                    guard let row = floatingMenuRowPixels(actionMenuSlot(index, in: menu))
                     else { continue }
                     if x >= row.x && x < row.x + row.width &&
                        y >= row.y && y < row.y + row.height { return index }
@@ -4464,7 +4480,7 @@ struct WindowHarness {
                             anchor: anchor,
                             desiredSize: NSSize(width: menuWidth,
                                 height: ThemedMenuMetrics.height(for: entries)),
-                            in: root.bounds, flipped: root.isFlipped)
+                            in: menuLayoutBounds, flipped: root.isFlipped)
                         let maximumHeight = max(64, placement.height)
                         func visibleEnd(start: Int) -> Int {
                             var height: CGFloat = 12
@@ -4492,7 +4508,7 @@ struct WindowHarness {
                         sessionMenuFrame = ThemedMenuLayout.frame(
                             anchor: anchor,
                             desiredSize: NSSize(width: menuWidth, height: menuHeight),
-                            in: root.bounds, flipped: root.isFlipped)
+                            in: menuLayoutBounds, flipped: root.isFlipped)
                         retainedSessionMenuRows.prepare(
                             menu: "session:\(menu.sessionID):\(menu.page)",
                             entries: entries, visible: visible)
@@ -4548,9 +4564,25 @@ struct WindowHarness {
                 trace("header bandHeight=\(navigatorHeaderHeight) title=\(titleRect) add=\(addRect) actions=\(actionsRect)")
                 let mountStarted = DispatchTime.now().uptimeNanoseconds
                 root.finishNavigatorRows()
+                func mountNavigatorMenu(_ surface: ThemedMenuPanelView,
+                                        frame: NSRect, rows: [NSView]) {
+                    if hasSplitPane {
+                        root.mountMenuRows([], heights: [], topInset: navigatorHeaderHeight + 2)
+                        surface.frame = NSRect(origin: .zero, size: frame.size)
+                        surface.appearance = LinuxTheme.appearance
+                        navigatorMenuWindow.contentView = surface
+                        navigatorFloatingSurface = surface
+                        navigatorFloatingFrame = frame
+                        navigatorFloatingRows = rows
+                    } else {
+                        root.mountFloatingMenu(surface, frame: frame, rows: rows)
+                        navigatorFloatingSurface = nil
+                        navigatorFloatingRows.removeAll(keepingCapacity: true)
+                    }
+                }
                 if sessionMenu != nil {
                     sessionMenuSurface.setRows(floatingMenuViews, heights: floatingMenuHeights)
-                    root.mountFloatingMenu(sessionMenuSurface, frame: sessionMenuFrame,
+                    mountNavigatorMenu(sessionMenuSurface, frame: sessionMenuFrame,
                         rows: floatingMenuViews)
                 } else if let menu = actions {
                     let width = ThemedMenuMetrics.width(for: actionMenuEntries, minimum: 190,
@@ -4559,10 +4591,10 @@ struct WindowHarness {
                     actionMenuFrame = ThemedMenuLayout.frame(
                         anchor: actionMenuAnchor(in: menu),
                         desiredSize: NSSize(width: width, height: height),
-                        in: root.bounds, flipped: root.isFlipped)
+                        in: menuLayoutBounds, flipped: root.isFlipped)
                     actionMenuSurface.setRows(menuRows, heights: menuHeights,
                         padding: ThemedMenuMetrics.verticalOuterInset)
-                    root.mountFloatingMenu(actionMenuSurface, frame: actionMenuFrame,
+                    mountNavigatorMenu(actionMenuSurface, frame: actionMenuFrame,
                         rows: menuRows)
                 } else if accountPicker != nil {
                     let width = ThemedMenuMetrics.width(for: accountMenuEntries, minimum: 190,
@@ -4571,14 +4603,17 @@ struct WindowHarness {
                     accountMenuFrame = ThemedMenuLayout.frame(
                         anchor: actionsButton.convert(actionsButton.bounds, to: root),
                         desiredSize: NSSize(width: width, height: height),
-                        in: root.bounds, flipped: root.isFlipped)
+                        in: menuLayoutBounds, flipped: root.isFlipped)
                     accountMenuSurface.setRows(menuRows, heights: menuHeights,
                         padding: ThemedMenuMetrics.verticalOuterInset)
-                    root.mountFloatingMenu(accountMenuSurface, frame: accountMenuFrame,
+                    mountNavigatorMenu(accountMenuSurface, frame: accountMenuFrame,
                         rows: menuRows)
                 } else {
                     root.mountMenuRows(menuRows, heights: menuHeights,
                         topInset: navigatorHeaderHeight + 2)
+                    navigatorFloatingSurface = nil
+                    navigatorFloatingRows.removeAll(keepingCapacity: true)
+                    navigatorMenuWindow.contentView = nil
                 }
                 let focusedSlot: Int
                 if let menu = actions { focusedSlot = actionMenuSlot(menu.selected, in: menu) }
@@ -4589,15 +4624,24 @@ struct WindowHarness {
                 if let menu = sessionMenu {
                     focusedView = floatingMenuRows.first { $0.entryIndex == menu.selected }
                 } else if actions != nil || accountPicker != nil {
-                    focusedView = root.mountedMenuRow(at: focusedSlot)
+                    focusedView = hasSplitPane
+                        ? (navigatorFloatingRows.indices.contains(focusedSlot)
+                            ? navigatorFloatingRows[focusedSlot] : nil)
+                        : root.mountedMenuRow(at: focusedSlot)
                 } else if projectsMode && !projects.isEmpty {
                     focusedView = outline.view(atColumn: 0, row: selectedInlineIndex,
                                                makeIfNecessary: false)
                 } else {
                     focusedView = root.mountedRow(at: focusedSlot)
                 }
-                contentWindow.makeFirstResponder(sidebarFocused && accountPicker == nil
-                    ? focusedView : nil)
+                if hasSplitPane, navigatorFloatingSurface != nil {
+                    contentWindow.makeFirstResponder(nil)
+                    navigatorMenuWindow.makeFirstResponder(sidebarFocused && accountPicker == nil
+                        ? focusedView : nil)
+                } else {
+                    contentWindow.makeFirstResponder(sidebarFocused && accountPicker == nil
+                        ? focusedView : nil)
+                }
                 let mountMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - mountStarted) / 1_000_000
                 trace("raster.begin")
                 let bitmap = Bitmap(width: navigatorWidth, height: height,
@@ -4649,13 +4693,32 @@ struct WindowHarness {
                 }
                 trace("present.end")
                 guard result == 0 else { throw WindowFailure(String(cString: tw_error())) }
+                if hasSplitPane, let surface = navigatorFloatingSurface {
+                    let frame = navigatorFloatingFrame
+                    let pixelWidth = Int((frame.width * scale).rounded())
+                    let pixelHeight = Int((frame.height * scale).rounded())
+                    let overlay = Bitmap(width: pixelWidth, height: pixelHeight)
+                    surface.render(in: NSGraphicsContext(bitmap: overlay, scale: scale))
+                    let overlayResult = overlay.pixels.withUnsafeBufferPointer {
+                        tw_present_navigator_menu(window, $0.baseAddress,
+                            Int32(pixelWidth), Int32(pixelHeight),
+                            Int32((frame.minX * scale).rounded()),
+                            Int32((menuLayoutBounds.height - frame.maxY) * scale))
+                    }
+                    guard overlayResult == 0 else {
+                        throw WindowFailure("navigator menu overlay exceeds its window")
+                    }
+                } else {
+                    tw_hide_navigator_menu(window)
+                }
                 if visibleWorkingActivity {
                     try paintWorkingPatches()
                 }
                 trace("accessibility-title.begin")
                 if let menu = sessionMenu {
                     let rows = floatingMenuRows.filter { menu.command(at: $0.entryIndex) != nil }
-                    let bounds = sessionMenuSurface.convert(sessionMenuSurface.bounds, to: root)
+                    let bounds = hasSplitPane ? sessionMenuFrame
+                        : sessionMenuSurface.convert(sessionMenuSurface.bounds, to: root)
                     let listX = Int32(bounds.minX * scale)
                     let listY = Int32((root.bounds.height - bounds.maxY) * scale)
                     tw_accessibility_begin_list(window, "Session actions", 0,
@@ -4664,7 +4727,10 @@ struct WindowHarness {
                     for row in rows {
                         guard let command = menu.command(at: row.entryIndex),
                               let title = menu.entries[row.entryIndex].item?.title else { continue }
-                        let rect = row.convert(row.bounds, to: root)
+                        let rect = hasSplitPane
+                            ? row.convert(row.bounds, to: sessionMenuSurface).offsetBy(
+                                dx: sessionMenuFrame.minX, dy: sessionMenuFrame.minY)
+                            : row.convert(row.bounds, to: root)
                         let x = Int32(rect.minX * scale)
                         let y = Int32((root.bounds.height - rect.maxY) * scale)
                         let result = command.rawValue.withCString { identifier in
@@ -4698,8 +4764,7 @@ struct WindowHarness {
                     for index in menu.first..<end {
                         let command = menu.commands[index]
                         let label = command.title + (command.availability.disabledReason.map { ". " + $0 } ?? "")
-                        guard let bounds = menuRowPixels(actionMenuSlot(index, in: menu), in: root,
-                                                         scale: contentWindow.backingScaleFactor) else {
+                        guard let bounds = floatingMenuRowPixels(actionMenuSlot(index, in: menu)) else {
                             throw WindowFailure("accessible menu command has no mounted row")
                         }
                         let result = command.id.withCString { identifier in
@@ -4744,8 +4809,7 @@ struct WindowHarness {
                         let handle = pickerAccounts[index]
                         let name = handle.isStandard ? "Default \(provider)" : "\(provider) \(handle.name)"
                         let label = name + (handle == active ? " active" : "")
-                        guard let bounds = menuRowPixels(index - accountFirst, in: root,
-                                                         scale: contentWindow.backingScaleFactor)
+                        guard let bounds = floatingMenuRowPixels(index - accountFirst)
                         else { throw WindowFailure("accessible account has no mounted row") }
                         let result = handle.name.withCString { identifier in
                             label.withCString { text in
@@ -5437,6 +5501,7 @@ struct WindowHarness {
             let windowIsKey = tw_window_has_focus(window) != 0
             if contentWindow.isKeyWindow != windowIsKey {
                 contentWindow.isKeyWindow = windowIsKey
+                navigatorMenuWindow.isKeyWindow = windowIsKey
                 if !windowIsKey { contentWindow.cancelPointerGesture() }
                 for index in outline.visibleRowIndexes {
                     guard let chrome = outline.rowView(atRow: index,
@@ -5547,6 +5612,7 @@ struct WindowHarness {
                 }
                 if event.action == 4 || event.action == 7 {
                     contentWindow.cancelPointerGesture()
+                    navigatorMenuWindow.cancelPointerGesture()
                     _ = navigatorRoot.takeActivatedRowSlot()
                     activatedOutlineItem = nil
                     activatedOutlineProjectActionID = nil
@@ -5557,6 +5623,11 @@ struct WindowHarness {
                     activatedAccountHandle = nil
                     rowActionMenuGesture = false
                     rowActionMenuEntered = false
+                    if event.action == 4, navigatorFloatingSurface != nil {
+                        if sessionMenu != nil { dismissSessionMenu() }
+                        else if actions != nil { dismissActions() }
+                        else if accountPicker != nil { accountPicker = nil; dirty = true }
+                    }
                     if hoveredOutlineItem != nil {
                         hoveredOutlineItem = nil; dirty = true
                     }
@@ -5574,6 +5645,7 @@ struct WindowHarness {
                 // a pointer move never scans a stored catalogue or builds hidden controls.
                 var pointerOutlineItem: NavigatorOutlineItem?
                 if actions == nil, accountPicker == nil, savedPicker == nil,
+                   sessionMenu == nil,
                    launch != nil, let index = outlineRowIndex(at: event),
                    let item = outline.item(atRow: index) as? NavigatorOutlineItem,
                    (item.kind == .project || item.kind == .repository || item.kind == .agent),
@@ -5613,8 +5685,15 @@ struct WindowHarness {
                     activatedOutlineSessionArchiveID = nil
                     activatedSessionMenuEntry = nil
                 }
-                _ = contentWindow.dispatchToContent(NSEvent(type: eventType,
-                                                              locationInWindow: point))
+                if navigatorFloatingSurface != nil {
+                    let menuPoint = NSPoint(x: point.x - navigatorFloatingFrame.minX,
+                                            y: point.y - navigatorFloatingFrame.minY)
+                    _ = navigatorMenuWindow.dispatchToContent(NSEvent(type: eventType,
+                        locationInWindow: menuPoint))
+                } else {
+                    _ = contentWindow.dispatchToContent(NSEvent(type: eventType,
+                        locationInWindow: point))
+                }
                 if event.action == 1, let actionID = activatedOutlineSessionActionID {
                     activatedOutlineSessionActionID = nil
                     if pointerOutlineItem?.kind == .agent,
@@ -5746,6 +5825,7 @@ struct WindowHarness {
                         event.kind = 8 // Reuse the menu's exact-project command admission.
                     } else { continue }
                 }
+                if navigatorFloatingSurface != nil && event.kind != 8 { continue }
                 if event.kind == 8 {
                     // A held press that entered the menu is completed by its release below.
                 } else if event.action == 1 {

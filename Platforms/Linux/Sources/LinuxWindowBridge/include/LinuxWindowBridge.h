@@ -176,6 +176,9 @@ int tw_present_terminal_header(TWWindow *, const uint8_t *rgba, int width, int h
 // origin is right-pane-local; hiding also unmounts its accessibility menu.
 int tw_present_session_menu(TWWindow *, const uint8_t *rgba, int width, int height, int x, int y);
 void tw_hide_session_menu(TWWindow *);
+int tw_present_navigator_menu(TWWindow *, const uint8_t *rgba, int width, int height, int x, int y);
+void tw_hide_navigator_menu(TWWindow *);
+int tw_navigator_menu_visible(TWWindow *);
 // App-only header button. Height0 hides; disabled buttons remain visible but cannot activate.
 void tw_actions_button(TWWindow *, const char *label, int enabled,
                        int x, int y, int width, int height);

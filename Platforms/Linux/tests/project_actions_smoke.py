@@ -270,6 +270,7 @@ try:
 
         # A held press can enter the newly opened host menu. Releasing on Open shell must
         # target Beta even though Alpha was still selected when the menu opened.
+        beta_id = rows[1].get_accessible_id()
         move_pointer(window, rows[1].get_child_at_index(1))
         xdo('mousedown', '--window', window, '1')
         eventually(lambda: listing(app).get_name() == 'Project actions' and
@@ -278,7 +279,6 @@ try:
         eventually(lambda: listing(app).get_child_at_index(1).get_state_set().contains(
             Atspi.StateType.SELECTED), 'drag highlighted Open shell', process)
         xdo('mouseup', '--window', window, '1')
-        beta_id = rows[1].get_accessible_id()
         def beta_terminal_selected():
             with sqlite3.connect(store / 'threading.db') as database:
                 beta = json.loads(database.execute('SELECT data FROM project WHERE id=?',
