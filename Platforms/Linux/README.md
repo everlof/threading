@@ -119,9 +119,10 @@ The current shared-view audit distinguishes reused components from reused page c
 | --- | --- | --- |
 | Navigator rows and menus | Sidebar row assembly and `MorphingTitleLabel` titles, menu panel, document, rows, separator, layout | `Specimen.Window` still assembles the navigator root separately from `ProjectSidebarViewController`; SDL viewport, overlay lifecycle and menu interaction remain host-owned |
 | Opening composer | `OpeningComposerContentView` owns the choice row, column, and hero region; prompt, chips, choice panels and menu rows are shared | Linux still supplies a reduced set of controls and its house-theme greeting; macOS owns its theme backdrop and extension plane |
-| Native conversation | Transcript table and row components, prompt, chips, pane constraints, menu panels | `WorkspaceConversationPane` still assembles a reduced page separately from `ConversationViewController` |
+| Native conversation | `ConversationPaneContentView` mounts transcript, status and composer with the same constraints; transcript rows, prompt, chips and menu panels are shared | `WorkspaceConversationPane` still supplies a reduced control set and lifecycle; the Mac controller owns its additional rails and overlays |
 | General Settings | Page canvas, confirmation card, toggles and constraints | `WorkspaceSettingsPane` includes fewer sections than `GeneralPreferencesViewController` |
 | Welcome and sidebar artwork | Opening body and row containers are shared | `ComposerWelcomeView`, `SidebarBackdropView`, `SidebarBrandView`, and `ThreadingMarkView` still have separate Linux implementations inside their Design files; the Linux hero also differs from the macOS hero stack |
+| Navigator activity and schedule picker | Shared session row content and picker policy | Linux still draws `ThemedSessionActivityMark` and the schedule picker's table row through platform-specific leaves |
 
 The shared-view source check prevents new duplicate classes and manual menu row/panel frames.
 It does not make separate page controllers equivalent; the remaining page composition work is

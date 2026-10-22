@@ -22,7 +22,7 @@ final class WorkspaceConversationPane: WorkspacePane {
     let runtime: NativeWorkspaceSession
     let chrome: WorkspacePaneChrome
     private let owner = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
-    private let root = NSView(frame: .zero)
+    private let root = ConversationPaneContentView(frame: .zero)
     private let transcript = ConversationTranscriptTable<WorkspaceConversationPane>()
     private var scroll: ThemedScrollView { transcript.scrollView }
     private var table: ThemedTableView { transcript.tableView }
@@ -96,9 +96,6 @@ final class WorkspaceConversationPane: WorkspacePane {
         status.lineBreakMode = .byTruncatingTail
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         status.isSelectable = true
-        for view in [scroll, status, composer] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-        }
         transcript.surface = self
         transcript.activate()
         composer.placeholder = "Reply to this conversation"
@@ -117,9 +114,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         effortChip.nextKeyView = speedChip
         speedChip.nextKeyView = submit
         submit.nextKeyView = composer.linuxEditor
-        root.addSubview(scroll)
-        root.addSubview(status)
-        root.addSubview(composer)
+        root.mount(transcript: scroll, status: status, composer: composer)
         root.addSubview(speedMenu)
         root.addSubview(configurationMenu)
         configurationMenu.isHidden = true
@@ -155,16 +150,12 @@ final class WorkspaceConversationPane: WorkspacePane {
         contextLabel.setAccessibilityIdentifier("conversation.context")
         composer.setFooterControls(leading: [modelChip, modeChip, effortChip, speedChip],
                                    trailing: [contextLabel])
-        NSLayoutConstraint.activate(ConversationPaneLayout.constraints(
-            in: root,
-            transcript: scroll,
-            status: status,
-            composer: composer,
+        root.constrain(
             transcriptTop: scroll.topAnchor.constraint(equalTo: root.topAnchor),
             composerBottom: root.bottomAnchor,
             columnCap: composerColumnCap,
             columnWidth: composerColumnWidth
-        ))
+        )
         owner.contentView = root
         runtime.onRow = { [weak self] index, row, pages in
             guard let self else { return }

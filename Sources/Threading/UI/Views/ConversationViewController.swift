@@ -307,6 +307,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     private lazy var composerColumnCap = promptContentContainer.widthAnchor.constraint(
         lessThanOrEqualToConstant: ConversationDefaults.composerWidth
     )
+    private let paneContent = ConversationPaneContentView()
     private lazy var minimapLeading = minimap.leadingAnchor.constraint(equalTo: view.leadingAnchor)
 
     /// The transcript normally starts at the pane's content edge. While a limit refusal stands,
@@ -1230,7 +1231,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView()
+        view = paneContent
         view.wantsLayer = true
     }
 
@@ -1269,16 +1270,15 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // flush at the leading edge rather than behind a reserved orb-sized gap.
         orbView.isHidden = true
 
-        view.addSubview(scrollView)
+        paneContent.mount(transcript: scrollView, status: statusRow,
+                          composer: promptContentContainer)
         view.addSubview(minimap)
         view.addSubview(jumpToEndButton, positioned: .above, relativeTo: scrollView)
         // Above the scroll view in z, and pinned to its top edge: it overlays the transcript
         // rather than insetting it, because insetting would move the content under an anchored
         // auto-scroll and make arriving output jump by the header's height.
         view.addSubview(stickyStep, positioned: .above, relativeTo: scrollView)
-        view.addSubview(promptContentContainer)
         installActivityBeam()
-        view.addSubview(statusRow)
         view.addSubview(outboxRail)
         view.addSubview(scheduledStrip)
         view.addSubview(limitEscapeStrip)
@@ -1445,16 +1445,13 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }
 
     private func setupConstraints() {
-        NSLayoutConstraint.activate(ConversationPaneLayout.constraints(
-            in: view,
-            transcript: scrollView,
-            status: statusRow,
-            composer: promptContentContainer,
+        paneContent.constrain(
             transcriptTop: transcriptBelowPaneTop,
             composerBottom: view.safeAreaLayoutGuide.bottomAnchor,
             columnCap: composerColumnCap,
             columnWidth: composerColumnWidth
-        ) + [
+        )
+        NSLayoutConstraint.activate([
             // Directly above the box, below the status line. The two lines answer different
             // questions and belong on different sides of that boundary: the status line is the
             // *turn* talking — the orb, the word, what the last one cost — and reads with the
