@@ -57,11 +57,11 @@ final class WorkspaceConversationPane: WorkspacePane {
     private var submit: ThemedButton { composer.linuxSubmitButton }
     private let status: NSTextField
     private lazy var composerColumnCap = composer.widthAnchor.constraint(
-        lessThanOrEqualToConstant: Design.Chat.columnWidth + 2 * Design.Spacing.inset)
+        lessThanOrEqualToConstant: ConversationPaneLayout.composerWidth)
     private lazy var composerColumnWidth: NSLayoutConstraint = {
         let constraint = composer.widthAnchor.constraint(
-            equalToConstant: Design.Chat.columnWidth + 2 * Design.Spacing.inset)
-        constraint.priority = .init(400)
+            equalToConstant: ConversationPaneLayout.composerWidth)
+        constraint.priority = ConversationPaneLayout.statedColumnPriority
         return constraint
     }()
     private var needsPresentation = true
@@ -706,8 +706,8 @@ final class WorkspaceConversationPane: WorkspacePane {
         guard height >= minimumWindowHeight else { needsPresentation = true; return }
         guard needsPresentation || size != presentedSize || displayRevision != owner.displayRevision else { return }
         root.frame = NSRect(origin: .zero, size: size)
-        let columnCap = Design.Chat.columnWidth + 2 * inset
-        let composerWidth = max(1, min(columnCap, size.width - 2 * inset))
+        let columnCap = ConversationPaneLayout.composerWidth
+        let composerWidth = max(1, ConversationPaneLayout.measuredComposerWidth(in: size.width))
         if composerColumnCap.constant != columnCap { composerColumnCap.constant = columnCap }
         if composerColumnWidth.constant != composerWidth {
             composerColumnWidth.constant = composerWidth

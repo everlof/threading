@@ -4,6 +4,18 @@ import AppKit
 /// The host supplies its pane edge anchors and keeps ownership of transient rails and overlays.
 @MainActor
 enum ConversationPaneLayout {
+    /// The reply box includes the prompt's padding around the transcript reading column.
+    static var composerWidth: CGFloat { Design.Chat.columnWidth + 2 * Design.Spacing.inset }
+
+    /// A stale measured width must yield to the split pane's holding priority during resize.
+    static let statedColumnPriority = NSLayoutConstraint.Priority(
+        NSLayoutConstraint.Priority.defaultLow.rawValue + 1
+    )
+
+    static func measuredComposerWidth(in paneWidth: CGFloat) -> CGFloat {
+        min(composerWidth, paneWidth - 2 * Design.Spacing.inset)
+    }
+
     static func constraints(
         in root: NSView,
         transcript: NSView,

@@ -1809,7 +1809,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     private func updateComposerColumnWidth() {
         let cap = ConversationDefaults.composerWidth
         if abs(composerColumnCap.constant - cap) > 0.5 { composerColumnCap.constant = cap }
-        let width = min(cap, view.bounds.width - Design.Spacing.inset * 2)
+        let width = ConversationPaneLayout.measuredComposerWidth(in: view.bounds.width)
         guard width > 0, abs(composerColumnWidth.constant - width) > 0.5 else { return }
         composerColumnWidth.constant = width
     }

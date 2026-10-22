@@ -1532,12 +1532,14 @@ converted through the actual view hierarchy for placement and repeated-click dis
 on macOS and Linux, using `ConversationPaneLayout` for their shared constraints. Each host
 supplies its own top and bottom anchors: Mac uses the pane safe area, while the Linux bitmap
 root supplies its bounds. The Mac-only rails and overlays keep their additional constraints
-in the controller.
+in the controller. `ConversationPaneLayout` also owns the reply width cap, its pane-width
+calculation and the 251-priority stated width. Linux previously used 400 there, which could
+make a stale width compete with the split pane during resize.
 
-`SidebarNavigatorContentView` similarly mounts the navigator header, outline and empty state on both
-platforms. Mac pins the header to its safe area and the outline above its footer; Linux pins
-the header to its viewport top and the outline to its bottom. Linux's outer specimen retains
-its diagnostic layers, while the Mac controller retains footer and backdrop ownership.
+`SidebarNavigatorContentView` similarly mounts the navigator header, outline, empty state and
+footer on both platforms. Mac pins the header to its safe area; Linux pins it to its viewport
+top. The outline ends above the mounted footer in both hosts. Linux's outer specimen retains
+its diagnostic layers, while the Mac controller retains its backdrop ownership.
 
 `SidebarBrandContentView` mounts the brand mark and wordmark with the same stack, mark size and
 edge constraints. Mac supplies optional theme artwork and activity leaves; Linux supplies its
