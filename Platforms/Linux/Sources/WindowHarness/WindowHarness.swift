@@ -161,7 +161,6 @@ struct WindowHarness {
     private static let navigatorRowHeight: CGFloat = SidebarDefaults.rowHeight
     private static let navigatorRowStride: CGFloat = SidebarDefaults.rowHeight
     @MainActor private static var navigatorHeaderHeight: CGFloat { PaneHeaderView.bandHeight }
-    @MainActor private static var navigatorRowsTop: Int32 { Int32((navigatorHeaderHeight + 2) * WorkspaceDisplay.scale) }
     #if os(Linux)
     static let terminalCellWidth = Int(TW_TERMINAL_CELL_WIDTH)
     static let terminalCellHeight = Int(TW_TERMINAL_CELL_HEIGHT)
@@ -2110,6 +2109,7 @@ struct WindowHarness {
         let snoozeWakeInbox = SnoozeWakeInbox()
         var pendingSnoozeAcknowledgements: [String: String] = [:]
         var actions: NavigatorActions.Presentation?
+        let addProjectMenuSeparator = ThemedMenuSeparatorView()
         var sessionMenu: SidebarSessionMenu?
         let sessionMenuSurface = ThemedMenuPanelView(frame: .zero)
         let retainedSessionMenuRows = RetainedMenuRows()
@@ -4105,8 +4105,11 @@ struct WindowHarness {
             if actionsEnabled != enabled { actionsEnabled = enabled; dirty = true }
             let visibleRowHeight = actions == nil && accountPicker == nil
                 ? navigatorRowStride : ThemedMenuMetrics.rowHeight
+            let separatorReserve = actions?.kind == .addProject
+                ? ThemedMenuMetrics.separatorHeight : 0
             let count = min(Int(TW_NAVIGATOR_MAX_ROWS),
-                max(1, Int((CGFloat(height) / scale - navigatorHeaderHeight - 2) / visibleRowHeight)))
+                max(1, Int((CGFloat(height) / scale - navigatorHeaderHeight - 2
+                            - separatorReserve) / visibleRowHeight)))
             let projectsMode = actions == nil && accountPicker == nil && savedPicker == nil
             if dirty {
                 navigatorRoot.prepareNavigatorFrame(NSRect(x: 0, y: 0,
@@ -4119,16 +4122,30 @@ struct WindowHarness {
             outlineSource.projectIndexes = projectIndexes
             let sidebarRows = SidebarVisibleRows(outline: outline, projects: projects,
                                                   projectIndexes: projectIndexes)
+            func scratchpadSeparatorIndex(in menu: NavigatorActions.Presentation) -> Int? {
+                guard menu.kind == .addProject else { return nil }
+                return menu.commands.firstIndex {
+                    $0.id == NavigatorActions.Command.newScratchpad.rawValue
+                }
+            }
+            func actionMenuSlot(_ index: Int, in menu: NavigatorActions.Presentation) -> Int {
+                let separatorOffset = scratchpadSeparatorIndex(in: menu).map { boundary in
+                    menu.first < boundary && index >= boundary ? 1 : 0
+                } ?? 0
+                return index - menu.first + separatorOffset
+            }
             func actionMenuIndex(at x: Int32, y: Int32) -> Int? {
-                guard let menu = actions, y >= navigatorRowsTop else { return nil }
-                let stride = Int32(ThemedMenuMetrics.rowHeight * contentWindow.backingScaleFactor)
-                let slot = Int((y - navigatorRowsTop) / stride)
-                let index = menu.first + slot
-                guard slot >= 0, slot < count, index < menu.commands.count else { return nil }
-                guard let row = menuRowPixels(slot, in: navigatorRoot,
-                                              scale: contentWindow.backingScaleFactor) else { return nil }
-                return x >= row.x && x < row.x + row.width &&
-                       y >= row.y && y < row.y + row.height ? index : nil
+                guard let menu = actions else { return nil }
+                let end = min(menu.commands.count, menu.first + count)
+                for index in menu.first..<end {
+                    guard let row = menuRowPixels(actionMenuSlot(index, in: menu),
+                                                  in: navigatorRoot,
+                                                  scale: contentWindow.backingScaleFactor)
+                    else { continue }
+                    if x >= row.x && x < row.x + row.width &&
+                       y >= row.y && y < row.y + row.height { return index }
+                }
+                return nil
             }
             if var menu = actions {
                 let commands: [HostCommandDescriptor]
@@ -4257,6 +4274,10 @@ struct WindowHarness {
                     retainedMenuRows.prepare(menu: "actions:\(menu.kind)", entries: entries,
                                              visible: menu.first..<end)
                     for index in menu.first..<end {
+                        if index > menu.first, index == scratchpadSeparatorIndex(in: menu) {
+                            menuRows.append(addProjectMenuSeparator)
+                            menuHeights.append(ThemedMenuMetrics.separatorHeight)
+                        }
                         guard let row = retainedMenuRows.row(at: index, plan: plan) else {
                             throw WindowFailure("host command was not a menu item")
                         }
@@ -4463,24 +4484,24 @@ struct WindowHarness {
                 trace("header bandHeight=\(navigatorHeaderHeight) title=\(titleRect) add=\(addRect) actions=\(actionsRect)")
                 let mountStarted = DispatchTime.now().uptimeNanoseconds
                 root.finishNavigatorRows()
-                let scratchpadBoundary = actions.flatMap { $0.kind == .addProject ? 2 - $0.first : nil }
                 if sessionMenu != nil {
                     sessionMenuSurface.setRows(floatingMenuViews, heights: floatingMenuHeights)
                     root.mountFloatingMenu(sessionMenuSurface, frame: sessionMenuFrame,
                         rows: floatingMenuViews)
                 } else {
                     root.mountMenuRows(menuRows, heights: menuHeights,
-                        topInset: navigatorHeaderHeight + 2,
-                        separatorBeforeRow: scratchpadBoundary)
+                        topInset: navigatorHeaderHeight + 2)
                 }
                 let focusedSlot: Int
-                if let menu = actions { focusedSlot = menu.selected - menu.first }
+                if let menu = actions { focusedSlot = actionMenuSlot(menu.selected, in: menu) }
                 else if accountPicker != nil { focusedSlot = accountSelected - accountFirst }
                 else if savedPicker != nil { focusedSlot = savedSelected - savedFirst }
                 else { focusedSlot = selectedInlineIndex - first }
                 let focusedView: NSView?
                 if let menu = sessionMenu {
                     focusedView = floatingMenuRows.first { $0.entryIndex == menu.selected }
+                } else if actions != nil || accountPicker != nil {
+                    focusedView = root.mountedMenuRow(at: focusedSlot)
                 } else if projectsMode && !projects.isEmpty {
                     focusedView = outline.view(atColumn: 0, row: selectedInlineIndex,
                                                makeIfNecessary: false)
@@ -4586,7 +4607,7 @@ struct WindowHarness {
                     for index in menu.first..<end {
                         let command = menu.commands[index]
                         let label = command.title + (command.availability.disabledReason.map { ". " + $0 } ?? "")
-                        guard let bounds = menuRowPixels(index - menu.first, in: root,
+                        guard let bounds = menuRowPixels(actionMenuSlot(index, in: menu), in: root,
                                                          scale: contentWindow.backingScaleFactor) else {
                             throw WindowFailure("accessible menu command has no mounted row")
                         }

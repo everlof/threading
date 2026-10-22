@@ -89,6 +89,8 @@ row rectangle inside it.
 `ThemedMenuPanelView.setRows` is the shared mount for pane, composer, conversation and floating
 session menus, while the navigator mounts the same document in its standing menu layer. The
 shared-view check rejects a new per-row frame assignment in those hosts.
+The Add Project divider is a `ThemedMenuSeparatorView` inside that document, so its height,
+pointer gap and accessibility row offsets come from the same visible sequence as the choices.
 The navigator's header Actions and account pickers still use a full-column menu mode; their
 anchoring and dismissal must converge on the same menu presentation as macOS.
 The row menu now uses the same Snooze wall-clock moments as macOS. Its Linux host owns the

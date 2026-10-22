@@ -127,7 +127,6 @@ enum Specimen {
         private var workspaceBackdrop: SidebarBackdropView?
         private var workspaceBackdropClip: NSView?
         private var workspaceWell: NSView?
-        private var workspaceScratchpadRule: SeparatorView?
         private var mountedMenuDocument: ThemedMenuDocumentView?
         private var mountedMenuHeights: [CGFloat] = []
         #else
@@ -182,20 +181,15 @@ enum Specimen {
             let backdrop = SidebarBackdropView()
             let backdropClip = NSView(frame: .zero)
             let well = NSView(frame: .zero)
-            let rule = SeparatorView()
-            rule.translatesAutoresizingMaskIntoConstraints = true
-            rule.isHidden = !separatesScratchpad
             backdrop.translatesAutoresizingMaskIntoConstraints = false
             backdropClip.translatesAutoresizingMaskIntoConstraints = false
             well.translatesAutoresizingMaskIntoConstraints = false
             backdropClip.addSubview(backdrop)
             addSubview(backdropClip, positioned: .below, relativeTo: rowLayer)
             addSubview(well, positioned: .above, relativeTo: backdropClip)
-            addSubview(rule, positioned: .above, relativeTo: well)
             workspaceBackdrop = backdrop
             workspaceBackdropClip = backdropClip
             workspaceWell = well
-            workspaceScratchpadRule = rule
         }
 
         /// The SDL host keeps this tree mounted across mode changes. Re-resolve the neutral
@@ -264,8 +258,7 @@ enum Specimen {
         /// Rows that stay visible stay mounted: detaching a row mid-press would end the
         /// gesture its release is meant to complete.
         #if THREADING_WINDOW_HARNESS
-        func mountMenuRows(_ rows: [NSView], heights: [CGFloat], topInset: CGFloat,
-                           separatorBeforeRow: Int? = nil) {
+        func mountMenuRows(_ rows: [NSView], heights: [CGFloat], topInset: CGFloat) {
             precondition(rows.count == heights.count)
             if subviews.last !== menuLayer {
                 addSubview(menuLayer, positioned: .above, relativeTo: nil)
@@ -291,17 +284,6 @@ enum Specimen {
                 x: 6, y: bounds.height - topInset - documentHeight,
                 width: max(1, bounds.width - 12), height: documentHeight
             )
-            workspaceScratchpadRule?.isHidden = true
-            if let index = separatorBeforeRow, index > 0, rows.indices.contains(index),
-               let workspaceScratchpadRule {
-                // The third choice follows the two folder choices. Measure their actual
-                // boundary; the old fixed offset ran the rule through the second label.
-                workspaceScratchpadRule.isHidden = false
-                let above = heights.prefix(index).reduce(0, +)
-                workspaceScratchpadRule.frame = NSRect(
-                    x: 8, y: bounds.height - topInset - above - 0.25,
-                    width: max(0, bounds.width - 16), height: 0.5)
-            }
         }
         #endif
 

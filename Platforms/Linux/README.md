@@ -100,10 +100,10 @@ navigator. Saved agent pages now show its production Actions control and a retai
 of production `ThemedMenuRowView` rows. The scoped Linux menu copies the saved session ID or
 owning project path; the host revalidates the active page and project before each command.
 Its menu rows, the opening and conversation choice menus, and the navigator's Actions and account
-menus now use the production `ThemedMenuDocumentView`. The floating session menu also uses its
-shared separator. `ThemedMenuPanelView` owns the menu surface and historical frame artwork on
-both platforms; the current Linux theme snapshot selects its automatic appearance. Linux supplies
-menu bounds and SDL overlay lifecycle; the shared document lays out the rows.
+menus now use the production `ThemedMenuDocumentView`. The floating session menu and Add Project
+menu also use its shared separator. `ThemedMenuPanelView` owns the menu surface and historical
+frame artwork on both platforms; the current Linux theme snapshot selects its automatic appearance.
+Linux supplies menu bounds and SDL overlay lifecycle; the shared document lays out the rows.
 The navigator's header Actions and account pickers still replace the column with menu rows;
 they have not yet adopted the Mac anchored menu placement and dismissal behavior.
 

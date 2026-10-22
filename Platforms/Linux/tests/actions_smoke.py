@@ -272,6 +272,7 @@ try:
         assert idle_add.get_action_iface().do_action(0)
         eventually(lambda: listing().get_name() == 'Add Project',
                    'idle Add Project opened menu')
+        snapshot('add-project-menu')
         key('Escape')
         eventually(lambda: listing().get_name() == 'Projects',
                    'idle Add Project menu dismissed')
