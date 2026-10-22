@@ -545,10 +545,17 @@ enum Specimen {
             let trailing: NSLayoutConstraint
             let width: NSLayoutConstraint
         }
-        private var productionSessionView: ThemedSessionRowContentView?
-        private var productionSessionStack: NSStackView?
+        private var productionSessionAssembly: SidebarSessionRowAssembly?
+        private var productionSessionView: ThemedSessionRowContentView? {
+            productionSessionAssembly?.visuals
+        }
+        private var productionSessionStack: NSStackView? {
+            productionSessionAssembly?.contentStack
+        }
         private var productionSessionMount: ProductionContentMount?
-        private var productionSessionTrailingSlot: SidebarSessionTrailingSlot?
+        private var productionSessionTrailingSlot: SidebarSessionTrailingSlot? {
+            productionSessionAssembly?.trailingSlot
+        }
         private var productionSessionStatusSlot: NSView? { productionSessionTrailingSlot?.statusSlot }
         private var productionSessionActivityMark: ThemedSessionActivityMark?
         private var productionSessionHoverControls: NSStackView? { productionSessionTrailingSlot?.hoverControls }
@@ -806,13 +813,14 @@ enum Specimen {
             if let productionSessionView {
                 content = productionSessionView
             } else {
-                content = ThemedSessionRowContentView(frame: .zero)
-                let stack = NSStackView(views: [content])
-                SidebarRowDefaults.configureSessionContentStack(stack)
-                stack.setAccessibilityIdentifier("sidebar.session.content-stack")
+                let assembly = SidebarSessionRowAssembly()
+                content = assembly.visuals
                 let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
-                let trailing = SidebarSessionTrailingSlot()
-                let mount = mountProductionContent(stack, leadingInset: leading, slot: trailing)
+                let trailing = assembly.trailingSlot
+                let edges = assembly.mount(in: self, leadingInset: leading,
+                    trailingInset: productionTrailingInset + SidebarRowDefaults.trailingInset)
+                let mount = ProductionContentMount(slot: trailing, leading: edges.leading,
+                    trailing: edges.trailing, width: edges.slotWidth)
                 trailing.hoverControls.isHidden = true
                 trailing.actionButton.surfaceStateDidChange = { [weak self] in
                     self?.onSessionControlVisualChange?()
@@ -821,9 +829,7 @@ enum Specimen {
                     self?.onSessionControlVisualChange?()
                 }
                 productionSessionMount = mount
-                productionSessionTrailingSlot = trailing
-                productionSessionStack = stack
-                productionSessionView = content
+                productionSessionAssembly = assembly
             }
             let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
             if let productionSessionMount {

@@ -77,6 +77,10 @@ project identity checked before launch. The hover `⋯`, secondary click, and Sh
 selected session all open that one row-owned menu, as on macOS; project rows retain their
 project-owned menu. The menu's origin and its row rectangles are viewport placement, while the
 row contents keep the Mac component constraints.
+`SidebarSessionRowAssembly` now constructs the shared default-content stack and trailing slot,
+mounts both in either host cell, and installs the same outer constraints. The Mac cell still
+owns extension replacement, hover and status state; the Linux outline cell still owns recycled
+row identity and viewport placement. Both hosts use that one default-content and trailing tree.
 The row menu now uses the same Snooze wall-clock moments as macOS. Its Linux host owns the
 persisted visibility overlay, one process-wide deadline map, worker-side expiry reconciliation,
 and exact-session wake receipts. The shared menu rows draw the choices; no snooze timer or

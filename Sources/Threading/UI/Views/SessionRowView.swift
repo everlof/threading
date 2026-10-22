@@ -19,7 +19,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// The trailing geometry exists for every row, but idle and dormant sessions draw no status.
     /// Keep that stable slot cheap and materialize the indicator's attention/limit subviews and
     /// constraints only after a state has pixels to contribute.
-    private let trailingSlot = SidebarSessionTrailingSlot()
+    private let assembly = SidebarSessionRowAssembly()
+    private var trailingSlot: SidebarSessionTrailingSlot { assembly.trailingSlot }
     private var statusSlot: NSView { trailingSlot.statusSlot }
     private var statusIndicator: SessionStatusIndicator?
     private var actionButton: ThemedIconButton { trailingSlot.actionButton }
@@ -62,7 +63,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     var onCustomizationAction: ((ComponentCustomizationAction) -> Void)?
     private var sessionID: SessionID?
 
-    private let rowVisuals = ThemedSessionRowContentView()
+    private var rowVisuals: ThemedSessionRowContentView { assembly.visuals }
     private var iconView: GlyphView { rowVisuals.iconView }
 
     /// The account's chip, overlaid on the mark's bottom-trailing corner. Deliberately not
@@ -103,7 +104,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     )
     private var nativeStack: NSStackView { rowVisuals }
     private lazy var contentContainer = ComponentContentContainer(defaultContent: nativeStack)
-    private lazy var rowContentStack = NSStackView(views: [rowVisuals])
+    private var rowContentStack: NSStackView { assembly.contentStack }
 
     /// The two gutters the column's width moves — see `SidebarDensity`. Held so a narrower
     /// column is a constant assignment on the rows already on screen.
@@ -301,12 +302,13 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // `PaneFooterView` places a trailing button — see `OpticalInsetProviding`. Pinned by
         // frame instead, the status dot stops short of the margin a project row's count reaches,
         // and the list's trailing edge reads as two edges.
-        let edges = SidebarRowDefaults.constrainContent(
-            rowContentStack, trailingSlot: trailingSlot, in: self,
+        let mount = assembly.mount(
+            in: self,
             leadingInset: SidebarRowDefaults.leadingInset,
             trailingInset: trailingSlotInset(for: SidebarRowDefaults.trailingInset))
-        contentLeadingConstraint = edges.leading
-        trailingSlotConstraint = edges.trailing
+        contentLeadingConstraint = mount.leading
+        trailingSlotConstraint = mount.trailing
+        trailingSlotWidthConstraint = mount.slotWidth
     }
 
     /// How far inside the row's trailing edge the slot is pinned, for a given gutter.
@@ -320,8 +322,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         max(0, gutter - archiveButton.opticalHorizontalInset)
     }
 
-    /// Builds the one visual subtree extensions may customize. The activity/actions slot is a
-    /// sibling outside the container, so replacing or invalidating content cannot disturb it.
+    /// Prepares extension replacement around the shared row assembly. The activity/actions
+    /// slot stays a sibling, so replacing content cannot disturb it.
     private func setupCustomizableContent() {
         // The trailing slot is **not** in the stack.
         //
@@ -332,10 +334,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // came to rest against the title — mid-row on some rows and at the edge on others, for a
         // reason nothing in the row could show. Pinned to the row it is always where the eye
         // looks for it, whatever the row is made of.
-        SidebarRowDefaults.configureSessionContentStack(rowContentStack)
-        addSubview(rowContentStack)
-        addSubview(trailingSlot)
-
         if !defersCustomizationUntilNeeded {
             _ = identityCustomizationHost
             _ = customizationHost
@@ -587,20 +585,11 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         conductIndicator = indicator
     }
 
-    /// The slot sits at the trailing edge, where it reads as status rather than as another
-    /// icon competing with the agent's own.
+    /// The shared assembly places the slot; the host binds its row-specific actions.
     private func setupTrailingSlot() {
         actionButton.onPress = { [weak self] in self?.actionClicked() }
         // The archive action is bound per session in `configure`, not here: it has to name the
         // session it was aimed at rather than read the row's current one when it fires.
-        let width = trailingSlot.widthAnchor.constraint(
-            equalToConstant: SidebarRowDefaults.trailingSlotSize
-        )
-        trailingSlotWidthConstraint = width
-        NSLayoutConstraint.activate([
-            width,
-            trailingSlot.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize)
-        ])
     }
 
     /// Applies status without making an invisible `SessionStatusIndicator` part of every cold

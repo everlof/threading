@@ -9602,3 +9602,26 @@ zone as the app under validation, so "tomorrow" cannot straddle the UTC midnight
 The remaining project, terminal and session row shells still need a
 shared owner where their assembly overlaps; this extraction covers the common trailing
 session subtree, not the complete sidebar row.
+
+## 265. The default session row mounts from one assembly, 2026-10-22
+
+`SessionRowView` and Linux's recycled `Specimen.Row` now instantiate
+`SidebarSessionRowAssembly` from the production Design source. It creates the native identity
+and title stack plus the shared trailing slot, mounts both as cell children, and installs the
+outer content, slot-size and edge constraints. The Mac cell retains extension replacement,
+selection, hover, activity and action routing; Linux retains outline identity, virtual row
+placement and its saved-session action routes. This removes another Linux-only stack
+constructor without making all session-row behavior portable.
+
+`WindowHarness` and the unsigned Mac Debug app build. The Linux session, terminal and project
+layout fixtures pass. The real Xvfb archived-navigation journey passes Snooze/Unsnooze, Pin and
+Archive. Its 1120×900 hover and post-archive renders were inspected and are pixel-identical to
+the pre-change Linux captures. The UI structure ratchet now records six Linux-only stack
+constructors and 3,119 constraint sites overall. The Mac `sidebar-session-rows` suite passes
+four tests and renders 50 states. The repository evidence comparator accepts all 50 decoded
+images against the preceding capture; the light and dark hovered rows were inspected.
+
+The full Mac `PromptView` is still not mounted on Linux. The current diagnostic build of that
+source reaches AppKit drag, pasteboard, bitmap/text-layout APIs and Mac attachment services,
+after the Linux core's composer/query model names. Those adapters are the next large seam;
+repeating the surrounding composer in a Linux-only view would preserve the duplication.
