@@ -1496,7 +1496,9 @@ by the Mac controller and Linux host. `OpeningComposerContentView` mounts that c
 choice row, and the hero region as one view and constraint tree on both platforms. The hosts
 supply the greeting content, controls, draft and launch policy; the Mac root still owns its
 theme backdrop and `composer.backdrop@1` extension plane. The Linux root is the same shared
-content view inside the SDL viewport. Linux's transparent editor sits inside the shared field
+content view inside the SDL viewport. `ComposerWelcomeStackView` also supplies one mark,
+greeting and optional caption arrangement and compact-height rule; each host provides its
+text and mark leaves. Linux's transparent editor sits inside the shared field
 surface, so an empty document cannot shrink the visible field; its cached used-text height feeds
 the same bounded growth policy. `PromptChrome.configureContentStack` and
 `contentSizingConstraints` now supply the same vertical attachment/editor/footer stack and size

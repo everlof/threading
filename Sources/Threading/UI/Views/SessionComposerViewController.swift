@@ -96,7 +96,8 @@ final class SessionComposerViewController: NSViewController {
     private let welcomeMark = ThemeWelcomeMarkView(defaultSide: ComposerDefaults.heroMarkSide)
     private let greetingLabel = MorphingMultilineTitleLabel()
     private let captionLabel = MorphingMultilineTitleLabel()
-    private let heroStack = NSStackView()
+    private lazy var heroStack = ComposerWelcomeStackView(
+        mark: welcomeMark, greeting: greetingLabel, caption: captionLabel)
     private var heroRegion: NSLayoutGuide { composerBody.heroRegion }
     private var hasPlayedHeroDrawIn = false
 
@@ -605,16 +606,6 @@ final class SessionComposerViewController: NSViewController {
         greetingLabel.wrapping = .words(maximumLines: ComposerDefaults.greetingMaximumLines)
         captionLabel.wrapping = .words(maximumLines: ComposerDefaults.captionMaximumLines)
 
-        heroStack.orientation = .vertical
-        heroStack.alignment = .centerX
-        heroStack.spacing = Design.Spacing.inset
-        heroStack.addArrangedSubview(welcomeMark)
-        heroStack.addArrangedSubview(greetingLabel)
-        heroStack.addArrangedSubview(captionLabel)
-        // A caption belongs to its greeting: closer to it than the greeting is to the mark.
-        heroStack.setCustomSpacing(Design.Spacing.small, after: greetingLabel)
-        heroStack.translatesAutoresizingMaskIntoConstraints = false
-
         // The quietest tier there is. With the primary gone from this screen, a bordered import
         // would be the loudest thing left in the column and would read as the action to take —
         // when it is the alternative to the one the box already offers.
@@ -713,8 +704,7 @@ final class SessionComposerViewController: NSViewController {
             // The lines moved after this pass placed the hero; the next one places them.
             view.needsLayout = true
         }
-        heroStack.isHidden = heroRegion.frame.height
-            < heroStack.fittingSize.height + ComposerDefaults.heroMinimumClearance
+        heroStack.isHidden = heroStack.exceedsHeroRegion(height: heroRegion.frame.height)
         updateWelcomeRegions()
     }
 

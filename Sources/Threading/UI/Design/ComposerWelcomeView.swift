@@ -8,13 +8,38 @@ enum ComposerWelcomeLayout {
     static var measure: CGFloat { Design.Size.readableWidth }
 }
 
+/// The mark, greeting and optional caption share one stack on both platforms. Hosts supply
+/// their theme-aware mark and text leaves, then place this stack in the opening hero region.
+@MainActor
+final class ComposerWelcomeStackView: NSStackView {
+    init(mark: NSView, greeting: NSView, caption: NSView? = nil) {
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .centerX
+        spacing = Design.Spacing.inset
+        translatesAutoresizingMaskIntoConstraints = false
+        addArrangedSubview(mark)
+        addArrangedSubview(greeting)
+        if let caption {
+            addArrangedSubview(caption)
+            setCustomSpacing(Design.Spacing.small, after: greeting)
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func exceedsHeroRegion(height: CGFloat) -> Bool {
+        height < fittingSize.height + ComposerWelcomeLayout.minimumClearance
+    }
+}
+
 #if os(Linux)
 /// Static house-theme welcome, using the same mark and greeting policy as the Mac composer.
 /// A single bounded label retains its text metrics between input/presentation callbacks.
 final class ComposerWelcomeView: NSView, ThemedComponent {
     private let mark = ThreadingMarkView()
     private let greeting = NSTextField(wrappingLabelWithString: "")
-    private lazy var stack = NSStackView(views: [mark, greeting])
+    private lazy var stack = ComposerWelcomeStackView(mark: mark, greeting: greeting)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -22,9 +47,6 @@ final class ComposerWelcomeView: NSView, ThemedComponent {
         greeting.textColor = Design.Text.label
         greeting.alignment = .center
         greeting.maximumNumberOfLines = ComposerWelcomeLayout.maximumLines
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = Design.Spacing.inset
         addSubview(stack)
         NSLayoutConstraint.activate([
             mark.widthAnchor.constraint(equalToConstant: ComposerWelcomeLayout.markSide),
@@ -50,8 +72,7 @@ final class ComposerWelcomeView: NSView, ThemedComponent {
         let measure = min(ComposerWelcomeLayout.measure,
             max(1, bounds.width - 2 * Design.Spacing.pane))
         if greeting.preferredMaxLayoutWidth != measure { greeting.preferredMaxLayoutWidth = measure }
-        isHidden = bounds.height
-            < stack.fittingSize.height + ComposerWelcomeLayout.minimumClearance
+        isHidden = stack.exceedsHeroRegion(height: bounds.height)
     }
 }
 #endif

@@ -15,8 +15,12 @@ from check_ui_structure import executable_text
 DECLARATION = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:")
 EXPECTED_DUPLICATES: set[str] = set()
 HOST_RENDER_LEAVES = {"LinuxActivityBeamHostView", "MorphingLabel"}
-VIEW_DECLARATION = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*NSView\b")
 CLASS_BASE = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)")
+VIEW_BASES = {
+    "NSView", "NSStackView", "NSScrollView", "NSClipView", "NSTableView",
+    "NSTableRowView", "NSTableCellView", "NSOutlineView", "NSControl", "NSButton",
+    "NSTextField", "NSTextView", "NSImageView", "ThemedControl", "ThemedScrollView",
+}
 MENU_ROW_FRAME = re.compile(r"\b(?:row|separator)\.frame\s*=")
 MENU_PLACEMENT_FRAME = re.compile(
     r"\b(?:configurationMenu|speedMenu|choiceSurface|sessionMenuFrame|"
@@ -56,10 +60,11 @@ def main() -> int:
     host_views = {
         name
         for path in linux_directory.glob("*.swift") if not path.is_symlink()
-        for name in VIEW_DECLARATION.findall(executable_text(path.read_text(encoding="utf-8")))
+        for name, base in CLASS_BASE.findall(executable_text(path.read_text(encoding="utf-8")))
+        if base in VIEW_BASES
     }
     for name in sorted(host_views - HOST_RENDER_LEAVES):
-        print(f"linux-shared-views: new Linux NSView {name} needs a shared UI review", file=sys.stderr)
+        print(f"linux-shared-views: new Linux view {name} needs a shared UI review", file=sys.stderr)
     for name in sorted(HOST_RENDER_LEAVES - host_views):
         print(f"linux-shared-views: {name} was removed; update the host leaf list", file=sys.stderr)
     shared_view_subclasses = []
