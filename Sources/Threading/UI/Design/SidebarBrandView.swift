@@ -11,35 +11,61 @@ enum SidebarBrandLayout {
     static let logoSide: CGFloat = 24
 }
 
+/// One brand row arrangement for both hosts. Theme-specific artwork is supplied as optional
+/// leaves; the mark and wordmark keep their shared order, spacing and edge constraints.
+@MainActor
+final class SidebarBrandContentView: NSStackView {
+    init(mark: NSView, wordmark: NSView, customLogo: NSView? = nil,
+         workloadAnalyzer: NSView? = nil, audioAnalyzer: NSView? = nil) {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        alignment = .centerY
+        spacing = Design.Spacing.small
+        translatesAutoresizingMaskIntoConstraints = false
+        addArrangedSubview(mark)
+        if let customLogo { addArrangedSubview(customLogo) }
+        addArrangedSubview(wordmark)
+        if let workloadAnalyzer { addArrangedSubview(workloadAnalyzer) }
+        if let audioAnalyzer { addArrangedSubview(audioAnalyzer) }
+        NSLayoutConstraint.activate([
+            mark.widthAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
+            mark.heightAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func mount(in host: NSView, fillsWidth: Bool) {
+        host.addSubview(self)
+        let trailing = fillsWidth
+            ? trailingAnchor.constraint(equalTo: host.trailingAnchor)
+            : trailingAnchor.constraint(lessThanOrEqualTo: host.trailingAnchor)
+        NSLayoutConstraint.activate([
+            leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            trailing,
+            topAnchor.constraint(equalTo: host.topAnchor),
+            bottomAnchor.constraint(equalTo: host.bottomAnchor)
+        ])
+    }
+}
+
 #if os(Linux)
 /// The house theme's brand, using the production mark and header measurements.
 /// The native host keeps navigation/menu identity in its accessible list and window title.
 final class SidebarBrandView: NSView, ThemedComponent {
     private let mark = ThreadingMarkView(frame: .zero)
-    // localization-ignore: Threading is the product trademark.
-    private let wordmark = NSTextField(labelWithString: "Threading")
+    private let wordmark = MorphingTitleLabel()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
-        let stack = NSStackView(views: [mark, wordmark])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = Design.Spacing.small
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
+        let stack = SidebarBrandContentView(mark: mark, wordmark: wordmark)
+        stack.mount(in: self, fillsWidth: true)
         wordmark.font = SidebarAppearance.brandFont
-        wordmark.textColor = Design.Text.label
-        wordmark.lineBreakMode = .byTruncatingTail
+        // localization-ignore: Threading is the product trademark.
+        wordmark.setStringValue("Threading", animated: false)
+        wordmark.useAutomaticTextColor()
         wordmark.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            mark.widthAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
-            mark.heightAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide)
-        ])
         mark.setAccessibilityElement(false)
         wordmark.setAccessibilityElement(false)
         setAccessibilityElement(true)
@@ -83,7 +109,9 @@ final class SidebarBrandView: NSView, ThemedComponent {
     private let wordmark = MorphingTitleLabel()
     private let workloadAnalyzer = AgentWorkloadAnalyzerView()
     private let audioAnalyzer = AudioSpectrumView()
-    private let stack = NSStackView()
+    private lazy var stack = SidebarBrandContentView(
+        mark: mark, wordmark: wordmark, customLogo: customLogo,
+        workloadAnalyzer: workloadAnalyzer, audioAnalyzer: audioAnalyzer)
     private let appEvents = AppEventObservations()
     private var pointerTracking: NSTrackingArea?
     private var workloadIntensity = AgentWorkloadMonitor.shared.intensity
@@ -99,24 +127,9 @@ final class SidebarBrandView: NSView, ThemedComponent {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
 
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = Design.Spacing.small
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(mark)
-        stack.addArrangedSubview(customLogo)
-        stack.addArrangedSubview(wordmark)
-        stack.addArrangedSubview(workloadAnalyzer)
-        stack.addArrangedSubview(audioAnalyzer)
-        addSubview(stack)
+        stack.mount(in: self, fillsWidth: false)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            mark.widthAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
-            mark.heightAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
             customLogo.widthAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
             customLogo.heightAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
             workloadAnalyzer.widthAnchor.constraint(equalToConstant: Design.WorkloadAnalyzer.size.width),

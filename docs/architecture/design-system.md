@@ -1526,6 +1526,10 @@ platforms. Mac pins the header to its safe area and the outline above its footer
 the header to its viewport top and the outline to its bottom. Linux's outer specimen retains
 its diagnostic layers, while the Mac controller retains footer and backdrop ownership.
 
+`SidebarBrandContentView` mounts the brand mark and wordmark with the same stack, mark size and
+edge constraints. Mac supplies optional theme artwork and activity leaves; Linux supplies its
+static mark and the shared `MorphingTitleLabel` wordmark.
+
 **Undo has two owners, and both are required.** `ThemedTextView.allowsUndo` makes user edits enter
 the text system's manager; the application menu then reaches that manager through AppKit's window
 responder actions, `undo:` and `redo:`. Those colons are load-bearing. `UndoManager.undo` and
