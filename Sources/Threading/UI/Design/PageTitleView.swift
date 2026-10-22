@@ -49,6 +49,7 @@ final class PageTitleView: BackdropThemedControl {
     private let titleLabel = MorphingTitleLabel()
     private let roleIconView = GlyphView()
     private let actionsButton: ThemedIconButton
+    private var widthCapConstraint: NSLayoutConstraint?
     private var isPressed = false { didSet { needsDisplay = true } }
 
     /// What the current title names, so a *rename* can be told from the header being pointed at
@@ -61,6 +62,18 @@ final class PageTitleView: BackdropThemedControl {
     var maxWidth: CGFloat? {
         didSet {
             guard maxWidth != oldValue else { return }
+            if let maxWidth {
+                if let widthCapConstraint {
+                    widthCapConstraint.constant = maxWidth
+                } else {
+                    let cap = widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth)
+                    cap.isActive = true
+                    widthCapConstraint = cap
+                }
+            } else {
+                widthCapConstraint?.isActive = false
+                widthCapConstraint = nil
+            }
             invalidateIntrinsicContentSize()
         }
     }

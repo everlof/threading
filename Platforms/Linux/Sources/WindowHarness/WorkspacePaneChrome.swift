@@ -87,9 +87,6 @@ final class WorkspacePaneChrome {
         pageTitle.actionsAnchor.isHidden = !showsSessionActions
         pageTitle.onActions = { [weak self] _ in self?.menuToggleRequested = true }
         pageTitle.maxWidth = PageTitleView.maximumWidth
-        NSLayoutConstraint.activate([
-            pageTitle.widthAnchor.constraint(lessThanOrEqualToConstant: PageTitleView.maximumWidth)
-        ])
         openInAction.onPress = { [weak self] in
             guard let self else { return }
             self.requestedOpenInID = self.preferredOpenInID

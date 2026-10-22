@@ -426,9 +426,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             PaneHeaderDefaults.titleWidthPriority,
             for: .horizontal
         )
-        NSLayoutConstraint.activate([
-            title.widthAnchor.constraint(lessThanOrEqualToConstant: PageTitleView.maximumWidth),
-        ])
         sessionContextToolbarButton = title.actionsAnchor
 
         materializedPageTitleView = title
