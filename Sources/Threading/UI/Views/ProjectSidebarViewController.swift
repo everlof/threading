@@ -121,14 +121,7 @@ final class ProjectSidebarViewController: NSViewController {
 
     /// Retained so settings mode can mark it as the open page.
     private lazy var settingsButton: ThemedButton = {
-        let button = ThemedButton()
-        button.title = L10n.string("Settings")
-        button.image = NSImage(
-            systemSymbolName: "gearshape",
-            accessibilityDescription: L10n.string("Settings")
-        )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
-        button.isBordered = false
-        button.applyFont(.controlRegular)
+        let button = SidebarFooterControls.settings()
         button.target = self
         button.action = #selector(settingsClicked)
         return button

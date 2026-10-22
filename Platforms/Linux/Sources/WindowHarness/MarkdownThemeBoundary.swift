@@ -65,7 +65,8 @@ extension NSView {
 extension Design {
     // Recipes used by the shared conversation/Markdown rows in this fixed-theme host.
     enum FontRole: Equatable {
-        case detail, body, reading, emphasizedBody, subheading, caption, heading, placeholderTitle, welcomeGreeting
+        case detail, body, reading, emphasizedBody, subheading, caption, heading
+        case placeholderTitle, welcomeGreeting, controlRegular
         case code(weight: NSFont.Weight = .regular)
         static func detail() -> Self { .detail }
 
@@ -80,6 +81,7 @@ extension Design {
             case .subheading: .systemFont(ofSize: 12, weight: .regular)
             case .caption: .systemFont(ofSize: 11, weight: .semibold)
             case .heading: Design.Typography.heading()
+            case .controlRegular: Design.Typography.controlRegular()
             case .code(let weight): .monospacedSystemFont(ofSize: 11, weight: weight)
             }
         }
@@ -94,18 +96,13 @@ extension NSTextField {
     typealias DocumentFontRole = Design.FontRole
     func applyFont(_ role: Design.FontRole) { applyFont(role, in: .chrome) }
     func applyFont(_ role: Design.FontRole, in surface: Design.Typography.FontSurface) {
-        switch role {
-        case .reading: font = Design.Typography.reading()
-        case .body: font = Design.Typography.body(surface: surface)
-        case .emphasizedBody: font = .systemFont(ofSize: 13, weight: .semibold)
-        case .detail: font = Design.Typography.detail()
-        case .placeholderTitle: font = .systemFont(ofSize: 15, weight: .medium)
-        case .welcomeGreeting: font = .systemFont(ofSize: 20, weight: .semibold)
-        case .subheading: font = .systemFont(ofSize: 12, weight: .regular)
-        case .caption: font = .systemFont(ofSize: 11, weight: .semibold)
-        case .heading: font = Design.Typography.heading()
-        case .code(let weight): font = .monospacedSystemFont(ofSize: 11, weight: weight)
-        }
+        font = role.resolved(in: surface)
+    }
+}
+
+extension ThemedButton {
+    func applyFont(_ role: Design.FontRole) {
+        font = role.resolved()
     }
 }
 

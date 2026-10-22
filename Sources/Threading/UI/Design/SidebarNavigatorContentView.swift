@@ -1,5 +1,22 @@
 import AppKit
 
+/// The sidebar's shared destination control. Hosts provide the action, while the symbol,
+/// type, and accessibility identity belong to the same footer on both platforms.
+@MainActor
+enum SidebarFooterControls {
+    static func settings() -> ThemedButton {
+        let button = ThemedButton()
+        button.title = L10n.string("Settings")
+        button.image = NSImage(
+            systemSymbolName: "gearshape", accessibilityDescription: button.title
+        )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+        button.isBordered = false
+        button.applyFont(.controlRegular)
+        button.setAccessibilityIdentifier("sidebar.settings")
+        return button
+    }
+}
+
 /// The standing header and outline geometry of the project navigator.
 /// Each host supplies its own bands and outer chrome; this view owns their shared placement.
 @MainActor

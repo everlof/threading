@@ -16,16 +16,6 @@ extension Design.Symbol {
     }
 }
 
-extension NSTextField {
-    enum ChipFontRole { case controlRegular }
-
-    func applyFont(_ role: ChipFontRole) {
-        switch role {
-        case .controlRegular: font = Design.Typography.controlRegular()
-        }
-    }
-}
-
 public enum SurfaceRadius {
     case pill(height: CGFloat)
     case fixed(CGFloat)

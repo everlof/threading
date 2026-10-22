@@ -1862,12 +1862,7 @@ struct WindowHarness {
         let header = PaneHeaderView(
             leading: [headerBrand], trailing: [addProjectButton, actionsButton], margin: .paneEdge)
         navigatorRoot.mountNavigatorHeader(header)
-        let settingsButton = ThemedButton()
-        settingsButton.title = "Settings"
-        settingsButton.image = Design.Symbol.image(
-            "gearshape", slot: 12, pointSize: 12, weight: .regular)
-        settingsButton.isBordered = false
-        settingsButton.font = Design.Typography.controlRegular()
+        let settingsButton = SidebarFooterControls.settings()
         var settingsActivated = false
         settingsButton.action = { settingsActivated = true }
         let footer = PaneFooterView(leading: [settingsButton], compressing: settingsButton,

@@ -68,8 +68,9 @@ must let the shim solve them. The outer SDL viewport and recycled outline-row re
 arrive as frames; macOS's themed menu presenter also assigns measured menu-row frames inside its
 viewport. Keeping those frame boundaries does not duplicate a shared component's layout.
 The footer is mounted through `SidebarNavigatorContentView` on both desktop hosts; the outline
-ends at the production `PaneFooterView`'s top edge. Linux supplies the Settings action and SDL
-accessibility bridge while macOS supplies its other global footer actions.
+ends at the production `PaneFooterView`'s top edge. `SidebarFooterControls` configures the
+Settings button once, including its symbol and accessibility identity. Linux supplies its action
+and SDL accessibility bridge while macOS supplies its other global footer actions.
 
 The Linux and macOS session rows now mount the same `SidebarSessionTrailingSlot`, which builds
 the status column and two-control hover stack with one set of constraints. Its anchored menu
