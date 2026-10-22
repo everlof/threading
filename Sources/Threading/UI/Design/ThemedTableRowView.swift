@@ -119,15 +119,11 @@ public class ThemedTableRowView:
     public var plateRectForTesting: NSRect { platePath.bounds }
 
     public override func drawSelection(in dirtyRect: NSRect) {
-        #if os(Linux)
-        guard isSelected else { return }
-        (isEmphasized ? Design.Surface.selectionFill
-                       : Design.Surface.selectionFillUnemphasized).setFill()
-        platePath.fill()
-        #else
+        #if !os(Linux)
         guard !AppThemeLibrary.current.isSystem else {
             return super.drawSelection(in: dirtyRect)
         }
+        #endif
         guard isSelected else { return }
 
         // The ground is measured rather than assumed: the same row class is drawn in the
@@ -136,7 +132,6 @@ public class ThemedTableRowView:
         // already answers this for every other derived colour in the app.
         SelectionSurface.quiet(over: resolvedGround()).fill.setFill()
         selectionPath.fill()
-        #endif
     }
 
     /// **The ink that reads on whatever this row actually painted.**
@@ -181,17 +176,15 @@ public class ThemedTableRowView:
     public var selectionGround: NSColor? {
         guard isSelected else { return nil }
         #if !os(Linux)
-        guard AppThemeLibrary.current.isSystem else {
-            return SelectionSurface.quiet(over: resolvedGround()).ground
+        if AppThemeLibrary.current.isSystem {
+            // AppKit's own fill, at the strength AppKit is drawing it.
+            let fill = isEmphasized
+                ? Design.Surface.selectionFill
+                : Design.Surface.selectionFillUnemphasized
+            return fill.composited(over: resolvedGround())
         }
         #endif
-        // AppKit's own fill, at the strength AppKit is drawing it — a selected row in a window
-        // that is not in front is a pale grey, and ink measured against the emphasized blue would
-        // be white on it.
-        let fill = isEmphasized
-            ? Design.Surface.selectionFill
-            : Design.Surface.selectionFillUnemphasized
-        return fill.composited(over: resolvedGround())
+        return SelectionSurface.quiet(over: resolvedGround()).ground
     }
 
     /// The theme's control corner, inset just off the row's edges so the fill reads as a surface
@@ -211,19 +204,17 @@ public class ThemedTableRowView:
     /// object. (Drawing it from the *cell* instead is worse in the mirror image: the cell is inset
     /// further still, so the plate stood as tall as the selection and visibly narrower than it.)
     private var platePath: NSBezierPath {
-        #if os(Linux)
-        return (superview as? NSTableView)?.style == .inset
-            ? path(insetBy: ThemedTableRowDefaults.systemInsetStylePadding)
-            : selectionPath
-        #else
-        guard AppThemeLibrary.current.isSystem else { return selectionPath }
-        switch (superview as? NSTableView)?.effectiveStyle {
-        case .inset, .sourceList:
-            return path(insetBy: ThemedTableRowDefaults.systemInsetStylePadding)
-        default:
-            return selectionPath
+        #if !os(Linux)
+        if AppThemeLibrary.current.isSystem {
+            switch (superview as? NSTableView)?.effectiveStyle {
+            case .inset, .sourceList:
+                return path(insetBy: ThemedTableRowDefaults.systemInsetStylePadding)
+            default:
+                break
+            }
         }
         #endif
+        return selectionPath
     }
 
     private func path(insetBy padding: CGFloat) -> NSBezierPath {

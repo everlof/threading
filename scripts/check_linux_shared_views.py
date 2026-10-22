@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Keep Linux from rebuilding shared UI classes or laying out menu rows again.
 
-The named classes are migration debt. Removing one requires shrinking this list; adding
-another fails the build even when a different Linux view was removed in the same change.
+The platform-only leaves are migration debt. Removing one requires shrinking its list;
+adding another fails the build even when a different leaf was removed in the same change.
 """
 
-from pathlib import Path
+from __future__ import annotations
+
 import re
 import sys
+from bisect import bisect_right
+from pathlib import Path
 
 from check_ui_structure import executable_text
 
@@ -15,6 +18,10 @@ from check_ui_structure import executable_text
 DECLARATION = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:")
 EXPECTED_DUPLICATES: set[str] = set()
 HOST_RENDER_LEAVES = {"LinuxActivityBeamHostView", "MorphingLabel"}
+PLATFORM_VIEW_LEAVES = {
+    "ComposerWelcomeView", "SidebarBackdropView", "SidebarBrandView",
+    "ThemedSessionActivityMark", "ThreadingMarkView",
+}
 CLASS_BASE = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)")
 VIEW_BASES = {
     "NSView", "NSStackView", "NSScrollView", "NSClipView", "NSTableView",
@@ -45,6 +52,44 @@ def classes(in_directory: Path, *, skip_links: bool = False, recursive: bool = F
     return result
 
 
+def linux_only_view_classes(in_directory: Path) -> dict[str, Path]:
+    """Find view types declared in Linux branches of otherwise shared UI sources."""
+    result = {}
+    for path in sorted(in_directory.rglob("*.swift")):
+        source = path.read_text(encoding="utf-8")
+        if "os(Linux)" not in source:
+            continue
+        code = executable_text(source)
+        branches: list[bool | None] = []
+        linux_lines = []
+        line_starts = []
+        offset = 0
+        for line in code.splitlines(keepends=True):
+            line_starts.append(offset)
+            offset += len(line)
+            directive = line.strip()
+            if directive.startswith("#if ") or directive.startswith("#elseif "):
+                expression = directive.split(maxsplit=1)[1].replace(" ", "")
+                linux_branch = expression == "os(Linux)"
+                mac_branch = expression == "!os(Linux)"
+                branch = linux_branch if linux_branch or mac_branch else None
+                if directive.startswith("#if "):
+                    branches.append(branch)
+                elif branches:
+                    branches[-1] = branch
+            elif directive == "#else" and branches:
+                if branches[-1] is not None:
+                    branches[-1] = not branches[-1]
+            elif directive == "#endif" and branches:
+                branches.pop()
+            linux_lines.append(True in branches)
+        for match in CLASS_BASE.finditer(code):
+            line_index = bisect_right(line_starts, match.start()) - 1
+            if linux_lines[line_index] and match.group(2) in VIEW_BASES:
+                result[match.group(1)] = path
+    return result
+
+
 def main() -> int:
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent
     mac = classes(root / "Sources/Threading/UI", recursive=True)
@@ -67,6 +112,14 @@ def main() -> int:
         print(f"linux-shared-views: new Linux view {name} needs a shared UI review", file=sys.stderr)
     for name in sorted(HOST_RENDER_LEAVES - host_views):
         print(f"linux-shared-views: {name} was removed; update the host leaf list", file=sys.stderr)
+    platform_views = linux_only_view_classes(root / "Sources/Threading/UI")
+    new_platform_views = platform_views.keys() - PLATFORM_VIEW_LEAVES
+    removed_platform_views = PLATFORM_VIEW_LEAVES - platform_views.keys()
+    for name in sorted(new_platform_views):
+        print(f"linux-shared-views: new Linux-only view {name} in {platform_views[name]}; "
+              "extend the AppKit shim or review it as a platform leaf", file=sys.stderr)
+    for name in sorted(removed_platform_views):
+        print(f"linux-shared-views: {name} is shared; remove it from the leaf list", file=sys.stderr)
     shared_view_subclasses = []
     for path in linux_directory.glob("*.swift"):
         if path.is_symlink():
@@ -90,8 +143,10 @@ def main() -> int:
             frame_assignments.append((path, line))
             print(f"linux-shared-views: menu panel frame in {path}:{line}; "
                   "use ThemedMenuLayout", file=sys.stderr)
-    print(f"linux-shared-views: {len(duplicates)} named duplicate classes remain")
+    print(f"linux-shared-views: {len(duplicates)} named duplicate classes, "
+          f"{len(platform_views)} Linux-only shared-source view leaves remain")
     return 1 if (added or removed or host_views != HOST_RENDER_LEAVES
+                 or new_platform_views or removed_platform_views
                  or shared_view_subclasses or frame_assignments) else 0
 
 

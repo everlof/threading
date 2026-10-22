@@ -180,6 +180,7 @@ final class ScheduleMomentPickerView: NSView, NSTableViewDataSource, NSTableView
         table.delegate = self
         table.rowHeight = rowHeight
         table.style = .inset
+        table.headerView = nil
         table.setAccessibilityLabel(label)
         table.addTableColumn(NSTableColumn(identifier: column))
         scroll.documentView = table
@@ -285,11 +286,7 @@ final class ScheduleMomentPickerView: NSView, NSTableViewDataSource, NSTableView
         return ScheduleMomentPickerRows.makeTimeRow(visibleTimes[row])
     }
 
-#if os(Linux)
-    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        LinuxScheduleMomentPickerRowView(frame: .zero)
-    }
-#else
+#if !os(Linux)
     func tableView(_ tableView: NSTableView,
                    typeSelectStringFor column: NSTableColumn?, row: Int) -> String? {
         if tableView === dayTable {
@@ -312,17 +309,3 @@ final class ScheduleMomentPickerView: NSView, NSTableViewDataSource, NSTableView
         }
     }
 }
-
-#if os(Linux)
-@MainActor
-private final class LinuxScheduleMomentPickerRowView: NSTableRowView {
-    override func drawSelection(in dirtyRect: NSRect) {
-        guard isSelected else { return }
-        let plate = NSBezierPath(roundedRect: bounds.insetBy(dx: Design.Spacing.tight, dy: 1),
-                                 xRadius: Design.Radius.control,
-                                 yRadius: Design.Radius.control)
-        Design.Surface.controlHover.setFill()
-        plate.fill()
-    }
-}
-#endif
