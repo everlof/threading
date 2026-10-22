@@ -52,10 +52,7 @@ final class WorkspacePlaceholderPane {
     private(set) var actionTitle = ""
 
     private let window = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
-    private let composerRoot = NSView(frame: .zero)
     private let composerHero = ComposerWelcomeView(frame: .zero)
-    private let composerColumn = NSStackView()
-    private let destinationRow = NSStackView()
     private let actionRow = NSView(frame: .zero)
     private let composerSurface = PromptView(frame: .zero)
     private let composerStartButton = ThemedButton()
@@ -124,6 +121,10 @@ final class WorkspacePlaceholderPane {
     private var onIdentityChoice: ((String) -> Void)?
     private let showsComposer = true
     private(set) var composerIdentity: String?
+    private lazy var composerRoot = OpeningComposerContentView(
+        choiceViews: [projectChip, providerChip], prompt: composerSurface,
+        actionRow: actionRow, hero: composerHero, heroPlacement: .fill)
+    private var composerColumn: NSStackView { composerRoot.column }
     private var root: NSView { composerRoot }
     private var actionAnchor: ThemedButton { composerStartButton }
     private var hasLaunchProject = false
@@ -131,22 +132,15 @@ final class WorkspacePlaceholderPane {
     private var launchBlocked = false
     private var presentedSize = NSSize.zero
     private var needsPresentation = true
-    private var composerBottom: NSLayoutConstraint!
+    private var composerBottom: NSLayoutConstraint { composerRoot.bottomConstraint }
 
     init(onSubmit: @escaping () -> Void) {
         LinuxSymbols.install()
-        composerRoot.addSubview(composerHero)
-        composerHero.translatesAutoresizingMaskIntoConstraints = false
-        let destinationSpacer = NSView()
-        PromptChrome.configureOpeningChoices(destinationRow,
-            choices: [projectChip, providerChip], spacer: destinationSpacer)
         projectChip.setContentCompressionResistancePriority(.init(239), for: .horizontal)
         providerChip.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         actionRow.addSubview(composerStartButton)
         composerStartButton.translatesAutoresizingMaskIntoConstraints = false
-        PromptChrome.configureOpeningColumn(composerColumn, choices: destinationRow,
-            prompt: composerSurface, actionRow: actionRow)
         composerSurface.minimumHeight = PromptChrome.openingMinimumHeight
         composerSurface.submitPlacement = .outside
         composerSurface.showsImageAttachments = true
@@ -174,20 +168,13 @@ final class WorkspacePlaceholderPane {
         ] {
             chip.setContentCompressionResistancePriority(.init(Float(priority)), for: .horizontal)
         }
-        composerBottom = PromptChrome.mountOpeningColumn(composerColumn, in: composerRoot,
-            prompt: composerSurface, actionRow: actionRow)
         composerRoot.addSubview(choiceSurface)
         NSLayoutConstraint.activate([
-            destinationRow.widthAnchor.constraint(equalTo: composerColumn.widthAnchor),
             composerStartButton.trailingAnchor.constraint(equalTo: actionRow.trailingAnchor),
             composerStartButton.topAnchor.constraint(equalTo: actionRow.topAnchor),
             composerStartButton.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor),
             composerStartButton.leadingAnchor.constraint(
-                greaterThanOrEqualTo: actionRow.leadingAnchor),
-            composerHero.topAnchor.constraint(equalTo: composerRoot.topAnchor),
-            composerHero.bottomAnchor.constraint(equalTo: composerColumn.topAnchor),
-            composerHero.leadingAnchor.constraint(equalTo: composerRoot.leadingAnchor),
-            composerHero.trailingAnchor.constraint(equalTo: composerRoot.trailingAnchor)
+                greaterThanOrEqualTo: actionRow.leadingAnchor)
         ])
         choiceSurface.isHidden = true
         projectChip.choicePresentationProvider = { [weak self] _, didDismiss in

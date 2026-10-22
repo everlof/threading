@@ -97,7 +97,7 @@ final class SessionComposerViewController: NSViewController {
     private let greetingLabel = MorphingMultilineTitleLabel()
     private let captionLabel = MorphingMultilineTitleLabel()
     private let heroStack = NSStackView()
-    private let heroRegion = NSLayoutGuide()
+    private var heroRegion: NSLayoutGuide { composerBody.heroRegion }
     private var hasPlayedHeroDrawIn = false
 
     /// Soft ground-coloured veils behind the hero and the box, when the theme asks for them.
@@ -471,8 +471,12 @@ final class SessionComposerViewController: NSViewController {
     /// is — `5h 86…` was a percentage with its `%` truncated off.
     private let usageLabel = UsageReadingLabel()
 
-    /// The composer's own column, bottom-flush in the pane.
-    private let stack = NSStackView()
+    /// The composer's shared content tree; the host retains theme and session policy.
+    private lazy var composerBody = OpeningComposerContentView(
+        choiceViews: [locationChip, identityChip, roleChip],
+        beforePrompt: [managedWorkspaceCheckbox], prompt: promptContentContainer,
+        actionRow: actionRow, hero: heroStack)
+    private var stack: NSStackView { composerBody.column }
     private let appEvents = AppEventObservations()
     /// Retained only while the existing model or effort chip is presenting its chooser.
     /// Nothing about the chip row or composer layout depends on this surface.
@@ -617,23 +621,12 @@ final class SessionComposerViewController: NSViewController {
         importButton.emphasis = .tertiary
         importButton.setAccessibilityIdentifier("composer.session-start.import")
 
-        // The row's slack belongs *after* the last chip, not inside it. The column states its
-        // own measure now, so for the first time the row is wider than its chips — and a chip
-        // hugs its content loosely enough that the leftover width was shared out among them,
-        // drawing an agent's name in a pill three times its length. The spacer hugs less than
-        // any of them, so it takes the remainder instead.
-        let chipSpacer = NSView()
-
         // Where, and who — two chips for the two questions, not four for their parts. A project
         // and a checkout are one place; an agent and a login are one identity, and read as four
         // separate answers the reader had to reassemble. What the session *runs with* is not
         // here at all: it belongs to the words being written, so it sits on the prompt box's own
         // bottom row (see `wirePrompt`). Placement is what carries the meaning now — above the
         // box is who and where, inside it is what with.
-        let chips = NSStackView()
-        PromptChrome.configureOpeningChoices(chips,
-            choices: [locationChip, identityChip, roleChip], spacer: chipSpacer)
-
         locationChip.setAccessibilityIdentifier("composer.session-start.location")
         identityChip.setAccessibilityIdentifier("composer.session-start.identity")
         roleChip.setAccessibilityIdentifier("composer.session-start.role")
@@ -680,36 +673,15 @@ final class SessionComposerViewController: NSViewController {
         setupPromptCustomization()
         wireManagedWorkspace()
 
-        // Three things, evenly spaced: where this runs, what to say, and what to do about it.
-        // The column used to need two different steps because it held a usage block as well;
-        // with that folded into the box there is one rhythm to keep.
-        PromptChrome.configureOpeningColumn(stack, choices: chips,
-            beforePrompt: [managedWorkspaceCheckbox], prompt: promptContentContainer,
-            actionRow: actionRow)
-
         installExtensionBackdrop()
         installWelcomeScrim()
-        PromptChrome.mountOpeningColumn(stack, in: view,
-            prompt: promptContentContainer, actionRow: actionRow)
-        view.addSubview(heroStack)
-        view.addLayoutGuide(heroRegion)
-
+        composerBody.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(composerBody)
         NSLayoutConstraint.activate([
-            // The hero floats in whatever room the composer leaves above itself.
-            heroRegion.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            heroRegion.bottomAnchor.constraint(equalTo: stack.topAnchor),
-            heroRegion.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            heroRegion.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            heroStack.centerXAnchor.constraint(equalTo: heroRegion.centerXAnchor),
-            heroStack.centerYAnchor.constraint(equalTo: heroRegion.centerYAnchor),
-            heroStack.leadingAnchor.constraint(
-                greaterThanOrEqualTo: view.leadingAnchor,
-                constant: Design.Spacing.pane
-            ),
-            heroStack.trailingAnchor.constraint(
-                lessThanOrEqualTo: view.trailingAnchor,
-                constant: -Design.Spacing.pane
-            )
+            composerBody.topAnchor.constraint(equalTo: view.topAnchor),
+            composerBody.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            composerBody.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            composerBody.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
 
         wireChips()
@@ -769,7 +741,7 @@ final class SessionComposerViewController: NSViewController {
     /// coordinates. Restated on every layout, and when the box changes size inside the column
     /// without the column moving — a growing prompt is laid out after this view is.
     private func updateWelcomeRegions() {
-        let hero = heroStack.isHidden ? CGRect.zero : heroStack.frame
+        let hero = heroStack.isHidden ? CGRect.zero : view.convert(heroStack.bounds, from: heroStack)
         let prompt = view.convert(promptContentContainer.bounds, from: promptContentContainer)
         welcomeScrim.heroRegion = hero.isEmpty ? .zero : welcomeScrim.convert(hero, from: view)
         welcomeScrim.promptRegion = welcomeScrim.convert(prompt, from: view)

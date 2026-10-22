@@ -117,10 +117,11 @@ The current shared-view audit distinguishes reused components from reused page c
 
 | Surface | Shared UI mounted by Linux | Remaining host boundary |
 | --- | --- | --- |
-| Navigator rows and menus | Sidebar row assembly, menu panel, document, rows, separator, layout | SDL viewport, overlay lifecycle and menu interaction |
-| Opening composer | Prompt, chips, choice panels, menu rows and placement | `WorkspacePlaceholderPane` still assembles the page separately from the macOS controller |
+| Navigator rows and menus | Sidebar row assembly, menu panel, document, rows, separator, layout | `Specimen.Window` still assembles the navigator root separately from `ProjectSidebarViewController`; SDL viewport, overlay lifecycle and menu interaction remain host-owned |
+| Opening composer | `OpeningComposerContentView` owns the choice row, column, and hero region; prompt, chips, choice panels and menu rows are shared | Linux still supplies a reduced set of controls and its house-theme greeting; macOS owns its theme backdrop and extension plane |
 | Native conversation | Transcript table and row components, prompt, chips, pane constraints, menu panels | `WorkspaceConversationPane` still assembles a reduced page separately from `ConversationViewController` |
 | General Settings | Page canvas, confirmation card, toggles and constraints | `WorkspaceSettingsPane` includes fewer sections than `GeneralPreferencesViewController` |
+| Welcome and sidebar artwork | Opening body and row containers are shared | `ComposerWelcomeView`, `SidebarBackdropView`, `SidebarBrandView`, and `ThreadingMarkView` still have separate Linux implementations inside their Design files; the Linux hero also differs from the macOS hero stack |
 
 The shared-view source check prevents new duplicate classes and manual menu row/panel frames.
 It does not make separate page controllers equivalent; the remaining page composition work is

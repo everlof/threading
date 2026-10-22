@@ -236,6 +236,9 @@ try:
     window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid', process.pid,
                                      '--name', '^Threading experiment - ').splitlines()[0], 'window')
     xdo('windowfocus', '--sync', window)
+    if mode == 'baseline':
+        eventually(lambda: control('linux.composer.project'), 'opening composer controls')
+        capture('opening-composer.png')
     if mode == 'checkout':
         location = eventually(lambda: control('linux.composer.project'), 'location chip')
         eventually(lambda: location.get_name() == 'Project: Project › main', 'main branch')

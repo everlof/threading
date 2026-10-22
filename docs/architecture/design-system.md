@@ -1492,7 +1492,11 @@ overflows, the box is already at its cap and the constant has stopped moving.
 which supplies its surrounding session composer. The shared editor owns placeholder drawing,
 focus and Return/⌘Return behavior; Threading retains text admission, submission and drafts.
 `PromptChrome` also owns the opening column's 720-point cap and 116-point prompt minimum, used
-by the Mac controller and Linux host. Linux's transparent editor sits inside the shared field
+by the Mac controller and Linux host. `OpeningComposerContentView` mounts that column, its
+choice row, and the hero region as one view and constraint tree on both platforms. The hosts
+supply the greeting content, controls, draft and launch policy; the Mac root still owns its
+theme backdrop and `composer.backdrop@1` extension plane. The Linux root is the same shared
+content view inside the SDL viewport. Linux's transparent editor sits inside the shared field
 surface, so an empty document cannot shrink the visible field; its cached used-text height feeds
 the same bounded growth policy. `PromptChrome.configureContentStack` and
 `contentSizingConstraints` now supply the same vertical attachment/editor/footer stack and size
