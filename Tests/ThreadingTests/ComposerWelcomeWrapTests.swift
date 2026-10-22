@@ -307,10 +307,8 @@ final class ComposerWelcomeWrapTests: HostedStoreTestCase {
         composer.show(projectID: nil)
         let greeting = try greeting(in: composer)
         let hero = try XCTUnwrap(greeting.superview)
-        let box = composer.promptHandoffView
-        let column = try XCTUnwrap(
-            composer.view.subviews.first { box.isDescendant(of: $0) && $0 !== hero }
-        )
+        let body = try XCTUnwrap(hero.superview as? OpeningComposerContentView)
+        let column = body.column
 
         return heights.map { height in
             host.setFrameSize(NSSize(width: Fixture.narrow.width, height: height))

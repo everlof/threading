@@ -52,7 +52,11 @@ final class WorkspacePlaceholderPane {
     private(set) var actionTitle = ""
 
     private let window = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
-    private let composerHero = ComposerWelcomeView(frame: .zero)
+    private let composerMark = ThreadingMarkView(frame: .zero)
+    private let composerGreeting = NSTextField(wrappingLabelWithString: "")
+    private lazy var composerHero = ComposerWelcomeStackView(
+        mark: composerMark, greeting: composerGreeting,
+        fixedMarkSide: ComposerWelcomeLayout.markSide)
     private let actionRow = NSView(frame: .zero)
     private let composerSurface = PromptView(frame: .zero)
     private let composerStartButton = ThemedButton()
@@ -123,7 +127,7 @@ final class WorkspacePlaceholderPane {
     private(set) var composerIdentity: String?
     private lazy var composerRoot = OpeningComposerContentView(
         choiceViews: [projectChip, providerChip], prompt: composerSurface,
-        actionRow: actionRow, hero: composerHero, heroPlacement: .fill)
+        actionRow: actionRow, hero: composerHero)
     private var composerColumn: NSStackView { composerRoot.column }
     private var root: NSView { composerRoot }
     private var actionAnchor: ThemedButton { composerStartButton }
@@ -136,6 +140,11 @@ final class WorkspacePlaceholderPane {
 
     init(onSubmit: @escaping () -> Void) {
         LinuxSymbols.install()
+        composerGreeting.applyFont(.welcomeGreeting)
+        composerGreeting.textColor = Design.Text.label
+        composerGreeting.alignment = .center
+        composerGreeting.maximumNumberOfLines = ComposerWelcomeLayout.maximumLines
+        composerMark.setAccessibilityElement(false)
         projectChip.setContentCompressionResistancePriority(.init(239), for: .horizontal)
         providerChip.setContentCompressionResistancePriority(.required, for: .horizontal)
 
@@ -249,7 +258,7 @@ final class WorkspacePlaceholderPane {
         title = ComposerGreeting.message()
         detail = ""
         actionTitle = "Start Session"
-        composerHero.configure(greeting: title)
+        if composerGreeting.stringValue != title { composerGreeting.stringValue = title }
         projectChip.configure(symbolName: "folder", title: projectName)
         providerChip.configure(symbolName: "terminal", title: providerName)
         selectedProjectName = projectName
@@ -1014,7 +1023,12 @@ final class WorkspacePlaceholderPane {
             if composerColumn.spacing != columnSpacing { composerColumn.spacing = columnSpacing }
             if composerBottom.constant != -bottomInset { composerBottom.constant = -bottomInset }
             window.layoutIfNeeded()
-            composerHero.updateVisibility()
+            let measure = ComposerWelcomeLayout.measure(forPaneWidth: root.bounds.width)
+            if composerGreeting.preferredMaxLayoutWidth != measure {
+                composerGreeting.preferredMaxLayoutWidth = measure
+            }
+            composerHero.isHidden = composerHero.exceedsHeroRegion(
+                height: composerRoot.heroRegion.frame.height)
             if choiceKind != nil {
                 let oldFrame = choiceSurface.frame
                 let oldCount = choiceVisibleCount
@@ -1050,7 +1064,7 @@ final class WorkspacePlaceholderPane {
                 }
             }
         }
-        let greeting = composerHero.greetingBounds
+        let greeting = composerGreeting.convert(composerGreeting.bounds, to: root)
         tw_accessibility_placeholder_heading_bounds(nativeWindow,
             Int32(originX + Int((greeting.minX * scale).rounded())),
             Int32(((root.bounds.height - greeting.maxY) * scale).rounded()),

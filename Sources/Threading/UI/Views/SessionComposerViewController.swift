@@ -716,10 +716,7 @@ final class SessionComposerViewController: NSViewController {
     /// that would only ever narrow. Restated on every pass and costs a width comparison when the
     /// pane has not changed width; the labels re-break only when the measure moves.
     private func updateHeroMeasure() -> Bool {
-        let measure = min(
-            view.bounds.width - Design.Spacing.pane * 2,
-            ComposerDefaults.heroMeasure
-        )
+        let measure = ComposerWelcomeLayout.measure(forPaneWidth: view.bounds.width)
         let before = (greetingLabel.presentedLines, captionLabel.presentedLines)
         greetingLabel.wrapWidth = measure
         captionLabel.wrapWidth = measure

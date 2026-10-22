@@ -195,11 +195,12 @@ selection ground; using it for `Design.Text.secondary/tertiary/quaternary` disca
 theme's blue/cream hue. The native empty-pane journey checks the actual glyph pixels through
 light/dark changes at both display scales, including antialiased 1× text.
 
-The Linux opening welcome is a `ComposerWelcomeView` boundary, not a terminal placeholder.
-It combines the retained shared mark paths with one primary-ink, 20-point semibold greeting,
-word-wrapped to at most three lines. `ComposerWelcomeLayout` shares its 40-point mark,
-620-point measure and 48-point minimum clearance with the Mac controller. Measurement is cached
-at unchanged width/text; no provider/project-sized tree or work is added to pointer callbacks.
+The Linux opening welcome mounts the same `ComposerWelcomeStackView` and centered hero constraints
+as the Mac composer. Its host supplies the retained shared mark paths and one primary-ink,
+20-point semibold greeting, word-wrapped to at most three lines. `ComposerWelcomeLayout` shares
+its 40-point mark, 620-point measure and 48-point minimum clearance with the Mac controller.
+Measurement is cached at unchanged width/text; no provider/project-sized tree or work is added
+to pointer callbacks.
 The app greeting is selected once from the shared calendar policy, whose daypart is the same
 portable grammar used by theme welcomes. Linux currently paints the house-theme static form;
 this does not implement theme-authored greetings, captions, alternate marks or motion.

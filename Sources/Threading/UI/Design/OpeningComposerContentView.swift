@@ -4,11 +4,6 @@ import AppKit
 /// this view owns the choice row, bottom-flush column and the room above it for the greeting.
 @MainActor
 final class OpeningComposerContentView: NSView {
-    enum HeroPlacement {
-        case centered
-        case fill
-    }
-
     let choices = NSStackView()
     let column = NSStackView()
     let heroRegion = NSLayoutGuide()
@@ -19,7 +14,7 @@ final class OpeningComposerContentView: NSView {
     }
 
     init(choiceViews: [NSView], beforePrompt: [NSView] = [], prompt: NSView,
-         actionRow: NSView, hero: NSView, heroPlacement: HeroPlacement = .centered) {
+         actionRow: NSView, hero: NSView) {
         super.init(frame: .zero)
 
         let spacer = NSView()
@@ -37,26 +32,14 @@ final class OpeningComposerContentView: NSView {
             heroRegion.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
             heroRegion.bottomAnchor.constraint(equalTo: column.topAnchor),
             heroRegion.leadingAnchor.constraint(equalTo: leadingAnchor),
-            heroRegion.trailingAnchor.constraint(equalTo: trailingAnchor)
+            heroRegion.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hero.centerXAnchor.constraint(equalTo: heroRegion.centerXAnchor),
+            hero.centerYAnchor.constraint(equalTo: heroRegion.centerYAnchor),
+            hero.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor,
+                constant: Design.Spacing.pane),
+            hero.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor,
+                constant: -Design.Spacing.pane)
         ])
-        switch heroPlacement {
-        case .centered:
-            NSLayoutConstraint.activate([
-                hero.centerXAnchor.constraint(equalTo: heroRegion.centerXAnchor),
-                hero.centerYAnchor.constraint(equalTo: heroRegion.centerYAnchor),
-                hero.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor,
-                    constant: Design.Spacing.pane),
-                hero.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor,
-                    constant: -Design.Spacing.pane)
-            ])
-        case .fill:
-            NSLayoutConstraint.activate([
-                hero.topAnchor.constraint(equalTo: heroRegion.topAnchor),
-                hero.bottomAnchor.constraint(equalTo: heroRegion.bottomAnchor),
-                hero.leadingAnchor.constraint(equalTo: heroRegion.leadingAnchor),
-                hero.trailingAnchor.constraint(equalTo: heroRegion.trailingAnchor)
-            ])
-        }
     }
 
     @available(*, unavailable)
