@@ -19,8 +19,7 @@ DECLARATION = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:")
 EXPECTED_DUPLICATES: set[str] = set()
 HOST_RENDER_LEAVES = {"LinuxActivityBeamHostView", "MorphingLabel"}
 PLATFORM_VIEW_LEAVES = {
-    "SidebarBackdropView", "SidebarBrandView", "ThemedSessionActivityMark",
-    "ThreadingMarkView",
+    "SidebarBackdropView", "SidebarBrandView", "ThreadingMarkView",
 }
 CLASS_BASE = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)")
 VIEW_BASES = {

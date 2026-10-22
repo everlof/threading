@@ -1,5 +1,6 @@
 import AppKit
 
+#if !os(Linux)
 // MARK: - Status Progress Ring
 
 /// A compact semantic receipt split between positive, non-blocking, active, and adverse outcomes.
@@ -116,6 +117,7 @@ public enum ThemedStatusProgressRing {
         arc.stroke()
     }
 }
+#endif
 
 // MARK: - Spinner
 
@@ -135,7 +137,7 @@ public final class ThemedSpinner: NSView, ThemedComponent {
         static let lineWidth: CGFloat = 1.5
         /// A gap in the ring is what makes rotation visible at all.
         static let sweep: CGFloat = 0.72
-        static let period: CFTimeInterval = 0.9
+        static let period: TimeInterval = 0.9
         /// Used only before the view has a window or a screen to ask. Retina rather than 1×
         /// because guessing low is the case that ships blurry — `ThreadingMarkView`'s rule.
         static let assumedBackingScale: CGFloat = 2
@@ -172,12 +174,14 @@ public final class ThemedSpinner: NSView, ThemedComponent {
         layer?.addSublayer(arc)
         applyContentsScale()
         themeRedraw = ThemeRedraw(self)
+        #if !os(Linux)
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(accessibilityDisplayOptionsChanged),
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil
         )
+        #endif
 
         // `didSet` does not run for an initial value, so without this a spinner is a static
         // three-quarter ring from construction until something first toggles `isAnimating` —
@@ -187,7 +191,9 @@ public final class ThemedSpinner: NSView, ThemedComponent {
     }
 
     deinit {
+        #if !os(Linux)
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        #endif
     }
 
     @available(*, unavailable)
@@ -235,10 +241,12 @@ public final class ThemedSpinner: NSView, ThemedComponent {
     /// the view's `contentsScale`, so the arc rasterised its path at 1× and the compositor
     /// scaled it up — a 1.5pt ring that was two pixels of grey smear on every Retina display,
     /// for every minute an agent worked. Re-asked when the window moves between displays.
+    #if !os(Linux)
     public override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         applyContentsScale()
     }
+    #endif
 
     private func applyContentsScale() {
         let scale = window?.backingScaleFactor
@@ -248,9 +256,11 @@ public final class ThemedSpinner: NSView, ThemedComponent {
         arc.contentsScale = scale
     }
 
+    #if !os(Linux)
     @objc private func accessibilityDisplayOptionsChanged() {
         applyAnimation()
     }
+    #endif
 
     private func applyAnimation() {
         isHidden = !isAnimating
@@ -279,6 +289,7 @@ public final class ThemedSpinner: NSView, ThemedComponent {
     }
 }
 
+#if !os(Linux)
 // MARK: - Progress Bar
 
 /// A determinate progress bar drawn from the theme, replacing `NSProgressIndicator(style: .bar)`.
@@ -595,6 +606,7 @@ public enum ThemedProgressDrawing {
         }
     }
 }
+#endif
 
 // MARK: - Warning Mark
 
@@ -626,7 +638,7 @@ public final class ThemedWarningMark: NSView, ThemedComponent {
         /// Something wants attention but is still running — the warning role.
         case warning
 
-        public var fill: NSColor {
+        @MainActor public var fill: NSColor {
             switch self {
             case .negative: return Design.Status.negative
             case .warning: return Design.Status.warning

@@ -403,9 +403,9 @@ enum Specimen {
             mountedRows[nextRowSlot - 1].configureProductionStatus(status, color: color)
         }
 
-        func mountSessionActivity(_ activity: NativeSessionActivity, phase: CGFloat) {
+        func mountSessionActivity(_ activity: NativeSessionActivity) {
             guard nextRowSlot > 0 else { return }
-            mountedRows[nextRowSlot - 1].configureProductionActivity(activity, phase: phase)
+            mountedRows[nextRowSlot - 1].configureProductionActivity(activity)
         }
 
         func mountTerminalContent(title: String, icon: NSImage, selected: Bool,
@@ -597,7 +597,8 @@ enum Specimen {
             productionSessionAssembly?.trailingSlot
         }
         private var productionSessionStatusSlot: NSView? { productionSessionTrailingSlot?.statusSlot }
-        private var productionSessionActivityMark: ThemedSessionActivityMark?
+        private var productionSessionActivityMark: SessionStatusIndicator?
+        private var productionActivityIsWorking = false
         private var productionSessionHoverControls: NSStackView? { productionSessionTrailingSlot?.hoverControls }
         private var productionSessionActionButton: ThemedIconButton? { productionSessionTrailingSlot?.actionButton }
         private var productionSessionArchiveButton: ThemedIconButton? { productionSessionTrailingSlot?.archiveButton }
@@ -606,9 +607,9 @@ enum Specimen {
         /// Saved-runtime picker cells draw their own selection; outline rows have an outer
         /// SidebarHoverRowView that draws the same silhouette for them.
         private var productionSidebarSelectionInset: CGFloat?
-        var productionWorkingMark: ThemedSessionActivityMark? {
+        var productionWorkingMark: SessionStatusIndicator? {
             guard let mark = productionSessionActivityMark,
-                  !mark.isHidden, mark.isWorking,
+                  !mark.isHidden, productionActivityIsWorking,
                   productionSessionStack?.isHidden == false else { return nil }
             return mark
         }
@@ -988,32 +989,34 @@ enum Specimen {
             label.isHidden = false
         }
 
-        func configureProductionActivity(_ activity: NativeSessionActivity, phase: CGFloat) {
+        func configureProductionActivity(_ activity: NativeSessionActivity) {
             guard let statusSlot = productionSessionStatusSlot,
                   productionSessionStack?.isHidden == false else { return }
+            productionActivityIsWorking = activity.showsWorkingMark
             guard activity != .idle else {
+                productionSessionActivityMark?.update(for: .idle)
                 productionSessionActivityMark?.isHidden = true
                 return
             }
-            let mark: ThemedSessionActivityMark
+            let mark: SessionStatusIndicator
             if let productionSessionActivityMark {
                 mark = productionSessionActivityMark
             } else {
-                mark = ThemedSessionActivityMark()
+                mark = SessionStatusIndicator()
                 mark.translatesAutoresizingMaskIntoConstraints = false
                 mark.setAccessibilityIdentifier("sidebar.session.activity")
                 statusSlot.addSubview(mark)
                 SidebarRowDefaults.constrainSessionStatusContent(mark, in: statusSlot)
                 productionSessionActivityMark = mark
             }
-            let state: ThemedSessionActivityMark.State = switch activity {
-            case .idle: preconditionFailure("idle activity has no mark")
-            case .loading: .loading
+            let state: SessionActivity = switch activity {
+            case .idle, .loading: .idle
             case .working: .working
             case .readyWithBackgroundWork: .readyWithBackgroundWork
             case .awaitingUser: .awaitingUser
             }
-            mark.update(state, selectedInk: selected ? ink.label : nil, phase: phase)
+            mark.hostGround = selected ? .selection : nil
+            mark.update(for: state, isLoading: activity == .loading)
             mark.isHidden = false
         }
 

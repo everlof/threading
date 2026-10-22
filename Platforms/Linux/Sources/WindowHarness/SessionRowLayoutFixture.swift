@@ -40,16 +40,20 @@ enum SessionRowLayoutFixture {
                      abs(status.frame.midX - (slot.frame.width - SidebarRowDefaults.trailingSlotSize / 2)) < 0.5 &&
                      abs(status.frame.midY - slot.bounds.midY) < 0.5,
                      "shared session status lost its Mac trailing-slot constraints")
-        row.configureProductionActivity(.awaitingUser, phase: 0)
+        row.configureProductionActivity(.awaitingUser)
         precondition(LayoutEngine.layout(root).solved, "blocked activity broke the session slot")
         guard let mark = status.subviews.first(where: {
             $0.accessibilityIdentifier() == "sidebar.session.activity"
         }) else { preconditionFailure("blocked session mark was not mounted") }
         precondition(mark.frame == status.bounds && !mark.isHidden &&
-                     mark.accessibilityLabel() == "Session waiting for an answer",
+                     mark.subviews.contains(where: {
+                         !$0.isHidden && $0.accessibilityLabel() == "Session waiting for an answer"
+                     }),
                      "blocked status lost the shared status-content constraints")
-        row.configureProductionActivity(.working, phase: 0.5)
-        precondition(mark.accessibilityLabel() == "Session working" && !mark.isHidden,
+        row.configureProductionActivity(.working)
+        precondition(mark.subviews.contains(where: {
+            !$0.isHidden && $0.accessibilityLabel() == "Session working"
+        }) && !mark.isHidden,
                      "working status did not reuse the mounted mark")
         precondition(content.titleLabel.frame.width > 20 &&
                      content.titleLabel.stringValue == "A saved agent",
@@ -73,7 +77,7 @@ enum SessionRowLayoutFixture {
                      stack.frame.maxX <= slot.frame.minX - SidebarRowDefaults.horizontalSpacing,
                      "long session title and attention lost their Mac stack slots")
         root.mountSessionStatus(nil, color: accent)
-        row.configureProductionActivity(.idle, phase: 0)
+        row.configureProductionActivity(.idle)
         precondition(LayoutEngine.layout(root).solved && attention.isHidden &&
                      slot.frame.width == SidebarRowDefaults.trailingSlotSize && mark.isHidden,
                      "recycled session kept a stale attention label")

@@ -122,10 +122,10 @@ The current shared-view audit distinguishes reused components from reused page c
 | Native conversation | `ConversationPaneContentView` mounts transcript, status and composer with the same constraints; transcript rows, prompt, chips and menu panels are shared | `WorkspaceConversationPane` still supplies a reduced control set and lifecycle; the Mac controller owns its additional rails and overlays |
 | General Settings | Page canvas, confirmation card, toggles and constraints | `WorkspaceSettingsPane` includes fewer sections than `GeneralPreferencesViewController` |
 | Welcome and sidebar artwork | Both hosts mount `ComposerWelcomeStackView` with the same centering and compact-height constraints; the sidebar brand uses a shared stack and the Linux wordmark uses `MorphingTitleLabel` | Linux still supplies a static greeting and mark; `SidebarBackdropView`, `SidebarBrandView`, and `ThreadingMarkView` still have separate platform implementations inside their Design files |
-| Navigator activity and schedule picker | Shared session row content, picker policy and `ThemedTableRowView` selection | Linux still draws `ThemedSessionActivityMark` through a platform-specific leaf |
+| Navigator activity and schedule picker | Shared `SessionStatusIndicator`, spinner, warning mark, session row content, picker policy and `ThemedTableRowView` selection | Linux still supplies runtime activity facts and rasterizes the retained status subtree into the SDL sidebar |
 
 The shared-view source check prevents new duplicate classes, Linux-only view leaves in shared
-sources, and manual menu row/panel frames; its four remaining leaves are listed above.
+sources, and manual menu row/panel frames; its three remaining leaves are listed above.
 It does not make separate page controllers equivalent; the remaining page composition work is
 tracked here explicitly.
 

@@ -8,6 +8,12 @@ public typealias CGColor = NSColor
 public struct CGPath {
     let path: NSBezierPath
 
+    public init(ellipseIn rect: CGRect, transform: CGAffineTransform?) {
+        let path = NSBezierPath(ovalIn: rect)
+        precondition(transform == nil, "Linux CGPath cannot apply a Core Graphics transform")
+        self.path = path
+    }
+
     public init(roundedRect: CGRect, cornerWidth: CGFloat, cornerHeight: CGFloat,
                 transform: CGAffineTransform?) {
         let path = NSBezierPath(roundedRect: roundedRect,
@@ -83,6 +89,7 @@ open class CAAnimation {
     open var timingFunction: CAMediaTimingFunction?
     open var fillMode: FillMode = .removed
     open var isRemovedOnCompletion = true
+    open var repeatCount: Float = 0
     public init() {}
 }
 
@@ -120,7 +127,7 @@ open class CALayer {
     open var mask: CALayer?
     public private(set) weak var superlayer: CALayer?
     public private(set) var sublayers: [CALayer] = []
-    private var animations: [String: CAAnimation] = [:]
+    private var animations: [String: (value: CAAnimation, startedAt: TimeInterval)] = [:]
 
     public init() {}
     public init(layer: Any) {
@@ -145,16 +152,114 @@ open class CALayer {
         sublayers.insert(layer, at: min(Int(index), sublayers.count))
     }
 
+    open func addSublayer(_ layer: CALayer) {
+        insertSublayer(layer, at: UInt32(sublayers.count))
+    }
+
     open func removeFromSuperlayer() {
         superlayer?.sublayers.removeAll { $0 === self }
         superlayer = nil
     }
 
     open func add(_ animation: CAAnimation, forKey key: String?) {
-        if let key { animations[key] = animation }
+        if let key { animations[key] = (animation, ProcessInfo.processInfo.systemUptime) }
     }
 
     open func removeAnimation(forKey key: String) { animations.removeValue(forKey: key) }
+
+    open func animation(forKey key: String) -> CAAnimation? { animations[key]?.value }
+
+    func animationPhase(forKey key: String) -> CGFloat? {
+        guard let animation = animations[key], animation.value.duration > 0 else { return nil }
+        let elapsed = ProcessInfo.processInfo.systemUptime - animation.startedAt
+        return CGFloat((elapsed / animation.value.duration).truncatingRemainder(dividingBy: 1))
+    }
+}
+
+/// The production spinner uses a shape layer for its partial ring. The shim rasterizes that
+/// retained path when the SDL host requests a frame; its animation remains layer-owned.
+open class CAShapeLayer: CALayer {
+    public enum LineCap { case butt, round, square }
+    public enum LineJoin { case miter, round, bevel }
+
+    open var path: CGPath?
+    open var fillColor: CGColor?
+    open var strokeColor: CGColor?
+    open var lineWidth: CGFloat = 1
+    open var lineCap: LineCap = .butt
+    open var lineJoin: LineJoin = .miter
+    open var strokeStart: CGFloat = 0
+    open var strokeEnd: CGFloat = 1
+
+    public override init() { super.init() }
+    public required init?(coder: NSCoder) { super.init(coder: coder) }
+
+    func render(in context: NSGraphicsContext) {
+        guard let path else { return }
+        context.saveGraphicsState()
+        defer { context.restoreGraphicsState() }
+        context.translateBy(x: frame.minX, y: frame.minY)
+        if let phase = animationPhase(forKey: "spin") {
+            let centre = CGPoint(x: bounds.midX, y: bounds.midY)
+            context.translateBy(x: centre.x, y: centre.y)
+            context.concat(CGAffineTransform(rotationAngle: -2 * .pi * phase))
+            context.translateBy(x: -centre.x, y: -centre.y)
+        }
+        if let fillColor {
+            fillColor.setFill()
+            path.path.fill()
+        }
+        guard let strokeColor else { return }
+        let stroke = clippedStroke(path.path)
+        stroke.lineWidth = lineWidth
+        stroke.lineCapStyle = switch lineCap {
+        case .butt: .butt
+        case .round: .round
+        case .square: .square
+        }
+        stroke.lineJoinStyle = switch lineJoin {
+        case .miter: .miter
+        case .round: .round
+        case .bevel: .bevel
+        }
+        strokeColor.setStroke()
+        stroke.stroke()
+    }
+
+    private func clippedStroke(_ source: NSBezierPath) -> NSBezierPath {
+        guard strokeStart > 0 || strokeEnd < 1 else { return source }
+        let subpaths = source.subpaths(flatness: 0.1)
+        let edges = subpaths.flatMap { subpath -> [(CGPoint, CGPoint, CGFloat)] in
+            let points = subpath.closed ? subpath.points + [subpath.points[0]] : subpath.points
+            return zip(points, points.dropFirst()).map { first, second in
+                let distance = hypot(second.x - first.x, second.y - first.y)
+                return (first, second, distance)
+            }
+        }
+        let total = edges.reduce(CGFloat.zero) { $0 + $1.2 }
+        let lower = min(1, max(0, strokeStart)) * total
+        let upper = min(1, max(0, strokeEnd)) * total
+        let clipped = NSBezierPath()
+        guard upper > lower else { return clipped }
+        var distance: CGFloat = 0
+        var drawing = false
+        for (first, second, length) in edges where length > 0 {
+            let start = max(lower, distance)
+            let end = min(upper, distance + length)
+            if end > start {
+                let from = (start - distance) / length
+                let to = (end - distance) / length
+                let startPoint = CGPoint(x: first.x + (second.x - first.x) * from,
+                                         y: first.y + (second.y - first.y) * from)
+                let endPoint = CGPoint(x: first.x + (second.x - first.x) * to,
+                                       y: first.y + (second.y - first.y) * to)
+                if !drawing { clipped.move(to: startPoint); drawing = true }
+                clipped.line(to: endPoint)
+            }
+            distance += length
+        }
+        return clipped
+    }
 }
 
 /// An axial gradient. Only its role as a mask is composited here: as a mask, its colours'

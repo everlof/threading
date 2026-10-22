@@ -27,13 +27,14 @@ liveness. Only scheduled rows stay undimmed without a live provider. Both platfo
 non-template dormant mark opacity from `SidebarRowDefaults`; durable attention words sit in
 the shared title stack rather than the trailing activity slot. The Linux host invalidates the
 navigator when either provider type exits, including when it is no longer the active pane.
-Linux now paints the active-turn arc and pending-permission dot in that trailing slot. The
-status mount and its content use the Mac row's exact constraints from `SidebarRowDefaults`:
-the mark is centred in the trailing 20-point column with the same 12-point bounds. A visible
-working mark is rasterized only in its solved rectangle and updates the retained SDL sidebar
-texture there, rather than rebuilding the whole navigator at animation cadence. Linux still
-needs the Mac hover controls and its other status silhouettes for background work, unread
-attention and usage-limit stops.
+Linux mounts the exact `SessionStatusIndicator` in that trailing slot. Its shared spinner,
+background-work dot, blocked dot and usage-limit mark keep their Mac state and accessibility
+behavior; the AppKit shim rasterizes the spinner's retained shape layer. The status mount and
+its content use the Mac row's exact constraints from `SidebarRowDefaults`: the mark is centred
+in the trailing 20-point column with the same 12-point bounds. A visible working mark is
+rasterized only in its solved rectangle and updates the retained SDL sidebar texture there,
+rather than rebuilding the whole navigator at animation cadence. The Linux host still supplies
+its runtime activity facts and has no unread-attention state yet.
 
 The saved-session picker used the same constrained content but gave each outer row a 22-point
 host frame, six points shorter than the Mac sidebar cell. It now takes its row height and stride

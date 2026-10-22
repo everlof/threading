@@ -202,7 +202,7 @@ struct WindowHarness {
         _ runtime: ProjectSnapshot.SavedRuntime, retained: Bool, at date: Date,
         index: Int, width: Int, height: Int, accent: NSColor, selected: Bool,
         selectedInk: Specimen.Ink, root: Specimen.Window, image: NSImage?,
-        activity: NativeSessionActivity, activityPhase: CGFloat,
+        activity: NativeSessionActivity,
         indent: CGFloat = 0
     ) {
         let frame = navigatorRowRect(index, width: width, height: height, indent: indent)
@@ -215,7 +215,7 @@ struct WindowHarness {
                                  selected: selected, dormant: dormant)
         root.mountSessionStatus(runtime.attentionTitle(at: date).map(readableNavigatorText),
                                 color: selected ? ink.secondary : Design.Text.tertiary)
-        root.mountSessionActivity(activity, phase: activityPhase)
+        root.mountSessionActivity(activity)
     }
 
     /// A visible saved shell uses the Mac terminal row's icon and title composition. The
@@ -2232,15 +2232,12 @@ struct WindowHarness {
         var navigatorDisplayRevision: UInt64 = 0
         var nextVisibleAttentionExpiry: Date?
         var visibleWorkingActivity = false
-        var activityPhase: CGFloat = 0
         var nextActivityFrame = Date.distantPast
-        var workingMarks: [ThemedSessionActivityMark] = []
-        var workingPatches: [(mark: ThemedSessionActivityMark, x: Int, y: Int,
+        var workingMarks: [SessionStatusIndicator] = []
+        var workingPatches: [(mark: SessionStatusIndicator, x: Int, y: Int,
                               width: Int, height: Int, background: [UInt8])] = []
         func paintWorkingPatches() throws {
             guard !workingPatches.isEmpty else { return }
-            activityPhase = Design.Motion.reducesStatusMotion ? 0 : CGFloat(
-                Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9)
             for patch in workingPatches {
                 let tile = Bitmap(width: patch.width, height: patch.height)
                 tile.withMutablePixels { pixels in
@@ -2248,10 +2245,8 @@ struct WindowHarness {
                 }
                 let context = NSGraphicsContext(bitmap: tile, scale: scale)
                 NSGraphicsContext.current = context
-                patch.mark.updatePhase(activityPhase)
-                patch.mark.effectiveAppearance.performAsCurrentDrawingAppearance {
-                    patch.mark.draw(patch.mark.bounds)
-                }
+                context.translateBy(x: -patch.mark.frame.minX, y: -patch.mark.frame.minY)
+                patch.mark.render(in: context)
                 NSGraphicsContext.current = nil
                 let result = tile.pixels.withUnsafeBufferPointer {
                     tw_update_sidebar_region(activityWindow.pointer, $0.baseAddress,
@@ -2357,7 +2352,7 @@ struct WindowHarness {
                     archiveEnabled: actionsEnabled && pendingArchive == nil && pendingPin == nil)
                 row.configureProductionStatus(runtime.attentionTitle(at: now),
                     color: isSelected ? ink.secondary : Design.Text.tertiary)
-                row.configureProductionActivity(activity, phase: activityPhase)
+                row.configureProductionActivity(activity)
                 if let mark = row.productionWorkingMark { workingMarks.append(mark) }
             case .terminal(let projectIndex, let childIndex, _):
                 let project = projects[projectIndex]
@@ -4321,8 +4316,6 @@ struct WindowHarness {
                 visibleWorkingActivity = false
                 workingMarks.removeAll(keepingCapacity: true)
                 workingPatches.removeAll(keepingCapacity: true)
-                activityPhase = Design.Motion.reducesStatusMotion ? 0 : CGFloat(
-                    Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9)
                 let width = navigatorWidth
                 trace(traceFirstFrame ? "first-frame.begin" : "frame.begin")
                 // At most viewport/count row objects, even for a large persisted catalogue.
@@ -4414,7 +4407,7 @@ struct WindowHarness {
                                 index: index - savedFirst,
                                 width: width, height: height, accent: accent,
                                 selected: index == savedSelected, selectedInk: selectedInk, root: root,
-                                image: mark, activity: activity, activityPhase: activityPhase)
+                                image: mark, activity: activity)
                             if let mark = root.mountedRow(at: index - savedFirst)?.productionWorkingMark {
                                 workingMarks.append(mark)
                             }
@@ -4639,7 +4632,7 @@ struct WindowHarness {
                 let renderStarted = DispatchTime.now().uptimeNanoseconds
                 _ = root.layoutSubtreeIfNeeded()
                 let markRegions = workingMarks.compactMap { mark ->
-                    (mark: ThemedSessionActivityMark, x: Int, y: Int, width: Int, height: Int)? in
+                    (mark: SessionStatusIndicator, x: Int, y: Int, width: Int, height: Int)? in
                     let rect = mark.convert(mark.bounds, to: root)
                     let x = Int((rect.minX * scale).rounded())
                     let y = height - Int((rect.maxY * scale).rounded())

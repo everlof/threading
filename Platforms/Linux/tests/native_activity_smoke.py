@@ -99,12 +99,18 @@ def row_with(text):
         if app.get_process_id() != process.pid or app.get_name() != 'Threading Linux':
             continue
         frame = app.get_child_at_index(0)
+        if frame is None:
+            continue
         for child in range(frame.get_child_count()):
             listed = frame.get_child_at_index(child)
+            if listed is None:
+                continue
             if listed.get_role_name() != 'list' or not listed.get_name().startswith('Saved agents'):
                 continue
             for row_index in range(listed.get_child_count()):
                 row = listed.get_child_at_index(row_index)
+                if row is None:
+                    continue
                 if row.get_accessible_id() == identifier and text in row.get_name():
                     return row
     return None
