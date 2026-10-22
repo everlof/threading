@@ -682,8 +682,12 @@ open class NSView: NSResponder, NSLayoutItem {
             }
             let dirtyRect = visibleRect
             if !dirtyRect.isEmpty { draw(dirtyRect) }
-            for case let shape as CAShapeLayer in layer?.sublayers ?? [] {
-                shape.render(in: context)
+            for sublayer in layer?.sublayers ?? [] {
+                if let shape = sublayer as? CAShapeLayer {
+                    shape.render(in: context)
+                } else if let gradient = sublayer as? CAGradientLayer {
+                    gradient.render(in: context, clippedTo: visibleRect)
+                }
             }
             for subview in subviews { subview.renderLaidOut(in: context) }
             if let mask, let deviceToLayer {

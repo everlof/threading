@@ -1,28 +1,7 @@
 import AppKit
 
-#if os(Linux)
-typealias ThreadingMarkPath = NSBezierPath
-private typealias MutableThreadingMarkPath = NSBezierPath
-
-private extension NSBezierPath {
-    func addLine(to point: CGPoint) { line(to: point) }
-    func closeSubpath() { close() }
-    func addCurve(to point: CGPoint, control1: CGPoint, control2: CGPoint) {
-        curve(to: point, controlPoint1: control1, controlPoint2: control2)
-    }
-    func addQuadCurve(to point: CGPoint, control: CGPoint) {
-        let start = currentPoint
-        curve(to: point,
-            controlPoint1: CGPoint(x: start.x + (control.x - start.x) * 2 / 3,
-                                   y: start.y + (control.y - start.y) * 2 / 3),
-            controlPoint2: CGPoint(x: point.x + (control.x - point.x) * 2 / 3,
-                                   y: point.y + (control.y - point.y) * 2 / 3))
-    }
-}
-#else
 typealias ThreadingMarkPath = CGPath
 private typealias MutableThreadingMarkPath = CGMutablePath
-#endif
 
 // MARK: - Threading Mark Geometry
 

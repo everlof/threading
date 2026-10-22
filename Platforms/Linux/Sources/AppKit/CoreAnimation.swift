@@ -5,22 +5,41 @@ import Foundation
 /// floating-target state are retained without claiming a complete Core Animation compositor.
 public typealias CGColor = NSColor
 
-public struct CGPath {
+public class CGPath {
     let path: NSBezierPath
 
+    init(path: NSBezierPath) { self.path = path }
+
     public init(ellipseIn rect: CGRect, transform: CGAffineTransform?) {
-        let path = NSBezierPath(ovalIn: rect)
+        path = NSBezierPath(ovalIn: rect)
         precondition(transform == nil, "Linux CGPath cannot apply a Core Graphics transform")
-        self.path = path
     }
 
     public init(roundedRect: CGRect, cornerWidth: CGFloat, cornerHeight: CGFloat,
                 transform: CGAffineTransform?) {
-        let path = NSBezierPath(roundedRect: roundedRect,
-                                xRadius: cornerWidth, yRadius: cornerHeight)
+        path = NSBezierPath(roundedRect: roundedRect,
+                            xRadius: cornerWidth, yRadius: cornerHeight)
         precondition(transform == nil, "Linux CGPath cannot apply a Core Graphics transform")
-        self.path = path
     }
+}
+
+public final class CGMutablePath: CGPath {
+    public init() { super.init(path: NSBezierPath()) }
+
+    public func move(to point: CGPoint) { path.move(to: point) }
+    public func addLine(to point: CGPoint) { path.line(to: point) }
+    public func addCurve(to point: CGPoint, control1: CGPoint, control2: CGPoint) {
+        path.curve(to: point, controlPoint1: control1, controlPoint2: control2)
+    }
+    public func addQuadCurve(to point: CGPoint, control: CGPoint) {
+        let start = path.currentPoint
+        path.curve(to: point,
+                   controlPoint1: CGPoint(x: start.x + (control.x - start.x) * 2 / 3,
+                                          y: start.y + (control.y - start.y) * 2 / 3),
+                   controlPoint2: CGPoint(x: point.x + (control.x - point.x) * 2 / 3,
+                                          y: point.y + (control.y - point.y) * 2 / 3))
+    }
+    public func closeSubpath() { path.close() }
 }
 
 public final class CGContext {
@@ -110,6 +129,7 @@ public final class CAAnimationGroup: CAAnimation {
 open class CALayer {
     public enum CornerCurve { case circular, continuous }
 
+    open var isHidden = false
     open var masksToBounds = false
     open var frame: CGRect = .zero
     open var backgroundColor: CGColor?
@@ -134,6 +154,7 @@ open class CALayer {
         guard let source = layer as? CALayer else { return }
         frame = source.frame
         backgroundColor = source.backgroundColor
+        isHidden = source.isHidden
         name = source.name
         contentsScale = source.contentsScale
         cornerCurve = source.cornerCurve
@@ -267,6 +288,8 @@ open class CAShapeLayer: CALayer {
 /// the top of a flipped view and the bottom of an unflipped one, because the coordinates are the
 /// backing view's own.
 open class CAGradientLayer: CALayer {
+    public enum LayerType { case axial }
+    open var type: LayerType = .axial
     open var colors: [Any]?
     open var locations: [NSNumber]?
     open var startPoint = CGPoint(x: 0.5, y: 0)
@@ -274,6 +297,23 @@ open class CAGradientLayer: CALayer {
 
     public override init() { super.init() }
     public required init?(coder: NSCoder) { super.init(coder: coder) }
+
+    func render(in context: NSGraphicsContext, clippedTo visibleRect: CGRect) {
+        guard !isHidden, frame.width > 0, frame.height > 0,
+              let colors = colors as? [NSColor],
+              let gradient = NSGradient(colors: colors) else { return }
+        precondition(colors.count == 2 &&
+                     abs(startPoint.x - endPoint.x) < 0.0001 &&
+                     abs(startPoint.y - endPoint.y) == 1 &&
+                     (locations == nil || locations == [0, 1]),
+                     "Linux gradient drawing supports the exported two-stop vertical sidebar")
+        context.saveGraphicsState()
+        defer { context.restoreGraphicsState() }
+        context.translateBy(x: frame.minX, y: frame.minY)
+        let localVisible = visibleRect.offsetBy(dx: -frame.minX, dy: -frame.minY)
+        gradient.draw(in: bounds, angle: startPoint.y > endPoint.y ? 90 : -90,
+                      clippedTo: localVisible)
+    }
 
     /// The interpolated alpha at `point`, in unit coordinates of this layer's frame.
     func alpha(atUnit point: CGPoint) -> CGFloat {

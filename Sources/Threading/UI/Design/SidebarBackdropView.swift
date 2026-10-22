@@ -1,31 +1,5 @@
 import AppKit
 
-#if os(Linux)
-/// The checked house-theme export admits a static two-stop vertical gradient. Keep this
-/// platform drawing leaf in the production backdrop boundary; the host only positions it.
-/// Theme export tests reject pictures, motion or a changed gradient geometry until supported.
-final class SidebarBackdropView: NSView {
-    private let gradient: NSGradient
-
-    init() {
-        guard let gradient = NSGradient(colors: SidebarAppearance.backgroundColors) else {
-            preconditionFailure("The exported sidebar needs its two gradient stops")
-        }
-        self.gradient = gradient
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func draw(_ dirtyRect: NSRect) {
-        gradient.draw(in: bounds, angle: 90, clippedTo: visibleRect)
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-}
-#else
-
 /// The sidebar's ground: the platform's own sidebar material under the identity theme, an
 /// opaque themed surface under a style — and, when the style says so, that surface dressed
 /// with a gradient and an image.
@@ -53,12 +27,15 @@ final class SidebarBackdropView: NSView {
 /// every effective-appearance flip, the same discipline `ThemedSpinner` keeps per redraw.
 final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
 
+    #if !os(Linux)
     private let material = NSVisualEffectView()
+    #endif
     private let fill = ThemedSurfaceView()
     /// Structural host for the two decoration layers, kept as a view so it stacks between the
     /// fill and the content the ordinary way.
     private let decor = NSView()
     private let gradientLayer = CAGradientLayer()
+    #if !os(Linux)
     private let imageLayer = CALayer()
     /// A fill or fit picture placed by its alignment inside `imageLayer`, which clips it — how
     /// an illustration stands on the column's foot at any window height.
@@ -66,6 +43,7 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
     private var motionView: ThemeBackdropMotionView?
     /// The theme's ambient particles over both — bubbles rising through the column.
     private let particleField = ThemeParticleFieldLayer()
+    #endif
     private let appEvents = AppEventObservations()
 
     // MARK: - Initialization
@@ -74,24 +52,28 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
+        #if !os(Linux)
         material.material = .sidebar
         material.blendingMode = .behindWindow
         material.state = .followsWindowActiveState
         material.translatesAutoresizingMaskIntoConstraints = false
         addSubview(material)
+        #endif
         addSubview(fill)
 
         decor.translatesAutoresizingMaskIntoConstraints = false
         decor.wantsLayer = true
         gradientLayer.type = .axial
         decor.layer?.addSublayer(gradientLayer)
+        #if !os(Linux)
         imageLayer.masksToBounds = true
         imageLayer.addSublayer(alignedImage)
         decor.layer?.addSublayer(imageLayer)
         decor.layer?.addSublayer(particleField)
+        #endif
         addSubview(decor)
 
-        for pane in [material, fill, decor] {
+        for pane in [fill, decor] {
             NSLayoutConstraint.activate([
                 pane.topAnchor.constraint(equalTo: topAnchor),
                 pane.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -99,6 +81,14 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
                 pane.trailingAnchor.constraint(equalTo: trailingAnchor)
             ])
         }
+        #if !os(Linux)
+        NSLayoutConstraint.activate([
+            material.topAnchor.constraint(equalTo: topAnchor),
+            material.bottomAnchor.constraint(equalTo: bottomAnchor),
+            material.leadingAnchor.constraint(equalTo: leadingAnchor),
+            material.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+        #endif
 
         apply()
 
@@ -116,11 +106,14 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
     override func layout() {
         super.layout()
         gradientLayer.frame = decor.bounds
+        #if !os(Linux)
         imageLayer.frame = decor.bounds
         alignedImage.place(in: imageLayer.bounds)
         particleField.frame = decor.bounds
+        #endif
     }
 
+    #if !os(Linux)
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         // A field decides whether it moves from its window; a move is a new answer.
@@ -129,6 +122,7 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
 
     /// The field, for a test asking which state it is in.
     var particles: ThemeParticleFieldLayer { particleField }
+    #endif
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
@@ -141,6 +135,14 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
 
     /// Shows the ground the current theme calls for.
     private func apply() {
+        #if os(Linux)
+        fill.applySurface(fill: Design.Surface.background, radius: .fixed(0), bevel: .none)
+        gradientLayer.colors = SidebarAppearance.backgroundColors.map(\.cgColor)
+        gradientLayer.locations = [0, 1]
+        // The exported house gradient starts at the visible top of the sidebar.
+        gradientLayer.startPoint = CGPoint(x: 0.5, y: 1)
+        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
+        #else
         let isSystem = AppThemePalette.current.isSystem
         material.isHidden = !isSystem
         fill.isHidden = isSystem
@@ -160,8 +162,10 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
         applyGradient(background?.gradient)
         applyImage(background?.image)
         particleField.apply(background?.particles, host: self)
+        #endif
     }
 
+    #if !os(Linux)
     private func applyGradient(_ gradient: SidebarAppearance.Background.Gradient?) {
         guard let gradient else {
             motionView?.stop()
@@ -224,5 +228,9 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
     func permitsSystemChrome(_ view: NSView) -> Bool {
         view === material || view.isDescendant(of: material)
     }
+    #else
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func permitsSystemChrome(_ view: NSView) -> Bool { false }
+    #endif
 }
-#endif

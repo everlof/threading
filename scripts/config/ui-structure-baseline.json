@@ -1,9 +1,9 @@
 {
   "controllers": 105,
   "platform_views": 122,
-  "constraints": 3101,
+  "constraints": 3071,
   "drawing": 107,
   "linux_platform_views": 9,
-  "linux_constraints": 81,
+  "linux_constraints": 76,
   "linux_stacks": 2
 }

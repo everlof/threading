@@ -11,59 +11,6 @@ enum ThreadingMarkParticleMotion: String, CaseIterable {
     /// The field turns continuously by one of the mark's six indistinguishable strand steps.
     case orbit
 }
-
-#if os(Linux)
-/// Static presentation of the canonical mark. The software host retains its eight paths;
-/// theme changes only restate ink. Particle and launch motion remain platform work.
-final class ThreadingMarkView: NSView, ThemedComponent {
-    private var preparedBounds: CGRect?
-    private var preparedScale: CGFloat = 0
-    private var outline: NSBezierPath?
-    private var strands: [NSBezierPath] = []
-    private var core: NSBezierPath?
-
-    override func draw(_ dirtyRect: NSRect) {
-        let scale = window?.backingScaleFactor ?? 1
-        if preparedBounds != bounds || preparedScale != scale {
-            preparePaths(scale: scale)
-        }
-        SidebarAppearance.brandMark.setFill()
-        SidebarAppearance.brandMark.setStroke()
-        outline?.stroke()
-        for strand in strands { strand.stroke() }
-        core?.fill()
-    }
-
-    private func preparePaths(scale: CGFloat) {
-        preparedBounds = bounds
-        preparedScale = scale
-        let side = min(bounds.width, bounds.height)
-        guard side > 0 else { outline = nil; strands = []; core = nil; return }
-        func snapped(_ width: CGFloat) -> CGFloat {
-            max(1 / scale, (width * scale).rounded() / scale)
-        }
-        let strandWidth = snapped(side * ThreadingMarkGeometry.strandStrokeRatio)
-        let inset = CGRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2,
-                           width: side, height: side).insetBy(dx: strandWidth / 2, dy: strandWidth / 2)
-        let left = ceil(inset.minX * scale) / scale
-        let bottom = ceil(inset.minY * scale) / scale
-        let box = CGRect(x: left, y: bottom,
-            width: floor(inset.maxX * scale) / scale - left,
-            height: floor(inset.maxY * scale) / scale - bottom)
-        outline = ThreadingMarkGeometry.outlinePath(in: box)
-        outline?.lineWidth = snapped(side * ThreadingMarkGeometry.outlineStrokeRatio)
-        outline?.lineCapStyle = .round
-        outline?.lineJoinStyle = .round
-        strands = ThreadingMarkGeometry.strandPaths(in: box)
-        for strand in strands {
-            strand.lineWidth = strandWidth
-            strand.lineCapStyle = .round
-            strand.lineJoinStyle = .round
-        }
-        core = ThreadingMarkGeometry.corePath(in: box)
-    }
-}
-#else
 // MARK: - Threading Mark View
 
 /// The Threading mark, drawn live — and able to stitch itself in.
@@ -171,6 +118,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     private let outline = CAShapeLayer()
     private var strands: [CAShapeLayer] = []
     private let core = CAShapeLayer()
+    #if !os(Linux)
     private var particleContainer: CALayer?
     /// Motion local to the particle drawing. The outer container owns hover/press transforms;
     /// keeping this nested layer separate lets a held hover tumble the complete implied box in
@@ -185,10 +133,12 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     /// `nil` is the product cadence. Tests may collapse the dwell without changing the global
     /// motion system or actually waiting through a human-scale hover.
     private var heldHoverDelayOverride: TimeInterval?
+    #endif
     private var themeRedraw: ThemeRedraw?
     /// Whether the mark is currently held lifted, so a press knows what it is scaling from and
     /// a repeated enter does not re-trigger the core's one beat.
     private var isHovered = false
+    #if !os(Linux)
     /// `nil` keeps the plain vector mark. This is the default for passive appearances such as
     /// the composer hero; the sidebar opts into `.weave` because its host owns pointer state.
     var particleMotion: ThreadingMarkParticleMotion? {
@@ -197,6 +147,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
             configureParticles()
         }
     }
+    #endif
 
     /// Every layer the mark is made of, in draw order. The animations move all of them
     /// together, so the one list is what stops a new part being left behind by a turn.
@@ -228,6 +179,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         themeRedraw = ThemeRedraw(self)
     }
 
+    #if !os(Linux)
     convenience init(
         particleMotion: ThreadingMarkParticleMotion,
         heldHoverDelay: TimeInterval? = nil
@@ -239,6 +191,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         heldHoverDelayOverride = heldHoverDelay
         configureParticles()
     }
+    #endif
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
@@ -261,6 +214,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
     ///
     /// Re-asked rather than set once, because the answer changes when the window moves between
     /// displays of different scales — the same rule `ThemeRedraw` follows for ink.
+    #if !os(Linux)
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         applyContentsScale()
@@ -268,6 +222,7 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         // move between displays is a remeasure, not only a re-rasterise.
         needsLayout = true
     }
+    #endif
 
     private var backingScale: CGFloat {
         window?.backingScaleFactor
@@ -286,11 +241,13 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         for shape in shapes {
             shape.contentsScale = scale
         }
+        #if !os(Linux)
         particleContainer?.contentsScale = scale
         particleField?.contentsScale = scale
         for particle in particles {
             particle.layer.contentsScale = scale
         }
+        #endif
     }
 
     // MARK: - Layout & Drawing
@@ -343,7 +300,9 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         core.frame = bounds
         core.path = ThreadingMarkGeometry.corePath(in: box)
 
+        #if !os(Linux)
         layoutParticles(in: box, side: side)
+        #endif
     }
 
     /// The nearest whole number of device pixels, and never fewer than one.
@@ -359,9 +318,12 @@ final class ThreadingMarkView: NSView, ThemedComponent {
             strand.strokeColor = ink.thread.cgColor
         }
         core.fillColor = ink.core.cgColor
+        #if !os(Linux)
         applyParticleInk(ink)
+        #endif
     }
 
+    #if !os(Linux)
     // MARK: - Particle Geometry
 
     private func configureParticles() {
@@ -1102,9 +1064,15 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         shape.add(stroke, forKey: "drawIn")
     }
 
+    #endif
+
     // MARK: - Private Methods
 
     private func resolvedInk() -> (shield: NSColor, thread: NSColor, core: NSColor) {
+        #if os(Linux)
+        let ink = SidebarAppearance.brandMark
+        return (ink, ink, ink)
+        #else
         if AppThemePalette.current.isSystem {
             let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             return dark
@@ -1121,7 +1089,6 @@ final class ThreadingMarkView: NSView, ThemedComponent {
         // the ground it actually sits on.
         let ink = Design.Surface.accent.legible(on: Design.Surface.background)
         return (ink, ink, ink)
+        #endif
     }
 }
-
-#endif

@@ -16,7 +16,15 @@ extension NSView {
     public func backingAlignedRect(_ rect: NSRect, options: NSAlignmentOptions) -> NSRect {
         precondition(options == .alignAllEdgesInward, "unsupported backing alignment option")
         guard rect.width > 0, rect.height > 0 else { return rect }
-        let transform = NSGraphicsContext.current?.transform ?? .identity
+        let transform: CGAffineTransform
+        if let context = NSGraphicsContext.current {
+            transform = context.transform
+        } else {
+            // Auto Layout commonly measures before rasterization. Use the attached window's
+            // backing scale then, just as AppKit does when aligning a view outside draw(_:).
+            let scale = window?.backingScaleFactor ?? 1
+            transform = CGAffineTransform(scaleX: scale, y: scale)
+        }
         guard transform.b == 0, transform.c == 0,
               transform.a.isFinite, transform.d.isFinite,
               transform.tx.isFinite, transform.ty.isFinite,

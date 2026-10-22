@@ -58,7 +58,9 @@ recycled table-row rectangles remain viewport coordinates; they do not replace a
 internal constraints. The Linux sidebar ground follows the same root-edge rule as macOS: the
 backdrop occupies the whole column, a constrained clip exposes only the header band, and the
 opaque navigator well starts at the header's bottom edge. The full-column gradient keeps its
-coordinate space without recalculating three child frames on every resize.
+coordinate space without recalculating three child frames on every resize. The backdrop now
+mounts the same fill and decoration views as macOS; the AppKit shim paints its retained
+`CAGradientLayer` from the checked house-theme export.
 The row, text, and menu overlay layers are likewise pinned to the navigator root on all four
 edges. The outline's disclosure glyph is centred on its cell with a constrained leading offset
 that changes with indentation. These are parent relationships, so a root resize or row reuse
@@ -197,14 +199,17 @@ theme's blue/cream hue. The native empty-pane journey checks the actual glyph pi
 light/dark changes at both display scales, including antialiased 1× text.
 
 The Linux opening welcome mounts the same `ComposerWelcomeStackView` and centered hero constraints
-as the Mac composer. Its host supplies the retained shared mark paths and one primary-ink,
+as the Mac composer. `ThreadingMarkView` now keeps the Mac's shape-layer tree and path layout;
+the AppKit shim rasterizes its paths into the SDL frame. Its host supplies one primary-ink,
 20-point semibold greeting, word-wrapped to at most three lines. `ComposerWelcomeLayout` shares
 its 40-point mark, 620-point measure and 48-point minimum clearance with the Mac controller.
 Measurement is cached at unchanged width/text; no provider/project-sized tree or work is added
 to pointer callbacks.
 The app greeting is selected once from the shared calendar policy, whose daypart is the same
 portable grammar used by theme welcomes. Linux currently paints the house-theme static form;
-this does not implement theme-authored greetings, captions, alternate marks or motion.
+theme-authored greetings, captions, alternate marks and mark motion remain unported. The sidebar
+brand also uses one `SidebarBrandView` class and one mark/wordmark stack constraint on both
+platforms; its custom theme logo and analyzer leaves are still Mac-only.
 
 The Linux New Worktree and Rename Session questions mount the production `ThemedAlert` model
 and `ThemedAlertContentView`. `ThemedAlertLayout` builds the copy, heading and section stacks
@@ -1496,7 +1501,9 @@ focus and Return/⌘Return behavior; Threading retains text admission, submissio
 `PromptChrome` also owns the opening column's 720-point cap and 116-point prompt minimum, used
 by the Mac controller and Linux host. `OpeningComposerContentView` mounts that column, its
 choice row, and the hero region as one view and constraint tree on both platforms. The hosts
-supply the greeting content, controls, draft and launch policy; the Mac root still owns its
+supply their action controls to `OpeningComposerActionRowView`; it keeps the Start placement,
+optional import offer and adjacent time buttons under the same constraints on both platforms.
+The hosts supply the greeting content, draft and launch policy; the Mac root still owns its
 theme backdrop and `composer.backdrop@1` extension plane. The Linux root is the same shared
 content view inside the SDL viewport. `ComposerWelcomeStackView` also supplies one mark,
 greeting and optional caption arrangement and compact-height rule; each host provides its

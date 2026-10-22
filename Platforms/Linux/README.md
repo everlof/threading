@@ -118,14 +118,14 @@ The current shared-view audit distinguishes reused components from reused page c
 | Surface | Shared UI mounted by Linux | Remaining host boundary |
 | --- | --- | --- |
 | Navigator rows and menus | `SidebarNavigatorContentView` mounts the header, outline and empty state with shared constraints; row assembly, titles and menu components are shared | Linux keeps an outer `Specimen.Window` for SDL layers and diagnostic modes; macOS still mounts its footer, extension backdrop and mascot around the shared core |
-| Opening composer | `OpeningComposerContentView` owns the choice row, column, and hero region; `ComposerWelcomeStackView` assembles the mark, greeting and optional caption; prompt, chips, choice panels and menu rows are shared | Linux still supplies a reduced set of controls and its house-theme greeting; macOS owns its theme backdrop and extension plane |
+| Opening composer | `OpeningComposerContentView` owns the choice row, column, and hero region; `OpeningComposerActionRowView` places Start and optional import/time actions; `ComposerWelcomeStackView` assembles the mark, greeting and optional caption; prompt, chips, choice panels and menu rows are shared | Linux still supplies fewer action controls and its house-theme greeting; macOS owns its theme backdrop and extension plane |
 | Native conversation | `ConversationPaneContentView` mounts transcript, status and composer with the same constraints; transcript rows, prompt, chips and menu panels are shared | `WorkspaceConversationPane` still supplies a reduced control set and lifecycle; the Mac controller owns its additional rails and overlays |
 | General Settings | Page canvas, confirmation card, toggles and constraints | `WorkspaceSettingsPane` includes fewer sections than `GeneralPreferencesViewController` |
-| Welcome and sidebar artwork | Both hosts mount `ComposerWelcomeStackView` with the same centering and compact-height constraints; the sidebar brand uses a shared stack and the Linux wordmark uses `MorphingTitleLabel` | Linux still supplies a static greeting and mark; `SidebarBackdropView`, `SidebarBrandView`, and `ThreadingMarkView` still have separate platform implementations inside their Design files |
+| Welcome and sidebar artwork | Both hosts mount `ComposerWelcomeStackView` with the same centering and compact-height constraints; `SidebarBackdropView`, `SidebarBrandView` and `ThreadingMarkView` now share their view classes, brand constraints and mark shape layers | Linux still supplies the house-theme gradient, fixed brand and greeting; custom theme artwork, analyzers and mark particle motion remain unported |
 | Navigator activity and schedule picker | Shared `SessionStatusIndicator`, spinner, warning mark, session row content, picker policy and `ThemedTableRowView` selection | Linux still supplies runtime activity facts and rasterizes the retained status subtree into the SDL sidebar |
 
 The shared-view source check prevents new duplicate classes, Linux-only view leaves in shared
-sources, and manual menu row/panel frames; its three remaining leaves are listed above.
+sources, and manual menu row/panel frames; no Linux-only shared-source view leaves remain.
 It does not make separate page controllers equivalent; the remaining page composition work is
 tracked here explicitly.
 

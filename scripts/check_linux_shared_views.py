@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Keep Linux from rebuilding shared UI classes or laying out menu rows again.
 
-The platform-only leaves are migration debt. Removing one requires shrinking its list;
-adding another fails the build even when a different leaf was removed in the same change.
+No platform-only shared-source view leaves remain; adding one fails the build.
 """
 
 from __future__ import annotations
@@ -18,9 +17,7 @@ from check_ui_structure import executable_text
 DECLARATION = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:")
 EXPECTED_DUPLICATES: set[str] = set()
 HOST_RENDER_LEAVES = {"LinuxActivityBeamHostView", "MorphingLabel"}
-PLATFORM_VIEW_LEAVES = {
-    "SidebarBackdropView", "SidebarBrandView", "ThreadingMarkView",
-}
+PLATFORM_VIEW_LEAVES: set[str] = set()
 CLASS_BASE = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)")
 VIEW_BASES = {
     "NSView", "NSStackView", "NSScrollView", "NSClipView", "NSTableView",

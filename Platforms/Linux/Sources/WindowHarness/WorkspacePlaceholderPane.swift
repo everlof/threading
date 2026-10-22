@@ -57,9 +57,9 @@ final class WorkspacePlaceholderPane {
     private lazy var composerHero = ComposerWelcomeStackView(
         mark: composerMark, greeting: composerGreeting,
         fixedMarkSide: ComposerWelcomeLayout.markSide)
-    private let actionRow = NSView(frame: .zero)
     private let composerSurface = PromptView(frame: .zero)
     private let composerStartButton = ThemedButton()
+    private lazy var actionRow = OpeningComposerActionRowView(primary: composerStartButton)
     private lazy var projectChip = ChipView()
     private lazy var providerChip = ChipView()
     private let modelChip = ChipView()
@@ -148,8 +148,6 @@ final class WorkspacePlaceholderPane {
         projectChip.setContentCompressionResistancePriority(.init(239), for: .horizontal)
         providerChip.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        actionRow.addSubview(composerStartButton)
-        composerStartButton.translatesAutoresizingMaskIntoConstraints = false
         composerSurface.minimumHeight = PromptChrome.openingMinimumHeight
         composerSurface.submitPlacement = .outside
         composerSurface.showsImageAttachments = true
@@ -178,13 +176,6 @@ final class WorkspacePlaceholderPane {
             chip.setContentCompressionResistancePriority(.init(Float(priority)), for: .horizontal)
         }
         composerRoot.addSubview(choiceSurface)
-        NSLayoutConstraint.activate([
-            composerStartButton.trailingAnchor.constraint(equalTo: actionRow.trailingAnchor),
-            composerStartButton.topAnchor.constraint(equalTo: actionRow.topAnchor),
-            composerStartButton.bottomAnchor.constraint(equalTo: actionRow.bottomAnchor),
-            composerStartButton.leadingAnchor.constraint(
-                greaterThanOrEqualTo: actionRow.leadingAnchor)
-        ])
         choiceSurface.isHidden = true
         projectChip.choicePresentationProvider = { [weak self] _, didDismiss in
             self?.openChoice(.project, didDismiss: didDismiss)

@@ -212,96 +212,9 @@ final class SessionComposerViewController: NSViewController {
     ///
     /// The row itself never hides now that it carries the send; the import button is what
     /// appears once discovery finds something.
-    private lazy var actionRow: NSView = {
-        let row = NSView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.setAccessibilityIdentifier("composer.session-start.actions")
-        importButton.translatesAutoresizingMaskIntoConstraints = false
-        startButton.translatesAutoresizingMaskIntoConstraints = false
-        scheduleButton.translatesAutoresizingMaskIntoConstraints = false
-        curfewButton.translatesAutoresizingMaskIntoConstraints = false
-        cancelEditButton.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(importButton)
-        row.addSubview(cancelEditButton)
-        row.addSubview(curfewButton)
-        row.addSubview(scheduleButton)
-        row.addSubview(startButton)
-
-        // "The offer yields first" — stated in the constraint below and, until now, only there.
-        // A `lessThanOrEqualTo` says the import button *may* stop short of what is beside it; it
-        // does not say the button's own title is what gives when the row runs out of room, so
-        // the row simply grew past the pane instead. The rule bit once a third control joined
-        // the row and the fixture had a project to discover conversations in — which is why it
-        // only ever failed in a full suite, where earlier tests leave projects behind.
-        importButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let inset = importButton.opticalHorizontalInset
-        NSLayoutConstraint.activate([
-            importButton.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: -inset),
-            importButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-
-            // Both buttons stand at the same height, which is a statement about the *row* rather
-            // than about either button. A plain button asks for the height its mark and its
-            // padding need — 4pt shorter than a bordered one — and at rest that is invisible,
-            // because it draws nothing. Under the pointer it raises a surface, and a hover pill
-            // visibly shorter than the primary it sits opposite reads as two rows pretending to
-            // be one. The height is the row's to state; the ink stays where it was.
-            importButton.heightAnchor.constraint(equalTo: startButton.heightAnchor),
-
-            // The offer yields first: it is one line of quiet text, and the action beside it is
-            // the thing that must stay readable when the pane is narrow. Pinned to the *first*
-            // of the two icon buttons rather than to the clock, so adding the end beside the
-            // start moved the row's leading offer along with it instead of overlapping it.
-            importButton.trailingAnchor.constraint(
-                lessThanOrEqualTo: curfewButton.leadingAnchor,
-                constant: -Design.Spacing.medium
-            ),
-
-            // When it ends, beside when it starts: two icon buttons at the same `small` spread
-            // the clock already keeps from the send, so the three read as one cluster about
-            // *time* rather than as three unrelated controls. On the outside of the pair rather
-            // than between them, because the clock is the primary's own alternative — send it
-            // now, send it later — and wedging a third decision into that pair would break the
-            // spread form the comment below calls the primary's split control.
-            curfewButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            curfewButton.trailingAnchor.constraint(
-                equalTo: scheduleButton.leadingAnchor,
-                constant: -Design.Spacing.small
-            ),
-
-            scheduleButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            // `small`, where everything else on this row is `medium` apart. The two are one
-            // decision offered two ways — send it now, send it later — and the tighter gap is
-            // how that is said without a plate around them, which is the same ranking
-            // `SplitIconButtonView` draws for the pair it welds. A plate is not on offer here:
-            // this press is the accent-filled primary, and `SplitButtonView` welds neutral
-            // pairs only — a shared plate under an accent press would hold a permanent colour
-            // seam, so the spread form *is* the primary's split control. It is also what keeps the row
-            // inside a 560-point pane: at `medium` the row's minimum ran three points past what
-            // `ComposerWindowFitTests` allows the column, and an icon button's width is a
-            // required constraint that no compression priority will yield.
-            scheduleButton.trailingAnchor.constraint(
-                equalTo: startButton.leadingAnchor,
-                constant: -Design.Spacing.small
-            ),
-
-            // The import button's own geometry, restated for the control that takes its slot
-            // while an edit holds the box. The two are never visible together, so sharing the
-            // leading edge costs nothing and keeps the row's silhouette identical in both modes.
-            cancelEditButton.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-            cancelEditButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            cancelEditButton.heightAnchor.constraint(equalTo: startButton.heightAnchor),
-            cancelEditButton.trailingAnchor.constraint(
-                lessThanOrEqualTo: curfewButton.leadingAnchor,
-                constant: -Design.Spacing.medium
-            ),
-
-            startButton.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            startButton.topAnchor.constraint(equalTo: row.topAnchor),
-            startButton.bottomAnchor.constraint(equalTo: row.bottomAnchor)
-        ])
-        return row
-    }()
+    private lazy var actionRow = OpeningComposerActionRowView(
+        primary: startButton, importButton: importButton, cancelEditButton: cancelEditButton,
+        curfewButton: curfewButton, scheduleButton: scheduleButton)
 
     /// Start it later: the same offers the reply box's chevron makes, one message earlier.
     ///

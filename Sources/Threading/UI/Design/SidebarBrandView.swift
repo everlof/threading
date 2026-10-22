@@ -35,48 +35,16 @@ final class SidebarBrandContentView: NSStackView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func mount(in host: NSView, fillsWidth: Bool) {
+    func mount(in host: NSView) {
         host.addSubview(self)
-        let trailing = fillsWidth
-            ? trailingAnchor.constraint(equalTo: host.trailingAnchor)
-            : trailingAnchor.constraint(lessThanOrEqualTo: host.trailingAnchor)
         NSLayoutConstraint.activate([
             leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            trailing,
+            trailingAnchor.constraint(lessThanOrEqualTo: host.trailingAnchor),
             topAnchor.constraint(equalTo: host.topAnchor),
             bottomAnchor.constraint(equalTo: host.bottomAnchor)
         ])
     }
 }
-
-#if os(Linux)
-/// The house theme's brand, using the production mark and header measurements.
-/// The native host keeps navigation/menu identity in its accessible list and window title.
-final class SidebarBrandView: NSView, ThemedComponent {
-    private let mark = ThreadingMarkView(frame: .zero)
-    private let wordmark = MorphingTitleLabel()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        translatesAutoresizingMaskIntoConstraints = false
-        let stack = SidebarBrandContentView(mark: mark, wordmark: wordmark)
-        stack.mount(in: self, fillsWidth: true)
-        wordmark.font = SidebarAppearance.brandFont
-        // localization-ignore: Threading is the product trademark.
-        wordmark.setStringValue("Threading", animated: false)
-        wordmark.useAutomaticTextColor()
-        wordmark.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        mark.setAccessibilityElement(false)
-        wordmark.setAccessibilityElement(false)
-        setAccessibilityElement(true)
-        setAccessibilityRole(.staticText)
-        // localization-ignore: Threading is the product trademark.
-        setAccessibilityLabel("Threading")
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-}
-#else
 
 // MARK: - Sidebar Brand View
 
@@ -100,13 +68,15 @@ final class SidebarBrandView: NSView, ThemedComponent {
 
     // MARK: - Properties
 
-
     /// Weave is the compact treatment: its dots stay on the actual shield and thread paths,
     /// so the 24pt mark remains recognisable while the whole row is under the pointer.
-    private let mark = ThreadingMarkView(particleMotion: .weave)
+    private let mark = ThreadingMarkView(frame: .zero)
+    private let wordmark = MorphingTitleLabel()
+    #if os(Linux)
+    private lazy var stack = SidebarBrandContentView(mark: mark, wordmark: wordmark)
+    #else
     /// A theme-supplied logo — still, or moving and fizzing when the theme states motion.
     private let customLogo = ThemeLogoView()
-    private let wordmark = MorphingTitleLabel()
     private let workloadAnalyzer = AgentWorkloadAnalyzerView()
     private let audioAnalyzer = AudioSpectrumView()
     private lazy var stack = SidebarBrandContentView(
@@ -120,6 +90,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
     /// morph — `AppThemeDidChange` also fires for font-override sweeps, and a wordmark that
     /// re-morphs its own unchanged name on those reads as a tic.
     private var shownTitle: String?
+    #endif
 
     // MARK: - Initialization
 
@@ -127,8 +98,12 @@ final class SidebarBrandView: NSView, ThemedComponent {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
 
-        stack.mount(in: self, fillsWidth: false)
+        #if !os(Linux)
+        mark.particleMotion = .weave
+        #endif
+        stack.mount(in: self)
 
+        #if !os(Linux)
         NSLayoutConstraint.activate([
             customLogo.widthAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
             customLogo.heightAnchor.constraint(equalToConstant: SidebarBrandLayout.logoSide),
@@ -137,14 +112,26 @@ final class SidebarBrandView: NSView, ThemedComponent {
             audioAnalyzer.widthAnchor.constraint(equalToConstant: Design.AudioSpectrum.size.width),
             audioAnalyzer.heightAnchor.constraint(equalToConstant: Design.AudioSpectrum.size.height)
         ])
+        #endif
 
         mark.setAccessibilityElement(false)
+        #if !os(Linux)
         customLogo.setAccessibilityElement(false)
-        wordmark.setAccessibilityElement(false)
         audioAnalyzer.setAccessibilityElement(false)
+        #endif
+        wordmark.setAccessibilityElement(false)
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
 
+        #if os(Linux)
+        wordmark.font = SidebarAppearance.brandFont
+        // localization-ignore: Threading is the product trademark.
+        wordmark.setStringValue("Threading", animated: false)
+        wordmark.useAutomaticTextColor()
+        wordmark.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        // localization-ignore: Threading is the product trademark.
+        setAccessibilityLabel("Threading")
+        #else
         configure(animated: false)
 
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
@@ -157,6 +144,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
             self.updateAccessibility()
         }
         appEvents.observe(AudioSpectrumDidChange.self) { [weak self] _ in self?.updateAccessibility() }
+        #endif
     }
 
     @available(*, unavailable)
@@ -164,6 +152,7 @@ final class SidebarBrandView: NSView, ThemedComponent {
         fatalError("init(coder:) has not been implemented")
     }
 
+    #if !os(Linux)
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         // An adaptive theme may state different brands per appearance; a light/dark flip is
@@ -349,6 +338,5 @@ final class SidebarBrandView: NSView, ThemedComponent {
         setAccessibilityValue(summary)
         toolTip = summary
     }
+    #endif
 }
-
-#endif
