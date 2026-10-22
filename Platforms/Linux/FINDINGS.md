@@ -9579,3 +9579,26 @@ currently shows the tool row when chart rendering is unavailable), selection aut
 a drag leaves the transcript viewport, and the enclosing `PromptView` port. The sidebar row
 shells, complete General settings composition and alert interaction model remain the other
 duplicated UI assemblies identified in §262.
+
+## 264. Session row status and actions share one view, 2026-10-22
+
+The macOS `SessionRowView` and Linux's recycled navigator cell both used the same
+`SidebarRowDefaults` constraints, yet each separately constructed the status column, `⋯` and
+Archive controls, and their hover stack. `SidebarSessionTrailingSlot` now creates that subtree
+once in production Design source. Both hosts mount it and supply only their session-specific
+status content and action callbacks. The slot retains its accessibility identities and the
+Mac crossfade/width behavior; Linux still creates it only for visible session cells. The Linux
+UI structure ratchet falls from eight to seven local stack constructors.
+
+The Linux build and session, terminal and project layout fixtures pass. The real native
+conversation journey still passes after the change, and its mounted sidebar row was inspected.
+The archived-navigation journey rendered the actual hover controls with title truncation and
+correct row bounds. Four macOS `sidebar-session-rows` evidence tests pass; the repository's
+decoded-pixel report matches all 50 current renders against the nearest pre-change capture,
+and the light and dark hover states were inspected. The installed Linux journey passed
+Snooze/Unsnooze, Pin and Archive through the same mounted row and its menu; its hover and
+post-archive renders were inspected. The test fixes its calendar to the same Stockholm time
+zone as the app under validation, so "tomorrow" cannot straddle the UTC midnight boundary.
+The remaining project, terminal and session row shells still need a
+shared owner where their assembly overlaps; this extraction covers the common trailing
+session subtree, not the complete sidebar row.

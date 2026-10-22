@@ -19,40 +19,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// The trailing geometry exists for every row, but idle and dormant sessions draw no status.
     /// Keep that stable slot cheap and materialize the indicator's attention/limit subviews and
     /// constraints only after a state has pixels to contribute.
-    private let statusSlot = NSView()
+    private let trailingSlot = SidebarSessionTrailingSlot()
+    private var statusSlot: NSView { trailingSlot.statusSlot }
     private var statusIndicator: SessionStatusIndicator?
-    /// The row's `⋯`, the same nested icon button a tab's `×` is — see `ThemedIconButton`.
-    /// It inks from the chrome because the sidebar sits on the chrome's ground, not the
-    /// terminal's backdrop.
-    private let actionButton = ThemedIconButton(
-        symbolName: SidebarRowDefaults.actionSymbol,
-        accessibility: L10n.string("Session actions"),
-        target: .inline,
-        inkSource: .chrome,
-        glyphMaterialization: .deferred
-    )
-
-    /// Archiving without opening the menu first — the one row action reached often enough to
-    /// earn the row's own surface. It sits outermost of the pair, on the row's very edge — the
-    /// column the status mark occupies at rest and yields while the pointer is on the row.
-    private let archiveButton = ThemedIconButton(
-        symbolName: SidebarRowDefaults.archiveSymbol,
-        accessibility: SidebarRowDefaults.archiveAccessibilityLabel,
-        target: .inline,
-        inkSource: .chrome,
-        glyphMaterialization: .deferred
-    )
-
-    /// The buttons the pointer reveals, fading in as one while the status mark fades out —
-    /// a crossfade inside the status's own column, not an arrival beside it.
-    ///
-    /// Sized into the slot rather than overhanging it — see `sessionTrailingSlotWidth` for why
-    /// the slot expands before these buttons appear.
-    private let hoverControls = NSStackView()
-
-    /// Container holding the status indicator and the hover controls overlaid. At rest it pays
-    /// for the status target alone; under the pointer it expands to contain both actions.
-    private let trailingSlot = NSView()
+    private var actionButton: ThemedIconButton { trailingSlot.actionButton }
+    private var archiveButton: ThemedIconButton { trailingSlot.archiveButton }
+    private var hoverControls: NSStackView { trailingSlot.hoverControls }
     private var trailingSlotWidthConstraint: NSLayoutConstraint?
     private var presentsStatus = false
 
@@ -618,40 +590,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// The slot sits at the trailing edge, where it reads as status rather than as another
     /// icon competing with the agent's own.
     private func setupTrailingSlot() {
-        statusSlot.translatesAutoresizingMaskIntoConstraints = false
-
-        // No size stated for either button: each knows its own target and padding.
-        //
-        // The `⋯` opens on the press. The row is rebuilt under the pointer whenever the tree's
-        // shape changes, and a press waiting for its release loses it to that rebuild — see
-        // `ThemedIconButton.presentsMenu`.
-        actionButton.presentsMenu = true
         actionButton.onPress = { [weak self] in self?.actionClicked() }
-        actionButton.translatesAutoresizingMaskIntoConstraints = false
         // The archive action is bound per session in `configure`, not here: it has to name the
         // session it was aimed at rather than read the row's current one when it fires.
-        archiveButton.translatesAutoresizingMaskIntoConstraints = false
-
-        // Trailing-most last: the archive button takes the row's edge — the same column the
-        // status mark holds at rest — and the `⋯` sits inboard of it.
-        hoverControls.orientation = .horizontal
-        hoverControls.alignment = .centerY
-        hoverControls.spacing = SidebarRowDefaults.hoverButtonSpacing
-        hoverControls.alphaValue = 0
-        hoverControls.translatesAutoresizingMaskIntoConstraints = false
-        hoverControls.addArrangedSubview(actionButton)
-        hoverControls.addArrangedSubview(archiveButton)
-
-        trailingSlot.translatesAutoresizingMaskIntoConstraints = false
-        trailingSlot.setAccessibilityIdentifier("sidebar.session.trailing")
-        statusSlot.setAccessibilityIdentifier("sidebar.session.status")
-        actionButton.setAccessibilityIdentifier("sidebar.session.actions")
-        archiveButton.setAccessibilityIdentifier("sidebar.session.archive")
-        hoverControls.setAccessibilityIdentifier("sidebar.session.hover-controls")
-        trailingSlot.addSubview(statusSlot)
-        trailingSlot.addSubview(hoverControls)
-        SidebarRowDefaults.constrainSessionStatus(statusSlot, in: trailingSlot)
-
         let width = trailingSlot.widthAnchor.constraint(
             equalToConstant: SidebarRowDefaults.trailingSlotSize
         )
@@ -660,7 +601,6 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             width,
             trailingSlot.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.trailingSlotSize)
         ])
-        SidebarRowDefaults.constrainSessionHoverControls(hoverControls, in: trailingSlot)
     }
 
     /// Applies status without making an invisible `SessionStatusIndicator` part of every cold

@@ -14,6 +14,10 @@ gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
 binary, host, endpoint, fixture, evidence = sys.argv[1:]
+# The picker and this assertion must read the same calendar day. UTC is still on yesterday
+# when the Stockholm validation host has passed midnight.
+os.environ['TZ'] = 'Europe/Stockholm'
+time.tzset()
 root = Path(fixture) / 'archived-navigation'
 root.mkdir()
 project = root / 'Project'
@@ -76,12 +80,14 @@ def project_list():
     desktop = Atspi.get_desktop(0)
     for index in range(desktop.get_child_count()):
         app = desktop.get_child_at_index(index)
-        if app.get_name() != 'Threading Linux' or app.get_process_id() != process.pid:
+        if app is None or app.get_name() != 'Threading Linux' or app.get_process_id() != process.pid:
             continue
         frame = app.get_child_at_index(0)
+        if frame is None:
+            continue
         for child_index in range(frame.get_child_count()):
             listed = frame.get_child_at_index(child_index)
-            if listed.get_role_name() == 'list' and listed.get_name() == 'Projects':
+            if listed is not None and listed.get_role_name() == 'list' and listed.get_name() == 'Projects':
                 return listed
     return None
 
@@ -90,12 +96,14 @@ def session_menu():
     desktop = Atspi.get_desktop(0)
     for index in range(desktop.get_child_count()):
         app = desktop.get_child_at_index(index)
-        if app.get_name() != 'Threading Linux' or app.get_process_id() != process.pid:
+        if app is None or app.get_name() != 'Threading Linux' or app.get_process_id() != process.pid:
             continue
         frame = app.get_child_at_index(0)
+        if frame is None:
+            continue
         for child_index in range(frame.get_child_count()):
             listed = frame.get_child_at_index(child_index)
-            if listed.get_role_name() == 'list' and listed.get_name() == 'Session actions':
+            if listed is not None and listed.get_role_name() == 'list' and listed.get_name() == 'Session actions':
                 return listed
     return None
 

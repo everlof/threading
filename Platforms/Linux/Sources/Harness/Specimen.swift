@@ -548,11 +548,12 @@ enum Specimen {
         private var productionSessionView: ThemedSessionRowContentView?
         private var productionSessionStack: NSStackView?
         private var productionSessionMount: ProductionContentMount?
-        private var productionSessionStatusSlot: NSView?
+        private var productionSessionTrailingSlot: SidebarSessionTrailingSlot?
+        private var productionSessionStatusSlot: NSView? { productionSessionTrailingSlot?.statusSlot }
         private var productionSessionActivityMark: ThemedSessionActivityMark?
-        private var productionSessionHoverControls: NSStackView?
-        private var productionSessionActionButton: ThemedIconButton?
-        private var productionSessionArchiveButton: ThemedIconButton?
+        private var productionSessionHoverControls: NSStackView? { productionSessionTrailingSlot?.hoverControls }
+        private var productionSessionActionButton: ThemedIconButton? { productionSessionTrailingSlot?.actionButton }
+        private var productionSessionArchiveButton: ThemedIconButton? { productionSessionTrailingSlot?.archiveButton }
         private var productionSessionPinnedIndicator: GlyphView?
         private var productionSessionActionsRevealed = false
         /// Saved-runtime picker cells draw their own selection; outline rows have an outer
@@ -759,9 +760,9 @@ enum Specimen {
             return bounds.contains(point) && point.x >= marker.frame.minX && point.x < marker.frame.maxX
         }
 
-        private func mountProductionContent(_ content: NSView, leadingInset: CGFloat)
+        private func mountProductionContent(_ content: NSView, leadingInset: CGFloat,
+                                            slot: NSView = NSView())
             -> ProductionContentMount {
-            let slot = NSView()
             slot.translatesAutoresizingMaskIntoConstraints = false
             slot.setAccessibilityElement(false)
             addSubview(content)
@@ -810,47 +811,17 @@ enum Specimen {
                 SidebarRowDefaults.configureSessionContentStack(stack)
                 stack.setAccessibilityIdentifier("sidebar.session.content-stack")
                 let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
-                let mount = mountProductionContent(stack, leadingInset: leading)
-                mount.slot.setAccessibilityIdentifier("sidebar.session.trailing")
-                let statusSlot = NSView()
-                statusSlot.translatesAutoresizingMaskIntoConstraints = false
-                statusSlot.setAccessibilityIdentifier("sidebar.session.status")
-                mount.slot.addSubview(statusSlot)
-                SidebarRowDefaults.constrainSessionStatus(statusSlot, in: mount.slot)
-                let action = ThemedIconButton(
-                    symbolName: SidebarRowDefaults.actionSymbol,
-                    accessibility: "Session actions",
-                    target: .inline, inkSource: .chrome,
-                    glyphMaterialization: .deferred)
-                action.translatesAutoresizingMaskIntoConstraints = false
-                action.presentsMenu = true
-                action.setAccessibilityIdentifier("sidebar.session.actions")
-                action.surfaceStateDidChange = { [weak self] in
+                let trailing = SidebarSessionTrailingSlot()
+                let mount = mountProductionContent(stack, leadingInset: leading, slot: trailing)
+                trailing.hoverControls.isHidden = true
+                trailing.actionButton.surfaceStateDidChange = { [weak self] in
                     self?.onSessionControlVisualChange?()
                 }
-                let archive = ThemedIconButton(
-                    symbolName: SidebarRowDefaults.archiveSymbol,
-                    accessibility: SidebarRowDefaults.archiveAccessibilityLabel,
-                    target: .inline, inkSource: .chrome,
-                    glyphMaterialization: .deferred)
-                archive.translatesAutoresizingMaskIntoConstraints = false
-                archive.setAccessibilityIdentifier("sidebar.session.archive")
-                archive.surfaceStateDidChange = { [weak self] in
+                trailing.archiveButton.surfaceStateDidChange = { [weak self] in
                     self?.onSessionControlVisualChange?()
                 }
-                let hoverControls = NSStackView(views: [action, archive])
-                hoverControls.orientation = .horizontal
-                hoverControls.alignment = .centerY
-                hoverControls.spacing = SidebarRowDefaults.hoverButtonSpacing
-                hoverControls.translatesAutoresizingMaskIntoConstraints = false
-                hoverControls.setAccessibilityIdentifier("sidebar.session.hover-controls")
-                mount.slot.addSubview(hoverControls)
-                SidebarRowDefaults.constrainSessionHoverControls(hoverControls, in: mount.slot)
                 productionSessionMount = mount
-                productionSessionStatusSlot = statusSlot
-                productionSessionHoverControls = hoverControls
-                productionSessionActionButton = action
-                productionSessionArchiveButton = archive
+                productionSessionTrailingSlot = trailing
                 productionSessionStack = stack
                 productionSessionView = content
             }

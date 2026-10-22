@@ -25,9 +25,8 @@ enum SessionRowLayoutFixture {
               }),
               let content = stack.arrangedSubviews.compactMap({ $0 as? ThemedSessionRowContentView }).first
         else { preconditionFailure("shared session content stack was not mounted") }
-        guard let slot = row.subviews.first(where: {
-            $0.accessibilityIdentifier() == "sidebar.session.trailing"
-        }) else { preconditionFailure("session trailing slot was not mounted") }
+        guard let slot = row.subviews.compactMap({ $0 as? SidebarSessionTrailingSlot }).first
+        else { preconditionFailure("shared session trailing slot was not mounted") }
         guard let status = slot.subviews.first(where: {
             $0.accessibilityIdentifier() == "sidebar.session.status"
         }) else { preconditionFailure("shared session status slot was not mounted") }

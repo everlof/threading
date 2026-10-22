@@ -65,7 +65,8 @@ must let the shim solve them. The outer SDL viewport and recycled outline-row re
 arrive as frames; macOS's themed menu presenter also assigns measured menu-row frames inside its
 viewport. Keeping those frame boundaries does not duplicate a shared component's layout.
 
-The Linux session row now uses the shared constrained two-control hover slot. Its anchored menu
+The Linux and macOS session rows now mount the same `SidebarSessionTrailingSlot`, which builds
+the status column and two-control hover stack with one set of constraints. Its anchored menu
 mounts production `ThemedMenuRowView` items over the standing outline. The menu layer must sit
 above the header as well as the outline: in a short window a menu grows upward across that band,
 and leaving the header above it lets title text paint through the menu. Menu rows and shared
