@@ -117,7 +117,7 @@ The current shared-view audit distinguishes reused components from reused page c
 
 | Surface | Shared UI mounted by Linux | Remaining host boundary |
 | --- | --- | --- |
-| Navigator rows and menus | Sidebar row assembly and `MorphingTitleLabel` titles, menu panel, document, rows, separator, layout | `Specimen.Window` still assembles the navigator root separately from `ProjectSidebarViewController`; SDL viewport, overlay lifecycle and menu interaction remain host-owned |
+| Navigator rows and menus | `SidebarNavigatorContentView` mounts the header, outline and empty state with shared constraints; row assembly, titles and menu components are shared | Linux keeps an outer `Specimen.Window` for SDL layers and diagnostic modes; macOS still mounts its footer, extension backdrop and mascot around the shared core |
 | Opening composer | `OpeningComposerContentView` owns the choice row, column, and hero region; prompt, chips, choice panels and menu rows are shared | Linux still supplies a reduced set of controls and its house-theme greeting; macOS owns its theme backdrop and extension plane |
 | Native conversation | `ConversationPaneContentView` mounts transcript, status and composer with the same constraints; transcript rows, prompt, chips and menu panels are shared | `WorkspaceConversationPane` still supplies a reduced control set and lifecycle; the Mac controller owns its additional rails and overlays |
 | General Settings | Page canvas, confirmation card, toggles and constraints | `WorkspaceSettingsPane` includes fewer sections than `GeneralPreferencesViewController` |

@@ -127,6 +127,7 @@ enum Specimen {
         private var workspaceBackdrop: SidebarBackdropView?
         private var workspaceBackdropClip: NSView?
         private var workspaceWell: NSView?
+        private var workspaceContent: SidebarNavigatorContentView?
         private var mountedMenuDocument: ThemedMenuDocumentView?
         private var mountedMenuHeights: [CGFloat] = []
         #else
@@ -187,9 +188,34 @@ enum Specimen {
             backdropClip.addSubview(backdrop)
             addSubview(backdropClip, positioned: .below, relativeTo: rowLayer)
             addSubview(well, positioned: .above, relativeTo: backdropClip)
+            let content = SidebarNavigatorContentView(frame: .zero)
+            content.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(content, positioned: .above, relativeTo: rowLayer)
+            NSLayoutConstraint.activate([
+                content.topAnchor.constraint(equalTo: topAnchor),
+                content.bottomAnchor.constraint(equalTo: bottomAnchor),
+                content.leadingAnchor.constraint(equalTo: leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: trailingAnchor)
+            ])
             workspaceBackdrop = backdrop
             workspaceBackdropClip = backdropClip
             workspaceWell = well
+            workspaceContent = content
+        }
+
+        func mountNavigatorHeader(_ header: NSView) {
+            guard let workspaceContent else {
+                preconditionFailure("install the workspace sidebar before its header")
+            }
+            workspaceContent.mountHeader(header, top: workspaceContent.topAnchor)
+        }
+
+        func mountNavigatorEmptyState(_ emptyState: NSView, over outline: NSView,
+                                      inset: CGFloat) {
+            guard let workspaceContent else {
+                preconditionFailure("install the workspace sidebar before its empty state")
+            }
+            workspaceContent.mountEmptyState(emptyState, over: outline, inset: inset)
         }
 
         /// The SDL host keeps this tree mounted across mode changes. Re-resolve the neutral
@@ -216,7 +242,14 @@ enum Specimen {
         /// The outline owns the project viewport. The fixed slots remain for the bounded
         /// saved-runtime picker, and never sit behind an active outline.
         func setNavigatorOutline(_ scrollView: NSScrollView, below header: NSView, visible: Bool) {
-            if scrollView.superview !== self {
+            if scrollView.superview == nil {
+                #if THREADING_WINDOW_HARNESS
+                guard let workspaceContent else {
+                    preconditionFailure("install the workspace sidebar before its outline")
+                }
+                workspaceContent.mountOutline(
+                    scrollView, below: header, bottom: workspaceContent.bottomAnchor)
+                #else
                 addSubview(scrollView, positioned: .below, relativeTo: menuLayer)
                 scrollView.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
@@ -225,6 +258,7 @@ enum Specimen {
                     scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
                     scrollView.bottomAnchor.constraint(equalTo: bottomAnchor)
                 ])
+                #endif
                 #if THREADING_WINDOW_HARNESS
                 if let clip = workspaceBackdropClip,
                    let backdrop = workspaceBackdrop,

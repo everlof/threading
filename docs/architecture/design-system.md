@@ -1507,16 +1507,22 @@ required gaps instead of asking that constraint tree to fit inside its ordinary 
 The bounded image previews use the Mac horizontal `NSStackView` inside their scroll document,
 and the remove control is pinned to each tile's top and trailing edges; the component still
 sets the scroll document's viewport frame.
-`ConversationPaneContentView` mounts the transcript, status line and reply column in one view
-on macOS and Linux, using `ConversationPaneLayout` for their shared constraints. Each host
-supplies its own top and bottom anchors: Mac uses the pane safe area, while the Linux bitmap
-root supplies its bounds. The Mac-only rails and overlays keep their additional constraints
-in the controller.
 Its permission chip uses the shared `PermissionModeLabels`
 mark/inherit wording and `AgentPermissionMode` titles and descriptions. The remaining opening
 footer controls are separate parity work. The choice presenter measures the fixed seven-value
 permission list once when opened and mounts at most six shared rows; its chip coordinates are
 converted through the actual view hierarchy for placement and repeated-click dismissal.
+
+`ConversationPaneContentView` mounts the transcript, status line and reply column in one view
+on macOS and Linux, using `ConversationPaneLayout` for their shared constraints. Each host
+supplies its own top and bottom anchors: Mac uses the pane safe area, while the Linux bitmap
+root supplies its bounds. The Mac-only rails and overlays keep their additional constraints
+in the controller.
+
+`SidebarNavigatorContentView` similarly mounts the navigator header, outline and empty state on both
+platforms. Mac pins the header to its safe area and the outline above its footer; Linux pins
+the header to its viewport top and the outline to its bottom. Linux's outer specimen retains
+its diagnostic layers, while the Mac controller retains footer and backdrop ownership.
 
 **Undo has two owners, and both are required.** `ThemedTextView.allowsUndo` makes user edits enter
 the text system's manager; the application menu then reaches that manager through AppKit's window

@@ -1861,12 +1861,7 @@ struct WindowHarness {
         actionsButton.surfaceStateDidChange = { actionsControlVisualChanged = true }
         let header = PaneHeaderView(
             leading: [headerBrand], trailing: [addProjectButton, actionsButton], margin: .paneEdge)
-        navigatorRoot.addSubview(header)
-        NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: navigatorRoot.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: navigatorRoot.trailingAnchor),
-            header.topAnchor.constraint(equalTo: navigatorRoot.topAnchor)
-        ])
+        navigatorRoot.mountNavigatorHeader(header)
         // The workspace owns one structural seam. It follows the theme rather than borrowing
         // the standalone specimen's frame, which also outlined the window's other three edges.
         let sidebarDivider = SeparatorView(.vertical)
@@ -1899,15 +1894,8 @@ struct WindowHarness {
             if let emptyStateView { emptyStateView.isHidden = false; return }
             let message = SidebarEmptyState.makeView()
             emptyStateView = message
-            navigatorRoot.addSubview(message)
-            NSLayoutConstraint.activate([
-                message.centerXAnchor.constraint(equalTo: outlineScroll.centerXAnchor),
-                message.centerYAnchor.constraint(equalTo: outlineScroll.centerYAnchor),
-                message.leadingAnchor.constraint(greaterThanOrEqualTo: navigatorRoot.leadingAnchor,
-                    constant: SidebarDefaults.emptyStateInset),
-                message.trailingAnchor.constraint(lessThanOrEqualTo: navigatorRoot.trailingAnchor,
-                    constant: -SidebarDefaults.emptyStateInset)
-            ])
+            navigatorRoot.mountNavigatorEmptyState(
+                message, over: outlineScroll, inset: SidebarDefaults.emptyStateInset)
         }
         func headerPixels(_ view: NSView) -> (x: Int32, y: Int32, width: Int32, height: Int32) {
             let rect = view.convert(view.bounds, to: navigatorRoot)

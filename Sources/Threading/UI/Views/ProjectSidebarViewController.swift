@@ -47,6 +47,7 @@ final class ProjectSidebarViewController: NSViewController {
 
     // MARK: - Properties
 
+    private let navigatorContent = SidebarNavigatorContentView()
     private lazy var outlineView: ThemedOutlineView = {
         let outline = ThemedOutlineView()
         outline.style = .inset
@@ -487,7 +488,7 @@ final class ProjectSidebarViewController: NSViewController {
     }
 
     override func loadView() {
-        view = NSView()
+        view = navigatorContent
     }
 
     override func viewDidLoad() {
@@ -556,23 +557,14 @@ private extension ProjectSidebarViewController {
         // material inside app-owned content is precisely what the theme boundary forbids, and
         // the audit caught it the moment the sidebar stopped being wrapped in a material of
         // its own. One pane, one answer about its own insets.
-        view.addSubview(scrollView)
-
         // The sidebar fills the window's full height; the list starts below the header band —
         // which itself starts below the traffic lights via the safe area. Still no app-name
         // label or section heading: the band holds controls that act on the list, not a
         // repetition of what the list already shows.
-        let bottomConstraint = scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor)
-        scrollViewBottomConstraint = bottomConstraint
-        NSLayoutConstraint.activate([
-            // Flush to the header's rule: the first row's breathing is the scroll view's own
-            // `contentBreathing`, inside the navigator well, so the well's fill meets the rule
-            // with no strip of pane ground between them.
-            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bottomConstraint
-        ])
+        // Flush to the header's rule: the first row's breathing is the scroll view's own
+        // `contentBreathing`, inside the navigator well.
+        scrollViewBottomConstraint = navigatorContent.mountOutline(
+            scrollView, below: header, bottom: footer.topAnchor)
 
         // Before the first `reload()`, so the first tree is drawn at the chosen density
         // rather than arriving indented and snapping flat. The width is not known yet — the
@@ -600,20 +592,8 @@ private extension ProjectSidebarViewController {
 
         let stack = SidebarEmptyState.makeView()
         emptyStateView = stack
-        view.addSubview(stack)
-
-        NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
-            stack.leadingAnchor.constraint(
-                greaterThanOrEqualTo: view.leadingAnchor,
-                constant: SidebarDefaults.emptyStateInset
-            ),
-            stack.trailingAnchor.constraint(
-                lessThanOrEqualTo: view.trailingAnchor,
-                constant: -SidebarDefaults.emptyStateInset
-            )
-        ])
+        navigatorContent.mountEmptyState(
+            stack, over: scrollView, inset: SidebarDefaults.emptyStateInset)
         stack.isHidden = false
     }
 
@@ -657,13 +637,7 @@ private extension ProjectSidebarViewController {
     private func setupHeader() {
         // The `+` opens its two ways in — existing folder or new — on the press, which is the
         // platform's menu gesture.
-        view.addSubview(header)
-
-        NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            header.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
+        navigatorContent.mountHeader(header, top: view.safeAreaLayoutGuide.topAnchor)
     }
 
     @objc private func settingsClicked() {
