@@ -1,6 +1,6 @@
 import AppKit
 
-private enum PromptAttachmentTileDefaults {
+enum PromptAttachmentTileDefaults {
     /// The plate under a movie poster's play mark has the size of a small control.
     static let playMarkDiameter = Design.Size.chipHeight
     static let playMarkSymbol = "play.fill"

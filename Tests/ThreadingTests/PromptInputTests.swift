@@ -601,7 +601,7 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(thumbnail.accessibilityValue() as? String, "Movie")
         XCTAssertEqual(
             descendants(of: thumbnail).filter {
-                $0.accessibilityIdentifier() == PromptViewDefaults.attachmentPlayMarkIdentifier
+                $0.accessibilityIdentifier() == PromptAttachmentTileDefaults.playMarkIdentifier
             }.count,
             1,
             "a movie thumbnail carries no play mark"
