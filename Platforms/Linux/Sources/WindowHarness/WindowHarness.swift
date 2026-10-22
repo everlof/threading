@@ -384,6 +384,13 @@ struct WindowHarness {
             try NativeUIWorkerContract.run()
             return
         }
+        if mode == "--themed-table-row-fixture" {
+            guard CommandLine.arguments.count == 3 else {
+                throw WindowFailure("usage: WindowHarness --themed-table-row-fixture OUTPUT.png")
+            }
+            try ThemedTableRowFixture.run(output: CommandLine.arguments[2])
+            return
+        }
         if mode == "--stream-ui-fixture" {
             let args = Array(CommandLine.arguments.dropFirst(2))
             guard args.count >= 2 else {

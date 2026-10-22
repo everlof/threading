@@ -101,8 +101,8 @@ of production `ThemedMenuRowView` rows. The scoped Linux menu copies the saved s
 owning project path; the host revalidates the active page and project before each command.
 
 The window host also links the production backdrop overlay, text field, clip view, scroll view,
-table view and activity beam wrapper. `scripts/check_linux_shared_views.py` rejects a second
-Linux class for any existing Threading UI class and requires review of every new Linux `NSView`
+table view, its default row view, and activity beam wrapper. `scripts/check_linux_shared_views.py`
+rejects a second Linux class for any existing Threading UI class and requires review of every new Linux `NSView`
 leaf. The Linux General settings pane still assembles fewer sections than the macOS General
 controller, and the native conversation pane still needs the complete production controller;
 those page-level compositions remain parity work.

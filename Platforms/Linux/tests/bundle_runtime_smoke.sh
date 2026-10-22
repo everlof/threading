@@ -198,6 +198,7 @@ THREADING_TEST_OBSERVED_MODE=1 THREADING_TEST_INHERITED_MODE=1 \
   "$fixture/composer-claude-observed-default.sock" "$fixture" \
   /evidence/restart-out/composer-claude-observed-default claude baseline
 dbus-run-session -- python3 /document_ui_smoke.py "$bin/WindowHarness" /evidence/restart-out/document
+timeout 15 "$bin/WindowHarness" --themed-table-row-fixture /evidence/restart-out/themed-table-row-default.png
 dbus-run-session -- python3 /user_bubble_smoke.py "$bin/WindowHarness" /evidence/restart-out/user-bubble
 dbus-run-session -- python3 /automatic_rows_smoke.py "$bin/WindowHarness" /evidence/restart-out/automatic-rows
 dbus-run-session -- python3 /diff_ui_smoke.py "$bin/WindowHarness" /evidence/restart-out/diff

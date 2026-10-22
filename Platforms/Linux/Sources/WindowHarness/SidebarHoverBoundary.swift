@@ -40,11 +40,6 @@ extension Design.Text {
     static func on(_ background: NSColor) -> Design.Ink { Design.Ink(on: background) }
 }
 
-@MainActor
-protocol OutlineDisclosureInkProviding: AnyObject {
-    var outlineDisclosureInk: NSColor { get }
-}
-
 extension NSOutlineView: SelectionStrengthStating {
     public var drawsSelectionAtFullStrength: Bool { window?.isKeyWindow ?? true }
 }

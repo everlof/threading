@@ -110,14 +110,10 @@ public class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, S
         withIdentifier identifier: NSUserInterfaceItemIdentifier,
         owner: Any?
     ) -> NSView? {
-        #if os(Linux)
-        return super.makeView(withIdentifier: identifier, owner: owner)
-        #else
         ThemedTableRowDefaults.vendedView(
             for: identifier,
             recycling: super.makeView(withIdentifier: identifier, owner: owner)
         )
-        #endif
     }
 
     public override func validateProposedFirstResponder(

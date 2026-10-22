@@ -104,6 +104,7 @@ enum WindowChromeAppearance {
 
 extension Design.Surface {
     static var primaryActionFace: NSColor { LinuxTheme.color("accent") }
+    static var dropTarget: NSColor { LinuxTheme.color("accentMuted") }
 }
 
 extension SurfaceRadius {

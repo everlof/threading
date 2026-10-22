@@ -655,6 +655,8 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         for row in visible where mounted[row] == nil {
             guard let view = viewForRow(row) else { continue }
             let rowView = rowViewForRow(row) ?? reusableRows.popLast()
+                ?? makeView(withIdentifier: NSUserInterfaceItemIdentifier("NSTableViewRowViewKey"),
+                            owner: self) as? NSTableRowView
                 ?? NSTableRowView(frame: .zero)
             let rect = rect(ofRow: row)
             rowView.frame = rect
