@@ -264,8 +264,46 @@ struct MobileAccountUsageReading: Equatable {
         let fraction: Double?
     }
 
+    /// One window as a written reading: its name, how much of it is spent, and where its clock
+    /// stands, for a surface with room to draw it as a bar rather than a ring.
+    ///
+    /// It keeps the reset and the length rather than an elapsed fraction, so the reading stays
+    /// one value while the clock moves: `MobileAccountUsageGauge` caches its picture on reading
+    /// equality, and a reading that changed every second would redraw a menu glyph on every
+    /// body pass of a streaming chat. Where the clock stands is asked at the moment of drawing.
+    struct Window: Equatable, Identifiable {
+        let id: String
+        /// `5h`, `7d`, `7d Fable`.
+        let name: String
+        /// Nil for a window whose reset has passed or whose value the Mac did not know.
+        let fraction: Double?
+        /// `38%`, or `—` where `fraction` is nil.
+        let value: String
+        let resetsAt: Date?
+        let duration: TimeInterval?
+        /// False for a window scoped to the chat's model, the disc's innermost ring.
+        let isAccountWide: Bool
+
+        /// How far through the window the clock stands, 0…1: the neutral tick on the window's
+        /// bar, so spend running ahead of time is visible without a second number. Nil where
+        /// the window's start cannot be placed, and past its reset, where the clock belongs
+        /// to the window after it.
+        func elapsedFraction(at now: Date) -> Double? {
+            guard let resetsAt, resetsAt > now else { return nil }
+            return MobileUsageCapacityProjection.elapsedFraction(
+                resetsAt: resetsAt.timeIntervalSince1970,
+                windowDuration: duration,
+                at: now.timeIntervalSince1970
+            )
+        }
+    }
+
     /// Outermost first.
     let rings: [Ring]
+
+    /// Every window the chat is metered by, in the Mac's reading order — the windows `summary`
+    /// writes out. Empty for an older host that sends only the binding fraction.
+    let windows: [Window]
 
     /// The words the rings stand for, in the Mac's reading order, `5h 43% · 7d 73% · 7d Fable
     /// 89%`, for VoiceOver and the draft's identity line. Nil when there is nothing to say. It
@@ -278,10 +316,16 @@ struct MobileAccountUsageReading: Equatable {
     /// account's unfiltered wire list and promote a scoped limit for another model.
     let nextReset: Date?
 
-    init(rings: [Ring], summary: String?, nextReset: Date? = nil) {
+    init(
+        rings: [Ring],
+        summary: String?,
+        nextReset: Date? = nil,
+        windows: [Window] = []
+    ) {
         self.rings = rings
         self.summary = summary
         self.nextReset = nextReset
+        self.windows = windows
     }
 
     /// The rings for `account` as a chat on `model` is metered. A nil model means the account's
@@ -315,18 +359,29 @@ struct MobileAccountUsageReading: Equatable {
         let rings = (accountWide + scoped)
             .prefix(MobileUsageDefaults.ringCapacity)
             .map { Ring(id: $0.id, fraction: liveFraction($0, now: now)) }
-        let summary = chosen
-            .map { "\($0.name) \(value($0, now: now))" }
+        let written = chosen.map { window in
+            Window(
+                id: window.id,
+                name: window.name,
+                fraction: liveFraction(window, now: now),
+                value: value(window, now: now),
+                resetsAt: window.resetsAt.map(Date.init(timeIntervalSince1970:)),
+                duration: window.windowDuration,
+                isAccountWide: window.metersModelIDs == nil
+            )
+        }
+        let summary = written
+            .map { "\($0.name) \($0.value)" }
             .joined(separator: MobileUsageDefaults.segmentSeparator)
-        let nextReset = chosen
+        let nextReset = written
             .compactMap(\.resetsAt)
-            .map(Date.init(timeIntervalSince1970:))
             .filter { $0 > now }
             .min()
         return MobileAccountUsageReading(
             rings: Array(rings),
             summary: summary.isEmpty ? nil : summary,
-            nextReset: nextReset
+            nextReset: nextReset,
+            windows: written
         )
     }
 
@@ -430,6 +485,11 @@ enum MobileUsageDefaults {
     static let bindingRingID = "binding"
     static let segmentSeparator = " · "
     static let unknownValue = "—"
+    /// Past this, a reset's weekday is no longer enough to place it.
+    static let week: TimeInterval = 7 * 24 * 60 * 60
+    /// The widest value a window can read, which the picker's bar sizes its number slot by, so
+    /// every row's bar ends at one x whatever its number says.
+    static let widestValue = "100%"
     /// Quiet until three quarters, alarming only when the window is nearly spent — the Mac's
     /// `UsageDefaults` thresholds, so one reading is one colour on both.
     static let warningFraction = 0.75

@@ -321,6 +321,301 @@ final class MobileIdentityPickerTests: XCTestCase {
         XCTAssertEqual(visited, [0, 1, 2, 3, 4])
     }
 
+    // MARK: - When a login comes back, and where its clock stands
+
+    /// The row's bar and reset are the longest window's — the outermost ring — written as the
+    /// moment and the wait. The five-hour window is left to its ring.
+    func testTheRowStatesTheLongestWindowsResetAsAMomentAndAWait() throws {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let reading = MobileAccountUsageReading.resolve(
+            account: Fixture.account(id: "a", windows: [
+                Fixture.window("5h", fraction: 0.07, resetsIn: 2 * 3600, now: now),
+                Fixture.window("7d", fraction: 0.38, resetsIn: 3 * 86400 + 4 * 3600, now: now),
+            ]),
+            model: nil,
+            now: now
+        )
+        let clock = MobileIdentityPickerClock.resolve(reading, now: now)
+        let resetsAt = now.addingTimeInterval(3 * 86400 + 4 * 3600)
+
+        XCTAssertEqual(clock.window?.name, "7d")
+        XCTAssertEqual(clock.reset, .at(resetsAt))
+        XCTAssertEqual(
+            clock.resetText(at: now),
+            resetsAt.formatted(.dateTime.weekday(.abbreviated).hour().minute()) + " · 3d 4h"
+        )
+        XCTAssertEqual(reading?.summary, "5h 7% · 7d 38%", "the written reading is unchanged")
+    }
+
+    /// The moment is as short as the wait beside it leaves unambiguous: the time today, the
+    /// weekday for the rest of the week — even a week out, where the weekday is today's — and the
+    /// date alone beyond it. A dated `29 Oct at 03:06` crowded the login's name to `Sond…`.
+    func testTheMomentIsAsShortAsTheWaitLeavesUnambiguous() throws {
+        let noon = try XCTUnwrap(
+            Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date())
+        )
+        let today = noon.addingTimeInterval(2 * 3600)
+        let weekOut = noon.addingTimeInterval(6 * 86400 + 19 * 3600)
+        let later = noon.addingTimeInterval(9 * 86400)
+
+        XCTAssertEqual(
+            MobileIdentityPickerClock.moment(today, now: noon),
+            today.formatted(.dateTime.hour().minute())
+        )
+        XCTAssertEqual(
+            MobileIdentityPickerClock.moment(weekOut, now: noon),
+            weekOut.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+        )
+        XCTAssertEqual(
+            MobileIdentityPickerClock.moment(later, now: noon),
+            later.formatted(.dateTime.month(.abbreviated).day())
+        )
+    }
+
+    /// A five-hour window fuller than the week does not take the row over: it refills on its
+    /// own, and its ring already says how full it is.
+    func testAFullerShortWindowLeavesTheRowOnTheWeek() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let reading = MobileAccountUsageReading.resolve(
+            account: Fixture.account(id: "a", windows: [
+                Fixture.window("5h", fraction: 0.8, resetsIn: 2 * 3600, now: now),
+                Fixture.window("7d", fraction: 0.38, resetsIn: 86400, now: now),
+            ]),
+            model: nil,
+            now: now
+        )
+        let clock = MobileIdentityPickerClock.resolve(reading, now: now)
+
+        XCTAssertEqual(clock.window?.name, "7d")
+        XCTAssertEqual(clock.reset, .at(now.addingTimeInterval(86400)))
+    }
+
+    /// A spent window, whichever it is, is when the login comes back: the row turns to it —
+    /// its bar and its reset — and to the last of them when more than one is spent.
+    func testASpentWindowTakesTheRowUntilItComesBack() throws {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let reading = MobileAccountUsageReading.resolve(
+            account: Fixture.account(id: "a", windows: [
+                Fixture.window("5h", fraction: 0.97, resetsIn: 2 * 3600 + 14 * 60, now: now),
+                Fixture.window("7d", fraction: 0.4, resetsIn: 3 * 86400, now: now),
+            ]),
+            model: nil,
+            now: now
+        )
+        let clock = MobileIdentityPickerClock.resolve(reading, now: now)
+        let back = now.addingTimeInterval(2 * 3600 + 14 * 60)
+
+        XCTAssertEqual(clock.window?.name, "5h", "the bar and the reset describe one window")
+        XCTAssertEqual(clock.reset, .out(until: back))
+        XCTAssertEqual(
+            clock.resetText(at: now),
+            MobileIdentityPickerClock.moment(back, now: now) + " · 2h 14m"
+        )
+        XCTAssertEqual(
+            clock.spokenReset(at: now),
+            MobileL10n.string("Out until %@", MobileProjectDefaultAccounts.resetTime(back, now: now)),
+            "VoiceOver hears no tint, so it is told the login is out"
+        )
+
+        let both = MobileAccountUsageReading.resolve(
+            account: Fixture.account(id: "b", windows: [
+                Fixture.window("5h", fraction: 0.97, resetsIn: 3600, now: now),
+                Fixture.window("7d", fraction: 1, resetsIn: 3 * 86400, now: now),
+            ]),
+            model: nil,
+            now: now
+        )
+        let last = MobileIdentityPickerClock.resolve(both, now: now)
+        XCTAssertEqual(last.window?.name, "7d")
+        XCTAssertEqual(last.reset, .out(until: now.addingTimeInterval(3 * 86400)))
+
+        let unsaid = MobileAccountUsageReading.resolve(
+            account: Fixture.account(id: "c", windows: [
+                .init(id: "5h", name: "5h", fraction: 1, windowDuration: 5 * 3600),
+            ]),
+            model: nil,
+            now: now
+        )
+        let out = MobileIdentityPickerClock.resolve(unsaid, now: now)
+        XCTAssertEqual(out.reset, .out(until: nil))
+        XCTAssertEqual(out.resetText(at: now), MobileL10n.string("Out of usage"))
+    }
+
+    /// Past its reset a window's number describes the window before it: its value is `—`, the
+    /// clock is not placed on it, it states no reset, and a full one is not out.
+    func testAnExpiredWindowNeitherTicksNorResets() throws {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let reading = try XCTUnwrap(MobileAccountUsageReading.resolve(
+            account: Fixture.account(id: "a", windows: [
+                Fixture.window("7d", fraction: 0.97, resetsIn: -60, now: now),
+            ]),
+            model: nil,
+            now: now
+        ))
+        let week = try XCTUnwrap(reading.windows.first)
+        let clock = MobileIdentityPickerClock.resolve(reading, now: now)
+
+        XCTAssertNil(week.fraction)
+        XCTAssertEqual(week.value, MobileUsageDefaults.unknownValue)
+        XCTAssertNil(week.elapsedFraction(at: now))
+        XCTAssertEqual(clock.window?.name, "7d")
+        XCTAssertNil(clock.reset)
+        XCTAssertNil(clock.resetText(at: now))
+    }
+
+    /// The tick is how much of the window's length has gone by: a five-hour window two hours
+    /// from its reset is three fifths through.
+    func testTheClockTickIsHowFarThroughTheWindowTheClockStands() throws {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let reading = try XCTUnwrap(MobileAccountUsageReading.resolve(
+            account: Fixture.account(id: "a", windows: [
+                Fixture.window("5h", fraction: 0.07, resetsIn: 2 * 3600, now: now),
+            ]),
+            model: nil,
+            now: now
+        ))
+        let elapsed = try XCTUnwrap(reading.windows.first?.elapsedFraction(at: now))
+
+        XCTAssertEqual(elapsed, 0.6, accuracy: 0.0001)
+    }
+
+    /// The clock lives outside the reading, so a reading is one value while time passes — the
+    /// chat menu's gauge caches its picture on that equality.
+    func testTheReadingDoesNotChangeAsTheClockMoves() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let account = Fixture.account(id: "a", windows: [
+            Fixture.window("5h", fraction: 0.07, resetsIn: 2 * 3600, now: now),
+        ])
+
+        XCTAssertEqual(
+            MobileAccountUsageReading.resolve(account: account, model: nil, now: now),
+            MobileAccountUsageReading.resolve(account: account, model: nil, now: now.addingTimeInterval(600))
+        )
+    }
+
+    /// A model's own window is the disc's innermost ring, not the row's bar, even when it is the
+    /// fullest: the bar is the account's, so it compares down the list.
+    func testAScopedWindowStaysOnTheDisc() {
+        let now = Date()
+        let fable = MobileIdentityPickerReading.resolve(
+            account: Fixture.account(id: "default", windows: Fixture.windows(now: now)),
+            selectedAccountID: "default",
+            draftModelID: "claude-fable-5",
+            now: now
+        )
+
+        XCTAssertEqual(fable?.windows.map(\.name), ["5h", "7d", "7d Fable"])
+        XCTAssertEqual(MobileIdentityPickerClock.resolve(fable, now: now).window?.name, "7d")
+    }
+
+    /// A host that sends no windows, or a login still being read, keeps its words and states no
+    /// reset.
+    func testALoginWithoutWindowsKeepsItsWords() {
+        let words = MobileAccountUsageReading(rings: [], summary: "5h 31% · 7d 56%")
+
+        XCTAssertEqual(
+            MobileIdentityPickerClock.resolve(words, now: Date()),
+            MobileIdentityPickerClock(window: nil, reset: nil)
+        )
+        XCTAssertEqual(
+            MobileIdentityPickerClock.resolve(nil, now: Date()),
+            MobileIdentityPickerClock(window: nil, reset: nil)
+        )
+    }
+
+    func testTheSpokenValueAddsWhenTheLoginComesBack() throws {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let account = Fixture.account(id: "a", windows: [
+            Fixture.window("7d", fraction: 0.38, resetsIn: 2 * 86400, now: now),
+        ])
+        let reading = try XCTUnwrap(MobileAccountUsageReading.resolve(account: account, model: nil, now: now))
+        let words = MobileAccountUsageWords.resolve(account: account, reading: reading)
+        let clock = MobileIdentityPickerClock.resolve(reading, now: now)
+
+        let spoken = words.spoken(with: clock, at: now)
+        XCTAssertEqual(spoken, "7d 38% · " + (clock.spokenReset(at: now) ?? ""))
+        XCTAssertNotNil(clock.spokenReset(at: now))
+        XCTAssertEqual(words.spoken(with: .resolve(nil, now: now), at: now), "7d 38%")
+    }
+
+    // MARK: - Rendered state
+
+    /// The picker as it ships, light and dark, over the logins a real Mac reports: a login whose
+    /// week has passed its reset, two with both windows, two with only the week — and, in the
+    /// second pair of pictures, a chosen login on a model with a window of its own and a login
+    /// that is out. The pictures land in `THREADING_RENDER_OUT` when it names a folder.
+    @MainActor
+    func testRendersTheLoginRowsWithTheirClocksAndCountdowns() throws {
+        let now = Date()
+        let logins: [RemoteAccountChoiceDTO] = [
+            Fixture.account(id: "rinda01", windows: [
+                Fixture.window("7d", fraction: 0.91, resetsIn: -3600, now: now),
+            ]),
+            Fixture.account(id: "rinda02", windows: [
+                Fixture.window("5h", fraction: 0.07, resetsIn: 2 * 3600 + 41 * 60, now: now),
+                Fixture.window("7d", fraction: 0.38, resetsIn: 4 * 86400 + 2 * 3600, now: now),
+            ]),
+            Fixture.account(id: "rinda03", windows: [
+                Fixture.window("7d", fraction: 0.48, resetsIn: 86400 + 3 * 3600, now: now),
+            ]),
+            Fixture.account(id: "sonda01", windows: [
+                Fixture.window("7d", fraction: 0.01, resetsIn: 6 * 86400 + 20 * 3600, now: now),
+            ]),
+            Fixture.account(id: "sonda02", windows: [
+                Fixture.window("5h", fraction: 0.6, resetsIn: -60, now: now),
+                Fixture.window("7d", fraction: 0.79, resetsIn: 2 * 86400 + 6 * 3600, now: now),
+            ]),
+        ]
+        let out = Fixture.account(id: "rinda04", windows: [
+            Fixture.window("5h", fraction: 0.97, resetsIn: 2 * 3600 + 14 * 60, now: now),
+            Fixture.window("7d", fraction: 0.62, resetsIn: 5 * 86400, now: now),
+        ])
+        // Five, not six: a sixth login scrolls, and `ImageRenderer` draws no scroll view's content.
+        let scoped = [Fixture.account(id: "default", windows: Fixture.windows(now: now)), out]
+            + logins.dropFirst(2)
+
+        for (name, dto) in [("light", RemoteAppModel.demoLightTheme), ("dark", RemoteAppModel.demoTheme)] {
+            let palette = RemoteThemePalette(dto)
+            for (variant, accounts, selected) in [
+                ("windows", logins, "rinda02"),
+                ("scoped", scoped, "default"),
+            ] {
+                let picker = MobileIdentityPicker(
+                    agents: [
+                        RemoteAgentChoiceDTO(
+                            id: "claude", name: "Claude Code", accounts: accounts, models: [],
+                            defaultModelID: nil, supportsConversation: true
+                        ),
+                        RemoteAgentChoiceDTO(
+                            id: "codex", name: "Codex", accounts: [], models: [],
+                            defaultModelID: nil, supportsConversation: true
+                        ),
+                    ],
+                    selectedAgentID: "claude",
+                    accounts: accounts,
+                    selectedAccountID: selected,
+                    draftModelID: "claude-fable-5",
+                    onChooseAgent: { _ in },
+                    onChooseAccount: { _ in }
+                )
+                .background(palette.floatingSurface)
+                .mobileTheme(palette)
+                let renderer = ImageRenderer(content: picker)
+                renderer.scale = 3
+                let image = try XCTUnwrap(renderer.uiImage, "\(name) \(variant)")
+                try save(image, named: "identity-picker-\(variant)-\(name)")
+            }
+        }
+    }
+
+    private func save(_ image: UIImage, named name: String) throws {
+        guard let folder = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+              !folder.isEmpty else { return }
+        let directory = URL(fileURLWithPath: folder, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try XCTUnwrap(image.pngData()).write(to: directory.appendingPathComponent("\(name).png"))
+    }
+
     // MARK: - Fixture
 
     private enum Fixture {
@@ -341,6 +636,22 @@ final class MobileIdentityPickerTests: XCTestCase {
                 usageWindows: windows,
                 models: [],
                 defaultModelID: "claude-opus-5"
+            )
+        }
+
+        static func window(
+            _ name: String,
+            fraction: Double,
+            resetsIn seconds: TimeInterval,
+            now: Date
+        ) -> RemoteAccountUsageWindowDTO {
+            let durations: [String: TimeInterval] = ["5h": 5 * 3600, "7d": 7 * 86400]
+            return RemoteAccountUsageWindowDTO(
+                id: name,
+                name: name,
+                fraction: fraction,
+                resetsAt: now.timeIntervalSince1970 + seconds,
+                windowDuration: durations[name]
             )
         }
 

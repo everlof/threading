@@ -268,8 +268,9 @@ first choice, so "Codex on the work login" was two openings. The picker is the t
 the two things they are: the runtimes as a strip of their own marks at one width each (a sixth
 starts a second row, padded so no tile widens), and the logins as rows on one `ThemedRowGroup`
 plate, each led by the toolbar's own disc — the login's emoji or initial, ringed by that login's
-reading — so the picker is a row of the discs the bar might wear, and the words under each name
-are the exact reading those rings stand for. Tapping a runtime keeps the popover open and the
+reading — so the picker is a row of the discs the bar might wear, and under each name what the
+rings cannot say: the longest window as a bar with a clock tick, and beside the name when it
+resets (see [`accounts.md`](architecture/accounts.md)). Tapping a runtime keeps the popover open and the
 rows beneath follow it, which is what the re-measure above exists for; tapping a login commits
 and closes. The chosen tile takes the accent as a *ring* on its disc rather than a fill: a brand
 mark keeps its own colour by design, and Claude's coral on an accent-filled disc is two brands

@@ -149,8 +149,22 @@ enum MobileUsageCapacityProjection {
         for window: RemoteUsageLimitSeriesSummaryDTO,
         at referenceTime: Double
     ) -> Double? {
-        guard let reset = window.resetsAt,
-              let duration = window.windowDuration,
+        elapsedFraction(
+            resetsAt: window.resetsAt,
+            windowDuration: window.windowDuration,
+            at: referenceTime
+        )
+    }
+
+    /// The same placement from the two facts alone, for a reading that is not a limit series —
+    /// the identity picker's per-login windows.
+    static func elapsedFraction(
+        resetsAt: Double?,
+        windowDuration: Double?,
+        at referenceTime: Double
+    ) -> Double? {
+        guard let reset = resetsAt,
+              let duration = windowDuration,
               reset.isFinite,
               duration.isFinite,
               duration > 0,
@@ -2448,8 +2462,9 @@ private struct UsageCard<Content: View>: View {
 
 /// Native SwiftUI counterpart of the Mac's `UsageBarView`: usage remains the colored length,
 /// while the neutral line is elapsed time. Keeping the two independent makes under/over pace
-/// visible without changing the provider's percentage.
-private struct MobileUsageCapacityBar: View {
+/// visible without changing the provider's percentage. The identity picker draws each login's
+/// windows with it too, so a window reads the same on the dashboard and where it is chosen.
+struct MobileUsageCapacityBar: View {
     @Environment(\.remoteTheme) private var theme
 
     let fraction: Double

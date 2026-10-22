@@ -3354,7 +3354,12 @@ agent and account are the disc at the top right, the agent's mark ringed by that
 one ring per limit window (the week outside, the five hours inside it, and a model's own window
 innermost when the draft will run a model the plan meters separately), with the full usage
 figures in its menu. That menu is a panel of the agents as a strip and the chosen agent's logins
-as rows: tap one, or press anywhere on a group and slide, and the choice follows your finger
+as rows. Under each login's name is its weekly limit as a bar and a percentage, with a tick
+across the bar marking how far through the week the clock is — a fill past its tick is a week
+being spent faster than it refills — and beside the name is when that week resets, as a moment
+and a wait, such as **Mon 09:06 · 4d 1h**. A login that has run out of a limit shows that limit
+instead, in red, with when it comes back. Tap a row, or press anywhere on a group and slide, and
+the choice follows your finger
 with a tick at each crossing until you lift on the one you want. The model-by-effort matrix
 under the run line answers a finger the same way. The composer at the bottom holds the prompt and, under
 it, one line for the run — **GPT-5.6 Sol · High**, a menu of model, effort and speed — and two

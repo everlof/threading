@@ -116,4 +116,35 @@ final class UsageValueFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.compactCurrency(25_400), UsageValueFormat.compactCurrency(25_400))
         XCTAssertEqual(UsageFormat.share(0.645), UsageValueFormat.share(0.645))
     }
+
+    // MARK: - Countdowns
+
+    /// The phone's identity picker writes the same countdown the Mac's account menu does, so
+    /// one reset reads as one spelling on both.
+    func testACountdownUsesTheLargestReadableUnitsAndNeverReadsZero() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(UsageValueFormat.remaining(until: now.addingTimeInterval(20), from: now), "1m")
+        XCTAssertEqual(UsageValueFormat.remaining(until: now.addingTimeInterval(47 * 60), from: now), "47m")
+        XCTAssertEqual(
+            UsageValueFormat.remaining(until: now.addingTimeInterval(2 * 3600 + 14 * 60), from: now),
+            "2h 14m"
+        )
+        XCTAssertEqual(
+            UsageValueFormat.remaining(until: now.addingTimeInterval(3 * 86400 + 4 * 3600), from: now),
+            "3d 4h"
+        )
+        XCTAssertEqual(UsageValueFormat.remaining(until: now.addingTimeInterval(-60), from: now), "1m")
+        XCTAssertEqual(UsageValueFormat.duration(12), "12s")
+        XCTAssertEqual(UsageValueFormat.duration(5 * 3600), "5h")
+    }
+
+    func testTheAppSpellsCountdownsThroughTheSharedVocabulary() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let reset = now.addingTimeInterval(19 * 3600 + 36 * 60)
+        XCTAssertEqual(
+            UsageFormat.remaining(until: reset, from: now),
+            UsageValueFormat.remaining(until: reset, from: now)
+        )
+        XCTAssertEqual(UsageFormat.duration(42), UsageValueFormat.duration(42))
+    }
 }

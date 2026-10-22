@@ -778,8 +778,33 @@ login's emoji or initial (the Mac's `AccountBadge.initial` order: address, then 
 that login's reading. The chosen login is ringed for the model the draft will start, so its row
 and the bar agree; every other login is ringed for its own default, which is what the next turn
 would spend there — the draft's model belongs to the chosen identity and is re-resolved on a
-switch. Under each name, the reading in the pill's words, or "Usage unavailable" /
-"Loading usage…" as a state of its own rather than padding in the name.
+switch. A host that sends no windows leaves the reading in the pill's words under the name, or
+"Usage unavailable" / "Loading usage…" as a state of its own rather than padding in the name.
+
+**The row states time, not the windows again.** The disc already rings every window, so the row
+says the two things a ring cannot (`MobileIdentityPickerClock`): where the clock stands, and when
+the window comes back. Both belong to one window, the account's longest — the outermost ring,
+the budget a login is chosen against; the five-hour window refills on its own and its ring is
+just inside. Its bar is the dashboard's `MobileUsageCapacityBar` with the exact value in a slot
+as wide as `100%`, so every bar ends at one x, and it carries the dashboard's **clock tick**, how
+far through the window the clock stands (from `resetsAt − windowDuration`), so a fill past its
+tick reads as spend ahead of time without a second number. Beside the name is the reset as a
+moment and a wait, `Mon 09:06 · 4d 1h`: the time alone today, the weekday for the rest of the
+week — even a week out, where the weekday is today's and the wait says which — and the date
+alone beyond. The wait is `UsageValueFormat.remaining`, moved to `ThreadingRemoteKit` so one
+reset is one spelling on the Mac and the phone. A login that is **out** turns its row to the
+spent window, the last to reset when more than one is — `MobileProjectDefaultAccounts.state`'s
+rule, so the picker and the project's login order agree on when a login returns — and the bar,
+the value and the reset take the critical tint, which is why the reset needs no "Out until" on
+screen; VoiceOver, which hears no tint, is told it.
+
+A first version wrote every window as aligned columns (`5h ▬ 7% 7d ▬ 38%`, the Mac menu's
+layout) with a model's own window on an extra line; beside a disc already ringing the same
+windows it read as a table squeezed under each name, and the dated `29 Oct at 03:06` form
+crowded names to `Sond…`. The reading keeps each window's reset and length rather than an
+elapsed fraction: `MobileAccountUsageGauge` caches on reading equality, and a value that changed
+with the clock would redraw the chat menu's glyph on every body pass of a streaming chat. The
+tick and the reset are asked at drawing time, against one `now` per pass.
 
 The scope match stays on the Mac. `RemoteAccountBridge.usageWindows` sends each scoped window
 with the ids among the account's model choices that `ModelName.scope` says it meters, and the

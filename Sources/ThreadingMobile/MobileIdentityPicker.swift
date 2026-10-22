@@ -64,6 +64,121 @@ enum MobileAccountUsageWords: Equatable {
         case .loading: return MobileL10n.string("Loading usage…")
         }
     }
+
+    /// What VoiceOver says for the row: these words, then when the login comes back — the reset
+    /// the row writes beside the name, as a phrase rather than a clock.
+    func spoken(with clock: MobileIdentityPickerClock, at now: Date) -> String {
+        [text, clock.spokenReset(at: now)]
+            .compactMap { $0 }
+            .joined(separator: MobileUsageDefaults.segmentSeparator)
+    }
+}
+
+// MARK: - Mobile Identity Picker Clock
+
+/// What a login's row says about time, beside a disc that already says how much is spent.
+///
+/// The disc rings every window the chat is metered by, so the row does not write them out again
+/// as columns — that read as a table squeezed under each name. It states the two things a ring
+/// cannot: where the clock stands in one window, as the tick on its bar, and when that window
+/// comes back, as a moment and a wait, `Mon 09:06 · 4d 1h`. The window is the account's longest,
+/// the outermost ring, because that is the budget a login is chosen against; a five-hour window
+/// refills on its own and its ring sits just inside.
+///
+/// The exception is a login that is out. A window metering the chat is spent, whichever it is,
+/// and the row turns to it: its full bar and its reset, the last of them when more than one is
+/// spent — the rule `MobileProjectDefaultAccounts.state` orders the project's logins by, so the
+/// picker and the order agree on when a login returns. The bar and the reset always describe
+/// the same window, so neither needs a name, and the critical tint says why the row changed.
+struct MobileIdentityPickerClock: Equatable {
+    enum Reset: Equatable {
+        /// The bar's window comes back then.
+        case at(Date)
+        /// The bar's window is spent until then; nil when it does not say.
+        case out(until: Date?)
+    }
+
+    /// The window the row's bar draws. Nil for a reading with no windows — an older host's —
+    /// whose row keeps its words.
+    let window: MobileAccountUsageReading.Window?
+    let reset: Reset?
+
+    static func resolve(_ reading: MobileAccountUsageReading?, now: Date) -> Self {
+        let windows = reading?.windows ?? []
+        // A window past its reset carries no fraction, so a spent one is always a live one.
+        let spent = windows.filter {
+            ($0.fraction ?? 0) >= RemoteProjectDefaultAccounts.spentFraction
+        }
+        if let unsaid = spent.first(where: { $0.resetsAt == nil }) {
+            return Self(window: unsaid, reset: .out(until: nil))
+        }
+        if let last = spent.max(by: { ($0.resetsAt ?? now) < ($1.resetsAt ?? now) }) {
+            return Self(window: last, reset: .out(until: last.resetsAt))
+        }
+        let window = longest(windows.filter(\.isAccountWide)) ?? longest(windows)
+        guard let resetsAt = window?.resetsAt, resetsAt > now else {
+            return Self(window: window, reset: nil)
+        }
+        return Self(window: window, reset: .at(resetsAt))
+    }
+
+    /// `Mon 09:06 · 4d 1h`: the moment, then the wait the way the Mac's account menu counts it
+    /// down. A login out with no reset to state says only that.
+    func resetText(at now: Date) -> String? {
+        switch reset {
+        case .none:
+            return nil
+        case .at(let date), .out(let date?):
+            return Self.moment(date, now: now)
+                + MobileUsageDefaults.segmentSeparator
+                + UsageValueFormat.remaining(until: date, from: now)
+        case .out(nil):
+            return MobileL10n.string("Out of usage")
+        }
+    }
+
+    /// The reset for VoiceOver, which hears no tint: `Resets in 4 days`, `Out until 18:40`.
+    func spokenReset(at now: Date) -> String? {
+        switch reset {
+        case .none:
+            return nil
+        case .at(let date):
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            return MobileL10n.string(
+                "Resets %@",
+                formatter.localizedString(for: date, relativeTo: now)
+            )
+        case .out(let until?):
+            return MobileL10n.string(
+                "Out until %@",
+                MobileProjectDefaultAccounts.resetTime(until, now: now)
+            )
+        case .out(nil):
+            return MobileL10n.string("Out of usage")
+        }
+    }
+
+    /// The moment as briefly as the wait beside it leaves unambiguous: the time today, else the
+    /// weekday — a week out that is today's weekday, and the wait says which — and past a week
+    /// the date alone, where the hour no longer helps.
+    static func moment(_ date: Date, now: Date) -> String {
+        if Calendar.current.isDate(date, inSameDayAs: now) {
+            return date.formatted(.dateTime.hour().minute())
+        }
+        if date.timeIntervalSince(now) < MobileUsageDefaults.week {
+            return date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    /// The outermost ring's window: the longest, a window of unknown length after any whose
+    /// length is known, and the first of equals — the order `MobileAccountUsageReading` rings in.
+    private static func longest(
+        _ windows: [MobileAccountUsageReading.Window]
+    ) -> MobileAccountUsageReading.Window? {
+        windows.max { ($0.duration ?? -1) < ($1.duration ?? -1) }
+    }
 }
 
 // MARK: - Mobile Identity Picker Reading
@@ -382,18 +497,20 @@ struct MobileIdentityPicker: View {
 
     @ViewBuilder
     private var accountList: some View {
+        // One clock for the pass, so two rows on the same window cannot tick it to two places.
+        let now = Date()
         if accountsScroll {
             // Too many logins to divide the surface by: the pan belongs to the scroll view, so
             // the rows answer taps only.
             ScrollView(.vertical) {
-                ThemedRowGroup { accountRows(scrubbable: false) }
+                ThemedRowGroup { accountRows(now: now, scrubbable: false) }
             }
             .scrollBounceBehavior(.basedOnSize)
             .frame(maxHeight: CGFloat(Metrics.scrubbableRows) * Metrics.rowHeight)
         } else {
             ThemedRowGroup {
                 GeometryReader { geometry in
-                    accountRows(scrubbable: true)
+                    accountRows(now: now, scrubbable: true)
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .mobileScrubSurface(
                             item: { account(at: $0, in: geometry.size)?.id },
@@ -406,7 +523,7 @@ struct MobileIdentityPicker: View {
         }
     }
 
-    private func accountRows(scrubbable: Bool) -> some View {
+    private func accountRows(now: Date, scrubbable: Bool) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
                 if index > 0 {
@@ -416,7 +533,7 @@ struct MobileIdentityPicker: View {
                             + MobileDesign.Spacing.medium
                     )
                 }
-                let row = accountRow(account).frame(maxWidth: .infinity)
+                let row = accountRow(account, now: now).frame(maxWidth: .infinity)
                 if scrubbable {
                     // The group is the surface. A recognizer on the row — even one that did
                     // nothing — would be the child gesture, and a child gesture takes every
@@ -432,7 +549,7 @@ struct MobileIdentityPicker: View {
         }
     }
 
-    private func accountRow(_ account: RemoteAccountChoiceDTO) -> some View {
+    private func accountRow(_ account: RemoteAccountChoiceDTO, now: Date) -> some View {
         let chosen = account.id == selectedAccountID
         // The wash follows the finger while one is down, and rests on the chosen login
         // otherwise; the checkmark stays on the chosen one throughout, so the row says both what
@@ -441,9 +558,11 @@ struct MobileIdentityPicker: View {
         let reading = MobileIdentityPickerReading.resolve(
             account: account,
             selectedAccountID: selectedAccountID,
-            draftModelID: draftModelID
+            draftModelID: draftModelID,
+            now: now
         )
         let words = MobileAccountUsageWords.resolve(account: account, reading: reading)
+        let clock = MobileIdentityPickerClock.resolve(reading, now: now)
         return HStack(spacing: MobileDesign.Spacing.medium) {
             MobileAccountGlyphDisc(
                 glyph: .resolve(
@@ -458,12 +577,30 @@ struct MobileIdentityPicker: View {
             // The text column owns the width the disc and the checkmark leave it, the way
             // `MobileDraftChooser`'s does; a spacer here measured a wrapping line one line tall.
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
-                Text(account.visibleName)
-                    .font(.subheadline.weight(chosen ? .semibold : .medium))
-                    .foregroundStyle(theme.label)
-                Text(words.text)
-                    .font(.caption)
-                    .foregroundStyle(theme.secondaryLabel)
+                // The reset is fixed at the line's end, so the name is the elastic part: a long
+                // login truncates, a reset never loses its digits.
+                HStack(spacing: MobileDesign.Spacing.small) {
+                    Text(account.visibleName)
+                        .font(.subheadline.weight(chosen ? .semibold : .medium))
+                        .foregroundStyle(theme.label)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let reset = clock.resetText(at: now) {
+                        Text(reset)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(resetInk(clock.reset))
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                }
+                if let window = clock.window {
+                    MobileIdentityPickerUsageBar(window: window, now: now)
+                } else {
+                    Text(words.text)
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .lineLimit(1)
+                }
             }
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
@@ -479,9 +616,15 @@ struct MobileIdentityPicker: View {
         .background(active ? theme.accent.opacity(Metrics.selectionWash) : Color.clear)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(account.name)
-        .accessibilityValue(words.text)
+        .accessibilityValue(words.spoken(with: clock, at: now))
         .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { choose(account: account.id) }
+    }
+
+    /// Quiet, except for a login that is out: then the critical tint its spent ring wears.
+    private func resetInk(_ reset: MobileIdentityPickerClock.Reset?) -> Color {
+        guard case .out = reset else { return theme.secondaryLabel }
+        return theme.usageTint(for: RemoteProjectDefaultAccounts.spentFraction)
     }
 
     private func account(at point: CGPoint, in size: CGSize) -> RemoteAccountChoiceDTO? {
@@ -497,6 +640,48 @@ struct MobileIdentityPicker: View {
         commitFeedback.impactOccurred()
         commitFeedback.prepare()
         onChooseAccount(id)
+    }
+}
+
+// MARK: - Mobile Identity Picker Usage Bar
+
+/// The row's one window as a bar and its exact value, with the dashboard's clock tick on it, so
+/// where spend stands against time is one glance rather than a sum.
+///
+/// The bar is `MobileUsageCapacityBar`, the dashboard's own: the length is the provider's
+/// percentage and the neutral tick is how far through the window the clock is, so a fill past
+/// its tick is a window being spent faster than it refills. The value sits in a slot as wide as
+/// the widest value, so every row's bar ends at one x down the list whatever its number says.
+private struct MobileIdentityPickerUsageBar: View {
+    let window: MobileAccountUsageReading.Window
+    let now: Date
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: MobileDesign.Spacing.small) {
+            MobileUsageCapacityBar(
+                fraction: window.fraction ?? 0,
+                timeMark: window.elapsedFraction(at: now),
+                tint: theme.usageTint(for: window.fraction)
+            )
+            Text(verbatim: MobileUsageDefaults.widestValue)
+                .hidden()
+                .fixedSize()
+                .overlay(alignment: .trailing) {
+                    Text(window.value)
+                        .foregroundStyle(valueInk)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+        }
+        .font(.caption.monospacedDigit())
+    }
+
+    /// Quiet until the window is under pressure, then the bar's own tint — the Mac menu's tone.
+    private var valueInk: Color {
+        MobileUsageSeverity.from(fraction: window.fraction) == .normal
+            ? theme.secondaryLabel
+            : theme.usageTint(for: window.fraction)
     }
 }
 
