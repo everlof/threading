@@ -8,13 +8,8 @@ final class ThemedProjectRowView: NSView {
     let nativeContent = NSView()
     let afterTitleSlot = NSStackView()
     let iconView = GlyphView()
-    #if os(Linux)
-    let titleLabel = NSTextField(labelWithString: "")
-    private var pathLabel: NSTextField?
-    #else
     let titleLabel = MorphingTitleLabel()
     private var pathLabel: MorphingTitleLabel?
-    #endif
     private var pathMinimumWidth: NSLayoutConstraint?
     private lazy var nativeStack = NSStackView(views: [iconView, titleLabel])
     private lazy var contentStack = NSStackView(views: [nativeContent, afterTitleSlot])
@@ -132,11 +127,7 @@ final class ThemedProjectRowView: NSView {
     }
 
     func setTitle(_ title: String, animated: Bool) {
-        #if os(Linux)
-        titleLabel.stringValue = title
-        #else
         titleLabel.setStringValue(title, animated: animated)
-        #endif
     }
 
     func setIcon(_ image: NSImage?, visible: Bool) {
@@ -200,12 +191,7 @@ final class ThemedProjectRowView: NSView {
 
         titleLabel.setContentHuggingPriority(SidebarRowDefaults.stretchableHugging, for: .horizontal)
         titleLabel.setAccessibilityIdentifier("sidebar.project.title")
-        #if os(Linux)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        #else
         titleLabel.setTextColor { [weak self] in self?.titleColor() ?? Design.Text.label }
-        #endif
 
         nativeStack.orientation = .horizontal
         nativeStack.alignment = .centerY
@@ -257,14 +243,10 @@ final class ThemedProjectRowView: NSView {
     }
 
     private func setTitleFont(_ role: NavigatorProjectRowPresentation.TitleRole) {
-        #if os(Linux)
-        titleLabel.font = ProjectRowLinuxTypography.titleFont(for: role)
-        #else
         switch role {
         case .emphasizedBody: titleLabel.applyFont(.emphasizedBody)
         case .caption: titleLabel.applyFont(.caption)
         }
-        #endif
     }
 
     private func setPath(_ path: String?, displayedAs text: String?) {
@@ -276,23 +258,13 @@ final class ThemedProjectRowView: NSView {
             return
         }
         guard let text else { preconditionFailure("Checkout presentation must provide its path text") }
-        #if os(Linux)
-        let label: NSTextField
-        #else
         let label: MorphingTitleLabel
-        #endif
         if let pathLabel {
             label = pathLabel
         } else {
-            #if os(Linux)
-            label = NSTextField(labelWithString: "")
-            label.font = ProjectRowLinuxTypography.pathFont
-            label.lineBreakMode = .byTruncatingTail
-            #else
             label = MorphingTitleLabel()
             label.applyFont(.body)
             label.setTextColor { [weak self] in self?.pathColor() ?? Design.Text.tertiary }
-            #endif
             label.setAccessibilityIdentifier("sidebar.project.worktree-path")
             label.setContentHuggingPriority(.defaultLow, for: .horizontal)
             nativeStack.addArrangedSubview(label)
@@ -310,11 +282,7 @@ final class ThemedProjectRowView: NSView {
         #else
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         #endif
-        #if os(Linux)
-        label.stringValue = text
-        #else
         label.setStringValue(text, animated: false)
-        #endif
         label.toolTip = path
         label.isHidden = false
         pathMinimumWidth?.isActive = true
@@ -455,13 +423,8 @@ final class ThemedProjectRowView: NSView {
     }
 
     private func applyColors() {
-        #if os(Linux)
-        titleLabel.textColor = titleColor()
-        pathLabel?.textColor = pathColor()
-        #else
         titleLabel.refreshTextColor()
         pathLabel?.refreshTextColor()
-        #endif
         let ground: InkSource? = isSelected ? .selection : nil
         createButton.hostGround = ground
         actionButton.hostGround = ground

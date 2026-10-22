@@ -73,11 +73,17 @@ public enum ChatNameMorphStyle: String {
 }
 
 extension MorphingTitleLabel {
-    enum FontRole { case control }
+    enum FontRole { case control, controlRegular, emphasizedBody, caption, body }
 
     func applyFont(_ role: FontRole) {
         switch role {
         case .control: font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        case .controlRegular: font = Design.Typography.controlRegular()
+        case .emphasizedBody: font = NSFont.systemFont(ofSize: SidebarRowDefaults.projectFontSize,
+                                                      weight: .semibold)
+        case .caption: font = NSFont.systemFont(ofSize: SidebarRowDefaults.headingFontSize,
+                                               weight: .regular)
+        case .body: font = Design.Typography.body()
         }
     }
 }

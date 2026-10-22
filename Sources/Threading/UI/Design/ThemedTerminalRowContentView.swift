@@ -5,11 +5,7 @@ import AppKit
 /// terminals with the same layout and ink roles.
 final class ThemedTerminalRowContentView: NSStackView {
     let iconView = GlyphView()
-    #if os(Linux)
-    let titleLabel = NSTextField(labelWithString: "")
-    #else
     let titleLabel = MorphingTitleLabel()
-    #endif
 
     private var isSelected = false
     private var isRunning = false
@@ -27,11 +23,7 @@ final class ThemedTerminalRowContentView: NSStackView {
     }
 
     func setTitle(_ title: String, animated: Bool = false) {
-        #if os(Linux)
-        if titleLabel.stringValue != title { titleLabel.stringValue = title }
-        #else
         titleLabel.setStringValue(title, animated: animated)
-        #endif
     }
 
     func setIcon(_ image: NSImage?) {
@@ -44,10 +36,8 @@ final class ThemedTerminalRowContentView: NSStackView {
         isRunning = running
         #if os(Linux)
         contentGround = ground
-        titleLabel.textColor = resolvedInk
-        #else
-        titleLabel.refreshTextColor()
         #endif
+        titleLabel.refreshTextColor()
         iconView.tint = resolvedInk
     }
 
@@ -83,14 +73,8 @@ final class ThemedTerminalRowContentView: NSStackView {
             iconView.heightAnchor.constraint(equalToConstant: SidebarRowDefaults.iconSlotWidth)
         ])
 
-        #if os(Linux)
-        titleLabel.font = Design.Typography.controlRegular()
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        #else
         titleLabel.applyFont(.controlRegular)
         titleLabel.setTextColor { [weak self] in self?.resolvedInk ?? Design.Text.label }
-        #endif
         titleLabel.setContentHuggingPriority(SidebarRowDefaults.stretchableHugging,
                                              for: .horizontal)
         titleLabel.setAccessibilityIdentifier("sidebar.terminal.title")

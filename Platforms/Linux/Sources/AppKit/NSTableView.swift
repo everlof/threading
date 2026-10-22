@@ -185,6 +185,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
     private var changingDocumentGeometry = false
     private var reconcilingRows = false
     private var measuredRows: Set<Int> = []
+    private var pendingScrollRow: Int?
 
     open override var isFlipped: Bool { true }
     open var enclosingScrollView: NSScrollView? { superview?.superview as? NSScrollView }
@@ -465,6 +466,13 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         guard row >= 0, row < numberOfRows, let clip = superview as? NSClipView else { return }
         let rect = rect(ofRow: row)
         let visible = clip.documentVisibleRect
+        guard !visible.isEmpty else {
+            // Selection can arrive before constraints size the clip. Scrolling against a zero
+            // viewport lands below the first row's top inset and hides that selection.
+            pendingScrollRow = row
+            return
+        }
+        pendingScrollRow = nil
         if usesAutomaticRowHeights, rect.minY < visible.minY || rect.maxY > visible.maxY {
             // Land at the estimated row's start. Measuring a preceding partial row while
             // bottom-aligning the estimate could otherwise push the requested row offscreen.
@@ -553,6 +561,10 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         }
         if frame.width != clipView.bounds.width {
             frame.size.width = clipView.bounds.width
+        }
+        if let pendingScrollRow, !clipView.documentVisibleRect.isEmpty {
+            self.pendingScrollRow = nil
+            scrollRowToVisible(pendingScrollRow)
         }
         reconcileVisibleRows()
     }

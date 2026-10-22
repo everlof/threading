@@ -4995,7 +4995,10 @@ struct WindowHarness {
                     setNavigatorTitle(title)
                     print("FRAME \(width)x\(height) mounted=\(visibleOutlineRows.count) selected=\(projects.isEmpty ? "none" : projects[selected].id) total=\(sidebarRows.totalCount)")
                     if !projects.isEmpty {
-                        print("OUTLINE_FRAME total=\(outline.numberOfRows) first=\(first) visible=\(end - first) mounted=\(outline.mountedViewCount) reusable=\(outline.reusableViewCount) scrollY=\(outlineScroll.contentView.bounds.minY)")
+                        // Rendering may resize the clip after the estimated range above.
+                        // Report the final viewport used for mounted cells and accessibility.
+                        let renderedRows = outline.visibleRowIndexes
+                        print("OUTLINE_FRAME total=\(outline.numberOfRows) first=\(renderedRows.first ?? 0) visible=\(renderedRows.count) mounted=\(outline.mountedViewCount) reusable=\(outline.reusableViewCount) scrollY=\(outlineScroll.contentView.bounds.minY)")
                     }
                 }
                 trace("accessibility-title.end")

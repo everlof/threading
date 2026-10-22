@@ -6,11 +6,7 @@ import AppKit
 final class ThemedSessionRowContentView: NSStackView {
     let nativeIdentityContent = NSView()
     let iconView = GlyphView()
-    #if os(Linux)
-    let titleLabel = NSTextField(labelWithString: "")
-    #else
     let titleLabel = MorphingTitleLabel()
-    #endif
     private(set) var accountChipView: NSImageView?
 
     override init(frame frameRect: NSRect) {
@@ -23,11 +19,7 @@ final class ThemedSessionRowContentView: NSStackView {
     }
 
     func setTitle(_ title: String, animated: Bool = false) {
-        #if os(Linux)
-        if titleLabel.stringValue != title { titleLabel.stringValue = title }
-        #else
         titleLabel.setStringValue(title, animated: animated)
-        #endif
     }
 
     func setIcon(_ image: NSImage?) {
@@ -102,13 +94,7 @@ final class ThemedSessionRowContentView: NSStackView {
             iconView.trailingAnchor.constraint(equalTo: nativeIdentityContent.trailingAnchor)
         ])
 
-        #if os(Linux)
-        titleLabel.font = Design.Typography.controlRegular()
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        #else
         titleLabel.applyFont(.controlRegular)
-        #endif
         titleLabel.setAccessibilityIdentifier("sidebar.session.title")
         titleLabel.setContentHuggingPriority(SidebarRowDefaults.stretchableHugging,
                                              for: .horizontal)
