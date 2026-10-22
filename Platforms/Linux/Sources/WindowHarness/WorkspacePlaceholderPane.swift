@@ -659,26 +659,24 @@ final class WorkspacePlaceholderPane {
         let sourceFrame = source.convert(source.bounds, to: composerRoot)
         if choiceKind == .model, let content = modelContent {
             let natural = content.intrinsicContentSize
-            let width = min(natural.width, max(1, size.width - 16))
-            let above = max(1, size.height - sourceFrame.maxY - 8)
-            let below = max(1, sourceFrame.minY - 8)
-            let opensAbove = above >= below
-            let height = min(natural.height, opensAbove ? above : below)
-            let x = min(max(8, sourceFrame.minX), max(8, size.width - width - 8))
-            let y = opensAbove ? sourceFrame.maxY + 4 : max(4, sourceFrame.minY - height - 4)
-            choiceSurface.frame = NSRect(x: x, y: y, width: width, height: height)
+            choiceSurface.frame = ThemedMenuLayout.frame(anchor: sourceFrame,
+                desiredSize: natural, in: composerRoot.bounds,
+                flipped: composerRoot.isFlipped)
             return
         }
         let width = min(max(choiceWidth, sourceFrame.width + 28), max(1, size.width - 48))
-        let availableAbove = max(0, size.height - sourceFrame.maxY - 12)
         let rowHeight = choiceRowHeight
-        let opensAbove = availableAbove >= rowHeight + 12
-        let available = opensAbove ? availableAbove : max(0, sourceFrame.minY - 8)
-        choiceVisibleCount = min(6, choiceOptions.count, max(1, Int((available - 12) / rowHeight)))
-        let height = CGFloat(choiceVisibleCount) * rowHeight + 12
-        let x = min(max(8, sourceFrame.minX), max(8, size.width - width - 8))
-        let y = opensAbove ? sourceFrame.maxY + 4 : max(4, sourceFrame.minY - height - 4)
-        choiceSurface.frame = NSRect(x: x, y: y, width: width, height: height)
+        let outerInset = ThemedMenuMetrics.verticalOuterInset * 2
+        let placement = ThemedMenuLayout.frame(anchor: sourceFrame,
+            desiredSize: NSSize(width: width,
+                height: CGFloat(choiceOptions.count) * rowHeight + outerInset),
+            in: composerRoot.bounds, flipped: composerRoot.isFlipped)
+        let rowCapacity = max(1, Int((placement.height - outerInset) / rowHeight))
+        choiceVisibleCount = min(6, choiceOptions.count, rowCapacity)
+        choiceSurface.frame = ThemedMenuLayout.frame(anchor: sourceFrame,
+            desiredSize: NSSize(width: width,
+                height: CGFloat(choiceVisibleCount) * rowHeight + outerInset),
+            in: composerRoot.bounds, flipped: composerRoot.isFlipped)
     }
 
     private func rebuildChoiceRows() {

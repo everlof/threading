@@ -2109,6 +2109,11 @@ struct WindowHarness {
         let snoozeWakeInbox = SnoozeWakeInbox()
         var pendingSnoozeAcknowledgements: [String: String] = [:]
         var actions: NavigatorActions.Presentation?
+        let actionMenuSurface = ThemedMenuPanelView(frame: .zero)
+        var actionMenuFrame = NSRect.zero
+        var actionMenuUsesProjectRow = false
+        let accountMenuSurface = ThemedMenuPanelView(frame: .zero)
+        var accountMenuFrame = NSRect.zero
         let addProjectMenuSeparator = ThemedMenuSeparatorView()
         var sessionMenu: SidebarSessionMenu?
         let sessionMenuSurface = ThemedMenuPanelView(frame: .zero)
@@ -3070,7 +3075,8 @@ struct WindowHarness {
             }
             if pane.chrome.takeOpenInChooserToggleRequest() {
                 if pane.chrome.hasOpenInMenu {
-                    pane.chrome.toggleOpenInMenu(window: window, paneWidth: terminalWidth)
+                    pane.chrome.toggleOpenInMenu(window: window, paneWidth: terminalWidth,
+                        paneHeight: height)
                 } else if pendingOpenInMenuPage == pane.chrome.pageIdentity {
                     pendingOpenInMenuPage = nil
                 } else {
@@ -3180,11 +3186,10 @@ struct WindowHarness {
             guard actionsEnabled else { return }
             let state = actionState(for: targetID)
             guard targetID == nil || state.projectID == targetID else { return }
-            // Menu content replaces the project rows. A later keyboard dismissal must not
-            // restore an old row's hover reveal at coordinates that may now mean something else.
             hoveredOutlineItem = nil
             rowActionMenuGesture = false
             rowActionMenuEntered = false
+            actionMenuUsesProjectRow = targetID != nil
             actions = .init(kind: .projectActions, projectID: state.projectID,
                             returnToSidebar: returnToSidebar,
                             commands: NavigatorActions.projectCommands(state))
@@ -3196,6 +3201,7 @@ struct WindowHarness {
                   addProjectButton.isEnabled else { return }
             if actions != nil { dismissActions(returnToParent: false) }
             hoveredOutlineItem = nil
+            actionMenuUsesProjectRow = false
             actions = .init(kind: .addProject, projectID: nil,
                             returnToSidebar: sidebarFocused,
                             commands: NavigatorActions.addProjectMenuCommands())
@@ -3208,6 +3214,7 @@ struct WindowHarness {
             hoveredOutlineItem = nil
             rowActionMenuGesture = false
             rowActionMenuEntered = false
+            actionMenuUsesProjectRow = true
             let state = actionState(for: targetID)
             actions = .init(kind: repository ? .repositoryCreate : .projectCreate,
                 projectID: targetID,
@@ -3425,7 +3432,8 @@ struct WindowHarness {
                 }
                 if pane.chrome.takeMenuToggleRequest() {
                     focusSidebar(false)
-                    pane.chrome.toggleMenu(window: window, paneWidth: terminalWidth)
+                    pane.chrome.toggleMenu(window: window, paneWidth: terminalWidth,
+                        paneHeight: height)
                 }
                 if let command = pane.chrome.takeMenuCommand() {
                     invokeSessionMenuCommand(command)
@@ -3469,7 +3477,8 @@ struct WindowHarness {
                 }
                 if let pane = activePane, pane.chrome.takeMenuToggleRequest() {
                     focusSidebar(false)
-                    pane.chrome.toggleMenu(window: window, paneWidth: terminalWidth)
+                    pane.chrome.toggleMenu(window: window, paneWidth: terminalWidth,
+                        paneHeight: height)
                     dirty = true
                 }
                 if let pane = activePane { drainOpenInRequests(pane) }
@@ -3953,7 +3962,8 @@ struct WindowHarness {
                 if let requestedPage = pendingOpenInMenuPage {
                     pendingOpenInMenuPage = nil
                     if let pane = activePane, pane.chrome.pageIdentity == requestedPage {
-                        pane.chrome.toggleOpenInMenu(window: window, paneWidth: terminalWidth)
+                        pane.chrome.toggleOpenInMenu(window: window, paneWidth: terminalWidth,
+                            paneHeight: height)
                     }
                 }
                 dirty = true
@@ -4073,6 +4083,19 @@ struct WindowHarness {
                                      height: height, originX: sidebarWidth)
             }
             let pickerAccounts = accountPicker == .claude ? claudeAccounts : codexAccounts
+            let accountMenuEntries: [ThemedMenuEntry]
+            if let accountPicker {
+                let provider = accountPicker == .claude ? "Claude" : "Codex"
+                let active = accountPicker == .claude ? claudeAccount : codexAccount
+                accountMenuEntries = pickerAccounts.map { handle in
+                    let name = handle.isStandard ? "Default \(provider)" :
+                        "\(provider) [\(readableNavigatorText(handle.name))]"
+                    return .item(ThemedMenuItem(title: name, representedValue: handle,
+                                                isSelected: handle == active))
+                }
+            } else {
+                accountMenuEntries = []
+            }
             // Consume after import installs its snapshot, and after a pending selection has
             // replayed its committed action. Neither operation may observe shifted row indices.
             if pendingFolderImport == nil, pendingSelection == nil,
@@ -4103,20 +4126,66 @@ struct WindowHarness {
             }
             let enabled = pendingFolderImport == nil && pendingSelection == nil
             if actionsEnabled != enabled { actionsEnabled = enabled; dirty = true }
+            if dirty {
+                navigatorRoot.prepareNavigatorFrame(NSRect(x: 0, y: 0,
+                    width: CGFloat(navigatorWidth) / scale, height: CGFloat(height) / scale))
+            }
+            func actionMenuAnchor(in menu: NavigatorActions.Presentation) -> NSRect {
+                if menu.kind == .addProject {
+                    return addProjectButton.convert(addProjectButton.bounds, to: navigatorRoot)
+                }
+                if actionMenuUsesProjectRow, let target = menu.projectID,
+                   let projectIndex = projectIndexes[target.uuidString] {
+                    let item = NavigatorOutlineItem(projectID: target.uuidString,
+                        projectIndex: projectIndex)
+                    let rowIndex = outline.row(forItem: item)
+                    if rowIndex >= 0,
+                       let row = outline.view(atColumn: 0, row: rowIndex,
+                           makeIfNecessary: false) as? Specimen.Row {
+                        let create = menu.kind == .projectCreate ||
+                            menu.kind == .repositoryCreate || menu.kind == .chatProviders
+                        let source = row.productionProjectControl(create: create) ?? row
+                        return source.convert(source.bounds, to: navigatorRoot)
+                    }
+                }
+                return actionsButton.convert(actionsButton.bounds, to: navigatorRoot)
+            }
             let visibleRowHeight = actions == nil && accountPicker == nil
                 ? navigatorRowStride : ThemedMenuMetrics.rowHeight
             let separatorReserve = actions?.kind == .addProject
                 ? ThemedMenuMetrics.separatorHeight : 0
+            let navigatorContentHeight = CGFloat(height) / scale - navigatorHeaderHeight - 2
+            let menuHeightBudget: CGFloat
+            if let menu = actions {
+                navigatorRoot.layoutSubtreeIfNeeded()
+                let fullHeight = CGFloat(menu.commands.count) * visibleRowHeight
+                    + separatorReserve + ThemedMenuMetrics.verticalOuterInset * 2
+                let frame = ThemedMenuLayout.frame(
+                    anchor: actionMenuAnchor(in: menu),
+                    desiredSize: NSSize(width: 190, height: fullHeight),
+                    in: navigatorRoot.bounds, flipped: navigatorRoot.isFlipped)
+                menuHeightBudget = frame.height - ThemedMenuMetrics.verticalOuterInset * 2
+            } else if accountPicker != nil {
+                navigatorRoot.layoutSubtreeIfNeeded()
+                let width = ThemedMenuMetrics.width(for: accountMenuEntries, minimum: 190,
+                    selectedEntryIndex: accountSelected)
+                let frame = ThemedMenuLayout.frame(
+                    anchor: actionsButton.convert(actionsButton.bounds, to: navigatorRoot),
+                    desiredSize: NSSize(width: width,
+                        height: ThemedMenuMetrics.height(for: accountMenuEntries)),
+                    in: navigatorRoot.bounds, flipped: navigatorRoot.isFlipped)
+                menuHeightBudget = frame.height - ThemedMenuMetrics.verticalOuterInset * 2
+            } else {
+                menuHeightBudget = navigatorContentHeight
+            }
             let count = min(Int(TW_NAVIGATOR_MAX_ROWS),
-                max(1, Int((CGFloat(height) / scale - navigatorHeaderHeight - 2
-                            - separatorReserve) / visibleRowHeight)))
+                max(1, Int((menuHeightBudget - separatorReserve) / visibleRowHeight)))
             let projectsMode = actions == nil && accountPicker == nil && savedPicker == nil
+            let showsNavigatorBehindMenu = savedPicker == nil
             if dirty {
-                navigatorRoot.prepareNavigatorFrame(NSRect(x: 0, y: 0,
-                    width: CGFloat(navigatorWidth) / scale, height: CGFloat(height) / scale))
                 navigatorRoot.setNavigatorOutline(outlineScroll, below: header,
-                    visible: projectsMode && !projects.isEmpty)
-                setEmptyStateVisible(projectsMode && projects.isEmpty && launch != nil)
+                    visible: showsNavigatorBehindMenu && !projects.isEmpty)
+                setEmptyStateVisible(showsNavigatorBehindMenu && projects.isEmpty && launch != nil)
             }
             outlineSource.projects = projects
             outlineSource.projectIndexes = projectIndexes
@@ -4259,6 +4328,7 @@ struct WindowHarness {
                 let selectedInk = LinuxTheme.neutralInk(on: accent, dark: LinuxTheme.isDark)
                 var menuRows: [NSView] = []
                 var menuHeights: [CGFloat] = []
+                var actionMenuEntries: [ThemedMenuEntry] = []
                 let end: Int
                 if let menu = actions {
                     end = min(menu.commands.count, menu.first + count)
@@ -4270,6 +4340,7 @@ struct WindowHarness {
                             isEnabled: command.availability.isAvailable
                         ))
                     }
+                    actionMenuEntries = entries
                     let plan = ThemedMenuRowPlan(entries: entries)
                     retainedMenuRows.prepare(menu: "actions:\(menu.kind)", entries: entries,
                                              visible: menu.first..<end)
@@ -4296,18 +4367,9 @@ struct WindowHarness {
                     }
                 } else if let accountPicker {
                     let provider = accountPicker == .claude ? "Claude" : "Codex"
-                    let active = accountPicker == .claude ? claudeAccount : codexAccount
                     end = min(pickerAccounts.count, accountFirst + count)
-                    // Discovery admits at most 32 handles. Measure the common check column
-                    // once, then materialize only the visible page as native menu rows.
-                    let entries: [ThemedMenuEntry] = pickerAccounts.map { handle in
-                        let name = handle.isStandard ? "Default \(provider)" :
-                            "\(provider) [\(readableNavigatorText(handle.name))]"
-                        return .item(ThemedMenuItem(title: name, representedValue: handle,
-                                                    isSelected: handle == active))
-                    }
-                    let plan = ThemedMenuRowPlan(entries: entries)
-                    retainedMenuRows.prepare(menu: "accounts:\(provider)", entries: entries,
+                    let plan = ThemedMenuRowPlan(entries: accountMenuEntries)
+                    retainedMenuRows.prepare(menu: "accounts:\(provider)", entries: accountMenuEntries,
                                              visible: accountFirst..<end)
                     for index in accountFirst..<end {
                         guard let row = retainedMenuRows.row(at: index, plan: plan) else {
@@ -4396,10 +4458,14 @@ struct WindowHarness {
                     if let anchor {
                         let entries = menu.entries
                         let plan = ThemedMenuRowPlan(entries: entries)
-                        let menuWidth = min(root.bounds.width - 8,
-                            max(190, ThemedMenuMetrics.width(for: entries, minimum: 190,
-                                selectedEntryIndex: menu.selected)))
-                        let maximumHeight = max(64, root.bounds.height - 8)
+                        let menuWidth = ThemedMenuMetrics.width(for: entries, minimum: 190,
+                            selectedEntryIndex: menu.selected)
+                        let placement = ThemedMenuLayout.frame(
+                            anchor: anchor,
+                            desiredSize: NSSize(width: menuWidth,
+                                height: ThemedMenuMetrics.height(for: entries)),
+                            in: root.bounds, flipped: root.isFlipped)
+                        let maximumHeight = max(64, placement.height)
                         func visibleEnd(start: Int) -> Int {
                             var height: CGFloat = 12
                             var end = start
@@ -4423,12 +4489,10 @@ struct WindowHarness {
                         let menuHeight = visible.reduce(CGFloat(12)) {
                             $0 + plan.heights[$1]
                         }
-                        let x = max(4, min(root.bounds.width - menuWidth - 4, anchor.minX))
-                        let below = anchor.minY - menuHeight - 4
-                        let y = below >= 4 ? below : min(root.bounds.height - menuHeight - 4,
-                            anchor.maxY + 4)
-                        sessionMenuFrame = NSRect(x: x, y: y, width: menuWidth,
-                            height: menuHeight)
+                        sessionMenuFrame = ThemedMenuLayout.frame(
+                            anchor: anchor,
+                            desiredSize: NSSize(width: menuWidth, height: menuHeight),
+                            in: root.bounds, flipped: root.isFlipped)
                         retainedSessionMenuRows.prepare(
                             menu: "session:\(menu.sessionID):\(menu.page)",
                             entries: entries, visible: visible)
@@ -4488,6 +4552,30 @@ struct WindowHarness {
                     sessionMenuSurface.setRows(floatingMenuViews, heights: floatingMenuHeights)
                     root.mountFloatingMenu(sessionMenuSurface, frame: sessionMenuFrame,
                         rows: floatingMenuViews)
+                } else if let menu = actions {
+                    let width = ThemedMenuMetrics.width(for: actionMenuEntries, minimum: 190,
+                        selectedEntryIndex: menu.selected)
+                    let height = menuHeights.reduce(ThemedMenuMetrics.verticalOuterInset * 2, +)
+                    actionMenuFrame = ThemedMenuLayout.frame(
+                        anchor: actionMenuAnchor(in: menu),
+                        desiredSize: NSSize(width: width, height: height),
+                        in: root.bounds, flipped: root.isFlipped)
+                    actionMenuSurface.setRows(menuRows, heights: menuHeights,
+                        padding: ThemedMenuMetrics.verticalOuterInset)
+                    root.mountFloatingMenu(actionMenuSurface, frame: actionMenuFrame,
+                        rows: menuRows)
+                } else if accountPicker != nil {
+                    let width = ThemedMenuMetrics.width(for: accountMenuEntries, minimum: 190,
+                        selectedEntryIndex: accountSelected)
+                    let height = menuHeights.reduce(ThemedMenuMetrics.verticalOuterInset * 2, +)
+                    accountMenuFrame = ThemedMenuLayout.frame(
+                        anchor: actionsButton.convert(actionsButton.bounds, to: root),
+                        desiredSize: NSSize(width: width, height: height),
+                        in: root.bounds, flipped: root.isFlipped)
+                    accountMenuSurface.setRows(menuRows, heights: menuHeights,
+                        padding: ThemedMenuMetrics.verticalOuterInset)
+                    root.mountFloatingMenu(accountMenuSurface, frame: accountMenuFrame,
+                        rows: menuRows)
                 } else {
                     root.mountMenuRows(menuRows, heights: menuHeights,
                         topInset: navigatorHeaderHeight + 2)
@@ -4592,7 +4680,8 @@ struct WindowHarness {
                     }
                     tw_accessibility_end_list(window)
                 } else if let menu = actions {
-                    let listY = Int32(navigatorHeaderHeight * scale)
+                    let listX = Int32(actionMenuFrame.minX * scale)
+                    let listY = Int32((root.bounds.height - actionMenuFrame.maxY) * scale)
                     let listTitle: String
                     switch menu.kind {
                     case .addProject: listTitle = "Add Project"
@@ -4603,7 +4692,9 @@ struct WindowHarness {
                     }
                     tw_accessibility_begin_list(window,
                         listTitle, Int32(menu.first),
-                        Int32(menu.commands.count), 1, 0, listY, Int32(navigatorWidth), Int32(height) - listY)
+                        Int32(menu.commands.count), 1, listX, listY,
+                        Int32(actionMenuFrame.width * scale),
+                        Int32(actionMenuFrame.height * scale))
                     for index in menu.first..<end {
                         let command = menu.commands[index]
                         let label = command.title + (command.availability.disabledReason.map { ". " + $0 } ?? "")
@@ -4643,10 +4734,12 @@ struct WindowHarness {
                 } else if let accountPicker {
                     let provider = accountPicker == .claude ? "Claude" : "Codex"
                     let active = accountPicker == .claude ? claudeAccount : codexAccount
-                    let listY = Int32(navigatorHeaderHeight * scale)
+                    let listX = Int32(accountMenuFrame.minX * scale)
+                    let listY = Int32((root.bounds.height - accountMenuFrame.maxY) * scale)
                     tw_accessibility_begin_list(window, "\(provider) accounts", Int32(accountFirst),
-                                                Int32(pickerAccounts.count), 1, 0, listY,
-                                                Int32(navigatorWidth), Int32(height) - listY)
+                                                Int32(pickerAccounts.count), 1, listX, listY,
+                                                Int32(accountMenuFrame.width * scale),
+                                                Int32(accountMenuFrame.height * scale))
                     for index in accountFirst..<end {
                         let handle = pickerAccounts[index]
                         let name = handle.isStandard ? "Default \(provider)" : "\(provider) \(handle.name)"
@@ -5334,6 +5427,13 @@ struct WindowHarness {
                 }
             }
             trace("event kind=\(event.kind) action=\(event.action)")
+            if accountPicker != nil, event.action == 1,
+               (event.kind == 15 || event.kind == 37 || event.kind == 39) {
+                accountPicker = nil
+                focusSidebar(false)
+                dirty = true
+                continue
+            }
             let windowIsKey = tw_window_has_focus(window) != 0
             if contentWindow.isKeyWindow != windowIsKey {
                 contentWindow.isKeyWindow = windowIsKey
@@ -5497,6 +5597,14 @@ struct WindowHarness {
                 }
                 let point = NSPoint(x: CGFloat(event.x) / contentWindow.backingScaleFactor,
                     y: navigatorRoot.bounds.height - CGFloat(event.y) / contentWindow.backingScaleFactor)
+                if accountPicker != nil, event.action == 1,
+                   !accountMenuFrame.contains(point) {
+                    contentWindow.cancelPointerGesture()
+                    activatedAccountHandle = nil
+                    accountPicker = nil
+                    dirty = true
+                    continue
+                }
                 if event.action == 1 {
                     activatedOutlineItem = nil
                     activatedOutlineProjectActionID = nil

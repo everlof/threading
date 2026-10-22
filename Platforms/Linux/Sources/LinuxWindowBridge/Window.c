@@ -347,8 +347,9 @@ int tw_present_terminal_header(TWWindow *w, const uint8_t *rgba, int width, int 
 }
 int tw_present_session_menu(TWWindow *w, const uint8_t *rgba, int width, int height,
                             int x, int y) {
+    // The shared menu layout admits 440pt at the host's maximum 2x scale.
     if (!w || !w->sidebarWidth || w->placeholderMode || !rgba ||
-        width < 1 || width > 512 || height < 1 || height > 512) return -1;
+        width < 1 || width > 1024 || height < 1 || height > 512) return -1;
     int windowWidth, windowHeight;
     SDL_GetWindowSize(w->window, &windowWidth, &windowHeight);
     const int paneWidth = windowWidth - w->sidebarWidth;

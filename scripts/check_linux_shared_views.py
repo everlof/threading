@@ -18,6 +18,10 @@ HOST_RENDER_LEAVES = {"LinuxActivityBeamHostView", "MorphingLabel"}
 VIEW_DECLARATION = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*NSView\b")
 CLASS_BASE = re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_]*)")
 MENU_ROW_FRAME = re.compile(r"\b(?:row|separator)\.frame\s*=")
+MENU_PLACEMENT_FRAME = re.compile(
+    r"\b(?:configurationMenu|speedMenu|choiceSurface|sessionMenuFrame|"
+    r"actionMenuFrame|accountMenuFrame)(?:\.frame)?\s*=\s*NSRect\s*\("
+)
 MENU_HOST_FILES = (
     "WorkspaceConversationPane.swift",
     "WorkspacePlaceholderPane.swift",
@@ -76,6 +80,11 @@ def main() -> int:
             frame_assignments.append((path, line))
             print(f"linux-shared-views: menu row frame in {path}:{line}; use the shared document",
                   file=sys.stderr)
+        for match in MENU_PLACEMENT_FRAME.finditer(source):
+            line = source.count("\n", 0, match.start()) + 1
+            frame_assignments.append((path, line))
+            print(f"linux-shared-views: menu panel frame in {path}:{line}; "
+                  "use ThemedMenuLayout", file=sys.stderr)
     print(f"linux-shared-views: {len(duplicates)} named duplicate classes remain")
     return 1 if (added or removed or host_views != HOST_RENDER_LEAVES
                  or shared_view_subclasses or frame_assignments) else 0

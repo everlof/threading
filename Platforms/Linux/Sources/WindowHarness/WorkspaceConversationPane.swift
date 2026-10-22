@@ -431,19 +431,19 @@ final class WorkspaceConversationPane: WorkspacePane {
         case .effort: chip = effortChip
         }
         let source = chip.convert(chip.bounds, to: root)
-        let width = min(configurationWidth, max(1, root.bounds.width - 16))
-        let availableAbove = max(0, root.bounds.height - source.maxY - 8)
-        let availableBelow = max(0, source.minY - 8)
-        let available = max(availableAbove, availableBelow)
-        let rowCapacity = max(1, Int((available - 12) / configurationRowHeight))
+        let outerInset = ThemedMenuMetrics.verticalOuterInset * 2
+        let placement = ThemedMenuLayout.frame(anchor: source,
+            desiredSize: NSSize(width: configurationWidth,
+                height: CGFloat(configurationChoices.count) * configurationRowHeight + outerInset),
+            in: root.bounds, flipped: root.isFlipped)
+        let rowCapacity = max(1, Int((placement.height - outerInset) / configurationRowHeight))
         configurationVisibleCount = min(6, configurationChoices.count, rowCapacity)
         configurationFirst = min(configurationFirst,
             max(0, configurationChoices.count - configurationVisibleCount))
-        let height = configurationRowHeight * CGFloat(configurationVisibleCount) + 12
-        let x = min(max(8, source.minX), max(8, root.bounds.width - width - 8))
-        let y = availableAbove >= height ? source.maxY + 4
-            : max(4, source.minY - height - 4)
-        configurationMenu.frame = NSRect(x: x, y: y, width: width, height: height)
+        configurationMenu.frame = ThemedMenuLayout.frame(anchor: source,
+            desiredSize: NSSize(width: configurationWidth,
+                height: configurationRowHeight * CGFloat(configurationVisibleCount) + outerInset),
+            in: root.bounds, flipped: root.isFlipped)
         mountConfigurationRows()
     }
 
@@ -594,12 +594,10 @@ final class WorkspaceConversationPane: WorkspacePane {
         guard speedOpen else { return }
         owner.layoutIfNeeded()
         let source = speedChip.convert(speedChip.bounds, to: root)
-        let width = min(300, max(1, root.bounds.width - 16))
-        let height = speedRowHeight * 3 + 12
-        let x = min(max(8, source.minX), max(8, root.bounds.width - width - 8))
-        let above = root.bounds.height - source.maxY
-        let y = above >= height + 8 ? source.maxY + 4 : max(4, source.minY - height - 4)
-        speedMenu.frame = NSRect(x: x, y: y, width: width, height: height)
+        speedMenu.frame = ThemedMenuLayout.frame(anchor: source,
+            desiredSize: NSSize(width: 300,
+                height: speedRowHeight * 3 + ThemedMenuMetrics.verticalOuterInset * 2),
+            in: root.bounds, flipped: root.isFlipped)
     }
 
     private func highlightSpeed(_ index: Int) {

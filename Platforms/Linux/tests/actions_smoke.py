@@ -115,7 +115,8 @@ def button():
     item = next(item for item in items if item.get_accessible_id() == 'linux.actions')
     assert item.get_role_name() == 'push button'
     bounds = item.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-    sidebar_width = listing().get_component_iface().get_extents(Atspi.CoordType.WINDOW).width
+    # The open list is now an anchored panel, so its width is no longer the sidebar width.
+    sidebar_width = frame.get_component_iface().get_extents(Atspi.CoordType.WINDOW).width - 640
     assert (bounds.x, bounds.y, bounds.width, bounds.height) == (sidebar_width - 56, 20, 40, 40)
     assert item.get_name() in ('Actions', 'Close actions'), 'icon lost its accessible meaning'
     assert frame.get_component_iface().get_accessible_at_point(
@@ -330,6 +331,7 @@ try:
         assert listing().get_name() != 'Project actions'
         xdo('click', '1')
         eventually(lambda: listing().get_name() == 'Project actions', 'pointer activated Actions')
+        assert listing().get_component_iface().get_extents(Atspi.CoordType.WINDOW).width < 480
         open_path = snapshot('open')
         open_bounds = button()[1]
         assert (open_bounds.x, open_bounds.y, open_bounds.width, open_bounds.height) == \
@@ -458,6 +460,16 @@ while True:
             invoke('linux.account.choose-' + provider)
             eventually(lambda: listing().get_name() == ('Codex' if provider == 'codex' else 'Claude') + ' accounts',
                        'account chooser through Actions')
+            assert listing().get_component_iface().get_extents(Atspi.CoordType.WINDOW).width < 480
+            snapshot('account-' + provider)
+            if provider == 'codex':
+                xdo('mousemove', '--window', window, '600', '100', 'click', '1')
+                eventually(lambda: listing().get_name() == 'Projects',
+                           'outside click dismissed account chooser')
+                press_accessible()
+                invoke('linux.account.choose-' + provider)
+                eventually(lambda: listing().get_name() == 'Codex accounts',
+                           'account chooser reopened after outside click')
             account_rows = {listing().get_child_at_index(i).get_accessible_id(): listing().get_child_at_index(i)
                             for i in range(listing().get_child_count())}
             assert len(account_rows) == 2 and provider + '-work' in account_rows

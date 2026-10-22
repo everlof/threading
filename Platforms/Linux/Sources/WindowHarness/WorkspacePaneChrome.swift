@@ -231,28 +231,27 @@ final class WorkspacePaneChrome {
         return chosenMenuCommand
     }
 
-    func toggleMenu(window: OpaquePointer, paneWidth: Int) {
+    func toggleMenu(window: OpaquePointer, paneWidth: Int, paneHeight: Int) {
         if menuOpen {
             let wasSessionMenu = menuContent == .sessionActions
             dismissMenu(window: window)
             if wasSessionMenu { return }
         }
         guard hasSessionActions, paneWidth >= 280 else { return }
-        openMenu(.sessionActions, paneWidth: paneWidth)
+        openMenu(.sessionActions, paneWidth: paneWidth, paneHeight: paneHeight)
     }
 
-    func toggleOpenInMenu(window: OpaquePointer, paneWidth: Int) {
+    func toggleOpenInMenu(window: OpaquePointer, paneWidth: Int, paneHeight: Int) {
         if menuOpen {
             let wasOpenInMenu = menuContent == .openIn
             dismissMenu(window: window)
             if wasOpenInMenu { return }
         }
         guard !openInChoices.isEmpty, paneWidth >= 280 else { return }
-        openMenu(.openIn, paneWidth: paneWidth)
+        openMenu(.openIn, paneWidth: paneWidth, paneHeight: paneHeight)
     }
 
-    private func openMenu(_ content: MenuContent, paneWidth: Int) {
-        menuVisibleRows = Self.visibleMenuRows
+    private func openMenu(_ content: MenuContent, paneWidth: Int, paneHeight: Int) {
         menuContent = content
         chosenMenuCommand = nil
         chosenOpenInID = nil
@@ -271,26 +270,50 @@ final class WorkspacePaneChrome {
             }
             selectedEntryIndex = presentedOpenInChoices.firstIndex { $0.id == preferredOpenInID }
         }
-        menuPlan = ThemedMenuRowPlan(entries: entries, selectedEntryIndex: selectedEntryIndex)
+        let plan = ThemedMenuRowPlan(entries: entries, selectedEntryIndex: selectedEntryIndex)
+        menuPlan = plan
         menuSelected = selectedEntryIndex ?? 0
-        menuFirstVisible = min(menuSelected, max(0, entries.count - menuVisibleRows))
-        let menuWidth = min(CGFloat(228), CGFloat(paneWidth) / WorkspaceDisplay.scale - 8)
-        menuSize.width = Int(menuWidth * WorkspaceDisplay.scale)
-        rebuildVisibleMenuRows()
         headerWindow.layoutIfNeeded()
-        let x: Int
+        let headerAnchor: NSRect
         switch content {
         case .sessionActions:
-            let anchor = pageTitle.actionsAnchor.convert(pageTitle.actionsAnchor.bounds,
-                                                          to: headerRoot)
-            x = Int((anchor.minX * WorkspaceDisplay.scale).rounded())
+            headerAnchor = pageTitle.actionsAnchor.convert(pageTitle.actionsAnchor.bounds,
+                                                            to: headerRoot)
             pageTitle.actionsAnchor.isSelected = true
         case .openIn:
-            let anchor = openInChooser.convert(openInChooser.bounds, to: headerRoot)
-            x = Int((anchor.maxX * WorkspaceDisplay.scale).rounded()) - menuSize.width
+            headerAnchor = openInChooser.convert(openInChooser.bounds, to: headerRoot)
             openInChooser.isSelected = true
         }
-        menuOrigin = (max(0, min(paneWidth - menuSize.width, x)), Self.headerPixelHeight)
+        let paneHeightPoints = CGFloat(paneHeight) / WorkspaceDisplay.scale
+        let anchor = headerAnchor.offsetBy(dx: 0,
+            dy: paneHeightPoints - PaneHeaderView.bandHeight)
+        let bounds = NSRect(x: 0, y: 0,
+            width: CGFloat(paneWidth) / WorkspaceDisplay.scale,
+            height: paneHeightPoints)
+        let width = ThemedMenuMetrics.width(for: entries, minimum: 228,
+            selectedEntryIndex: selectedEntryIndex)
+        let fullHeight = plan.heights.reduce(ThemedMenuMetrics.verticalOuterInset * 2, +)
+        let capacity = ThemedMenuLayout.frame(anchor: anchor,
+            desiredSize: NSSize(width: width, height: fullHeight),
+            in: bounds, flipped: false).height - ThemedMenuMetrics.verticalOuterInset * 2
+        var visibleHeight: CGFloat = 0
+        menuVisibleRows = 0
+        for rowHeight in plan.heights.prefix(Self.visibleMenuRows) {
+            if menuVisibleRows > 0 && visibleHeight + rowHeight > capacity { break }
+            visibleHeight += rowHeight
+            menuVisibleRows += 1
+        }
+        menuFirstVisible = min(menuSelected, max(0, entries.count - menuVisibleRows))
+        let frame = ThemedMenuLayout.frame(anchor: anchor,
+            desiredSize: NSSize(width: width,
+                height: visibleHeight + ThemedMenuMetrics.verticalOuterInset * 2),
+            in: bounds, flipped: false)
+        menuSize.width = Int((frame.width * WorkspaceDisplay.scale).rounded())
+        rebuildVisibleMenuRows()
+        menuOrigin = (
+            Int((frame.minX * WorkspaceDisplay.scale).rounded()),
+            Int(((paneHeightPoints - frame.maxY) * WorkspaceDisplay.scale).rounded())
+        )
         headerNeedsPresentation = true
         menuOpen = true
         menuNeedsPresentation = true
@@ -300,7 +323,7 @@ final class WorkspacePaneChrome {
         guard let plan = menuPlan else { return }
         let last = min(plan.heights.count, menuFirstVisible + menuVisibleRows)
         let visible = menuFirstVisible..<last
-        let padding: CGFloat = 6
+        let padding = ThemedMenuMetrics.verticalOuterInset
         let menuHeight = visible.reduce(2 * padding) { $0 + plan.heights[$1] }
         menuSize.height = Int(menuHeight * WorkspaceDisplay.scale)
         let menuWidth = CGFloat(menuSize.width) / WorkspaceDisplay.scale

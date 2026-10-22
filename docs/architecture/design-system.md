@@ -86,13 +86,20 @@ Menu rows follow the same boundary. `ThemedMenuDocumentView` places the bounded 
 surface recipe and classic frame artwork; Linux's current theme snapshot selects automatic menus.
 Linux supplies the outer SDL menu rectangle, selection and input route; the document owns every
 row rectangle inside it.
-`ThemedMenuPanelView.setRows` is the shared mount for pane, composer, conversation and floating
-session menus, while the navigator mounts the same document in its standing menu layer. The
-shared-view check rejects a new per-row frame assignment in those hosts.
+`ThemedMenuPanelView.setRows` is the shared mount for pane, composer, conversation, floating
+session, Actions and account menus. The navigator keeps its outline visible behind the floating
+panels. The shared-view check rejects a new per-row frame assignment in those hosts.
+Those menus now place their panels with `ThemedMenuLayout.frame`, the same anchored placement
+rule as macOS. The hosts retain only the visible menu page for Linux input and raster cost.
 The Add Project divider is a `ThemedMenuSeparatorView` inside that document, so its height,
 pointer gap and accessibility row offsets come from the same visible sequence as the choices.
-The navigator's header Actions and account pickers still use a full-column menu mode; their
-anchoring and dismissal must converge on the same menu presentation as macOS.
+The Linux host still routes menu selection and dismissal through its SDL event bridge. Porting
+the full `ThemedMenuPresenter` interaction model remains separate from the shared view tree.
+Navigator panels are currently rasterized into the sidebar viewport; unlike the Mac presenter,
+that host boundary cannot let a panel cross the divider into the content pane. A window-level
+overlay and matching pointer route are still needed for that placement parity.
+The account picker uses the header Actions anchor after the command panel closes; a true
+parent-and-submenu presentation depends on that overlay route too.
 The row menu now uses the same Snooze wall-clock moments as macOS. Its Linux host owns the
 persisted visibility overlay, one process-wide deadline map, worker-side expiry reconciliation,
 and exact-session wake receipts. The shared menu rows draw the choices; no snooze timer or

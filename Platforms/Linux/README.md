@@ -103,9 +103,28 @@ Its menu rows, the opening and conversation choice menus, and the navigator's Ac
 menus now use the production `ThemedMenuDocumentView`. The floating session menu and Add Project
 menu also use its shared separator. `ThemedMenuPanelView` owns the menu surface and historical
 frame artwork on both platforms; the current Linux theme snapshot selects its automatic appearance.
-Linux supplies menu bounds and SDL overlay lifecycle; the shared document lays out the rows.
-The navigator's header Actions and account pickers still replace the column with menu rows;
-they have not yet adopted the Mac anchored menu placement and dismissal behavior.
+Linux supplies the SDL overlay lifecycle; `ThemedMenuLayout` places the navigator Actions,
+account, composer, conversation, session, and pane-header menus from their host anchors.
+The shared panel and document lay out their surface and rows. The Linux host still routes
+menu events and dismissal; it has not yet ported the full Mac `ThemedMenuPresenter` interaction model.
+Navigator panels still render in the sidebar SDL texture, so a menu at the sidebar's right edge
+cannot cross the divider as a macOS popover can. That remaining overlay boundary is a host
+bridge task, not a second view implementation.
+The account picker currently opens from the header Actions anchor after its parent command
+panel closes; retaining the parent as a true submenu needs the same window-level overlay work.
+
+The current shared-view audit distinguishes reused components from reused page composition:
+
+| Surface | Shared UI mounted by Linux | Remaining host boundary |
+| --- | --- | --- |
+| Navigator rows and menus | Sidebar row assembly, menu panel, document, rows, separator, layout | SDL viewport and a window-level overlay for menus crossing the divider |
+| Opening composer | Prompt, chips, choice panels, menu rows and placement | `WorkspacePlaceholderPane` still assembles the page separately from the macOS controller |
+| Native conversation | Transcript table and row components, prompt, chips, pane constraints, menu panels | `WorkspaceConversationPane` still assembles a reduced page separately from `ConversationViewController` |
+| General Settings | Page canvas, confirmation card, toggles and constraints | `WorkspaceSettingsPane` includes fewer sections than `GeneralPreferencesViewController` |
+
+The shared-view source check prevents new duplicate classes and manual menu row/panel frames.
+It does not make separate page controllers equivalent; the remaining page composition work is
+tracked here explicitly.
 
 The window host also links the production backdrop overlay, text field, clip view, scroll view,
 table view, its default row view, and activity beam wrapper. `scripts/check_linux_shared_views.py`
@@ -1269,8 +1288,8 @@ production `HostCommandPlane`. The same existing host operations serve keyboard,
 AT-SPI invocation; disabled rows keep their reason and refuse execution. Escape restores the
 previous pane and picker. Menu interactions do not become terminal input.
 
-This contextual command surface remains host-owned diagnostic UI, mounting the unchanged
-production `ThemedMenuRowView` with the same column and height plan as the Mac presenter.
+This contextual command surface remains host-owned diagnostic UI, mounting the production
+`ThemedMenuPanelView` and `ThemedMenuRowView` through the shared document and placement rule.
 Threading owns project identity, availability, launch, persistence, account routing, focus and
 accessibility. It introduces no Linux extension API and does not yet mount the production
 floating menu presenter, command search or shortcut editor. Only visible rows mount,
