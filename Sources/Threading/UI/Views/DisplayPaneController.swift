@@ -711,8 +711,11 @@ final class DisplayPaneController: NSViewController {
     case .notificationTest: return activateNotificationTest(for: sessionID) != nil
     case .webExtensions: return activateWebExtensions(for: sessionID) != nil
     case .audit: return addAuditTab(for: sessionID) != nil
-    case .browser: return addBrowserTab(for: sessionID) != nil
-    case .privateBrowser: return addBrowserTab(for: sessionID, contextKind: .private) != nil
+    case .browser, .privateBrowser:
+      let contextKind: BrowserContextKind = target == .privateBrowser ? .private : .shared
+      guard let browser = addBrowserTab(for: sessionID, contextKind: contextKind) else { return false }
+      browser.focusAddress()
+      return true
     case .overview: return activateOverview(for: sessionID) != nil
     case .compare: chooseFilesToCompare(for: sessionID); return view.window != nil
     case .supervision: return activateSupervision(for: sessionID) != nil

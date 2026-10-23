@@ -21,7 +21,7 @@ import AppKit
 /// pane puts under the strip has already been handled and never arrives. There is nothing to
 /// hit-test and nothing to steal — the window is asked last, exactly as the responder chain
 /// intends.
-final class TitlebarActionWindow: NSWindow {
+final class TitlebarActionWindow: BrowserHostingWindow {
 
     /// The strip has no resting affordance because its other job is ordinary window chrome.
     /// This design-system view is mounted only when a drag proves it is carrying one reportable

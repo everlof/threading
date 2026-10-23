@@ -4342,11 +4342,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         if let location = browserResolver.location(for: sessionID) {
             browserResolver.activate(location, for: sessionID)
             revealBrowserHost(location.hostID, for: sessionID)
+            if location.browser.currentURL == nil { location.browser.focusAddress() }
             return
         }
 
-        displayPaneController.activateBrowser(for: sessionID)
+        let browser = displayPaneController.activateBrowser(for: sessionID)
         revealBrowserHost(.displayPanel, for: sessionID)
+        browser.focusAddress()
     }
 
     /// Opens the pane that holds a browser — the window's half of the same rule the agent's

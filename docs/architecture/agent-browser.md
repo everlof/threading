@@ -196,6 +196,27 @@ supplying the native defaults synthetic WebKit events lack: Tab and Shift-Tab tr
 Space activation, select/radio movement, and stepped number/range changes. Page `preventDefault`
 wins, Command/Control/Option combinations stay page-owned rather than invoking fallback actions,
 and sequential focus crosses accessible same-origin frame boundaries in document order.
+
+DOM focus is separate from the user's native keyboard focus. `callAsyncJavaScript` can make
+WebKit ask its window to become first responder when a bridge action focuses a form control.
+`BrowserHostingWindow` refuses that request before AppKit asks the current editor to resign;
+refusing in `WKWebView.becomeFirstResponder` is too late and still drops the composer's focus.
+The main window inherits this boundary and detached pane windows use it directly.
+`BrowserExecutionActivity` holds a counted `BrowserKeyboardFocus` scope for each active page,
+including nested actions, popups and rendering handoffs. Ordinary user clicks and key traversal
+remain allowed during actual `ApplicationEventDispatchContext` dispatch, and the explicit
+password takeover has a synchronous host-owned focus allowance. `NSApp.currentEvent` is not
+proof of a user gesture: it remains populated after dispatch ends.
+
+Browser appearance itself never focuses the address field. User commands, new-tab menus and
+browser shortcuts request it explicitly; agent navigation, tab creation and reveal do not.
+This is host-owned input routing, with no new customization surface. Bookkeeping is O(1) per
+operation and retains only active page identities (normally one; overlapping pages/scopes are
+the stress case). A focus request checks only its view ancestry, with no page/session scan,
+timer, filesystem work or post-operation focus restoration. `BrowserAgentFocusTests` drives
+the real tool coordinator and composer in a key panel; `BrowserKeyboardFocusTests` also checks
+the shipping window classes, nested scope retirement, user dispatch and password handoff.
+
 Browser waits poll bounded page text, exact/partial/regex URLs, document titles, captured network
 responses, selector counts, or element conditions instead of relying on arbitrary sleeps. Element
 waits use the same strict ref/selector/semantic-locator resolution and can check state, exact

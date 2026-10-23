@@ -767,13 +767,6 @@ final class BrowserViewController: NSViewController {
         observeWebView()
     }
 
-    override func viewDidAppear() {
-        super.viewDidAppear()
-        if webView.url == nil {
-            view.window?.makeFirstResponder(addressField)
-        }
-    }
-
     override func viewDidLayout() {
         super.viewDidLayout()
         chromeBar.updateResponsiveLayout()
@@ -1202,6 +1195,8 @@ final class BrowserViewController: NSViewController {
         load(url, waitUntil: .load) { _, _ in }
     }
 
+    /// Explicit user intent only. Appearing can also mean an agent opened or revealed this tab
+    /// while the user is typing in the composer, which must retain keyboard ownership.
     func focusAddress() {
         _ = view
         view.window?.makeFirstResponder(addressField)

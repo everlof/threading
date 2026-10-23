@@ -1,7 +1,8 @@
 import WebKit
 
-/// An operation needs a host clock and runnable host/WebKit processes. Restore idle scheduling
-/// when the final overlapping operation finishes, including failures and native deadlines.
+/// An operation needs runnable host/WebKit processes while native keyboard focus stays user-owned.
+/// Restore idle scheduling when the final overlapping operation finishes, including failures
+/// and native deadlines.
 @MainActor
 final class BrowserExecutionActivity {
     private struct Entry {
@@ -20,6 +21,7 @@ final class BrowserExecutionActivity {
     private var presentationUpdateScheduled = false
 
     func begin(for page: WKWebView) -> () -> Void {
+        let finishKeyboardFocus = BrowserKeyboardFocus.beginAgentOperation(on: page)
         let preferences = page.configuration.preferences
         let key = ObjectIdentifier(preferences)
         if entries.isEmpty {
@@ -57,6 +59,7 @@ final class BrowserExecutionActivity {
             finished = true
             self.endRendering(pageKey)
             self.end(key)
+            finishKeyboardFocus()
         }
     }
 

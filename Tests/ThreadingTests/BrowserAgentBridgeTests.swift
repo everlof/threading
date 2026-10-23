@@ -7138,7 +7138,8 @@ private final class BrowserSiteDataDecisionRecorder {
     }
 }
 
-private final class BrowserLoopbackHTTPServer {
+/// Loopback fixture shared by browser bridge and keyboard-focus integration tests.
+final class BrowserLoopbackHTTPServer {
     struct Attachment {
         let data: Data
         let mimeType: String

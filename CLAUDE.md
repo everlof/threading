@@ -571,6 +571,8 @@ the following cases genuinely need to be visible, and they are skipped by name i
 - `BrowserAgentBridgeIntegrationTests` (the whole class) — WKWebView will not load or render
   offscreen, so each test calls `orderFront`. Note the sibling class in the same file,
   `BrowserAgentBridgeTests`, needs no window and stays in `fast`.
+- `BrowserAgentFocusTests` (the whole class) — drives browser tools beside the real composer
+  in a visible nonactivating key panel, asserting keyboard ownership and delivered keystrokes.
 - `BrowserOffScreenCaptureTests` (the whole class) — verifies clicks and fresh screenshots after
   minimizing, moving off-display, covering or detaching a browser, plus new background-session
   tabs. Real visibility transitions need a window ordered on screen first. Missing and stale

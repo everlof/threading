@@ -33,6 +33,11 @@ The window uses `.fullSizeContentView` with a transparent, hidden title bar, so 
 runs the full height and the traffic lights float over it. The window title stays `Threading`,
 since it is only surfaced where macOS names the window (Mission Control, the Window menu).
 
+`TitlebarActionWindow` inherits `BrowserHostingWindow`, also used directly by detached pane
+windows. Its first-responder boundary keeps agent-driven WebKit DOM focus from taking the
+keyboard from the composer; ordinary user dispatch and explicit password handoff still work.
+The page-scoped lifetime and bounded lookup are documented in [agent-browser.md](agent-browser.md).
+
 The outer split owns the project sidebar and the docking workspace. Inside that workspace,
 `contentSplitController` owns stable conversation and display branches, so the existing panel
 toggle, width persistence and collapse gesture still operate on the whole right-hand branch.

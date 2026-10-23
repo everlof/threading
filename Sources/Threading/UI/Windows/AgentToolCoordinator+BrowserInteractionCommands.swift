@@ -325,8 +325,10 @@ extension AgentToolCoordinator {
         // focus from what is being typed into — would offer the field while the keystrokes went
         // somewhere else. A browser in a detached window on its own Space is switched to for the
         // same reason: the user cannot complete a sign-in they cannot see.
-        browser.view.window?.makeKeyAndOrderFront(nil)
-        browser.webView.window?.makeFirstResponder(browser.webView)
+        BrowserKeyboardFocus.withUserFocus {
+            browser.view.window?.makeKeyAndOrderFront(nil)
+            _ = browser.webView.window?.makeFirstResponder(browser.webView)
+        }
         do {
             return try await browser.preparePasswordFieldForUser(
                 ref: ref,

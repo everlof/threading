@@ -4857,6 +4857,10 @@ over deliberately rather than detected.
 You can also ask the agent to browse a site before opening the tab yourself; its first navigation
 creates the tab.
 
+You can keep typing in chat while the agent opens tabs, clicks or fills in the browser. These
+actions keep keyboard focus in your draft. Opening a browser yourself still focuses its address
+bar; an explicit password handoff brings the browser forward for your private input.
+
 Agents use the current pane or window size for browsing and ordinary screenshots, keeping any
 viewport you selected. They change dimensions when you ask or for a specific responsive or visual
 test, then restore the prior sizing after a temporary test.

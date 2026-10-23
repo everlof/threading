@@ -74,7 +74,7 @@ final class DetachedPaneWindowController: ThemedWindowController {
         host = DisplayPaneController(scope: .detachedWindow(windowID, session: sessionID))
         configureHost(host)
 
-        let window = NSWindow(
+        let window = BrowserHostingWindow(
             contentRect: NSRect(origin: .zero, size: Defaults.size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
