@@ -8,8 +8,9 @@ import ThreadingDomain
 /// ordering a window.
 ///
 /// The plugin contract hands over a `[String: String]`, deliberately: a plugin never receives a
-/// session, a project, a store or a window, so anything it needs is *named* here first and becomes
-/// part of the versioned surface. This type is where those names are decided, once, rather than
+/// session, a project, a store or a window, so placement metadata is *named* here first and becomes
+/// part of the versioned surface. Host operations use separate PluginKit capabilities. This type
+/// is where the placement names are decided, once, rather than
 /// being spelled at the call site and drifting.
 ///
 /// **Naming a folder is not granting access to it.** A native plugin is unsandboxed and could
@@ -24,7 +25,6 @@ struct NativePluginPlacement: Equatable {
         static let projectID = "projectID"
         static let projectName = "projectName"
         static let checkoutPath = "checkoutPath"
-        static let pymobiledevice3Path = "pymobiledevice3Path"
     }
 
     var sessionID: SessionID?
@@ -36,20 +36,17 @@ struct NativePluginPlacement: Equatable {
     /// folder instead would quietly read the wrong tree for any session working in a draft
     /// worktree, which is the sort of bug that looks like stale data rather than a wrong path.
     var checkoutPath: String?
-    var pymobiledevice3Path: String?
 
     init(
         sessionID: SessionID? = nil,
         projectID: ProjectID? = nil,
         projectName: String? = nil,
-        checkoutPath: String? = nil,
-        pymobiledevice3Path: String? = nil
+        checkoutPath: String? = nil
     ) {
         self.sessionID = sessionID
         self.projectID = projectID
         self.projectName = projectName
         self.checkoutPath = checkoutPath
-        self.pymobiledevice3Path = pymobiledevice3Path
     }
 
     /// The narrow dictionary the plugin receives.
@@ -63,9 +60,6 @@ struct NativePluginPlacement: Equatable {
         if let projectID { arguments[Key.projectID] = projectID.uuidString }
         if let projectName, !projectName.isEmpty { arguments[Key.projectName] = projectName }
         if let checkoutPath, !checkoutPath.isEmpty { arguments[Key.checkoutPath] = checkoutPath }
-        if let pymobiledevice3Path, !pymobiledevice3Path.isEmpty {
-            arguments[Key.pymobiledevice3Path] = pymobiledevice3Path
-        }
         return arguments
     }
 }

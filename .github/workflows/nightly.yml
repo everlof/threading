@@ -189,14 +189,20 @@ jobs:
             echo "Source: Threading is GPL-3.0-only and built from \`$sha\`. The complete corresponding"
             echo "source of its bundled proxy helper, including the upstream archives it is built from,"
             echo "is attached as \`threading-proxyd-source-$THREADING_VERSION.tar.gz\`."
+            echo
+            echo "Native plugin SDK: \`ThreadingPluginSDK-$THREADING_VERSION.zip\` contains the"
+            echo "public PluginKit contract, matching DesignKit sources and dependencies, and"
+            echo "Device Logs as a buildable example."
           } > "$RUNNER_TEMP/nightly-release-notes.md"
           plugin_manifest="build/release/native-plugins/native-plugins-$THREADING_VERSION.json"
           plugin_archives=(build/release/native-plugins/*-"$THREADING_VERSION".zip)
-          test -f "$plugin_manifest" && test -f "${plugin_archives[0]}"
+          plugin_sdk="build/release/ThreadingPluginSDK-$THREADING_VERSION.zip"
+          test -f "$plugin_manifest" && test -f "${plugin_archives[0]}" && test -f "$plugin_sdk"
           python3 scripts/check_remote_components.py
           if gh release view nightly >/dev/null 2>&1; then
             gh release upload nightly "build/release/Threading-$THREADING_VERSION.zip" \
               "build/release/threading-proxyd-source-$THREADING_VERSION.tar.gz" \
+              "$plugin_sdk" \
               "${plugin_archives[@]}" --clobber
             gh release upload nightly "$plugin_manifest" --clobber
             gh release upload nightly "build/release/appcast.xml" --clobber
@@ -208,8 +214,9 @@ jobs:
             # Date-named zips and their sources accumulate on a rolling release; keep only the
             # pair the feed names.
             stale_assets="$(gh release view nightly --json assets -q '.assets[].name' \
-              | grep -E '^(Threading-.*\.zip|threading-proxyd-source-.*\.tar\.gz|native-plugins-.*\.json|.*Plugin-.*\.zip)$' \
+              | grep -E '^(Threading-.*\.zip|ThreadingPluginSDK-.*\.zip|threading-proxyd-source-.*\.tar\.gz|native-plugins-.*\.json|.*Plugin-.*\.zip)$' \
               | grep -v -e "^Threading-$THREADING_VERSION.zip$" \
+                  -e "^ThreadingPluginSDK-$THREADING_VERSION.zip$" \
                   -e "^threading-proxyd-source-$THREADING_VERSION.tar.gz$" \
                   -e "^native-plugins-$THREADING_VERSION.json$" \
                   -e "-$THREADING_VERSION.zip$" || true)"
@@ -221,6 +228,7 @@ jobs:
             gh release create nightly \
               "build/release/Threading-$THREADING_VERSION.zip" \
               "build/release/threading-proxyd-source-$THREADING_VERSION.tar.gz" \
+              "$plugin_sdk" \
               "${plugin_archives[@]}" \
               "$plugin_manifest" \
               "build/release/appcast.xml" \

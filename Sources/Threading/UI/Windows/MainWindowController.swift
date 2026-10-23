@@ -1507,6 +1507,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         displayPaneController.onOpenDeviceLogs = { [weak self] sessionID, deviceID in
             self?.openDeviceLogsInDrawer(for: sessionID, deviceID: deviceID)
         }
+        displayPaneController.onDevicePluginRoutes = { [weak self] sessionID, deviceID in
+            self?.devicePluginRouteEntries(for: sessionID, deviceID: deviceID) ?? []
+        }
         displayPaneController.onShareSession = { sessionID in
             ShareChatSheet.run(for: sessionID)
         }
@@ -1722,33 +1725,92 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// window that owns the tabs, rather than by the device pane or plugin presentation.
     private func openDeviceLogsInDrawer(for sessionID: SessionID, deviceID: String) {
         guard sessionID == currentSessionID else { return }
-        guard openManagedPluginPane(
+        guard openNativePluginPane(
             identifier: NativePluginManagedOffer.deviceLogs.identifier,
             routeID: NativePluginManagedOffer.DeviceLogsRoute.fromDevice,
             arguments: ["deviceID": deviceID], for: sessionID
         ) else { SystemAlert.refuse(); return }
     }
 
-    /// Opens one declared first-party pane route. An existing tab keeps its chosen dock or drawer;
+    private func devicePluginRouteEntries(
+        for sessionID: SessionID, deviceID: String
+    ) -> [ThemedMenuEntry] {
+        guard sessionID == currentSessionID else { return [] }
+        let declared = CommandRegistry.shared.nativePluginRoutes(context: .selectedDevice)
+        var entries = declared.map { pane, route -> ThemedMenuEntry in
+            let title = pane.sections.first { $0.identifier == route.section }?.command?.title
+                ?? pane.sections.first { $0.identifier == route.section }?.title
+                ?? route.identifier
+            return .item(ThemedMenuItem(title: title, subtitle: pane.pluginIdentifier,
+                onChoose: { [weak self] in
+                    guard let self else { return }
+                    _ = self.openNativePluginPane(
+                        identifier: pane.pluginIdentifier, routeID: route.identifier,
+                        arguments: ["deviceID": deviceID], for: sessionID
+                    )
+                }))
+        }
+        let deviceLogs = NativePluginManagedOffer.deviceLogs
+        if !declared.contains(where: { $0.pane.pluginIdentifier == deviceLogs.identifier }),
+           let route = deviceLogs.paneRoute(NativePluginManagedOffer.DeviceLogsRoute.fromDevice) {
+            entries.insert(.item(ThemedMenuItem(title: deviceLogs.name,
+                onChoose: { [weak self] in
+                    guard let self else { return }
+                    _ = self.openNativePluginPane(
+                        identifier: deviceLogs.identifier, routeID: route.identifier,
+                        arguments: ["deviceID": deviceID], for: sessionID
+                    )
+                })), at: 0)
+        }
+        return entries
+    }
+
+    /// Opens one declared native pane route. An existing tab keeps its chosen dock or drawer;
     /// otherwise a drawer route moves the panel's new tab, never copies its plugin instance.
     @discardableResult
-    func openManagedPluginPane(
+    func openNativePluginPane(
         identifier: String,
         routeID: String,
         arguments: [String: String],
         for sessionID: SessionID
     ) -> Bool {
         guard sessionID == currentSessionID,
-              let offer = NativePluginManagedOffer.all.first(where: { $0.identifier == identifier }),
-              let route = offer.paneRoute(routeID),
-              let bundleURL = NativePluginCatalog.restoredPaneBundle(
-                identifier: offer.identifier, bundleName: offer.bundleName
-              ) else { return false }
+              let deviceID = arguments["deviceID"], arguments.count == 1,
+              !deviceID.isEmpty, deviceID.utf8.count <= 256,
+              deviceID.unicodeScalars.allSatisfy({
+                  !CharacterSet.controlCharacters.contains($0)
+              })
+        else { return false }
 
-        switch route.placement {
+        let declared = CommandRegistry.shared.nativePluginPane(
+            identifier: identifier, route: routeID
+        )
+        let offer = NativePluginManagedOffer.all.first { $0.identifier == identifier }
+        let bundleURL: URL
+        let section: String
+        let placement: NativePluginPaneDescriptor.Placement
+        if let declared, let route = declared.route(routeID), route.context == .selectedDevice {
+            bundleURL = declared.bundleURL
+            section = route.section
+            placement = route.placement
+        } else if let offer, let route = offer.paneRoute(routeID),
+                  route.context == .selectedDevice,
+                  let fixedBundle = NativePluginCatalog.restoredPaneBundle(
+                    identifier: offer.identifier, bundleName: offer.bundleName
+                  ) {
+            // A managed offer exists before the download. Once installed, discovery requires
+            // its signed declaration to agree with this fallback before mapping plugin code.
+            bundleURL = fixedBundle
+            section = route.section
+            placement = route.placement == .drawer ? .drawer : .panel
+        } else {
+            return false
+        }
+
+        switch placement {
         case .panel:
             guard let plugin = displayPaneController.activateNativePlugin(
-                bundleURL: bundleURL, section: route.section, for: sessionID
+                bundleURL: bundleURL, section: section, for: sessionID
             ) else { return false }
             plugin.activate(arguments: arguments)
             if displayPaneController.tabs(for: sessionID).contains(where: {
@@ -1761,7 +1823,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return true
         case .drawer:
             return openManagedPluginInDrawer(
-                bundleURL: bundleURL, section: route.section,
+                bundleURL: bundleURL, section: section,
                 arguments: arguments, for: sessionID
             )
         }
@@ -3284,6 +3346,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         source.onOpenDeviceLogs = { [weak self] session, device in
             self?.openDeviceLogsInDrawer(for: session, deviceID: device)
+        }
+        source.onDevicePluginRoutes = { [weak self] session, device in
+            self?.devicePluginRouteEntries(for: session, deviceID: device) ?? []
         }
         source.peerTabs = { [weak self, weak source] session in
             guard let self, let source else { return [] }

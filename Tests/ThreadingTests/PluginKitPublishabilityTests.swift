@@ -7,8 +7,8 @@ import XCTest
 /// to stay ready: a third party gets this directory and nothing else, and everything they need to
 /// build a loadable plugin has to be inside it. That property degrades silently — one convenient
 /// symlink into `Sources/Threading`, one `.package(path: "../../Something")`, and the split stops
-/// being a copy and becomes an untangling job. `ThreadingDesignKit` is what that looks like: 80
-/// symlinks into the app plus five sibling packages, and it cannot be published at all.
+/// being a copy and becomes an untangling job. `ThreadingDesignKit` is what that looks like: 96
+/// symlinks into the app plus sibling packages, so it needs the release SDK snapshot to travel.
 ///
 /// So this is the guard. It reads the directory rather than trusting anyone to remember.
 final class PluginKitPublishabilityTests: XCTestCase {
@@ -132,7 +132,7 @@ final class PluginKitPublishabilityTests: XCTestCase {
                        "pluginTools", "invokeTool"] {
             XCTAssertTrue(source.contains(member), "the example should demonstrate \(member)")
         }
-        XCTAssertTrue(source.contains("static let pluginAPIVersion = 5"),
+        XCTAssertTrue(source.contains("static let pluginAPIVersion = 6"),
                       "the example must embed the generation it compiled against")
         XCTAssertFalse(source.contains("{ ThreadingPluginAPI.version }"),
                        "a plugin must not read its generation from the host's framework")

@@ -15,7 +15,7 @@ public final class HelloPanePlugin: NSObject, ThreadingNativePlugin {
 
     // Keep this a literal. Installed plugins share the host's framework at runtime, so forwarding
     // to ThreadingPluginAPI.version would report the host generation instead of this build's.
-    public static let pluginAPIVersion = 5
+    public static let pluginAPIVersion = 6
 
     public var pluginIdentifier: String { "com.example.hellopane" }
 
@@ -30,13 +30,20 @@ public final class HelloPanePlugin: NSObject, ThreadingNativePlugin {
 
     public func makePaneView(context: PluginContext) -> NSView {
         let view = NSView()
+        label.toolTip = context.deviceServices == nil
+            ? "This host does not offer device services."
+            : "This host offers device services to approved native plugins."
         label.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(label)
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             label.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
         ])
-        if let greeting = context.argument("greeting") { label.stringValue = greeting }
+        if let deviceID = context.argument("deviceID") {
+            label.stringValue = "Selected device: \(deviceID)"
+        } else if let greeting = context.argument("greeting") {
+            label.stringValue = greeting
+        }
         pane = view
         return view
     }
@@ -48,6 +55,12 @@ public final class HelloPanePlugin: NSObject, ThreadingNativePlugin {
         pane?.layer?.backgroundColor = theme.background.cgColor
         label.textColor = theme.text
         label.font = theme.monospacedFont
+    }
+
+    public func activatePane(context: PluginContext) {
+        if let deviceID = context.argument("deviceID") {
+            label.stringValue = "Selected device: \(deviceID)"
+        }
     }
 
     // MARK: - Tools

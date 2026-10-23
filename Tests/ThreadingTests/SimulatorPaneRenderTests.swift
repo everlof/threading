@@ -191,6 +191,30 @@ final class SimulatorPaneRenderTests: XCTestCase {
                     "simulator-pane-menu-system-\(appearance.name).png"
                 )
             )
+
+            // The same visible logs button offers routes declared by installed plugins.
+            fixture.simulator.onDevicePluginRoutes = { _ in
+                [.item(ThemedMenuItem(title: "Open Hello Pane", subtitle: "com.example.hellopane"))]
+            }
+            let logsButton = fixture.simulator.logsButtonForTesting
+            let logsLocation = logsButton.convert(
+                NSPoint(x: logsButton.bounds.midX, y: logsButton.bounds.midY), to: nil
+            )
+            let logsClick = try XCTUnwrap(NSEvent.mouseEvent(
+                with: .rightMouseDown, location: logsLocation, modifierFlags: [],
+                timestamp: 0, windowNumber: fixture.window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: 1
+            ))
+            logsButton.rightMouseDown(with: logsClick)
+            XCTAssertTrue(ThemedMenuPresenter.isMenuOpen(in: fixture.window))
+            settle(fixture.window)
+            representation = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: representation)
+            try XCTUnwrap(representation.representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent(
+                    "simulator-pane-plugin-actions-system-\(appearance.name).png"
+                )
+            )
         }
 
         try renderWorkspaceLayouts()

@@ -704,12 +704,14 @@ shell, placement, active selection, persisted identifier, bounded route validati
 signature and approval, and the refusal when a bundle is missing or changed. A saved tab does not
 grant execution authority, and this adds no safe-extension presentation slot.
 
-**Declared first-party pane sections** extend that same native pane surface. A managed offer
-declares stable section identifiers and localized title keys; plugin code supplies the interior
+**Declared native pane sections and contextual routes** extend that same native pane surface.
+Signed plugin metadata declares stable section identifiers, titles, commands and optional
+selected-device routes; plugin code supplies the interior
 view for each identifier. Threading owns section chrome, placement across panel, dock and drawer,
 visibility, saved-mode validation, tool reveal routing and the user commands that open a section.
 Command IDs stay stable for keyboard overrides and remain available before installation. The
-first-party offer may also declare a contextual panel or drawer route. The window owns reuse,
+first-party offer retains matching declarations to show installation before its bundle exists.
+The window owns reuse,
 movement and selection when that route is invoked. The registration gives no new
 capability to safe extensions and grants no execution authority from a saved route.
 
@@ -744,10 +746,12 @@ or agent input authority is added.
 style its source menu and virtual table. Exact phone identity, profile/tooling setup truth,
 capture lifetime, packet parsing limits, local history and agent source selection stay owned by
 Threading and its bundled plugin. This adds no safe-extension presentation slot or data authority.
-Its profile setup and dedicated Apple sign-in view are host-only too: the host retains the
-official download origin, isolated remembered authentication state and its Forget Sign-In control,
-screen-bounded sign-in presentation (including at most two Apple-requested child windows),
-exact-phone install action, file and process bounds, iOS consent handoff and cleanup.
+Its profile setup and dedicated Apple sign-in view remain Threading-owned: Device Logs presents
+the official download origin, isolated remembered authentication state and its Forget Sign-In
+control, and screen-bounded sign-in presentation (including at most two Apple-requested child
+windows). The public PluginKit device service handles the exact-phone install request, file and
+process bounds, iOS consent handoff and cleanup in the host. An approved external native plugin
+can request the same bounded operation.
 Themes style controls; agents receive no profile
 installation action or access to this authentication browser.
 The Regular Logs/Bluetooth tab choice is host-owned as well: the workspace owns the two-reader
@@ -863,6 +867,9 @@ log sources, reader lifetime, filters and history once revealed. An absent on-de
 its signed install path. An invalid or disconnected UDID remains a pending selection for the next
 source rescan, and a
 repeated press reuses the existing pane. No extension receives new device data or authority.
+The same control's context menu lists signed native plugins that declare a `selected-device` route;
+the host supplies only the selected ID and routes through the same verified pane path. Plugin
+metadata cannot replace the primary Device Logs action or the host's device-control chrome.
 
 The browser origin prompt's chat-wide grant is host-only authorization UI. Its entity is the
 calling chat, and Threading owns the origin check, exact choice, durable scope, deletion cleanup

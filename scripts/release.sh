@@ -486,6 +486,14 @@ proxy_source="$("$ROOT/scripts/archive_proxy_source.sh" "$SOURCE_COMMIT" "$versi
     || fail "the proxy helper's source archive does not verify — see above"
 echo "  $proxy_source"
 
+# The native plugin API is only public in practice when an author can build against the same
+# DesignKit components and parser as our own plugins, outside this checkout. The archive resolves
+# DesignKit's in-repository source links and preserves the relative SwiftPM package layout.
+say "Archiving the native plugin SDK"
+plugin_sdk="$(python3 "$ROOT/scripts/archive_plugin_sdk.py" "$version" "$BUILD_DIR")" \
+    || fail "the native plugin SDK could not be archived"
+echo "  $plugin_sdk"
+
 # MARK: - Install
 #
 # A function rather than a tail, because this script has two endings — the un-notarized one below
@@ -586,6 +594,7 @@ say "Ready: $SCHEME $version ($build, $channel)"
 echo "  app: $APP"
 echo "  zip: $zip"
 echo "  source: $proxy_source"
+echo "  sdk: $plugin_sdk"
 echo "  plugins: $plugin_output"
 
 install_if_asked

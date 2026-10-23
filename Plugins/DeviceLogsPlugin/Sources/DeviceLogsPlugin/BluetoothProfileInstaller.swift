@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Security
+import ThreadingPluginKit
 
 /// A deliberate, finite device operation. Apple owns the download and iOS owns installation
 /// approval. Never bundle the profile or use MCInstall's supervised/silent installation route.
@@ -24,6 +25,7 @@ enum BluetoothProfileInstaller {
         profileURL: URL,
         deviceID: String,
         preferredToolPath: String?,
+        deviceServices: (any PluginDeviceServices)? = nil,
         deadline: TimeInterval = 90
     ) -> Result<Void, Failure> {
         guard installationLock.try() else { return .failure(.busy) }
@@ -32,6 +34,9 @@ enum BluetoothProfileInstaller {
         do {
             let data = try readProfile(profileURL)
             try validate(data)
+            if let deviceServices {
+                return brokerResult(deviceServices.installBluetoothLoggingProfile(data, deviceID: deviceID))
+            }
             let paths = DeviceLogSourceCatalog.structuredSyslogCandidatePaths(
                 preferredPath: preferredToolPath, environment: ProcessInfo.processInfo.environment
             )
@@ -65,6 +70,21 @@ enum BluetoothProfileInstaller {
             return .failure(failure)
         } catch {
             return .failure(.incomplete)
+        }
+    }
+
+    private static func brokerResult(
+        _ result: PluginDeviceOperationResult
+    ) -> Result<Void, Failure> {
+        switch result {
+        case .sent: return .success(())
+        case .busy: return .failure(.busy)
+        case .invalidDevice, .incomplete: return .failure(.incomplete)
+        case .invalidProfile: return .failure(.invalidProfile)
+        case .expiredProfile: return .failure(.expiredProfile)
+        case .toolUnavailable: return .failure(.missingTool)
+        case .rejected(let detail): return .failure(.rejected(detail))
+        @unknown default: return .failure(.incomplete)
         }
     }
 

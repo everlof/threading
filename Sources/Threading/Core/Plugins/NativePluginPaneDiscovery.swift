@@ -3,6 +3,16 @@ import ThreadingPluginKit
 
 /// One signed bundle's static, versioned pane declaration. Discovery never maps plugin code.
 struct NativePluginPaneDescriptor: Equatable, Sendable {
+    enum Placement: String, Sendable { case panel, drawer }
+    enum Context: String, Sendable { case selectedDevice = "selected-device" }
+
+    struct Route: Equatable, Sendable {
+        let identifier: String
+        let section: String
+        let placement: Placement
+        let context: Context
+    }
+
     struct Command: Equatable, Sendable {
         let title: String
         let symbol: String
@@ -18,15 +28,20 @@ struct NativePluginPaneDescriptor: Equatable, Sendable {
     let bundleURL: URL
     let pluginIdentifier: String
     let sections: [Section]
+    let routes: [Route]
     let verifiedInstalledIdentity: PluginLoader.PluginIdentity?
 
     var primarySection: String { sections[0].identifier }
     func contains(_ section: String) -> Bool { sections.contains { $0.identifier == section } }
+    func route(_ identifier: String) -> Route? {
+        routes.first { $0.identifier == identifier }
+    }
 }
 
 enum NativePluginPaneDiscovery {
     private static let maximumInfoPlistBytes = 65_536
     private static let maximumSections = 8
+    private static let maximumRoutes = 8
     private static let identifierCharacters = CharacterSet(
         charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
     )
@@ -66,7 +81,7 @@ enum NativePluginPaneDiscovery {
         guard offer.paneSections.map(\.identifier) == pane.sections.map(\.identifier) else {
             return false
         }
-        return zip(offer.paneSections, pane.sections).allSatisfy { expected, declared in
+        guard zip(offer.paneSections, pane.sections).allSatisfy({ expected, declared in
             guard expected.titleKey == declared.title else { return false }
             switch (expected.command, declared.command) {
             case (nil, nil): return true
@@ -76,7 +91,14 @@ enum NativePluginPaneDiscovery {
                     command.detailKey == metadata.detail
             default: return false
             }
-        }
+        }) else { return false }
+        return offer.paneRoutes.count == pane.routes.count &&
+            zip(offer.paneRoutes, pane.routes).allSatisfy { expected, declared in
+                expected.identifier == declared.identifier &&
+                    expected.section == declared.section &&
+                    expected.placement.rawValue == declared.placement.rawValue &&
+                    expected.context.rawValue == declared.context.rawValue
+            }
     }
 
     static func descriptor(
@@ -134,8 +156,40 @@ enum NativePluginPaneDiscovery {
             }
             sections.append(.init(identifier: sectionID, title: title, command: command))
         }
+        guard let routes = routes(in: declaration, sections: seen) else { return nil }
         return .init(bundleURL: bundleURL, pluginIdentifier: identifier,
-                     sections: sections, verifiedInstalledIdentity: verifiedInstalledIdentity)
+                     sections: sections, routes: routes,
+                     verifiedInstalledIdentity: verifiedInstalledIdentity)
+    }
+
+    private static func routes(
+        in declaration: [String: Any], sections: Set<String>
+    ) -> [NativePluginPaneDescriptor.Route]? {
+        let rawRoutes: [[String: Any]]
+        if let declared = declaration[PluginBundleMetadata.routes] as? [[String: Any]] {
+            rawRoutes = declared
+        } else if declaration[PluginBundleMetadata.routes] == nil {
+            rawRoutes = []
+        } else {
+            return nil
+        }
+        guard rawRoutes.count <= maximumRoutes else { return nil }
+        var seen = Set<String>()
+        var routes: [NativePluginPaneDescriptor.Route] = []
+        for raw in rawRoutes {
+            guard let identifier = boundedIdentifier(raw[PluginBundleMetadata.identifier]),
+                  seen.insert(identifier).inserted,
+                  let section = boundedIdentifier(raw[PluginBundleMetadata.section]),
+                  sections.contains(section),
+                  let placementName = raw[PluginBundleMetadata.placement] as? String,
+                  let placement = NativePluginPaneDescriptor.Placement(rawValue: placementName),
+                  let contextName = raw[PluginBundleMetadata.context] as? String,
+                  let context = NativePluginPaneDescriptor.Context(rawValue: contextName)
+            else { return nil }
+            routes.append(.init(identifier: identifier, section: section,
+                                placement: placement, context: context))
+        }
+        return routes
     }
 
     private static func bounded(_ value: Any?, maximumBytes: Int) -> String? {

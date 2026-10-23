@@ -446,10 +446,14 @@ before code is loaded; managed first-party downloads instead prove the signed re
 `Tools/build-plugin.sh --metadata PaneMetadata.plist` merges this declaration into the bundle
 before signing; `Examples/HelloPanePlugin/PaneMetadata.plist` is an independent author example.
 
-Device Logs declares these sections in its own `Info.plist` and uses the same discovery and pane
-registry when installed. The host retains its two existing command aliases before the managed
-bundle has been downloaded. The managed catalogue also retains contextual `from-device` routing;
-that route and the managed iPhone executable broker are separate public API work.
+Device Logs declares these sections and its `selected-device` route in its own `Info.plist` and
+uses the same discovery and pane registry when installed. A route names one declared section and
+`panel` or `drawer` placement; the host supplies the selected `deviceID`, retains tab ownership,
+and rejects unknown contexts. The device controls keep their primary Device Logs action and list
+all installed contextual plugin routes on right-click. `HelloPanePlugin` declares the same route
+using only the public SDK. The managed catalogue keeps its matching route and two command aliases
+before the first-party bundle is downloaded. The capability-scoped paired-iPhone operations are
+available to approved native plugins through `PluginContext.deviceServices`.
 
 ### Native workspace navigators
 
@@ -562,12 +566,13 @@ the log daemon, the modern paired-phone native-RSD reader with its legacy relay 
 `DeviceRelayReclaim` — stay in
 [`device-and-simulator-logs.md`](../feature-drafts/device-and-simulator-logs.md).
 
-Only the verified first-party Device Logs tenant receives the preferred path to Threading's
-managed `pymobiledevice3` environment in its placement arguments, whether bundled in a development
-build or installed from the signed release manifest. The host owns that installation and selects
-the capability; arbitrary installed plugins do not receive it. The pane resolves and
-version-checks the path during every source rescan, so an explicit Advanced Settings installation
-can become active without reloading the plugin or restarting the app.
+Every approved native plugin receives `PluginContext.deviceServices` through the public PluginKit
+contract. Device Logs uses it for structured paired-phone logs and Bluetooth profile installation;
+the host resolves and version-checks its managed `pymobiledevice3`, validates the device and
+profile, bounds the process, and owns the reader. The plugin retains only a stop token. No
+executable path travels through placement arguments. Device Logs checks availability during each
+worker-side source rescan, so an Advanced Settings installation can become active without
+reloading the plugin.
 
 ### Bluetooth packet source
 
@@ -848,16 +853,30 @@ THREADING_BLUETOOTH_STRESS=1 swift test --package-path Plugins/DeviceLogsPlugin 
 ```
 
 On 2026-10-12 the attached iPhone accepted the service connection but returned no packets in a
-10-second CLI probe. That verifies connectivity only; successful live packet reception still
-requires a prepared phone and Bluetooth activity. Do not replace that limitation with the
-synthetic render or codec test result.
+10-second CLI probe. That verified connectivity only; packet reception required a prepared phone
+and Bluetooth activity. Do not replace that limitation with the synthetic render or codec test
+result.
 
-## Publishing the kit: not yet, but ready whenever
+On 2026-10-23 the opt-in packet test received three HCI packets from an iPhone 16 Pro connected
+by USB. This proves the plugin's live packet reader on hardware; the in-app pane was not part of
+that hardware test.
 
-`ThreadingPluginKit` is the one package here meant to leave this repository. The decision today is
-**not to publish it**, and that is a decision about timing rather than about shape — so the shape
-is kept ready, and `PluginKitPublishabilityTests` enforces it rather than trusting anyone to
-remember.
+## Native plugin SDK distribution
+
+`ThreadingPluginKit` remains independently copyable. `PluginKitPublishabilityTests` checks that
+the contract package has no escaping symlink, path dependency or private import. The release
+pipeline now also prepares `ThreadingPluginSDK-<version>.zip` as an asset beside the app. It carries
+PluginKit, DesignKit, their package dependencies and Device Logs as a worked native example.
+`scripts/export_plugin_sdk.py` resolves DesignKit's source links into ordinary files, preserves
+the relative SwiftPM package layout and records the API version and source revision. The release
+asset has not yet been uploaded by a real tagged build. An isolated export compiled and ran Device
+Logs' broker test outside this checkout, and the opt-in host parity test built and loaded Device
+Logs from a locally generated copy of the exact SDK zip format.
+
+On 2026-10-23 a private draft staging release accepted an SDK zip from the uncommitted worktree.
+The downloaded bytes matched the upload, every source file matched the checkout, and one focused
+host parity case built and loaded Device Logs from that downloaded zip with no skip or failure.
+The final public release asset and its tagged-source provenance remain unverified.
 
 Ready means the directory is a thing somebody else could clone: no symlink or path dependency
 reaching outside it, no import of a module that would not travel with it, the build recipe inside
@@ -882,21 +901,16 @@ Three things were fixed *because* they are cheap now and expensive after publica
   clean under `-strict-concurrency=complete`. The host needed no change, which says the isolation
   was always real and merely unstated.
 
-**`ThreadingDesignKit` cannot follow yet, and that is recorded rather than hoped away.** It is 80
-symlinks into `Sources/Threading` plus dependencies on ThreadingDomain, ThreadingRemoteKit and
-SwiftTerm; publishing it means exporting the app's UI layer and dragging two more of our layers
-behind it. So the first-party Device Logs and T3 plugins link something an external author cannot
-consume from a released package yet. The distinction is now explicit rather than visual debt:
-first-party native plugins use the actual components; external custom components receive all 30
-resolved semantic colours through publishable `ThreadingPluginKit`. The latter is palette parity,
-not component parity — it does not promise Threading's control anatomy, type recipes or interaction
-surfaces.
-
-When the time comes: its own public repository, consumed back at `Packages/ThreadingPluginKit` as a
-submodule the way ThinkingOrbs, LabelMorph and BorderBeamKit already are, so the path does not move
-and `Threading.xcodeproj`'s `XCLocalSwiftPackageReference` needs no edit. Tag the major version to
-equal `ThreadingPluginAPI.version` literally, so an author reading a tag knows which host will
-accept them. A licence still has to be chosen.
+**DesignKit is exported as a source snapshot, not linked from the host.** Its 96 in-repository
+symlinks point into `Sources/Threading`; an external clone of that directory alone cannot build.
+The SDK archive materializes those files and carries ThreadingDomain, ThreadingRemoteKit,
+ThreadingExtensionKit, SwiftTerm, BorderBeamKit, ThinkingOrbs, LabelMorph and TimberLineParser.
+Device Logs builds from that isolated layout with the same `ThreadingPluginKit` capability API and
+its own static DesignKit code. An author using custom controls can still use PluginTheme's semantic
+palette without taking the DesignKit dependency. The archive copies the repository's GPL-3.0
+license and the vendored packages' license files. A separate DesignKit repository is unnecessary
+for the lockstep, source-distributed SDK; an independently versioned DesignKit would need its own
+compatibility and licensing decision.
 
 ## Tests
 
@@ -907,10 +921,14 @@ accept them. A licence still has to be chosen.
 | The signed bundle loads, its ground matches the host's, renders to a PNG, and is refused without a decision | `NativePluginLoadingTests` |
 | Our own plugin, built and installed the third-party way, offering the same tools — and refused until approved | `NativePluginParityTests` |
 | The kit is still a directory somebody else could clone: no escaping symlink or path dependency, recipe and example inside it | `PluginKitPublishabilityTests` |
+| The release SDK resolves DesignKit links, keeps local dependencies in the archive and has the same API generation | `test_plugin_sdk_export.py` and an isolated Device Logs build |
+| A Device Logs bundle built from the extracted SDK zip loads in the host with the shipped plugin's tools | Opt-in `NativePluginParityTests` |
 | A token follows the installed theme; the same `NSColor` re-resolves on a change; text size comes from the host | `HostSeamTests` |
 | A plugin-built view paints the host's ground | `PluginViewThemingTests` |
 | Identity and material exactly, colour to 1/255 | `HostThemeHandoffTests` |
 | The plugin's own decode, render and reclaim contracts | `DeviceLogsPluginTests` |
+| Public paired-device requests, bounded host stream and profile validation | `NativePluginDeviceServicesTests`, `StructuredDeviceLogSourceTests` |
+| A separately built PluginKit-only pane receives the same device service through the ordinary host context | Opt-in `NativePluginParityTests`, `NativePluginCatalogTests` |
 | Native T3 DesignKit composition, filtering, viewport-only cells, stable row identity and host-owned actions | `T3NavigatorPluginTests` |
 | Every custom-component semantic colour crosses from the active host theme | `NativePluginCatalogTests`, `PluginContractTests` |
 | The shipped native navigator metadata and principal-class conformance | `NativeWorkspaceNavigatorDiscoveryTests` |
@@ -920,11 +938,13 @@ one is not mistaken for coverage.
 
 ## Still open
 
-- **Contextual native pane routes are still host declarations.** Versioned bundle metadata now
-  exposes pane sections and commands to every signed native plugin. Device Logs retains the
-  pre-install command aliases and `from-device` route in `NativePluginManagedOffer`. A public
-  contextual-route declaration and capability-scoped iPhone tool broker remain to reach full
-  Device Logs parity. The host keeps placement and command conflicts.
+- **The SDK asset has not yet been published or tested from a tagged release.** Contextual
+  `selected-device` routes, paired-device operations and the exported DesignKit source now have
+  an external build path. The next notarized release must attach the SDK archive, and an author
+  must build and load from that downloaded asset before component parity is claimed as shipped.
+  `scripts/verify_published_plugin_sdk.sh` performs that check from the matching release checkout.
+  The managed offer retains a matching route only to show install state before Device Logs exists.
+  The host keeps device identity, placement, command conflicts and consent.
 - **No install flow for a third-party plugin.** A bundle is placed in `~/Library/Application
   Support/Threading/Plugins` by hand, and the approval prompt is the whole review surface. It says
   which tier the thing is and cannot be suppressed, but it is a dialog rather than a flow: nothing
@@ -939,8 +959,10 @@ one is not mistaken for coverage.
   This is the real requirement a third-party plugin faces:
   it must be Developer ID signed **and notarized**, which also means signed with a secure timestamp.
   The first-party on-demand installer now removes the attribute only after manifest and notarized
-  code checks. `build_plugin.sh` passes `--timestamp=none` for a bundled development build; the
-  release export signs the distributable bundle again with a secure timestamp.
+  code checks. The public `build-plugin.sh` defaults to `--timestamp=none` for local development;
+  authors can request a secure timestamp with `--identity` and `--timestamp` before notarization.
+  Threading's first-party release export signs its distributable bundles again with a secure
+  timestamp.
 
   **We can check notarization ourselves, and should.** The `notarized` code requirement is
   available and works (verified 2026-09-03 against notarized applications, which satisfy it, and
@@ -965,7 +987,8 @@ The log plugin supports two optional, additive PluginKit selectors:
 `makePaneSectionView(identifier:)` and `setPaneSectionPresented(identifier:presented:)`.
 The host opts in with `hostPaneSections=true` in the initial context. Without that opt-in, the
 plugin retains its internal segmented-control presentation, so older hosts and ordinary native
-plugins keep their existing contract. The binary API generation remains 5.
+plugins keep their existing section contract. These selectors are additive; the current binary
+API generation is 6 because `PluginContext` also exposes callable paired-device services.
 
 Device Logs and Bluetooth become separate host tabs, with persisted modes `regular` and
 `bluetooth`. Each first-party offer declares its ordered section identifiers and localized title

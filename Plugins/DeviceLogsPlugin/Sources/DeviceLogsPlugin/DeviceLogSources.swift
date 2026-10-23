@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import ThreadingDesignKit
+import ThreadingPluginKit
 import TimberLineParser
 
 // MARK: - Row
@@ -752,13 +753,15 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
     private let processName: String?
     private let minimumSeverity: Int
     private let structuredReader = DeviceLogLineReader(label: "device-structured")
+    private let deviceServices: (any PluginDeviceServices)?
+    private var hostStream: (any PluginDeviceLogStream)?
     private let fallbackReader = DeviceLogLineReader(label: "device-fallback")
     private let lifecycle = DispatchQueue(label: "codes.threading.devicelog.device-lifecycle")
     private let generation = DeviceLogLifecycleGeneration()
     private let decodedLock = NSLock()
     private let udid: String
     private let overNetwork: Bool
-    private let toolPath: String
+    private let toolPath: String?
     private let fallbackToolPath: String?
     private let structuredStartupDeadline: TimeInterval
     private var fallbackTimer: DispatchSourceTimer?
@@ -781,6 +784,26 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         self.udid = udid
         self.overNetwork = overNetwork
         self.toolPath = toolPath
+        self.deviceServices = nil
+        self.fallbackToolPath = fallbackToolPath
+        self.structuredStartupDeadline = structuredStartupDeadline
+        self.processName = processName
+        self.minimumSeverity = minimumSeverity
+    }
+
+    public init(
+        udid: String,
+        overNetwork: Bool,
+        deviceServices: any PluginDeviceServices,
+        fallbackToolPath: String?,
+        structuredStartupDeadline: TimeInterval = 6,
+        processName: String? = nil,
+        minimumSeverity: Int = 0
+    ) {
+        self.udid = udid
+        self.overNetwork = overNetwork
+        self.toolPath = nil
+        self.deviceServices = deviceServices
         self.fallbackToolPath = fallbackToolPath
         self.structuredStartupDeadline = structuredStartupDeadline
         self.processName = processName
@@ -805,6 +828,8 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         lifecycle.async { [self] in
             guard generation.contains(request) else { return }
             structuredReader.stop()
+            hostStream?.stop()
+            hostStream = nil
             fallbackReader.stop()
             stopped = false
             fallbackStarted = false
@@ -821,6 +846,8 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
             stopped = true
             cancelFallbackTimer()
             structuredReader.stop()
+            hostStream?.stop()
+            hostStream = nil
             fallbackReader.stop()
         }
     }
@@ -833,22 +860,32 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
     }
 
     private func startStructuredReader(request: Int) {
+        if let deviceServices {
+            hostStream = deviceServices.startStructuredSystemLog(
+                deviceID: udid,
+                minimumSeverity: minimumSeverity,
+                onLine: { [weak self] line in
+                    self?.receiveStructuredLine(ArraySlice(line), request: request)
+                },
+                onEnd: { [weak self] reason in
+                    self?.structuredReaderEnded(reason: reason, request: request)
+                }
+            )
+            if hostStream == nil {
+                structuredReaderEnded(reason: "structured device log unavailable", request: request)
+            }
+            return
+        }
+        guard let toolPath else {
+            structuredReaderEnded(reason: "structured device log unavailable", request: request)
+            return
+        }
         structuredReader.run(
             executable: toolPath,
             arguments: structuredArguments,
             environment: Self.environment(udid: udid),
             onLine: { [weak self] line in
-                guard let self, self.generation.contains(request), let row = DeviceLogDecoding.pymobiledevice3(line) else { return }
-                let isFirstStructuredRow = self.markDecodedStructuredRow()
-                // Errors only still receives Notice rows: the tool can clear Debug and Info, not more.
-                if row.severity >= self.minimumSeverity,
-                   self.processName == nil || row.process == self.processName { self.enqueue(row) }
-                if isFirstStructuredRow {
-                    self.lifecycle.async { [weak self] in
-                        guard let self, self.generation.contains(request) else { return }
-                        self.cancelFallbackTimer()
-                    }
-                }
+                self?.receiveStructuredLine(line, request: request)
             },
             onEnd: { [weak self] reason in
                 self?.structuredReaderEnded(reason: reason, request: request)
@@ -856,10 +893,26 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         )
     }
 
+    private func receiveStructuredLine(_ line: ArraySlice<UInt8>, request: Int) {
+        guard generation.contains(request), let row = DeviceLogDecoding.pymobiledevice3(line) else { return }
+        let isFirstStructuredRow = markDecodedStructuredRow()
+        // Errors only still receives Notice rows: the tool can clear Debug and Info, not more.
+        if row.severity >= minimumSeverity,
+           processName == nil || row.process == processName { enqueue(row) }
+        if isFirstStructuredRow {
+            lifecycle.async { [weak self] in
+                guard let self, self.generation.contains(request) else { return }
+                self.cancelFallbackTimer()
+            }
+        }
+    }
+
     private func structuredReaderEnded(reason: String, request: Int) {
         lifecycle.async { [weak self] in
             guard let self, self.generation.contains(request), !self.stopped else { return }
             self.cancelFallbackTimer()
+            self.hostStream?.stop()
+            self.hostStream = nil
             guard !self.didDecodeStructuredRow, let fallbackToolPath = self.fallbackToolPath else {
                 self.onStreamEnded?(reason)
                 return
@@ -878,6 +931,8 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         timer.setEventHandler { [weak self] in
             guard let self, self.generation.contains(request), !self.stopped, !self.didDecodeStructuredRow else { return }
             self.structuredReader.stop()
+            self.hostStream?.stop()
+            self.hostStream = nil
             self.startFallbackOnce(toolPath: fallbackToolPath, request: request)
         }
         fallbackTimer = timer
@@ -1407,6 +1462,11 @@ public struct DeviceLogSourceOption: Equatable, Sendable {
             toolPath: String,
             fallbackToolPath: String?
         )
+        case brokeredStructuredDevice(
+            udid: String,
+            overNetwork: Bool,
+            fallbackToolPath: String?
+        )
         /// One app on a real device. Which of its two logs to read is `DeviceLogRoute`, chosen
         /// beside the source rather than by doubling every app into two entries.
         case app(deviceID: String, bundleID: String, appName: String)
@@ -1454,13 +1514,14 @@ public struct DeviceLogSourceOption: Equatable, Sendable {
     /// firehose at Debug; Bluetooth packets have no level and an app's own log is not a firehose.
     public var readsAtLevel: Bool {
         switch kind {
-        case .simulator, .device, .structuredDevice: return true
+        case .simulator, .device, .structuredDevice, .brokeredStructuredDevice: return true
         case .bluetooth, .app: return false
         }
     }
 
     public func makeSource(
-        predicate: String?, route: Route = .appLog, processName: String? = nil, minimumSeverity: Int = 0
+        predicate: String?, route: Route = .appLog, processName: String? = nil,
+        minimumSeverity: Int = 0, deviceServices: (any PluginDeviceServices)? = nil
     ) -> DeviceLogRowSource? {
         let severity = readsAtLevel ? minimumSeverity : 0
         switch kind {
@@ -1486,6 +1547,13 @@ public struct DeviceLogSourceOption: Equatable, Sendable {
                 toolPath: tool,
                 fallbackToolPath: fallbackTool,
                 processName: processName,
+                minimumSeverity: severity
+            )
+        case .brokeredStructuredDevice(let udid, let overNetwork, let fallbackTool):
+            guard let deviceServices else { return nil }
+            return StructuredPairedDeviceLogRowSource(
+                udid: udid, overNetwork: overNetwork, deviceServices: deviceServices,
+                fallbackToolPath: fallbackTool, processName: processName,
                 minimumSeverity: severity
             )
         case .app(let deviceID, let bundleID, let appName):
@@ -1593,12 +1661,14 @@ public enum DeviceLogSourceCatalog {
 
     public static func discover(
         preferredPymobiledevice3Path: String? = nil,
+        deviceServices: (any PluginDeviceServices)? = nil,
         completion: @escaping @Sendable ([DeviceLogSourceOption]) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let structuredTool = structuredSyslogToolPath(
+            let hostStructured = deviceServices?.hasStructuredSystemLog() == true
+            let structuredTool = deviceServices == nil ? structuredSyslogToolPath(
                 preferredPath: preferredPymobiledevice3Path
-            )
+            ) : nil
             let fallbackTool = syslogToolPath
             let bluetoothTool = bluetoothToolPath
             // A simulator is its own machine and offers exactly one thing to read, so it is a
@@ -1624,7 +1694,13 @@ public enum DeviceLogSourceCatalog {
                     isSimulator: false
                 )
                 let systemLogKind: DeviceLogSourceOption.Kind
-                if let structuredTool {
+                if hostStructured {
+                    systemLogKind = .brokeredStructuredDevice(
+                        udid: device.udid,
+                        overNetwork: device.overNetwork,
+                        fallbackToolPath: fallbackTool
+                    )
+                } else if let structuredTool {
                     systemLogKind = .structuredDevice(
                         udid: device.udid,
                         overNetwork: device.overNetwork,

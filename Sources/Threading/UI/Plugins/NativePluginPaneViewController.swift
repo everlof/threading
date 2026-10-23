@@ -34,9 +34,6 @@ final class NativePluginPaneViewController: NSViewController {
     /// Check its verified identity before the principal class is mapped.
     private let expectedBundleIdentifier: String?
     private let expectedInstalledIdentity: PluginLoader.PluginIdentity?
-    /// A host-selected capability for verified first-party Device Logs. Third-party plugins do
-    /// not receive Threading's managed executable merely because they share this loading tier.
-    private let managedIPhoneToolPath: String?
     /// Plugin-specific routing attached to the latest reveal. Kept separately from placement so
     /// changing a target cannot rewrite the session/project identity the host owns.
     private var activationArguments: [String: String]
@@ -88,8 +85,6 @@ final class NativePluginPaneViewController: NSViewController {
             return sectioned(
                 bundleURL: bundleURL, sessionID: sessionID, section: selected,
                 primarySection: pane.primarySection, titles: titles,
-                managedIPhoneToolPath: pane.pluginIdentifier == NativePluginManagedOffer.deviceLogs.identifier
-                    ? Pymobiledevice3ManagedTool.executable().path : nil,
                 expectedBundleIdentifier: expectedIdentifier ?? pane.pluginIdentifier,
                 expectedInstalledIdentity: pane.verifiedInstalledIdentity
             )
@@ -118,8 +113,6 @@ final class NativePluginPaneViewController: NSViewController {
             section: selectedSection,
             primarySection: primarySection,
             titles: titles,
-            managedIPhoneToolPath: offer.identifier == NativePluginManagedOffer.deviceLogs.identifier
-                ? Pymobiledevice3ManagedTool.executable().path : nil,
             expectedBundleIdentifier: expectedIdentifier ?? offer.identifier
         )
     }
@@ -132,7 +125,6 @@ final class NativePluginPaneViewController: NSViewController {
         section: String,
         primarySection: String,
         titles: [String: String],
-        managedIPhoneToolPath: String? = nil,
         expectedBundleIdentifier: String? = nil,
         expectedInstalledIdentity: PluginLoader.PluginIdentity? = nil
     ) -> NativePluginPaneViewController {
@@ -152,10 +144,8 @@ final class NativePluginPaneViewController: NSViewController {
         if let existing = sectionOwners[key]?.value {
             owner = existing
         } else {
-            var arguments = ["hostPaneSections": "true"]
-            if managedIPhoneToolPath != nil { arguments["stream"] = primarySection }
+            let arguments = ["hostPaneSections": "true"]
             owner = NativePluginPaneViewController(bundleURL: bundleURL, owningSessionID: sessionID,
-                managedIPhoneToolPath: managedIPhoneToolPath,
                 expectedBundleIdentifier: expectedBundleIdentifier,
                 expectedInstalledIdentity: expectedInstalledIdentity,
                 activationArguments: arguments)
@@ -259,7 +249,6 @@ final class NativePluginPaneViewController: NSViewController {
     init(
         bundleURL: URL,
         owningSessionID: SessionID?,
-        managedIPhoneToolPath: String? = nil,
         expectedBundleIdentifier: String? = nil,
         expectedInstalledIdentity: PluginLoader.PluginIdentity? = nil,
         activationArguments: [String: String] = [:],
@@ -275,7 +264,6 @@ final class NativePluginPaneViewController: NSViewController {
         self.bundleURL = bundleURL
         self.owningSessionID = owningSessionID
         self.managedOffer = NativePluginManagedOffer.at(bundleURL)
-        self.managedIPhoneToolPath = managedIPhoneToolPath
         self.expectedBundleIdentifier = expectedBundleIdentifier
         self.expectedInstalledIdentity = expectedInstalledIdentity
         self.activationArguments = activationArguments
@@ -443,7 +431,10 @@ final class NativePluginPaneViewController: NSViewController {
     private func context() -> PluginContext {
         var arguments = placement().arguments
         arguments.merge(activationArguments) { _, activation in activation }
-        return PluginContext(theme: NativePluginCatalog.theme(), arguments: arguments)
+        return PluginContext(
+            theme: NativePluginCatalog.theme(), arguments: arguments,
+            deviceServices: NativePluginDeviceServices.shared
+        )
     }
 
     /// Where the pane is, resolved from the session that owns it.
@@ -453,18 +444,8 @@ final class NativePluginPaneViewController: NSViewController {
     /// handed the project folder would read the wrong tree for every draft-worktree session, which
     /// presents as stale content rather than as a wrong path.
     private func placement() -> NativePluginPlacement {
-        let toolPath: String?
-        if let candidate = verifiedCandidate,
-           candidate.isBundled || candidate.isManaged,
-           (candidate.bundle.identity?.bundleIdentifier
-                ?? Bundle(url: candidate.bundleURL)?.bundleIdentifier)
-                == NativePluginCatalog.deviceLogsIdentifier {
-            toolPath = managedIPhoneToolPath
-        } else {
-            toolPath = nil
-        }
         guard let owningSessionID else {
-            return NativePluginPlacement(pymobiledevice3Path: toolPath)
+            return NativePluginPlacement()
         }
         let store = resolveStore()
         let project = store?.project(forSessionID: owningSessionID)
@@ -472,8 +453,7 @@ final class NativePluginPaneViewController: NSViewController {
             sessionID: owningSessionID,
             projectID: project?.id,
             projectName: project?.name,
-            checkoutPath: store?.workingDirectory(forSessionID: owningSessionID),
-            pymobiledevice3Path: toolPath
+            checkoutPath: store?.workingDirectory(forSessionID: owningSessionID)
         )
     }
 

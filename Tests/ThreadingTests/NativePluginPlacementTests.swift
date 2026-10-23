@@ -14,8 +14,7 @@ final class NativePluginPlacementTests: XCTestCase {
             sessionID: session,
             projectID: project,
             projectName: "Threading",
-            checkoutPath: "/Users/someone/repo/Threading",
-            pymobiledevice3Path: "/managed/bin/pymobiledevice3"
+            checkoutPath: "/Users/someone/repo/Threading"
         )
 
         XCTAssertEqual(placement.arguments, [
@@ -23,8 +22,8 @@ final class NativePluginPlacementTests: XCTestCase {
             "projectID": project.uuidString,
             "projectName": "Threading",
             "checkoutPath": "/Users/someone/repo/Threading",
-            "pymobiledevice3Path": "/managed/bin/pymobiledevice3",
         ])
+        XCTAssertNil(placement.arguments["pymobiledevice3Path"])
     }
 
     /// An absent value must be an absent *key*, not an empty string.
@@ -62,6 +61,5 @@ final class NativePluginPlacementTests: XCTestCase {
         XCTAssertEqual(NativePluginPlacement.Key.projectID, "projectID")
         XCTAssertEqual(NativePluginPlacement.Key.projectName, "projectName")
         XCTAssertEqual(NativePluginPlacement.Key.checkoutPath, "checkoutPath")
-        XCTAssertEqual(NativePluginPlacement.Key.pymobiledevice3Path, "pymobiledevice3Path")
     }
 }

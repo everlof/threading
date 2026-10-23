@@ -39895,6 +39895,17 @@
         }
       }
     },
+    "Open Device Logs in Bottom Pane (right-click for plugin actions)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna enhetsloggar i nederpanelen (högerklicka för pluginåtgärder)"
+          }
+        }
+      }
+    },
     "Open Extension Options" : {
       "extractionState" : "manual",
       "localizations" : {

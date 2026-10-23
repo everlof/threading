@@ -12,15 +12,18 @@ struct NativePluginManagedOffer: Sendable {
         static let fromDevice = "from-device"
     }
 
-    enum PanePlacement: Sendable, Equatable {
+    enum PanePlacement: String, Sendable, Equatable {
         case panel
         case drawer
     }
+
+    enum PaneContext: String, Sendable { case selectedDevice = "selected-device" }
 
     struct PaneRoute: Sendable {
         let identifier: String
         let section: String
         let placement: PanePlacement
+        let context: PaneContext
     }
 
     struct PaneSection: Sendable {
@@ -94,7 +97,8 @@ struct NativePluginManagedOffer: Sendable {
         ],
         paneRoutes: [
             .init(identifier: DeviceLogsRoute.fromDevice,
-                section: DeviceLogsSection.regular, placement: .drawer)
+                section: DeviceLogsSection.regular, placement: .drawer,
+                context: .selectedDevice)
         ]
     )
 

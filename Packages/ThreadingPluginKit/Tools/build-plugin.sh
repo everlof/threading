@@ -3,6 +3,7 @@
 #
 #   build-plugin.sh <package-dir> --identifier <bundle-id> [--identity <codesign-identity>]
 #                                 [--install] [--output <dir>] [--metadata <plist>]
+#                                 [--timestamp]
 #
 # The contract in ThreadingPluginKit is not enough on its own to produce a bundle Threading will
 # load. Three of the steps below are not guessable, and each one fails in a way that blames the
@@ -13,9 +14,8 @@
 #   * the contract's install name must resolve to the framework embedded by the host. A second
 #     copy of ThreadingPluginKit would give the @objc protocol a different identity.
 #
-# Signing defaults to ad-hoc. Threading accepts any valid signature, including ad-hoc, and then
-# asks the user whether to run that particular build; a Developer ID is not a requirement to
-# write a plugin, only a way for the person installing it to know who you are.
+# Signing defaults to ad-hoc without a secure timestamp for local development. A distributable
+# archive needs a Developer ID signature with --timestamp, followed by notarization.
 set -euo pipefail
 
 package=""
@@ -24,6 +24,7 @@ identity="${PLUGIN_IDENTITY:--}"
 install=false
 output=""
 metadata=""
+timestamp=false
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -31,6 +32,7 @@ while [ $# -gt 0 ]; do
         --identity)   identity="$2";   shift 2 ;;
         --output)     output="$2";     shift 2 ;;
         --metadata)   metadata="$2";   shift 2 ;;
+        --timestamp)  timestamp=true;   shift ;;
         --install)    install=true;    shift ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
         *)  package="$1"; shift ;;
@@ -46,10 +48,15 @@ if [ -z "${identifier}" ]; then
     echo "it is the name your approval is recorded against, so it has to be yours." >&2
     exit 2
 fi
+if [ "${timestamp}" = true ] && [ "${identity}" = "-" ]; then
+    echo "--timestamp requires a signing identity; distribution requires Developer ID Application" >&2
+    exit 2
+fi
 
 output="${output:-${package}/.build/bundle}"
 bundle="${output}/${name}.bundle"
-rm -rf "${output}"
+mkdir -p "${output}"
+rm -rf "${bundle}"
 mkdir -p "${bundle}/Contents/MacOS"
 
 swift build --package-path "${package}" -c release
@@ -94,7 +101,13 @@ with open(sys.argv[2], "wb") as destination:
 PY
 fi
 
-codesign -s "${identity}" -f -o runtime --timestamp=none "${bundle}" >/dev/null
+signing=( -s "${identity}" -f -o runtime )
+if [ "${timestamp}" = true ]; then
+    signing+=( --timestamp )
+else
+    signing+=( --timestamp=none )
+fi
+codesign "${signing[@]}" "${bundle}" >/dev/null
 echo "built ${bundle}"
 codesign -dv --verbose=2 "${bundle}" 2>&1 | grep -E "Identifier|TeamIdentifier|Signature" | sed 's/^/  /' || true
 

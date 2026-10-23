@@ -14,11 +14,14 @@ This package, and nothing else. `Examples/HelloPanePlugin` is the proof: one dep
 Swift source file, an optional metadata plist, and one build command.
 
 Threading's bundled native plugins additionally link `ThreadingDesignKit` so their rows are drawn
-by the same components as the rest of the window. That package is not published yet, so external
-plugins use `PluginTheme`: its full semantic colour palette keeps custom components aligned with
-the active design system, while its original seven values remain the compatibility fallback for
-older hosts. The unpublished kit buys exact component, typography, material and geometry reuse;
-it does not grant additional host capabilities or data.
+by the same components as the rest of the window. Release builds attach
+`ThreadingPluginSDK-<version>.zip` beside the app: it contains this package, a standalone
+DesignKit source snapshot, its dependencies, and Device Logs as a buildable example. The snapshot
+resolves DesignKit's links into the application source, so it builds without this repository.
+Keep the SDK version matched to the host release; DesignKit is statically linked into the plugin
+and has no stable binary ABI. Plugins with their own components can use `PluginTheme` instead:
+its semantic palette follows the active design system. DesignKit adds exact control, typography,
+material and geometry reuse; it grants no additional host capabilities or data.
 
 ## Writing one
 
@@ -28,7 +31,7 @@ import ThreadingPluginKit
 
 @objc(MyPlugin)
 public final class MyPlugin: NSObject, ThreadingNativePlugin {
-    public static let pluginAPIVersion = 5
+    public static let pluginAPIVersion = 6
     public var pluginIdentifier: String { "com.example.myplugin" }
 
     public override required init() { super.init() }
@@ -48,6 +51,22 @@ so two plugins cannot collide.
 A host may reveal the same singleton pane again with more specific string arguments. Implement the
 optional `activatePane(context:)` hook when the pane can be re-targeted without rebuilding its view;
 plugins without it keep their existing presentation unchanged.
+
+### Paired iPhone operations
+
+Version 6 adds `PluginContext.deviceServices` to the pane context of approved native plugins. It
+provides the same finite host operations that Device Logs uses: check whether structured system
+logging is available, start a JSON line stream for a paired device, and send a Bluetooth logging
+profile to iOS for user approval. The host chooses the tool, validates device identifiers and
+profile data, bounds output and operation time, and retains control of the child process. The plugin receives a
+`PluginDeviceLogStream` token to stop its own reader; it receives no executable path or general
+device-command runner.
+
+The availability check, stream start and profile installation may touch files or launch processes.
+Call them from a bounded worker, then move UI updates to the main actor. The line and end callbacks
+run off main. A host may omit the service; handle `nil` before requesting an operation.
+`Examples/HelloPanePlugin` compiles against the optional service without
+depending on any private host package.
 
 ### Pane sections and commands
 
@@ -70,6 +89,14 @@ first section uses `makePaneView(context:)`; later sections use the optional
         </dict>
       </dict>
     </array>
+    <key>routes</key><array>
+      <dict>
+        <key>id</key><string>from-device</string>
+        <key>section</key><string>overview</string>
+        <key>placement</key><string>drawer</string>
+        <key>context</key><string>selected-device</string>
+      </dict>
+    </array>
   </dict>
 </dict>
 ```
@@ -80,6 +107,14 @@ shortcut identity. The optional command `detail` is shown in the palette. Thread
 at most eight sections in a 64 KiB plist, binds the declaration to the signed bundle identity,
 and owns the command shortcut, panel placement and tab restoration. Invalid declarations are
 ignored as a whole. This plist schema is versioned separately from the binary plugin API.
+
+`routes` is optional and bounded to eight entries. A `selected-device` route accepts the host's
+current `deviceID` as a string in `PluginContext.arguments`; the host chooses that identity and
+owns the control that opens the route. `section` must name one of this plugin's declared sections.
+`placement` is `panel` or `drawer`. The host reuses an existing tab and calls
+`activatePane(context:)` when the selected device changes. A route does not grant device control
+or an executable path. A first-party plugin may also appear in the host's managed-offer catalogue
+so its install affordance exists before the bundle arrives; the installed declaration must match.
 
 ## Building one
 
@@ -98,15 +133,19 @@ Three of the steps it performs are not guessable, and each fails by blaming some
   protocols — so the host refuses your plugin for *not conforming to a protocol it plainly
   conforms to*.
 
-Signing defaults to ad-hoc, which Threading accepts. A Developer ID is not required to write a
-plugin; it is how the person installing it knows who you are.
+Signing defaults to ad-hoc for local development, which Threading accepts after the user's
+approval. To distribute a downloaded archive, pass `--identity "Developer ID Application: …"`
+and `--timestamp`, then notarize the signed bundle before sharing it. A Developer ID alone with
+the default `--timestamp=none` is a local test build, not a notarizable release build. A downloaded
+bundle may be stopped by macOS Gatekeeper before Threading can show its approval prompt.
 
 ## How the host decides
 
 `~/Library/Application Support/Threading/Plugins` is where installed bundles go. Threading ships
-hardened runtime carrying `com.apple.security.cs.disable-library-validation`, so the operating
-system will map a bundle signed by anyone, or ad-hoc. **Every check is this package's**, and the
-order is a property of `PluginLoader` rather than of whoever calls it:
+hardened runtime carrying `com.apple.security.cs.disable-library-validation`, so its library
+validation does not restrict plugins to Threading's signing team. Gatekeeper may still reject a
+quarantined download. For a bundle the operating system permits, `PluginLoader` applies these
+checks in order:
 
 1. the bundle is readable;
 2. its signature validates — from any signer, ad-hoc included;
@@ -138,6 +177,11 @@ Version 5 adds the optional provider-neutral `PluginWorkspaceChangeRequest` on s
 `setVisibleItemIdentities`. A navigator reports only realized session rows; Threading owns local
 Git, remote providers, credentials, caching, URL validation, and the browser action. Existing v3
 and v4 plugins remain in the compatibility window.
+
+Version 6 adds the optional `PluginDeviceServices` reference in `PluginContext`. A plugin that
+calls this service declares version 6 so an older host refuses it before the getter is called.
+The host still loads v3–v5 plugins, and the original context initializer remains available to
+older code.
 
 The plugin's `pluginAPIVersion` must be a numeric literal for the SDK generation it was compiled
 against. Do not implement it by returning `ThreadingPluginAPI.version`: installed plugins use the

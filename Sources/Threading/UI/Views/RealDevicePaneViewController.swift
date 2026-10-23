@@ -117,6 +117,7 @@ final class RealDevicePaneViewController: NSViewController {
 
     var onSelectedDeviceChange: ((PhysicalDeviceID) -> Void)?
     var onOpenDeviceLogs: ((PhysicalDeviceID) -> Void)?
+    var onDevicePluginRoutes: ((PhysicalDeviceID) -> [ThemedMenuEntry])?
     var onOpenToolingSettings: (() -> Void)?
 
     private lazy var deviceChip: ChipView = {
@@ -169,10 +170,16 @@ final class RealDevicePaneViewController: NSViewController {
             target: .inline,
             inkSource: .chrome
         )
-        button.toolTip = L10n.string("Open Device Logs in Bottom Pane")
+        button.toolTip = L10n.string("Open Device Logs in Bottom Pane (right-click for plugin actions)")
         button.onPress = { [weak self] in
             guard let self, let deviceID = self.selectedDeviceID else { return }
             self.onOpenDeviceLogs?(deviceID)
+        }
+        button.onContextMenu = { [weak self, weak button] anchor in
+            guard let self, let button, let deviceID = self.selectedDeviceID,
+                  let entries = self.onDevicePluginRoutes?(deviceID), !entries.isEmpty
+            else { return false }
+            return self.presentMenu(entries, from: button, anchor: anchor)
         }
         button.setAccessibilityIdentifier("realDevice.logs")
         return button

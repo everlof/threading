@@ -1,5 +1,6 @@
 import AppKit
 import ThreadingDesignKit
+import ThreadingPluginKit
 
 /// A live log stream from a booted simulator or a paired iPhone.
 ///
@@ -96,7 +97,9 @@ public final class DeviceLogPaneViewController: NSViewController {
     private let packetPopUp = ThemedPopUp()
     private let filterField = ThemedTextField()
     private let statusLabel = NSTextField(labelWithString: "")
-    private lazy var bluetoothProfileSetup = BluetoothProfileSetupView(preferredToolPath: preferredPymobiledevice3Path)
+    private lazy var bluetoothProfileSetup = BluetoothProfileSetupView(
+        preferredToolPath: preferredPymobiledevice3Path, deviceServices: deviceServices
+    )
     private lazy var bluetoothSetupButton = ThemedButton(
         title: L10n.string("Set Up…"), target: self, action: #selector(toggleBluetoothSetup)
     )
@@ -269,6 +272,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// The app-owned tool location. It may not exist when the pane is created: a later rescan
     /// picks up a Settings installation without requiring Threading or the plugin to restart.
     private let preferredPymobiledevice3Path: String?
+    private let deviceServices: (any PluginDeviceServices)?
 
     /// Writes what arrives to disk, so search and a time range have something to look at once the
     /// ring has moved on. One store per chat: two chats watching two devices are two histories.
@@ -277,6 +281,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     public init(
         owningSessionID: String?,
         preferredPymobiledevice3Path: String? = nil,
+        deviceServices: (any PluginDeviceServices)? = nil,
         preferredMachineID: String? = nil,
         stream: Stream? = nil,
         definitionsCheckout: String? = nil
@@ -285,6 +290,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         self.definitionsCheckout = definitionsCheckout
         self.owningSessionID = owningSessionID
         self.preferredPymobiledevice3Path = preferredPymobiledevice3Path
+        self.deviceServices = deviceServices
         self.requestedMachineID = preferredMachineID
         self.recorder = DeviceLogRecorder(
             directory: Self.storeDirectory,
@@ -680,7 +686,8 @@ public final class DeviceLogPaneViewController: NSViewController {
         discoveryGeneration += 1
         let generation = discoveryGeneration
         DeviceLogSourceCatalog.discover(
-            preferredPymobiledevice3Path: preferredPymobiledevice3Path
+            preferredPymobiledevice3Path: preferredPymobiledevice3Path,
+            deviceServices: deviceServices
         ) { [weak self] found in
             MainActor.assumeIsolated {
                 guard let self, self.discoveryGeneration == generation else { return }
@@ -1093,7 +1100,10 @@ public final class DeviceLogPaneViewController: NSViewController {
         let reader: DeviceLogRowSource?
         if let sourceFactory { reader = sourceFactory(option, route, selectedProcess) }
         else {
-            reader = option.makeSource(predicate: nil, route: route, processName: selectedProcess, minimumSeverity: severity)
+            reader = option.makeSource(
+                predicate: nil, route: route, processName: selectedProcess,
+                minimumSeverity: severity, deviceServices: deviceServices
+            )
         }
         guard let started = reader else {
             source = nil

@@ -132,6 +132,20 @@ final class CommandRegistry {
         }
     }
 
+    func nativePluginPane(identifier: String, route: String) -> NativePluginPaneDescriptor? {
+        nativePluginPanes.first {
+            $0.pluginIdentifier == identifier && $0.route(route) != nil
+        }
+    }
+
+    func nativePluginRoutes(
+        context: NativePluginPaneDescriptor.Context
+    ) -> [(pane: NativePluginPaneDescriptor, route: NativePluginPaneDescriptor.Route)] {
+        nativePluginPanes.flatMap { pane in
+            pane.routes.filter { $0.context == context }.map { (pane, $0) }
+        }
+    }
+
     var panelCommands: [AppCommand] { resolvedCommands.filter { $0.panelTarget != nil } }
 
     func replaceAppearanceCommands(_ commands: [AppCommand]) {

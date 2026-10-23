@@ -111,6 +111,22 @@ final class NativePluginCatalogTests: XCTestCase {
         XCTAssertEqual(plugin.activationContexts.last?.argument("deviceID"), "DEVICE-A")
     }
 
+    func testLoadedPaneReceivesPublicDeviceServicesOnConstructionAndActivation() {
+        let plugin = DeviceServicePaneProbe()
+        let controller = NativePluginPaneViewController(
+            bundleURL: directory.appendingPathComponent("DeviceServiceProbe.bundle"),
+            owningSessionID: nil,
+            loadPlugin: { _ in .success(plugin) }
+        )
+
+        controller.loadView()
+        XCTAssertNotNil(plugin.creationContext?.deviceServices)
+
+        controller.activate(arguments: ["deviceID": "DEVICE-A"])
+        XCTAssertNotNil(plugin.activationContext?.deviceServices)
+        XCTAssertEqual(plugin.activationContext?.argument("deviceID"), "DEVICE-A")
+    }
+
     func testNavigatorOnlyPluginProducesANamedPaneCapabilityRefusal() {
         let plugin = NavigatorOnlyPresentationProbe()
         let controller = NativePluginPaneViewController(
@@ -358,6 +374,24 @@ private final class PanePresentationProbe: NSObject, ThreadingNativePlugin {
     func activatePane(context: PluginContext) { activationContexts.append(context) }
 
     func apply(theme: PluginTheme) { appliedThemes.append(theme) }
+}
+
+@MainActor
+private final class DeviceServicePaneProbe: NSObject, ThreadingNativePlugin {
+    static let pluginAPIVersion = 6
+    let pluginIdentifier = "tests.device-service-pane"
+    private(set) var creationContext: PluginContext?
+    private(set) var activationContext: PluginContext?
+
+    required override init() { super.init() }
+
+    func makePaneView(context: PluginContext) -> NSView {
+        creationContext = context
+        return NSView()
+    }
+
+    func activatePane(context: PluginContext) { activationContext = context }
+    func apply(theme _: PluginTheme) {}
 }
 
 @MainActor

@@ -361,6 +361,9 @@ final class DisplayPaneController: NSViewController {
   /// drawer is. Keep that navigation crossing as one narrow callback instead of teaching either
   /// pane about another split-view child.
   var onOpenDeviceLogs: ((SessionID, String) -> Void)?
+  /// Host-owned contextual actions for the currently selected device. Plugin metadata supplies
+  /// their routes, but the window decides which device and which tab receives the action.
+  var onDevicePluginRoutes: ((SessionID, String) -> [ThemedMenuEntry])?
 
   /// The owning window expands this host when an agent reveals a plugin tool's section.
   var onNativePluginToolReveal: ((SessionID) -> Void)?
@@ -1739,6 +1742,7 @@ final class DisplayPaneController: NSViewController {
     let streams = simulatorStreamCoordinator
     let authorizer = simulatorInputAuthorizer
     let openLogs = onOpenDeviceLogs
+    let deviceRoutes = onDevicePluginRoutes
     // Scenarios come from the checkout the session works in, read again each time they are offered.
     let checkout: @MainActor () -> URL? = { [weak self] in self?.simulatorScenarioCheckout(sessionID) }
     let workspace = SimulatorWorkspaceViewController(state: state, scenarioCheckout: checkout) { device in
@@ -1749,6 +1753,9 @@ final class DisplayPaneController: NSViewController {
       )
       controller.annotationSessionID = sessionID
       controller.onOpenDeviceLogs = { device in openLogs?(sessionID, device.rawValue) }
+      controller.onDevicePluginRoutes = { device in
+        deviceRoutes?(sessionID, device.rawValue) ?? []
+      }
       return controller
     }
     addChild(workspace)
@@ -1816,6 +1823,9 @@ final class DisplayPaneController: NSViewController {
     }
     controller.onOpenDeviceLogs = { [weak self] deviceID in
       self?.onOpenDeviceLogs?(sessionID, deviceID.rawValue)
+    }
+    controller.onDevicePluginRoutes = { [weak self] deviceID in
+      self?.onDevicePluginRoutes?(sessionID, deviceID.rawValue) ?? []
     }
     return controller
   }
@@ -3915,6 +3925,9 @@ extension DisplayPaneController: TabHosting {
     if case let .realDevice(device) = tab.body {
       device.onSelectedDeviceChange = { [weak self] _ in self?.persist(session) }
       device.onOpenDeviceLogs = { [weak self] device in self?.onOpenDeviceLogs?(session, device.rawValue) }
+      device.onDevicePluginRoutes = { [weak self] device in
+        self?.onDevicePluginRoutes?(session, device.rawValue) ?? []
+      }
     }
     if case let .extensionPanel(panel) = tab.body {
       panel.onChange = { [weak self] in

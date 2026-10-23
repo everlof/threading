@@ -14,20 +14,22 @@ final class WorkspaceDockTests: HostedStoreTestCase {
     let route = NativePluginManagedOffer.DeviceLogsRoute.fromDevice
     let drawer = controller.containerViewController.drawerHostController
 
-    XCTAssertFalse(controller.openManagedPluginPane(
+    XCTAssertFalse(controller.openNativePluginPane(
       identifier: identifier, routeID: "unknown", arguments: [:], for: session
     ))
-    XCTAssertTrue(controller.openManagedPluginPane(
-      identifier: identifier, routeID: route,
-      arguments: ["deviceID": "first"], for: session
-    ))
+    let menu = try XCTUnwrap(controller.displayPaneController.onDevicePluginRoutes?(session, "first"))
+    let logsAction = try XCTUnwrap(menu.compactMap { entry -> ThemedMenuItem? in
+      guard case .item(let item) = entry, item.title == L10n.string("Device Logs") else { return nil }
+      return item
+    }.first)
+    logsAction.onChoose?()
     let first = try XCTUnwrap(drawer.tabs(for: session).first { tab in
       guard case .nativePlugin = tab.body else { return false }
       return true
     })
     XCTAssertEqual((first.hostedController as? NativePluginPaneViewController)?.paneSection,
       NativePluginManagedOffer.DeviceLogsSection.regular)
-    XCTAssertTrue(controller.openManagedPluginPane(
+    XCTAssertTrue(controller.openNativePluginPane(
       identifier: identifier, routeID: route,
       arguments: ["deviceID": "second"], for: session
     ))

@@ -1,5 +1,6 @@
 import AppKit
 import ThreadingDesignKit
+import ThreadingPluginKit
 
 /// Two independent captures inside the session's one Device Logs workspace. A tab is a view
 /// choice, not a capture lifetime: only hiding the whole workspace stops the opened readers.
@@ -9,6 +10,7 @@ final class DeviceLogWorkspaceViewController: NSViewController {
 
     private let sessionID: String?
     private let toolPath: String?
+    private let deviceServices: (any PluginDeviceServices)?
     /// The session's checkout, for the Bluetooth tab's `.threading/bluetooth.yaml`.
     private let checkoutPath: String?
     private var preferredMachineID: String?
@@ -49,10 +51,14 @@ final class DeviceLogWorkspaceViewController: NSViewController {
 
     var selectedPane: DeviceLogPaneViewController? { panes[selectedStream] }
 
-    init(sessionID: String?, toolPath: String?, preferredMachineID: String?, checkoutPath: String? = nil) {
+    init(
+        sessionID: String?, toolPath: String?, preferredMachineID: String?,
+        checkoutPath: String? = nil, deviceServices: (any PluginDeviceServices)? = nil
+    ) {
         self.sessionID = sessionID
         self.checkoutPath = checkoutPath
         self.toolPath = toolPath
+        self.deviceServices = deviceServices
         self.preferredMachineID = preferredMachineID
         super.init(nibName: nil, bundle: nil)
     }
@@ -140,6 +146,7 @@ final class DeviceLogWorkspaceViewController: NSViewController {
         let pane = DeviceLogPaneViewController(
             owningSessionID: sessionID,
             preferredPymobiledevice3Path: toolPath,
+            deviceServices: deviceServices,
             preferredMachineID: selectedPane?.selectedDeviceID ?? preferredMachineID,
             stream: stream,
             definitionsCheckout: checkoutPath
@@ -199,6 +206,12 @@ final class DeviceLogWorkspaceViewController: NSViewController {
             }
         }
         if let discover { discover(completion) }
-        else { DeviceLogSourceCatalog.discover(preferredPymobiledevice3Path: toolPath, completion: completion) }
+        else {
+            DeviceLogSourceCatalog.discover(
+                preferredPymobiledevice3Path: toolPath,
+                deviceServices: deviceServices,
+                completion: completion
+            )
+        }
     }
 }

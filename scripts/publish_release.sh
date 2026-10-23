@@ -140,11 +140,12 @@ readonly APPCAST="$BUILD_DIR/appcast.xml"
 # The GPL helper's corresponding source travels beside the zip, never without it (release.sh,
 # "Corresponding source").
 readonly PROXY_SOURCE="$BUILD_DIR/threading-proxyd-source-$VERSION.tar.gz"
+readonly PLUGIN_SDK="$BUILD_DIR/ThreadingPluginSDK-$VERSION.zip"
 readonly PLUGIN_MANIFEST="$BUILD_DIR/native-plugins/native-plugins-$VERSION.json"
 shopt -s nullglob
 PLUGIN_ARCHIVES=("$BUILD_DIR"/native-plugins/*-"$VERSION".zip)
 shopt -u nullglob
-[[ -f "$ZIP" && -f "$APPCAST" && -f "$PROXY_SOURCE" && -f "$PLUGIN_MANIFEST" \
+[[ -f "$ZIP" && -f "$APPCAST" && -f "$PROXY_SOURCE" && -f "$PLUGIN_SDK" && -f "$PLUGIN_MANIFEST" \
     && ${#PLUGIN_ARCHIVES[@]} -gt 0 ]] \
     || fail "expected artefacts are missing from $BUILD_DIR"
 
@@ -158,6 +159,8 @@ NOTES="$(release_notes_for_version "$VERSION" "$ROOT/CHANGELOG.md")"
 SOURCE_NOTE="Source: Threading is GPL-3.0-only and built from this tag. The complete corresponding
 source of its bundled proxy helper, including the upstream archives it is built from, is attached
 as \`threading-proxyd-source-$VERSION.tar.gz\`."
+SDK_NOTE="Native plugin SDK: \`ThreadingPluginSDK-$VERSION.zip\` contains the public PluginKit
+contract, the matching DesignKit source and dependencies, and Device Logs as a buildable example."
 
 # The appcast is not an asset of every release, so the notes must not say it is: a beta's zip
 # lives on its own prerelease while the feed that describes it lives on the newest stable.
@@ -168,7 +171,9 @@ Direct download: \`Threading-$VERSION.zip\` — Developer ID signed, notarized b
 stapled. Installed copies update themselves through Sparkle from the feed published with this
 release.
 
-$SOURCE_NOTE"
+$SOURCE_NOTE
+
+$SDK_NOTE"
 else
     NOTES="$NOTES
 
@@ -177,7 +182,9 @@ notarized by Apple, and stapled. It updates itself like any other copy; a build 
 here starts out receiving $CHANNEL builds, and Settings ▸ General ▸ Software Updates switches
 that back to stable releases at any time.
 
-$SOURCE_NOTE"
+$SOURCE_NOTE
+
+$SDK_NOTE"
 fi
 
 # MARK: - Publish
@@ -196,13 +203,13 @@ fi
 
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
     say "Updating the existing GitHub release $TAG"
-    gh release upload "$TAG" "$ZIP" "$PROXY_SOURCE" "${PLUGIN_ARCHIVES[@]}" \
+    gh release upload "$TAG" "$ZIP" "$PROXY_SOURCE" "$PLUGIN_SDK" "${PLUGIN_ARCHIVES[@]}" \
         --repo "$REPO" --clobber
     gh release upload "$TAG" "$PLUGIN_MANIFEST" --repo "$REPO" --clobber
     gh release edit "$TAG" --repo "$REPO" --notes "$NOTES" "${release_kind_args[@]}"
 else
     say "Creating the GitHub release $TAG"
-    gh release create "$TAG" "$ZIP" "$PROXY_SOURCE" "${PLUGIN_ARCHIVES[@]}" \
+    gh release create "$TAG" "$ZIP" "$PROXY_SOURCE" "$PLUGIN_SDK" "${PLUGIN_ARCHIVES[@]}" \
         "$PLUGIN_MANIFEST" \
         --repo "$REPO" \
         --title "Threading $VERSION" \
@@ -244,5 +251,6 @@ say "Published"
 echo "  release:  https://github.com/$REPO/releases/tag/$TAG"
 echo "  download: https://github.com/$REPO/releases/download/$TAG/Threading-$VERSION.zip"
 echo "  source:   https://github.com/$REPO/releases/download/$TAG/threading-proxyd-source-$VERSION.tar.gz"
+echo "  sdk:      https://github.com/$REPO/releases/download/$TAG/ThreadingPluginSDK-$VERSION.zip"
 echo "  feed:     $FEED_URL"
 echo "  sha256:   $(shasum -a 256 "$ZIP" | awk '{print $1}')"

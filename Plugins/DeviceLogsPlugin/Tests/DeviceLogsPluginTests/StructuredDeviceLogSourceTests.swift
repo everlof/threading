@@ -1,8 +1,28 @@
 import Foundation
+import ThreadingPluginKit
 import XCTest
 @testable import DeviceLogsPlugin
 
 final class StructuredDeviceLogSourceTests: XCTestCase {
+    func testBrokeredStructuredReaderUsesPublicDeviceService() throws {
+        let service = TestDeviceLogService()
+        let source = StructuredPairedDeviceLogRowSource(
+            udid: "PHONE", overNetwork: false, deviceServices: service,
+            fallbackToolPath: nil, minimumSeverity: 3
+        )
+        let ended = expectation(description: "brokered stream ended")
+        source.onStreamEnded = { _ in ended.fulfill() }
+        source.start()
+        wait(for: [ended], timeout: 5)
+        source.stop()
+
+        XCTAssertEqual(service.requestedDeviceID, "PHONE")
+        XCTAssertEqual(service.requestedSeverity, 3)
+        XCTAssertEqual(source.drain().map(\.message), ["error"])
+        XCTAssertTrue(source.didDecodeStructuredRow)
+        XCTAssertTrue(service.stream.wasStopped)
+    }
+
     func testExactProcessScopeFiltersBeforeBufferingAndQuietAppDoesNotTriggerFallback() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-scoped-log-test-\(UUID().uuidString)")
@@ -227,4 +247,40 @@ final class StructuredDeviceLogSourceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
         XCTAssertTrue(source.drain().isEmpty)
     }
+}
+
+private final class TestDeviceLogService: PluginDeviceServices, @unchecked Sendable {
+    let stream = TestDeviceLogStream()
+    private let lock = NSLock()
+    private var request: (String, Int)?
+
+    var requestedDeviceID: String? { lock.withLock { request?.0 } }
+    var requestedSeverity: Int? { lock.withLock { request?.1 } }
+
+    func hasStructuredSystemLog() -> Bool { true }
+
+    func startStructuredSystemLog(
+        deviceID: String, minimumSeverity: Int,
+        onLine: @escaping @Sendable (Data) -> Void,
+        onEnd: @escaping @Sendable (String) -> Void
+    ) -> (any PluginDeviceLogStream)? {
+        lock.withLock { request = (deviceID, minimumSeverity) }
+        onLine(Data(#"{"timestamp":"2026-10-18T12:47:28.047435","level":"NOTICE","filename":"/kernel","message":"notice"}"#.utf8))
+        onLine(Data(#"{"timestamp":"2026-10-18T12:47:28.047510","level":"ERROR","filename":"/kernel","message":"error"}"#.utf8))
+        onEnd("test stream ended")
+        return stream
+    }
+
+    func installBluetoothLoggingProfile(_ profile: Data, deviceID: String) -> PluginDeviceOperationResult {
+        .toolUnavailable
+    }
+}
+
+private final class TestDeviceLogStream: PluginDeviceLogStream, @unchecked Sendable {
+    private let lock = NSLock()
+    private var stopped = false
+
+    var wasStopped: Bool { lock.withLock { stopped } }
+
+    func stop() { lock.withLock { stopped = true } }
 }

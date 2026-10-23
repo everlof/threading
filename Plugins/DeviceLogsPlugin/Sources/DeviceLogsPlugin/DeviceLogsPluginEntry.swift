@@ -22,7 +22,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
 
     // This must remain the generation embedded when the plugin is compiled. Do not forward to
     // ThreadingPluginAPI.version: the installed bundle uses the host's framework at runtime.
-    public static let pluginAPIVersion = 5
+    public static let pluginAPIVersion = 6
 
     public var pluginIdentifier: String { "codes.threading.plugin.devicelogs" }
 
@@ -31,9 +31,10 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
         MainActor.assumeIsolated {
             let workspace = DeviceLogWorkspaceViewController(
                 sessionID: context.argument("sessionID"),
-                toolPath: context.argument("pymobiledevice3Path"),
+                toolPath: nil,
                 preferredMachineID: context.argument("deviceID"),
-                checkoutPath: context.argument("checkoutPath")
+                checkoutPath: context.argument("checkoutPath"),
+                deviceServices: context.deviceServices
             )
             self.workspace = workspace
             if context.argument("hostPaneSections") == "true" { return workspace.sectionView(.regular) }
