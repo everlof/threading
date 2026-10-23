@@ -1,8 +1,8 @@
 // swift-tools-version: 5.9
 import PackageDescription
 
-/// The first-party device feature's on-demand bundle. Its first payload is the signed
-/// Simulator helper; the host keeps device admission, consent and session ownership.
+/// The first-party device feature's on-demand bundle. An external SDK copy builds its read-only
+/// Simulator snapshot pane using the same PluginKit and DesignKit products.
 let package = Package(
     name: "DevicesPlugin",
     platforms: [.macOS(.v13)],
@@ -11,12 +11,14 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Packages/ThreadingPluginKit"),
+        .package(path: "../../Packages/ThreadingDesignKit"),
     ],
     targets: [
         .target(
             name: "DevicesPlugin",
             dependencies: [
                 .product(name: "ThreadingPluginKit", package: "ThreadingPluginKit"),
+                .product(name: "ThreadingDesignKitStandalone", package: "ThreadingDesignKit"),
             ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),

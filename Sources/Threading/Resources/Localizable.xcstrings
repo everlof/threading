@@ -2832,6 +2832,17 @@
         }
       }
     },
+    "%lld more running Simulators were omitted." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld ytterligare startade simulatorer utelämnades."
+          }
+        }
+      }
+    },
     "%lld more scope carries a sound" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12931,6 +12942,17 @@
         }
       }
     },
+    "Capture Screenshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta skärmbild"
+          }
+        }
+      }
+    },
     "Capture Simulator" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13122,6 +13144,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tagen i en privat flik."
+          }
+        }
+      }
+    },
+    "Capturing screenshot…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tar skärmbild…"
           }
         }
       }
@@ -14216,6 +14249,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj ett förråd som redan finns i sidofältet."
+          }
+        }
+      }
+    },
+    "Choose a running iOS Simulator to capture its screen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj en startad iOS-simulator för att ta en skärmbild."
           }
         }
       }
@@ -18706,6 +18750,17 @@
         }
       }
     },
+    "CoreSimulator returned an unreadable screenshot." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CoreSimulator gav en skärmbild som inte kunde läsas."
+          }
+        }
+      }
+    },
     "Cost" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19260,6 +19315,17 @@
         }
       }
     },
+    "Couldn’t capture screenshot: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte ta skärmbild: %@"
+          }
+        }
+      }
+    },
     "Couldn’t capture this turn’s starting state." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19322,6 +19388,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte radera ”%@”"
+          }
+        }
+      }
+    },
+    "Couldn’t list Simulators: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte lista simulatorer: %@"
           }
         }
       }
@@ -25892,6 +25969,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "När en kontoavatar söks skickas en hash av inloggningsadressen till Gravatar och sedan adressen till GitHubs offentliga användarsökning. En vald emoji har fortfarande företräde."
+          }
+        }
+      }
+    },
+    "Finding running iOS Simulators…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Letar efter startade iOS-simulatorer…"
           }
         }
       }
@@ -36983,6 +37071,17 @@
         }
       }
     },
+    "No iOS Simulator is running. Start one in Xcode and refresh." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen iOS-simulator är startad. Starta en i Xcode och uppdatera."
+          }
+        }
+      }
+    },
     "No iPhone enrolled yet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46221,6 +46320,17 @@
         }
       }
     },
+    "Refresh Simulators" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdatera simulatorer"
+          }
+        }
+      }
+    },
     "Refresh artifact map" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50924,6 +51034,17 @@
         }
       }
     },
+    "Screenshot from %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skärmbild från %@."
+          }
+        }
+      }
+    },
     "Screenshot page or element" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51731,6 +51852,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Valt"
+          }
+        }
+      }
+    },
+    "Selected device is not a running iOS Simulator. Choose another." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den valda enheten är ingen startad iOS-simulator. Välj en annan."
           }
         }
       }
@@ -55223,6 +55355,17 @@
         }
       }
     },
+    "Simulator Snapshots" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorskärmbilder"
+          }
+        }
+      }
+    },
     "Simulator control is unavailable." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55263,6 +55406,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Simulatorskärm"
+          }
+        }
+      }
+    },
+    "Simulator snapshots" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorskärmbilder"
+          }
+        }
+      }
+    },
+    "Simulator snapshots need a newer Threading host." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorskärmbilder kräver en nyare version av Threading."
           }
         }
       }
@@ -76730,6 +76895,17 @@
         }
       }
     },
+    "iOS Simulator control and snapshots" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Styrning och skärmbilder för iOS-simulatorn"
+          }
+        }
+      }
+    },
     "iOS Simulator live control" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -76737,6 +76913,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Livestyrning av iOS-simulatorn"
+          }
+        }
+      }
+    },
+    "iOS Simulator screenshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skärmbild från iOS-simulator"
           }
         }
       }

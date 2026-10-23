@@ -13,7 +13,9 @@ public enum ThreadingPluginAPI {
     /// formerly required selector becomes optional.** An ordinary optional addition and a new
     /// stored property on a payload class remain additive under library evolution.
     ///
-    /// Version 6 adds callable paired-device services to `PluginContext`. A v6 plugin may invoke
+    /// Version 7 adds callable Simulator snapshot services to `PluginContext`. A v7 plugin may
+    /// invoke them, so a v6 host must refuse it before the first call. Version 6 adds callable
+    /// paired-device services to `PluginContext`. A v6 plugin may invoke
     /// them, so an older host must refuse it before the first call. Version 5 added the callable
     /// visible-row interest selector. That selector cannot share v4:
     /// a v5 plugin may call it, and an older host has no implementation to dispatch to. The
@@ -33,7 +35,7 @@ public enum ThreadingPluginAPI {
     /// Host-side symbols are not the contract at all. `PluginLoader` and `PluginLoadFailure` live
     /// here because the host and its tests need them, but nothing a plugin compiles against
     /// depends on their shape.
-    public static let version = 6
+    public static let version = 7
     public static let minimumSupportedVersion = 3
 
     public static func supports(_ version: Int) -> Bool {
@@ -185,11 +187,14 @@ public final class PluginContext: NSObject {
     public let arguments: [String: String]
     /// Finite host-owned device operations. `nil` on an older host or outside a loaded pane.
     public let deviceServices: (any PluginDeviceServices)?
+    /// Bounded, read-only operations on already running iOS Simulators. `nil` on an older host.
+    public let simulatorServices: (any PluginSimulatorServices)?
 
     public init(theme: PluginTheme, arguments: [String: String]) {
         self.theme = theme
         self.arguments = arguments
         self.deviceServices = nil
+        self.simulatorServices = nil
         super.init()
     }
 
@@ -201,6 +206,20 @@ public final class PluginContext: NSObject {
         self.theme = theme
         self.arguments = arguments
         self.deviceServices = deviceServices
+        self.simulatorServices = nil
+        super.init()
+    }
+
+    public init(
+        theme: PluginTheme,
+        arguments: [String: String],
+        deviceServices: any PluginDeviceServices,
+        simulatorServices: any PluginSimulatorServices
+    ) {
+        self.theme = theme
+        self.arguments = arguments
+        self.deviceServices = deviceServices
+        self.simulatorServices = simulatorServices
         super.init()
     }
 

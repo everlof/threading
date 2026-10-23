@@ -399,6 +399,13 @@ availability and error state, agent routing, tab persistence, and the direct-hel
 boundary. Those behaviours cannot be delegated to an extension without granting private device
 authority and making session guarantees depend on third-party process uptime.
 
+The on-demand Devices native plugin now supplies a separate, read-only **Simulator Snapshots**
+pane. Through the public PluginKit service it can list up to 64 already running iOS Simulators
+and capture a bounded PNG from one exact device. The host rechecks that the device is still
+running and suspends direct viewers for the public `simctl` transaction. No plugin gains boot,
+lease, input or direct-helper authority from this service. This is the first external-author
+parity slice; the interactive Simulator workspace above remains host-owned.
+
 Presentation still uses the shared host vocabulary from `Sources/Threading/UI/Design/`: the pane
 header, tab chip, controls, status rows, placeholder and interactive screen surface are themed
 components. A future public extension component may embed a semantic device status or explicit

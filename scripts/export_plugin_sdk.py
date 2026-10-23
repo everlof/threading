@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export the native plugin SDK and Device Logs as a self-contained source tree.
+"""Export the native plugin SDK and first-party examples as a self-contained source tree.
 
 The in-repository DesignKit shares source with the app through symlinks. External authors cannot
 clone that package alone, so this snapshot resolves those links while keeping the package layout
@@ -31,6 +31,7 @@ PACKAGES = (
     "Packages/Vendor/LabelMorph",
     "Packages/Vendor/TimberLineParser",
     "Plugins/DeviceLogsPlugin",
+    "Plugins/DevicesPlugin",
 )
 OMIT = {".build", ".git", ".swiftpm", "DerivedData", ".DS_Store"}
 
@@ -101,7 +102,7 @@ def export(destination: Path) -> None:
         (staged / "README.md").write_text(f"""# Threading native plugin SDK
 
 This source snapshot contains PluginKit API v{version}, ThreadingDesignKit, their package
-dependencies, and the Device Logs plugin as a complete native example. It was exported from
+dependencies, and Device Logs and Devices as complete native examples. It was exported from
 Threading revision `{revision}`{' with uncommitted changes' if dirty else ''}.
 
 Start with `Packages/ThreadingPluginKit/README.md`. From this directory, run
@@ -109,8 +110,13 @@ Start with `Packages/ThreadingPluginKit/README.md`. From this directory, run
 the Threading application checkout. `Packages/ThreadingPluginKit/Tools/build-plugin.sh` produces
 an installable bundle for a plugin you have authored.
 
-ThreadingPluginKit is the host's dynamic binary contract. Device Logs statically links its own
-ThreadingDesignKit and parser, so an externally built plugin does not depend on the host's private
+`swift build --package-path Plugins/DevicesPlugin` builds the read-only Simulator snapshot
+example using the same public `PluginContext.simulatorServices` broker as an approved external
+plugin. Its separately signed private helper belongs only to Threading's first-party release;
+the snapshot pane itself requires no private helper.
+
+ThreadingPluginKit is the host's dynamic binary contract. The examples statically link their own
+ThreadingDesignKit (and Device Logs its parser), so an externally built plugin does not depend on the host's private
 Swift ABI. The host still checks the plugin's declared API generation and requires explicit
 approval of each third-party native build. See the included GPL-3.0 `LICENSE`; vendored libraries
 retain their own license files.

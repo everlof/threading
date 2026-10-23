@@ -32,10 +32,12 @@ class PluginSDKExportTests(unittest.TestCase):
             self.assertEqual((destination / shared).read_bytes(), (ROOT / shared).read_bytes())
 
             manifest = json.loads((destination / "SDK_VERSION.json").read_text())
-            self.assertEqual(manifest["pluginAPIVersion"], 6)
+            self.assertEqual(manifest["pluginAPIVersion"], 7)
             self.assertIn("Plugins/DeviceLogsPlugin", manifest["packages"])
+            self.assertIn("Plugins/DevicesPlugin", manifest["packages"])
             self.assertTrue((destination / "LICENSE").is_file())
-            self.assertIn("PluginKit API v6", (destination / "README.md").read_text())
+            self.assertIn("PluginKit API v7", (destination / "README.md").read_text())
+            self.assertTrue((destination / "Plugins/DevicesPlugin/Sources/DevicesPlugin/SimulatorSnapshotsViewController.swift").is_file())
 
             for package in manifest["packages"]:
                 for swift_manifest in (destination / package).rglob("Package.swift"):
@@ -82,6 +84,10 @@ class PluginSDKExportTests(unittest.TestCase):
                 self.assertIn(b"--timestamp", recipe)
                 self.assertIn(
                     "ThreadingPluginSDK-0.0.0/Plugins/DeviceLogsPlugin/Sources/DeviceLogsPlugin/DeviceLogsPluginEntry.swift",
+                    source.namelist(),
+                )
+                self.assertIn(
+                    "ThreadingPluginSDK-0.0.0/Plugins/DevicesPlugin/Sources/DevicesPlugin/SimulatorSnapshotsViewController.swift",
                     source.namelist(),
                 )
             revision = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"],

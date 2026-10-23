@@ -179,6 +179,22 @@ app target no longer embeds a second copy. Its managed install offer uses the sa
 and Settings path as Device Logs and T3. The host verifies the exact managed build and nested
 helper, then launches the resolved version rather than a replaceable symlink. The device panes,
 Android backend and physical-iPhone code still live in the host and remain to be moved.
+The first public-API Simulator slice adds a read-only Snapshots pane to that same Devices bundle.
+It uses `PluginContext.simulatorServices` for bounded running-device discovery and exact-device
+PNG capture; approved external native plugins receive the same service. The broker enters the
+existing device transaction gate before `simctl` capture, so a plugin cannot wedge a live
+workspace by racing its private stream. This makes a usable external example, but does not yet
+remove the interactive workspace or backend from the app binary. Those are still the
+size-bearing Devices move.
+An unpublished Developer ID archive/export on 2026-10-23 passed deep signature and helper
+entitlement checks. The dry-run export retains all four bundles and measured **104.70 MB on disk /
+42.90 MB compressed**; its size ratchet failed because the reviewed baseline predates the new
+embedded Proxy bundle. A copy pruned with `native_plugin_staging.py` against the export's exact
+staged bundle set was re-signed, passed deep signature verification and the size ratchet, and
+measured **100.32 MB / 41.27 MB**. It was not notarized or published, and the 2026-10-23 source is
+not a matched comparison with the earlier 99.95 MB / 41.11 MB probe. The separately built Devices
+bundle from the public SDK recipe also loaded through the native pane host; live PNG capture on a
+booted Simulator was not verified because CoreSimulator discovery did not answer during the probe.
 
 The network proxy's portable helper and certificate setup script now build into
 `ProxyPlugin.bundle`. The app's direct copies are removed. The host verifies the signed managed

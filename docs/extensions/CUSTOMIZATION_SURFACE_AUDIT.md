@@ -715,6 +715,13 @@ The window owns reuse,
 movement and selection when that route is invoked. The registration gives no new
 capability to safe extensions and grants no execution authority from a saved route.
 
+**Simulator Snapshots in the Devices native plugin** is a separate read-only pane, not a
+replacement for the host's interactive Simulator workspace. Its public PluginKit broker lists
+already running iOS Simulators with a 64-device presentation cap and captures one bounded PNG
+after host identity revalidation. Threading owns CoreSimulator commands, the exact-device
+transaction gate, boot leases, input consent and direct-helper admission. An approved external
+native plugin receives the same snapshot broker; a safe extension receives no new device power.
+
 **Paged Settings navigation for large extension catalogues** extends the existing host-owned
 Settings shell. Extensions still contribute pages and fields through their existing semantic
 settings declarations; they cannot replace the sidebar, select a page, change the 48-row

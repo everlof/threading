@@ -16,7 +16,7 @@ Swift source file, an optional metadata plist, and one build command.
 Threading's bundled native plugins additionally link `ThreadingDesignKit` so their rows are drawn
 by the same components as the rest of the window. Release builds attach
 `ThreadingPluginSDK-<version>.zip` beside the app: it contains this package, a standalone
-DesignKit source snapshot, its dependencies, and Device Logs as a buildable example. The snapshot
+DesignKit source snapshot, its dependencies, and Device Logs and Devices as buildable examples. The snapshot
 resolves DesignKit's links into the application source, so it builds without this repository.
 Keep the SDK version matched to the host release; DesignKit is statically linked into the plugin
 and has no stable binary ABI. Plugins with their own components can use `PluginTheme` instead:
@@ -31,7 +31,7 @@ import ThreadingPluginKit
 
 @objc(MyPlugin)
 public final class MyPlugin: NSObject, ThreadingNativePlugin {
-    public static let pluginAPIVersion = 6
+    public static let pluginAPIVersion = 7
     public var pluginIdentifier: String { "com.example.myplugin" }
 
     public override required init() { super.init() }
@@ -67,6 +67,18 @@ Call them from a bounded worker, then move UI updates to the main actor. The lin
 run off main. A host may omit the service; handle `nil` before requesting an operation.
 `Examples/HelloPanePlugin` compiles against the optional service without
 depending on any private host package.
+
+### Running iOS Simulator snapshots
+
+Version 7 adds `PluginContext.simulatorServices` to every approved native pane plugin. The
+read-only broker lists at most 64 already running iOS Simulators, reporting how many were omitted,
+and captures a bounded PNG from one exact booted device. It never boots a device, sends input,
+installs an app or exposes the private Simulator helper. A snapshot suspends Threading's direct
+viewer of that same device for the public CoreSimulator transaction and resumes it afterward.
+Both calls are asynchronous and keep process, file and image work off the main actor. A plugin
+should decode the PNG on a worker before displaying it. `Plugins/DevicesPlugin` in the SDK archive
+is a complete pane using only this public service and shared DesignKit controls. Handle a `nil`
+service when loaded by an older host.
 
 ### Pane sections and commands
 
@@ -182,6 +194,10 @@ Version 6 adds the optional `PluginDeviceServices` reference in `PluginContext`.
 calls this service declares version 6 so an older host refuses it before the getter is called.
 The host still loads v3–v5 plugins, and the original context initializer remains available to
 older code.
+
+Version 7 adds the optional `PluginSimulatorServices` reference in `PluginContext`. A plugin
+that calls it declares version 7; older hosts refuse that plugin before the getter is called.
+The host still loads v3–v6 plugins.
 
 The plugin's `pluginAPIVersion` must be a numeric literal for the SDK generation it was compiled
 against. Do not implement it by returning `ThreadingPluginAPI.version`: installed plugins use the

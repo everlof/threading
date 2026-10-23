@@ -106,11 +106,18 @@ struct NativePluginManagedOffer: Sendable {
         identifier: "codes.threading.plugin.devices",
         bundleName: "DevicesPlugin.bundle",
         nameKey: "Devices",
-        summaryKey: "iOS Simulator live control",
+        summaryKey: "iOS Simulator control and snapshots",
         approximateDownloadSize: "0.3 MB",
         showsGenericPaneCommand: false,
-        paneSections: [],
-        paneRoutes: []
+        paneSections: [
+            .init(identifier: "snapshots", titleKey: "Simulator Snapshots",
+                command: .init(id: "panel.simulatorSnapshots", titleKey: "Simulator snapshots",
+                    symbol: "camera.viewfinder"))
+        ],
+        paneRoutes: [
+            .init(identifier: "from-device", section: "snapshots", placement: .panel,
+                context: .selectedDevice)
+        ]
     )
 
     static let t3Navigator = Self(

@@ -433,7 +433,8 @@ final class NativePluginPaneViewController: NSViewController {
         arguments.merge(activationArguments) { _, activation in activation }
         return PluginContext(
             theme: NativePluginCatalog.theme(), arguments: arguments,
-            deviceServices: NativePluginDeviceServices.shared
+            deviceServices: NativePluginDeviceServices.shared,
+            simulatorServices: NativePluginSimulatorServices.shared
         )
     }
 

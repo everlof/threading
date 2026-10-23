@@ -27,6 +27,11 @@ the Mac control hierarchy. Hard and soft bevel selection and drawing remain in `
 `ThreadingDesignKit` links both sources through its existing shared-source symlink boundary.
 This seam shares flat drawing, not control interaction or complete theme support.
 
+`ThemedBitmapView` is the non-interactive image canvas shared with native plugins. It fits one
+bitmap in the pane's assigned rectangle, claims no intrinsic width from the image's pixels and
+exposes the image as one accessible element. A snapshot pane can therefore display a full device
+frame without turning its size into a split-view width request or inventing a separate control.
+
 An edge-to-edge embedded plain `ThemedTableView` can opt its sole column into fitting its own
 bounds with `soleColumnFillsBoundsExactly`. AppKit's `sizeLastColumnToFit()` uses the containing
 view's width and can enlarge a table through its Auto Layout margins: a 600pt file table inset in

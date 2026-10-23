@@ -334,7 +334,7 @@ final class PluginContractTests: XCTestCase {
     /// V6 adds callable device services. A new host can still run a v3 pane plugin, while an
     /// older host refuses a newer plugin before it calls a service the host does not have.
     func testTheAPIVersionCompatibilityWindowPreservesV3PanePlugins() {
-        XCTAssertEqual(ThreadingPluginAPI.version, 6)
+        XCTAssertEqual(ThreadingPluginAPI.version, 7)
         XCTAssertEqual(ThreadingPluginAPI.minimumSupportedVersion, 3)
         XCTAssertFalse(ThreadingPluginAPI.supports(2))
         XCTAssertTrue(ThreadingPluginAPI.supports(3))

@@ -8,7 +8,7 @@ import ThreadingPluginKit
 public final class ProxyPlugin: NSObject, ThreadingNativePlugin {
     public override required init() { super.init() }
 
-    public static let pluginAPIVersion = 5
+    public static let pluginAPIVersion = 7
 
     public var pluginIdentifier: String { "codes.threading.plugin.proxy" }
 

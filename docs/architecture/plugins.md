@@ -244,6 +244,14 @@ stable installed URL.
 Devices carries the separately signed Simulator helper. Its host route verifies the managed
 receipt and nested code before launching the helper from the resolved version path; the app's
 direct helper copy is removed. A missing Devices bundle leaves the public screenshot fallback.
+Devices also declares a restorable Simulator Snapshots pane and a `selected-device` route through
+the same public pane metadata as an external plugin. It calls
+`PluginContext.simulatorServices`: a bounded catalogue of already running iOS Simulators and
+one exact-device PNG capture. The host checks the identity again and quiesces any live viewer
+through `SimulatorDeviceTransactions` while the public `simctl` capture runs. This is a read-only
+slice; the interactive workspace, leases, input consent and agent tools remain in the host.
+The exported SDK includes the Devices source so another author can build this pane without the
+application checkout or the first-party private helper.
 Proxy carries the separately signed portable `threading-proxyd` helper and certificate setup
 script. The host verifies its managed receipt and both signatures before a capture launch, pins
 the resolved version path, and reports the install action when the bundle is absent. Capture
@@ -866,12 +874,17 @@ that hardware test.
 `ThreadingPluginKit` remains independently copyable. `PluginKitPublishabilityTests` checks that
 the contract package has no escaping symlink, path dependency or private import. The release
 pipeline now also prepares `ThreadingPluginSDK-<version>.zip` as an asset beside the app. It carries
-PluginKit, DesignKit, their package dependencies and Device Logs as a worked native example.
+PluginKit, DesignKit, their package dependencies, Device Logs and the read-only Devices pane as
+worked native examples.
 `scripts/export_plugin_sdk.py` resolves DesignKit's source links into ordinary files, preserves
 the relative SwiftPM package layout and records the API version and source revision. The release
 asset has not yet been uploaded by a real tagged build. An isolated export compiled and ran Device
 Logs' broker test outside this checkout, and the opt-in host parity test built and loaded Device
 Logs from a locally generated copy of the exact SDK zip format.
+The Devices example also built from an isolated SDK source export using the public bundle recipe;
+its signed output passed signature validation and loaded into the native pane host with the
+Simulator Snapshots section and shared bitmap component. The host supplied the same public
+`PluginContext.simulatorServices` contract it gives any approved native pane.
 
 On 2026-10-23 a private draft staging release accepted an SDK zip from the uncommitted worktree.
 The downloaded bytes matched the upload, every source file matched the checkout, and one focused
