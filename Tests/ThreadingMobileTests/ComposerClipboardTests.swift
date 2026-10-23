@@ -244,6 +244,162 @@ final class ComposerTextViewPasteTests: XCTestCase {
         )
     }
 
+    func testNewSessionDraftDefersSubmissionKeyboardDismissalUntilAfterRendering() async throws {
+        try await assertDraftKeyboardDismissal(isEnabled: false)
+    }
+
+    func testNewSessionDraftDefersFocusOnlyDismissalUntilAfterRendering() async throws {
+        try await assertDraftKeyboardDismissal(isEnabled: true)
+    }
+
+    func testNewSessionDraftUsesLatestInputStateAcrossRapidUpdates() async {
+        let input = DraftInputState()
+        let editor = input.editor(isEnabled: true)
+        let coordinator = editor.makeCoordinator()
+        let view = IntrinsicTextView()
+        view.delegate = coordinator
+        let controller = UIViewController()
+        controller.view.addSubview(view)
+        let window = makeWindow(rootViewController: controller, size: CGSize(width: 390, height: 844))
+        defer { window.isHidden = true }
+
+        for index in 0..<1_000 {
+            input.isFocused = index.isMultiple(of: 2)
+            coordinator.updateInputState(for: view, editor: input.editor(isEnabled: true))
+        }
+        // A stale focus request must not reopen the keyboard once submission disables input,
+        // even if a chooser left the focus binding set.
+        input.isFocused = true
+        coordinator.updateInputState(for: view, editor: input.editor(isEnabled: false))
+        XCTAssertTrue(view.isEditable)
+        let settled = await draftInputSettled { !view.isEditable }
+        XCTAssertTrue(settled)
+        XCTAssertFalse(view.isFirstResponder)
+        XCTAssertTrue(input.focusPublications.isEmpty)
+    }
+
+    func testDismantlingNewSessionDraftCancelsPendingInputChanges() async throws {
+        let input = DraftInputState()
+        let editor = input.editor(isEnabled: false)
+        let coordinator = editor.makeCoordinator()
+        let view = IntrinsicTextView()
+        view.delegate = coordinator
+        coordinator.updateInputState(for: view, editor: editor)
+
+        SessionDraftPromptEditor.dismantleUIView(view, coordinator: coordinator)
+        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertTrue(view.isEditable, "a dismantled editor must not apply a queued input change")
+        XCTAssertNil(view.delegate)
+        XCTAssertTrue(input.focusPublications.isEmpty)
+    }
+
+    func testStartingSessionFromShippingDraftDismissesKeyboardAndOpensChat() async throws {
+        let restoreAccessibility = try MobileAccessibilityTestRuntime.enableAutomation()
+        defer { restoreAccessibility() }
+        let suite = "DraftKeyboardSubmissionTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let continuity = MobileSessionContinuityStore(defaults: defaults)
+        let model = RemoteAppModel(continuity: continuity)
+        model.startDemo()
+        let draft = MobileSessionDraft()
+        let screen = NavigationStack {
+            SessionDraftView(draft: draft)
+        }
+        .environmentObject(model)
+        .environmentObject(continuity)
+        .environmentObject(MobileTerminalKeyboardStore())
+        .environmentObject(RemoteNotificationManager())
+        .mobileTheme(RemoteThemePalette(nil))
+        let window = makeWindow(
+            hosting: UIHostingController(rootView: screen),
+            size: CGSize(width: 390, height: 844)
+        )
+        defer { window.isHidden = true }
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        XCTAssertTrue(textView.becomeFirstResponder())
+        textView.insertText(Fixture.existingDraft)
+        let ready = await draftInputSettled {
+            MobileAccessibilityTestRuntime.element(
+                labelled: MobileL10n.string("Start session"), in: window
+            ).map { !$0.accessibilityTraits.contains(.notEnabled) } == true
+        }
+        XCTAssertTrue(ready)
+        XCTAssertTrue(textView.isFirstResponder)
+        let start = try XCTUnwrap(MobileAccessibilityTestRuntime.element(
+            labelled: MobileL10n.string("Start session"), in: window
+        ))
+        XCTAssertTrue(start.accessibilityActivate())
+
+        let opened = await draftInputSettled {
+            model.sessionID(for: .draft(draft)) != nil && !textView.isFirstResponder
+        }
+        XCTAssertTrue(opened, "Start must finish its keyboard transition and open the created chat")
+    }
+
+    private func assertDraftKeyboardDismissal(isEnabled: Bool) async throws {
+        let input = DraftInputState()
+        let host = UIHostingController(rootView: input.editor(isEnabled: true))
+        let window = makeWindow(hosting: host, size: CGSize(width: 390, height: 844))
+        defer { window.isHidden = true }
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        XCTAssertTrue(textView.becomeFirstResponder())
+        XCTAssertTrue(textView.isFirstResponder)
+
+        // This is Start's state change, delivered through the shipping representable. Layout
+        // must finish before UIKit dismisses the keyboard and lays out the SwiftUI host again.
+        input.isFocused = false
+        host.rootView = input.editor(isEnabled: isEnabled)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        XCTAssertTrue(descendants(of: IntrinsicTextView.self, in: window).first === textView)
+        XCTAssertTrue(textView.isFirstResponder, "keyboard dismissal re-entered SwiftUI rendering")
+        XCTAssertTrue(textView.isEditable, "editability changed inside SwiftUI rendering")
+
+        let settled = await draftInputSettled {
+            !textView.isFirstResponder && textView.isEditable == isEnabled
+        }
+        XCTAssertTrue(settled)
+        XCTAssertFalse(input.isFocused)
+        XCTAssertEqual(textView.text, Fixture.existingDraft)
+    }
+
+    private func draftInputSettled(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
+    @MainActor
+    private final class DraftInputState {
+        var text = Fixture.existingDraft
+        var isFocused = false
+        var isOverflowing = false
+        var focusPublications: [Bool] = []
+
+        func editor(isEnabled: Bool) -> SessionDraftPromptEditor {
+            SessionDraftPromptEditor(
+                text: Binding(get: { self.text }, set: { self.text = $0 }),
+                isFocused: Binding(get: { self.isFocused }, set: {
+                    self.isFocused = $0
+                    self.focusPublications.append($0)
+                }),
+                isOverflowing: Binding(get: { self.isOverflowing }, set: { self.isOverflowing = $0 }),
+                isEnabled: isEnabled,
+                theme: RemoteThemePalette(nil),
+                offersFiles: { false },
+                pasteFiles: { false },
+                firstLineLeadingAccessoryWidth: 0,
+                firstLineTrailingAccessoryWidth: 0,
+                firstLineAccessoryHeight: 0,
+                firstLineAccessoriesInline: true
+            )
+        }
+    }
+
     func testCatchUpHeaderStaysBelowNavigationAndOpensReadingActions() throws {
         let fixture = try showCatchUp(themeID: nil, lastSeenRowID: "seen")
         defer { fixture.window.isHidden = true }

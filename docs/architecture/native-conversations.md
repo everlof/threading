@@ -1395,6 +1395,18 @@ that render may not reapply `isEditable`: a held system Backspace is a sequence 
 keyboard's repeat. Threading does not implement its own deletion timer or string indexing; UIKit
 continues to own marked text and composed-character deletion.
 
+The SwiftUI new-session prompt also defers **changed** editability and first-responder requests
+until its representable update has returned. Disabling a focused `UITextView` resigns first
+responder synchronously; UIKit's keyboard tracking can then lay out the SwiftUI host inside the
+AttributeGraph transaction already updating that editor. The physical-iPhone watchdog report on
+2026-10-23 captured exactly that nested stack in `SessionDraftPromptEditor.updateUIView`.
+Its coordinator refreshes the current bindings and coalesces input requests into one main-actor
+task. The task reads the latest focus and enabled state, dismisses before disabling, and never
+focuses disabled or detached input. Dismantling cancels the task and disconnects delegate callbacks
+without publishing during SwiftUI teardown. Keyboard ownership remains host-owned; themes still
+only supply the editor's material. `ComposerTextViewPasteTests` covers deferred dismissal,
+superseded requests, dismantling and Start through the shipping draft screen.
+
 Phone terminal keys and native-conversation buttons share one `MobileButtonFeedback`: a light
 `UIImpactFeedbackGenerator` impact at intensity 0.85. The UIKit adapter prepares that one generator
 on touch-down and fires only on the control's successful semantic activation—touch-up-inside for

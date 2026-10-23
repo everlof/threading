@@ -4,6 +4,31 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## iOS draft keyboard re-entrancy — 2026-10-23
+
+A physical iPhone report captured `SessionDraftPromptEditor.updateUIView` changing `isEditable`
+while its text view was first responder. UIKit synchronously resigned input, updated keyboard
+tracking and laid out the SwiftUI host, re-entering AttributeGraph before the original view update
+returned. The reported termination was `0x8BADF00D`, `process-exit`, after the five-second graceful
+exit deadline. This is an observed blocked stack, not a measurement of the whole preceding hang.
+
+The editor coordinator now owns deferred focus and editability reconciliation. The normal case is
+one editor with occasional focus/availability changes amid frequent text and keyboard renders;
+the regression stress case submits 1,000 input-state updates before the next main-actor turn.
+Request handling is O(1), retains one current state and at most one pending task, and does no
+text scan, file work or additional layout. Dismantling cancels the task. Exact current focus,
+disabled-input behavior and the draft text remain the correctness boundaries.
+
+`ComposerTextViewPasteTests` covers the shipping representable's render boundary, superseded input
+requests and cancellation, plus Start through `SessionDraftView` with a focused editor. These
+tests isolate the unsafe synchronous transition; they do not establish a physical-device latency
+improvement or reproduce every condition of the iOS 27 watchdog report.
+
+The ordinary arm64 iOS Simulator `build-for-testing` and mobile-theme/main-actor-latency checks
+passed. Runtime tests and rendered keyboard evidence remain unverified: the existing simulator
+test lane stalled on application launch, and a fresh disposable device then stalled in system
+data migration before the test host could run. The fix has not been installed on the iPhone.
+
 ## Standard Xcode cache discovery — 2026-10-14
 
 The previous storage scan did not visit the standard DerivedData location. Its expected input

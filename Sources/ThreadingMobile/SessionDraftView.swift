@@ -2019,6 +2019,7 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
     }
 
     func updateUIView(_ view: IntrinsicTextView, context: Context) {
+        context.coordinator.updateInputState(for: view, editor: self)
         if view.text != text {
             view.text = text
             view.invalidateIntrinsicContentSize()
@@ -2028,7 +2029,6 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         view.textContainerInset = SessionDraftPromptMetrics.textInsets(for: font)
         view.textColor = theme.uiLabel
         view.tintColor = theme.uiAccent
-        view.setEditableIfNeeded(isEnabled)
         if !view.isSelectable {
             view.isSelectable = true
         }
@@ -2045,15 +2045,12 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         if view.keyboardAppearance != keyboardAppearance {
             view.keyboardAppearance = keyboardAppearance
         }
+    }
 
-        if isFocused, !view.isFirstResponder {
-            Task { @MainActor [weak view] in
-                guard let view, isFocused, view.window != nil else { return }
-                view.becomeFirstResponder()
-            }
-        } else if !isFocused, view.isFirstResponder {
-            view.resignFirstResponder()
-        }
+    static func dismantleUIView(_ view: IntrinsicTextView, coordinator: Coordinator) {
+        coordinator.detach()
+        view.delegate = nil
+        view.onFirstLineAccessoryOverflowChange = nil
     }
 
     /// Measured once per distinct input, not once per layout pass. While the action row folds
@@ -2109,6 +2106,9 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         private var text: Binding<String>
         private var isFocused: Binding<Bool>
         private var isOverflowing: Binding<Bool>
+        private weak var textView: IntrinsicTextView?
+        private var isEnabled = true
+        private var inputUpdateTask: Task<Void, Never>?
 
         init(
             text: Binding<String>,
@@ -2118,6 +2118,46 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
             self.text = text
             self.isFocused = isFocused
             self.isOverflowing = isOverflowing
+        }
+
+        /// Changing editability can resign first responder, which synchronously lays out the
+        /// SwiftUI host for the keyboard. Neither operation may run inside `updateUIView`:
+        /// that re-enters the AttributeGraph transaction that is updating this editor.
+        /// One pending task reads the latest bindings instead of replaying stale focus requests.
+        func updateInputState(for view: IntrinsicTextView, editor: SessionDraftPromptEditor) {
+            text = editor.$text
+            isFocused = editor.$isFocused
+            isOverflowing = editor.$isOverflowing
+            textView = view
+            isEnabled = editor.isEnabled
+            let shouldFocus = isEnabled && isFocused.wrappedValue
+            guard view.isEditable != isEnabled || view.isFirstResponder != shouldFocus else { return }
+            guard inputUpdateTask == nil else { return }
+            inputUpdateTask = Task { @MainActor [weak self] in
+                guard !Task.isCancelled, let self else { return }
+                self.inputUpdateTask = nil
+                self.applyInputState()
+            }
+        }
+
+        func detach() {
+            inputUpdateTask?.cancel()
+            inputUpdateTask = nil
+            textView = nil
+        }
+
+        private func applyInputState() {
+            guard let view = textView else { return }
+            let shouldFocus = isEnabled && isFocused.wrappedValue
+            if !shouldFocus, view.isFirstResponder {
+                view.resignFirstResponder()
+            }
+            guard textView === view else { return }
+            view.setEditableIfNeeded(isEnabled)
+            if textView === view, isEnabled, isFocused.wrappedValue,
+               !view.isFirstResponder, view.window != nil {
+                view.becomeFirstResponder()
+            }
         }
 
         func reportAccessoryOverflow(_ overflows: Bool) {
@@ -2137,10 +2177,12 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
+            guard !isFocused.wrappedValue else { return }
             isFocused.wrappedValue = true
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
+            guard isFocused.wrappedValue else { return }
             isFocused.wrappedValue = false
         }
     }
