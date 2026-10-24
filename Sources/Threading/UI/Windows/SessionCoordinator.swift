@@ -259,8 +259,11 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// Ends a session's agent and releases its terminal, keeping the row in the sidebar to be
     /// resumed. Cmd+W and the row's `⋯` menu both land here so they cannot drift — the menu
     /// used to discard the process directly, skipping the confirmation Cmd+W asked for.
-    func closeSession(_ sessionID: SessionID) {
-        guard confirmCloseIfRunning(sessionID: sessionID) else { return }
+    ///
+    /// `confirming: false` is the sidebar menu's Option alternate, "Close Session Without
+    /// Asking": the held key and the title it produced stand in for the question.
+    func closeSession(_ sessionID: SessionID, confirming: Bool = true) {
+        guard !confirming || confirmCloseIfRunning(sessionID: sessionID) else { return }
 
         container.closeTerminal(for: sessionID)
         sidebar.refreshRows()

@@ -2399,14 +2399,20 @@ extension ProjectSidebarViewController {
     /// Both callers are an explicit "delete this row" — the row menu and the outline's Remove.
     /// Removing a *project* does not come through here; it discards its sessions itself, under
     /// its own single confirmation, so this cannot ask a second time per session.
-    func removeSession(_ sessionID: SessionID) {
+    ///
+    /// `confirming: false` is the menu's Option alternate, "Delete Session Without Asking": the
+    /// held key and the title it produced are the confirmation, so asking again would make the
+    /// alternate a second route to the same dialog.
+    func removeSession(_ sessionID: SessionID, confirming: Bool = true) {
         guard let session = projectStore.session(withID: sessionID) else { return }
 
-        let request = Self.deleteConfirmation(
-            for: session,
-            isRunning: AgentRuntime.shared.isRunning(sessionID: sessionID)
-        )
-        guard ConfirmationAlert.ask(request) else { return }
+        if confirming {
+            let request = Self.deleteConfirmation(
+                for: session,
+                isRunning: AgentRuntime.shared.isRunning(sessionID: sessionID)
+            )
+            guard ConfirmationAlert.ask(request) else { return }
+        }
 
         guard projectStore.removeSession(id: sessionID) == .applied else {
             presentToast(ToastRequest(
@@ -3369,20 +3375,23 @@ private extension ProjectSidebarViewController {
         }
     }
 
-    private func removeProject(_ projectID: ProjectID) {
+    /// `confirming: false` is the menu's Option alternate — see `removeSession(_:confirming:)`.
+    private func removeProject(_ projectID: ProjectID, confirming: Bool = true) {
         guard let project = projectStore.project(withID: projectID) else { return }
 
-        let runningSessionCount = project.sessions.filter {
-            AgentRuntime.shared.isRunning(sessionID: $0.id)
-        }.count
-        let runningTerminalCount = project.terminals.filter {
-            ProjectTerminalRuntime.shared.isRunning(terminalID: $0.id)
-        }.count
-        let runningCount = runningSessionCount + runningTerminalCount
-
-        let request = Self.removeProjectConfirmation(for: project, runningCount: runningCount)
-
-        guard ConfirmationAlert.ask(request) else { return }
+        if confirming {
+            let runningSessionCount = project.sessions.filter {
+                AgentRuntime.shared.isRunning(sessionID: $0.id)
+            }.count
+            let runningTerminalCount = project.terminals.filter {
+                ProjectTerminalRuntime.shared.isRunning(terminalID: $0.id)
+            }.count
+            let request = Self.removeProjectConfirmation(
+                for: project,
+                runningCount: runningSessionCount + runningTerminalCount
+            )
+            guard ConfirmationAlert.ask(request) else { return }
+        }
 
         guard projectStore.removeProject(id: projectID) == .applied else {
             reload()
@@ -4639,8 +4648,9 @@ extension ProjectSidebarViewController {
     }
 
     /// Everything a project offers — its right-click and its `⋯` button alike. Sessions are
-    /// started by selecting the project, which opens its composer.
-    func projectMenuEntries(row: Int) -> [ThemedMenuEntry] {
+    /// started by selecting the project, which opens its composer. `pasteboard` is where Copy
+    /// Path writes, injectable for the same reason `branchHeadingMenuEntries` takes one.
+    func projectMenuEntries(row: Int, pasteboard: NSPasteboard = .general) -> [ThemedMenuEntry] {
         let projectID = (outlineView.item(atRow: row) as? ProjectNode)?.projectID
         let optionValues = NativeSidebarPipelineOptions.current
 
@@ -4673,11 +4683,23 @@ extension ProjectSidebarViewController {
                 }
             )))
         }
-        entries.append(.item(ThemedMenuItem(
+        var reveal = ThemedMenuItem(
             title: L10n.string("Reveal in Finder"),
             image: ThemedMenuIcon.symbol("magnifyingglass"),
             onChoose: pinnedAction(row) { $0.revealInFinderClicked() }
-        )))
+        )
+        // Finder's own Option alternate beside its reveal: the path, for pasting elsewhere.
+        // Resolved on the click, so a project moved under the open menu copies where it is now.
+        if let projectID {
+            reveal.alternate = ThemedMenuAlternate(
+                title: L10n.string("Copy Path"),
+                image: ThemedMenuIcon.symbol("doc.on.doc")
+            ) { [weak self] in
+                guard let project = self?.projectStore.project(withID: projectID) else { return }
+                Self.copyToPasteboard(project.folderPath, pasteboard: pasteboard)
+            }
+        }
+        entries.append(.item(reveal))
         entries.append(projectIconEntry(row: row))
         if let projectID {
             entries.append(.item(ThemedMenuItem(
@@ -4728,11 +4750,19 @@ extension ProjectSidebarViewController {
             entries.append(loneBranchHeadingsEntry(optionValues))
         }
         entries.append(.separator)
-        entries.append(.item(ThemedMenuItem(
+        var remove = ThemedMenuItem(
             title: L10n.string("Remove Project"),
             image: ThemedMenuIcon.symbol("minus.circle"),
             onChoose: pinnedAction(row) { $0.removeClicked() }
-        )))
+        )
+        if let projectID {
+            remove.alternate = ThemedMenuAlternate(
+                title: L10n.string("Remove Project Without Asking")
+            ) { [weak self] in
+                self?.removeProject(projectID, confirming: false)
+            }
+        }
+        entries.append(.item(remove))
 
         if let projectID {
             entries.append(contentsOf: extensionCommandEntries(
@@ -5225,9 +5255,11 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
         setArchived archived: Bool,
         for sessionID: SessionID
     )
+    /// `confirming: false` skips the running-session question — the menu's Option alternate.
     func projectSidebar(
         _ sidebar: ProjectSidebarViewController,
-        closeSession sessionID: SessionID
+        closeSession sessionID: SessionID,
+        confirming: Bool
     )
     func projectSidebar(_ sidebar: ProjectSidebarViewController, restartTerminal sessionID: SessionID)
     func projectSidebar(

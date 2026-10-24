@@ -630,12 +630,25 @@ menu of what the project can start: **New Chat…** or **New Terminal**. (Clicki
 row itself opens the chat composer directly, so a new chat never needs the menu.) The **⋯**
 opens the project's actions, also available on **right-click**:
 - Rename Project…
-- Reveal in Finder
+- Reveal in Finder — hold **Option (⌥)** and it becomes **Copy Path**
 - Project Icon — see [Project icons](#project-icons)
 - Group Sessions by Branch (checked when on)
 - Headings for Lone Branches (shown while grouping is on)
 - Remove Project — deletes the project and every chat in it from Threading, after asking. Each
-  agent's own transcript stays on disk, so a chat can be imported again
+  agent's own transcript stays on disk, so a chat can be imported again. Hold **Option (⌥)** and
+  it becomes **Remove Project Without Asking**
+
+**Option alternates.** Holding **⌥** while a project or session menu is open renames some rows to a
+faster act, the way Finder's menus do: the row says exactly what pressing it will do, and letting
+go of the key puts it back. It works when ⌥ is already held as you right-click, with **Return**
+while the key is down, and from VoiceOver as an action on the row. The alternates are:
+
+| Row | With ⌥ held |
+|---|---|
+| Reveal in Finder (project) | Copy Path |
+| Remove Project | Remove Project Without Asking |
+| Close Session | Close Session Without Asking |
+| Delete Session | Delete Session Without Asking |
 
 Click the disclosure triangle to collapse a project. Expansion state is remembered, and a
 collapsed project shows how many chats and terminals it is hiding as a count at its trailing edge.
@@ -1557,6 +1570,8 @@ editor configured on that host.
 - Right-click > **Close Session**: ends the agent, leaving the session dormant and resumable
 - Right-click > **Delete Session**: removes it from the sidebar entirely, after asking — the
   agent's own transcript stays on disk and can be imported again, which is what the sheet says
+- Hold **⌥** with either menu open for **Close Session Without Asking** or **Delete Session
+  Without Asking** — see [Option alternates](#managing)
 
 ### Confirmations
 When a prompt is open, clicking its parent window brings Threading and the prompt forward,
@@ -1614,7 +1629,9 @@ Nothing else offers the checkbox. Anything that deletes for good — removing a 
 **deleting a session**, deleting an archived session or a theme, reclaiming build directories,
 clearing website data, running an extension command marked destructive, ending a Threading that
 has stopped responding or the agent processes a crashed one left behind — asks every time, and
-puts **Return** on Cancel rather than on the action. So does anything that grants access outside Threading: a
+puts **Return** on Cancel rather than on the action. The one way past it is deliberate: holding
+**⌥** in the sidebar's project or session menu turns Remove Project and Delete Session into
+**…Without Asking** rows, whose names already say what they skip. So does anything that grants access outside Threading: a
 website for the browser, a tool call, an unreviewed extension, or a shared chat link. Those
 prompts have their own narrower memory instead — "Always Allow This Host" is one host,
 "Allow for This Session" is one tool in one chat, and both are revocable in Settings.

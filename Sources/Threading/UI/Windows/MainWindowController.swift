@@ -5667,8 +5667,12 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         sessionCoordinator.setArchived(archived, for: sessionID)
     }
 
-    func projectSidebar(_: ProjectSidebarViewController, closeSession sessionID: SessionID) {
-        sessionCoordinator.closeSession(sessionID)
+    func projectSidebar(
+        _: ProjectSidebarViewController,
+        closeSession sessionID: SessionID,
+        confirming: Bool
+    ) {
+        sessionCoordinator.closeSession(sessionID, confirming: confirming)
     }
 
     func projectSidebar(_: ProjectSidebarViewController, restartTerminal sessionID: SessionID) {

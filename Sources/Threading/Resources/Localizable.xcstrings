@@ -15669,6 +15669,17 @@
         }
       }
     },
+    "Close Session Without Asking" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng konversation utan att fråga"
+          }
+        }
+      }
+    },
     "Close Settings" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21114,6 +21125,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Radera konversation"
+          }
+        }
+      }
+    },
+    "Delete Session Without Asking" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radera konversation utan att fråga"
           }
         }
       }
@@ -46923,6 +46945,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ta bort projekt"
+          }
+        }
+      }
+    },
+    "Remove Project Without Asking" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort projekt utan att fråga"
           }
         }
       }

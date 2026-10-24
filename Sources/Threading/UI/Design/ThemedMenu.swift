@@ -131,6 +131,11 @@ public struct ThemedMenuItem {
     /// because it is a property of the *list* a row was put in — one caller builds the row and
     /// the list's owner decides that its rows can be auditioned.
     public var accessory: ThemedMenuAccessory?
+    /// What this row becomes while a modifier is held — the platform's alternate menu item.
+    /// See `ThemedMenuAlternate`. Set after construction like the accessory, and ignored on a
+    /// row that opens a submenu: a parent turning into an action under its own open panel would
+    /// leave that panel hanging off a row that no longer owns it.
+    public var alternate: ThemedMenuAlternate?
     public var representedValue: Any?
     public var isSelected: Bool
     public var isEnabled: Bool
@@ -265,6 +270,43 @@ public struct ThemedMenuItem {
         shortcut ?? keyEquivalent.map { KeyboardShortcut(key: $0, modifiers: .command) }
     }
 
+    /// The row as it reads while `modifiers` are held: its alternate when they name it exactly,
+    /// otherwise itself.
+    ///
+    /// Only the act changes. The name, the mark and the help are the alternate's, and the action
+    /// is its alone — a row that drew "Remove Without Asking" and then ran the asking remove would
+    /// be the one outcome worse than no alternate at all. Everything describing the *subject*
+    /// rather than the act — subtitle, readings, selection, enablement — stays the row's, so the
+    /// columns the panel reserved from the authored rows still line up. The shortcut goes: it is
+    /// the chord for the row's own action, and printing it beside a different one would be a lie.
+    public func resolved(holding modifiers: NSEvent.ModifierFlags) -> ThemedMenuItem {
+        guard showsAlternate(holding: modifiers), let alternate else { return self }
+        var shown = ThemedMenuItem(
+            title: alternate.title,
+            help: alternate.help,
+            subtitle: subtitle,
+            shortcut: nil,
+            keyEquivalent: nil,
+            image: alternate.image ?? image,
+            preview: preview,
+            representedValue: nil,
+            isSelected: isSelected,
+            isEnabled: isEnabled,
+            destination: .action(alternate.action)
+        )
+        if let subtitleSegments { shown.setSubtitle(subtitleSegments) }
+        shown.metrics = metrics
+        shown.trailingDetail = trailingDetail
+        shown.titleDetail = titleDetail
+        shown.accessory = accessory
+        return shown
+    }
+
+    /// Whether `modifiers` turn this row into its alternate.
+    public func showsAlternate(holding modifiers: NSEvent.ModifierFlags) -> Bool {
+        submenu == nil && alternate?.isTriggered(by: modifiers) == true
+    }
+
     /// Sets both halves of a styled subtitle at once: the runs the row draws, and the plain
     /// join every non-drawing consumer keeps — the tooltip, the filter, the measured width.
     /// One entry point rather than two properties, because the two drifting apart is a row
@@ -373,6 +415,57 @@ public struct ThemedMenuAccessory {
         self.symbolName = symbolName
         self.title = title
         self.action = action
+    }
+}
+
+/// The act a row offers instead while a modifier is held: the Option key's "Delete
+/// Immediately" under Finder's "Move to Trash".
+///
+/// It exists for the fast path a person already knows they want — removing without the
+/// confirmation, copying the path instead of revealing the folder — and costs nothing to anyone
+/// who does not: no row is added, and the panel looks exactly as it did until the key goes down.
+/// While it is held the row *says* the other act, so the press is never a surprise: the name a
+/// person reads is always the action they get.
+///
+/// Three rules, all of them the platform's:
+///
+/// - **The chord is exact.** ⌥ alone reveals an Option alternate; ⌥⇧ does not, so a menu can one
+///   day carry two without the larger chord also triggering the smaller one.
+/// - **The panel is measured for both titles**, so pressing the key never resizes the menu under
+///   the pointer.
+/// - **The keyboard and VoiceOver reach it too.** Holding the key while pressing Return chooses
+///   it, and the row offers it as an accessibility action, because a capability that needs a
+///   held key and a pointer together would be one most people could not use.
+public struct ThemedMenuAlternate {
+    /// The four keys a person chords with. Caps Lock, Fn and the numeric-pad bit ride along in
+    /// `modifierFlags` without anyone meaning them, so an exact comparison ignores them.
+    private static let chordModifiers: NSEvent.ModifierFlags = [.option, .shift, .control, .command]
+
+    public let title: String
+    public let modifiers: NSEvent.ModifierFlags
+    /// Nil keeps the row's own mark, which is usually right: the alternate acts on the same thing.
+    public var image: NSImage?
+    public var help: String?
+    public let action: () -> Void
+
+    public init(
+        title: String,
+        modifiers: NSEvent.ModifierFlags = .option,
+        image: NSImage? = nil,
+        help: String? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.modifiers = modifiers.intersection(Self.chordModifiers)
+        self.image = image
+        self.help = help
+        self.action = action
+    }
+
+    /// Whether `flags` are exactly this alternate's chord. An alternate with no modifier is never
+    /// shown: it would replace its row permanently, which is a different title, not an alternate.
+    public func isTriggered(by flags: NSEvent.ModifierFlags) -> Bool {
+        !modifiers.isEmpty && flags.intersection(Self.chordModifiers) == modifiers
     }
 }
 
@@ -823,6 +916,7 @@ private final class ThemedMenuSession: NSObject {
     private weak var previousInitialFirstResponder: NSView?
     private var focusRunLoopObserver: CFRunLoopObserver?
     private var keyEventMonitor: Any?
+    private var modifierMonitor: Any?
     private var heldPressMonitor: Any?
     /// Where the press that opened this menu went down, in window coordinates — what a release
     /// is measured against to tell a sweep from a click. Nil for a menu no press opened.
@@ -915,6 +1009,7 @@ private final class ThemedMenuSession: NSObject {
         overlay.animateIn()
         installFocusRunLoopObserver()
         installKeyEventMonitor()
+        installModifierMonitor()
         installHeldPressMonitor(opening: NSApp.currentEvent)
 
         // `willClose` joined the list when the roster became the session's owner: a session
@@ -1009,6 +1104,30 @@ private final class ThemedMenuSession: NSObject {
         guard let keyEventMonitor else { return }
         NSEvent.removeMonitor(keyEventMonitor)
         self.keyEventMonitor = nil
+    }
+
+    /// The held modifiers, for the rows that read differently under them (`ThemedMenuAlternate`).
+    ///
+    /// Read once at open as well as watched, because the key is often already down: a person
+    /// who wants the fast path holds Option and *then* right-clicks, and a menu that waited for
+    /// the next change would open showing the act they were deliberately avoiding. A monitor for
+    /// the same reason the key-down route is one — a first responder borrowed by a field editor
+    /// would otherwise take the change — and it passes every event on, since a modifier's state
+    /// belongs to the whole window rather than to the menu.
+    private func installModifierMonitor() {
+        overlay.modifiersChanged(NSEvent.modifierFlags)
+        modifierMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) {
+            [weak self, weak window] event in
+            guard let self, !self.isClosed, event.window === window else { return event }
+            self.overlay.modifiersChanged(event.modifierFlags)
+            return event
+        }
+    }
+
+    private func removeModifierMonitor() {
+        guard let modifierMonitor else { return }
+        NSEvent.removeMonitor(modifierMonitor)
+        self.modifierMonitor = nil
     }
 
     /// The press that opened this menu, for as long as it is held.
@@ -1160,6 +1279,7 @@ private final class ThemedMenuSession: NSObject {
             Self.open.remove(self)
             removeFocusRunLoopObserver()
             removeKeyEventMonitor()
+            removeModifierMonitor()
             removeHeldPressMonitor()
             NotificationCenter.default.removeObserver(self)
             if let window, window.initialFirstResponder === overlay {
@@ -1255,6 +1375,9 @@ private final class ThemedMenuOverlayView: ThemedControl {
     private var travelApex: NSPoint?
     private var travelDeadline: TimeInterval = 0
     private var pointerTrackingArea: NSTrackingArea?
+    /// The modifiers held right now, kept so a submenu opened mid-chord reads the same way as
+    /// the panel it hangs off.
+    private var heldModifiers: NSEvent.ModifierFlags = []
 
     /// What has been typed since the menu opened. Letters filter: matching rows keep their
     /// ink, the rest dim, and the highlight lands on the first match — the menu keeps its
@@ -1343,6 +1466,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
             self?.pointerHighlighted(columnIndex: index, entryIndex: entryIndex)
         }
         surface.onPressBegan = { [weak self] event in self?.onPressBegan?(event) }
+        surface.showAlternates(holding: heldModifiers)
         // A submenu is anchored to where its parent row was at open; a parent that scrolls
         // under it would leave the panel beside the wrong row, so scrolling closes deeper.
         surface.onScrolled = { [weak self] in
@@ -1659,6 +1783,19 @@ private final class ThemedMenuOverlayView: ThemedControl {
             } else {
                 super.keyDown(with: event)
             }
+        }
+    }
+
+    /// The held modifiers changed: every open panel re-reads its alternates. A typed filter is
+    /// asked again of the deepest panel, since the titles it matched against just changed.
+    func modifiersChanged(_ flags: NSEvent.ModifierFlags) {
+        guard !isTearingDown else { return }
+        heldModifiers = flags
+        for column in columns {
+            column.surface.showAlternates(holding: flags)
+        }
+        if !filterQuery.isEmpty, let column = columns.last {
+            column.surface.applyFilter(filterQuery)
         }
     }
 
@@ -2298,10 +2435,11 @@ public enum ThemedMenuMetrics {
 
     /// The image column is reserved only when some item actually carries an image. Reserving
     /// it always left an 18pt hole between checkmark and title in every icon-less menu.
+    /// An alternate's own mark counts, or holding its key would draw a title with no room for it.
     public static func hasImageColumn(_ entries: [ThemedMenuEntry]) -> Bool {
         entries.contains { entry in
             guard case .item(let item) = entry else { return false }
-            return item.image != nil
+            return item.image != nil || item.alternate?.image != nil
         }
     }
 
@@ -2770,9 +2908,14 @@ public enum ThemedMenuMetrics {
     ) -> CGFloat {
         let text = entries.compactMap { entry -> CGFloat? in
             guard case .item(let item) = entry else { return nil }
-            let title = ceil(titleLine(of: item).size(
-                withAttributes: [.font: titleFont]
-            ).width)
+            // Measured for the alternate too: a panel that grew when Option went down would move
+            // every row's trailing column under the pointer that is about to press one.
+            let titles = [item] + (item.alternate.map {
+                [item.resolved(holding: $0.modifiers)]
+            } ?? [])
+            let title = titles.map {
+                ceil(titleLine(of: $0).size(withAttributes: [.font: titleFont]).width)
+            }.max() ?? 0
             let subtitle = ceil((item.subtitle ?? "").size(
                 withAttributes: [.font: Design.Typography.detail()]
             ).width)
@@ -3106,6 +3249,14 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
         }
     }
 
+    /// Each row reads as its alternate while that alternate's chord is held, and as itself
+    /// otherwise. O(rows in this panel), on a key change rather than per frame.
+    func showAlternates(holding modifiers: NSEvent.ModifierFlags) {
+        for row in rows.values {
+            row.showAlternate(holding: modifiers)
+        }
+    }
+
     // MARK: - Filtering
 
     func applyFilter(_ query: String) {
@@ -3143,6 +3294,7 @@ public enum ThemedMenuReferenceFixture {
         size: NSSize,
         selectedEntryIndex: Int? = nil,
         highlightedEntryIndex: Int? = nil,
+        heldModifiers: NSEvent.ModifierFlags = [],
         onChoose: ((Int) -> Void)? = nil
     ) -> NSView {
         let surface = ThemedMenuSurfaceView(
@@ -3153,6 +3305,8 @@ public enum ThemedMenuReferenceFixture {
         if let onChoose {
             surface.onChoose = { index, _ in onChoose(index) }
         }
+        // A fixture has no keyboard; this is the state the session's modifier monitor sets.
+        surface.showAlternates(holding: heldModifiers)
         surface.highlight(highlightedEntryIndex, scrollIntoView: false)
         surface.layoutSubtreeIfNeeded()
         surface.needsDisplay = true
@@ -3478,7 +3632,12 @@ private enum ThemedMenuPanelArtwork {
 private final class ThemedMenuRowView: ThemedControl {
 
     let entryIndex: Int
-    let item: ThemedMenuItem
+    /// The row as its caller built it. `item` is what it says *now*, which differs only while an
+    /// alternate's chord is held — and every path that reads the row (choosing, filtering, the
+    /// tooltip, VoiceOver) reads `item`, so none of them can act on a name the row is not showing.
+    let authoredItem: ThemedMenuItem
+    private(set) var item: ThemedMenuItem
+    private(set) var showsAlternate = false
     let preferredHeight: CGFloat
 
     var onChoose: ((Int, ThemedMenuItem) -> Void)?
@@ -3591,6 +3750,7 @@ private final class ThemedMenuRowView: ThemedControl {
         trailingDetailWidth: CGFloat = 0
     ) {
         self.entryIndex = entryIndex
+        authoredItem = item
         self.item = item
         selected = isSelected
         self.checkColumn = checkColumn
@@ -3629,6 +3789,28 @@ private final class ThemedMenuRowView: ThemedControl {
                 ? item.subtitle
                 : item.spokenSummary
         }
+    }
+
+    // MARK: - Alternate
+
+    func showAlternate(holding modifiers: NSEvent.ModifierFlags) {
+        let showsAlternate = authoredItem.showsAlternate(holding: modifiers)
+        guard showsAlternate != self.showsAlternate else { return }
+        self.showsAlternate = showsAlternate
+        item = authoredItem.resolved(holding: modifiers)
+        updateToolTip()
+        needsDisplay = true
+        NSAccessibility.post(element: self, notification: .titleChanged)
+    }
+
+    /// Chooses the alternate whatever is held — the accessibility action's route, which no key
+    /// can reach.
+    @discardableResult
+    func performAlternate() -> Bool {
+        guard authoredItem.isEnabled, let alternate = authoredItem.alternate,
+              authoredItem.showsAlternate(holding: alternate.modifiers) else { return false }
+        onChoose?(entryIndex, authoredItem.resolved(holding: alternate.modifiers))
+        return true
     }
 
     // MARK: - Submenu
@@ -3955,13 +4137,24 @@ private final class ThemedMenuRowView: ThemedControl {
     /// platform's own answer for "this element can do a second thing", it is announced with the
     /// row rather than found by hunting inside it, and it reaches exactly the same code the
     /// pointer does.
+    ///
+    /// The alternate is offered the same way, and for a stronger reason: its only other route is
+    /// a held key, which VoiceOver's own keys are already chorded with. Offered only while the row
+    /// is not already showing it, since pressing the row does that.
     override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
-        guard item.isEnabled, let accessory = item.accessory else { return nil }
-        return [
-            NSAccessibilityCustomAction(name: accessory.title) { [weak self] in
+        guard item.isEnabled else { return nil }
+        var actions: [NSAccessibilityCustomAction] = []
+        if let accessory = item.accessory {
+            actions.append(NSAccessibilityCustomAction(name: accessory.title) { [weak self] in
                 self?.performAccessory() ?? false
-            }
-        ]
+            })
+        }
+        if !showsAlternate, let alternate = authoredItem.alternate, authoredItem.submenu == nil {
+            actions.append(NSAccessibilityCustomAction(name: alternate.title) { [weak self] in
+                self?.performAlternate() ?? false
+            })
+        }
+        return actions.isEmpty ? nil : actions
     }
 
     // MARK: - Drawing

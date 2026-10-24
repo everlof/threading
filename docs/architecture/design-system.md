@@ -832,6 +832,31 @@ inside a row safe, and each of them was arrived at from the thing that goes wron
   that opens no submenu — Space and Return are unavailable by definition, since both choose, which
   is the commitment being avoided.
 
+**A row can say a second act while a modifier is held.** `ThemedMenuAlternate` is the platform's
+alternate menu item — Finder's Delete Immediately under Move to Trash — set on a row as
+`item.alternate`. The open menu reads the held modifiers at open (a person who wants the fast path
+holds ⌥ *before* the right-click) and watches `flagsChanged` through a session monitor, for the same
+reason key-downs are a monitor: a borrowed first responder must not take the change. The rules:
+
+- **The name is the act.** The row keeps an authored item and a shown one, and every path that
+  reads it — choosing by key, release or press, the filter, the tooltip, VoiceOver — reads the
+  shown one, so nothing can run an act the row is not naming. The row's shortcut is dropped while
+  the alternate shows: the chord belongs to the row's own action.
+- **The chord is exact**, among ⌥⇧⌃⌘ only; Caps Lock and Fn ride along unasked. ⌥⇧ does not
+  reveal an ⌥ alternate, which keeps a larger chord free for a second one.
+- **The panel is measured for both names** (`ThemedMenuMetrics.width`, `hasImageColumn`), so the
+  key going down never resizes the menu under the pointer about to press.
+- **Ignored on a row that opens a submenu**: a parent turning into an action under its own open
+  panel would strand that panel.
+- **VoiceOver gets it as a custom action** on the row, because its own keys are chorded with the
+  same modifiers.
+
+An alternate that skips a confirmation — the sidebar's "Remove Project Without Asking", "Delete
+Session Without Asking", "Close Session Without Asking" — says so in its title. That title, read
+while holding the key, *is* the confirmation; the call site takes a `confirming: false` path
+rather than suppressing the `ConfirmationPrompt`, so the register's policy for every other route
+is unchanged. `ThemedMenuAlternateTests` and `SidebarMenuAlternateTests` hold both halves.
+
 **A surface role is translucent on purpose, and that purpose ends where live content begins.**
 `surface` is the base tone at 14%, which is what makes a pill read as a lift off the backdrop
 rather than as a patch stuck on it — right for a control on an empty stretch of chrome, wrong for

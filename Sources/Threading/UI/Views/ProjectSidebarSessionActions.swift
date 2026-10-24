@@ -868,7 +868,13 @@ extension ProjectSidebarViewController {
             entries.append(action(
                 L10n.string("Close Session"),
                 symbol: "stop.circle",
-                shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.closeSession)
+                shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.closeSession),
+                alternate: ThemedMenuAlternate(
+                    title: L10n.string("Close Session Without Asking")
+                ) { [weak self] in
+                    guard let self else { return }
+                    delegate?.projectSidebar(self, closeSession: sessionID, confirming: false)
+                }
             ) { [weak self] in
                 self?.closeSessionClicked()
             })
@@ -957,7 +963,15 @@ extension ProjectSidebarViewController {
         ) { [weak self] in self?.toggleManagerRoleClicked() })
 
         appendGroupSeparator(&entries)
-        entries.append(action(L10n.string("Delete Session"), symbol: "trash") { [weak self] in
+        entries.append(action(
+            L10n.string("Delete Session"),
+            symbol: "trash",
+            alternate: ThemedMenuAlternate(
+                title: L10n.string("Delete Session Without Asking")
+            ) { [weak self] in
+                self?.removeSession(sessionID, confirming: false)
+            }
+        ) { [weak self] in
             self?.deleteSessionClicked()
         })
 
@@ -1109,18 +1123,23 @@ extension ProjectSidebarViewController {
     /// Nil is allowed and means *this row has no honest mark*, which is better than a vaguely
     /// related one — a column where two rows share a glyph they do not share a meaning with is
     /// worse than a column with a gap in it.
+    ///
+    /// `alternate` is what the row becomes while Option is held — see `ThemedMenuAlternate`.
     private func action(
         _ title: String,
         symbol: String? = nil,
         shortcut: KeyboardShortcut? = nil,
+        alternate: ThemedMenuAlternate? = nil,
         _ body: @escaping () -> Void
     ) -> ThemedMenuEntry {
-        .item(ThemedMenuItem(
+        var item = ThemedMenuItem(
             title: title,
             shortcut: shortcut,
             image: symbol.flatMap(ThemedMenuIcon.symbol),
             onChoose: body
-        ))
+        )
+        item.alternate = alternate
+        return .item(item)
     }
 
     /// Snooze sits beside Pin and Archive because all three change how a row is found, while
@@ -1891,7 +1910,7 @@ extension ProjectSidebarViewController {
     /// confirmation instead of skipping it.
     @objc private func closeSessionClicked() {
         guard let sessionID = actionSessionID else { return }
-        delegate?.projectSidebar(self, closeSession: sessionID)
+        delegate?.projectSidebar(self, closeSession: sessionID, confirming: true)
     }
 
     /// Hands the naming back to the one thing that already knows what this chat is about.
