@@ -3712,6 +3712,17 @@ final class RemoteSessionConnection: ObservableObject {
         connection.composerCapabilities = capabilities
         let storeStarted = ProcessInfo.processInfo.systemUptime
         let deliveryFixture = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?.contains("chat-delivery") == true
+        let longDeliveryFixture = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?.contains("chat-delivery-long") == true
+        let deliverySummary = longDeliveryFixture ? """
+            Run the saved daily review automation.
+            Permissions: local edits and tests.
+            Do not push, publish, deploy, or change other automations.
+            If you need a decision, report needsHuman. Never report success while work or checks remain unfinished.
+
+            Project: /workspace/daily-review
+            Automation workspace: /workspace/daily-review/.threading/local/automations/review
+            Verified resource snapshot (use these copies): /workspace/daily-review/.threading/local/automations/review/revisions/current
+            """ : "Check the larger text sizes too."
         let conversationSnapshot = RemoteConversationSnapshotDTO(
             rows: rows,
             streamingText: demoMode == "conversation-streaming"
@@ -3725,7 +3736,7 @@ final class RemoteSessionConnection: ObservableObject {
             hasEarlier: demoMode == "conversation-cold-stress"
                 && sourceRowCount > rows.count,
             delivery: deliveryFixture ? .init(canQueue: true, canSteer: true, messages: [
-                .init(id: "delivery-working", summary: "Check the larger text sizes too.", state: .working),
+                .init(id: "delivery-working", summary: deliverySummary, state: .working),
                 .init(id: "delivery-next", summary: "Then polish the image preview.", state: .queued)
             ]) : nil,
             configuration: demoMode == "conversation-chat-polish" ? .init(controls: [

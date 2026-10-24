@@ -41,6 +41,101 @@ private struct MobileConversationDeliverySheet: View {
     }
 }
 
+/// A bounded preview of the delivery receipt; the sheet owns its complete summary.
+/// Explicit one-line labels keep UIButton.Configuration from reflowing a multiline prompt
+/// into a screen-sized pinned title when UIKit refreshes its configuration.
+private final class MobileConversationDeliveryButton: UIButton {
+    private enum Metrics {
+        static let maximumPreviewScalars = 160
+        static let highlightedAlpha: CGFloat = 0.7
+    }
+
+    private let plate = UIView()
+    private let outline = MobileThemeOutlineView()
+    private let statusLabel = UILabel()
+    private let summaryLabel = UILabel()
+    private let disclosure = UIImageView(image: UIImage(systemName: "chevron.right"))
+
+    override var isHighlighted: Bool {
+        didSet { plate.alpha = isHighlighted ? Metrics.highlightedAlpha : 1 }
+    }
+
+    init() {
+        super.init(frame: .zero)
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+        plate.isUserInteractionEnabled = false
+        plate.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(plate)
+
+        let text = UIStackView(arrangedSubviews: [statusLabel, summaryLabel])
+        text.axis = .vertical
+        text.spacing = MobileDesign.Spacing.hairline
+        for label in [statusLabel, summaryLabel] {
+            label.numberOfLines = 1
+            label.lineBreakMode = .byTruncatingTail
+            label.adjustsFontForContentSizeCategory = true
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        disclosure.setContentHuggingPriority(.required, for: .horizontal)
+        disclosure.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let content = UIStackView(arrangedSubviews: [text, disclosure])
+        content.alignment = .center
+        content.spacing = MobileDesign.Spacing.small
+        content.translatesAutoresizingMaskIntoConstraints = false
+        plate.addSubview(content)
+        outline.translatesAutoresizingMaskIntoConstraints = false
+        plate.addSubview(outline)
+
+        let bottom = plate.bottomAnchor.constraint(equalTo: bottomAnchor)
+        bottom.priority = .defaultHigh // The containing stack can collapse an empty receipt.
+        NSLayoutConstraint.activate([
+            plate.leadingAnchor.constraint(equalTo: leadingAnchor, constant: MobileDesign.Spacing.small),
+            plate.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -MobileDesign.Spacing.small),
+            plate.topAnchor.constraint(equalTo: topAnchor, constant: MobileDesign.Spacing.small),
+            bottom,
+            plate.heightAnchor.constraint(greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget),
+            content.leadingAnchor.constraint(equalTo: plate.leadingAnchor, constant: MobileDesign.Spacing.medium),
+            content.trailingAnchor.constraint(equalTo: plate.trailingAnchor, constant: -MobileDesign.Spacing.medium),
+            content.topAnchor.constraint(equalTo: plate.topAnchor, constant: MobileDesign.Spacing.small),
+            content.bottomAnchor.constraint(equalTo: plate.bottomAnchor, constant: -MobileDesign.Spacing.small),
+            outline.leadingAnchor.constraint(equalTo: plate.leadingAnchor),
+            outline.trailingAnchor.constraint(equalTo: plate.trailingAnchor),
+            outline.topAnchor.constraint(equalTo: plate.topAnchor),
+            outline.bottomAnchor.constraint(equalTo: plate.bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(status: String, summary: String, additionalCount: Int, theme: RemoteThemePalette) {
+        let suffix = additionalCount > 0 ? MobileL10n.string(" · +%lld", additionalCount) : ""
+        statusLabel.text = status + suffix
+        // Bound the scan before normalizing whitespace or asking UIKit to shape any text.
+        let scalars = summary.unicodeScalars
+        let end = scalars.index(scalars.startIndex, offsetBy: Metrics.maximumPreviewScalars,
+                                limitedBy: scalars.endIndex) ?? scalars.endIndex
+        let prefix = String(scalars[..<end])
+        let preview = prefix.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        summaryLabel.text = preview + (end < scalars.endIndex ? "…" : "")
+        statusLabel.font = theme.chromeFont(forTextStyle: .caption1)
+        summaryLabel.font = theme.chromeFont(forTextStyle: .footnote)
+        statusLabel.textColor = theme.uiAccent
+        summaryLabel.textColor = theme.uiSecondaryLabel
+        disclosure.tintColor = theme.uiSecondaryLabel
+        disclosure.preferredSymbolConfiguration = .init(textStyle: .caption1)
+        plate.backgroundColor = theme.uiConversationPanel
+        plate.layer.cornerCurve = .continuous
+        plate.layer.cornerRadius = theme.panelRadius
+        outline.update(color: theme.uiBorder, radius: theme.panelRadius,
+                       width: theme.borderWidth, glow: theme.glow)
+        accessibilityLabel = status
+        accessibilityValue = (summaryLabel.text ?? "") + suffix
+        accessibilityHint = MobileL10n.string("Show message delivery details")
+    }
+}
+
 /// Owns the edge treatment for every native conversation host.
 ///
 /// SwiftUI otherwise decides inconsistently whether a hosted UIKit controller stops above the
@@ -124,7 +219,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private let attentionLabel = InsetsLabel()
     private let submissionLabel = InsetsLabel()
     private let deliveryButton = UIButton(type: .system)
-    private let queuedMessagesButton = UIButton(type: .system)
+    private let queuedMessagesButton = MobileConversationDeliveryButton()
     private var deliveryMode: RemoteConversationDeliveryMode = .queue
     private let composerShell = UIView()
     private let composerPanel = UIView()
@@ -342,21 +437,20 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         configureControlBar()
         configureBanner(attentionLabel)
         configureBanner(submissionLabel)
-        for button in [deliveryButton, queuedMessagesButton] {
-            button.configuration = compactControlConfiguration()
-            button.contentHorizontalAlignment = .leading
-            button.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
-            button.titleLabel?.adjustsFontForContentSizeCategory = true
-            button.titleLabel?.numberOfLines = 2
-            let height = button.heightAnchor.constraint(greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget)
-            height.priority = .defaultHigh
-            height.isActive = true
-            MobileButtonHaptics.install(on: button)
-        }
+        deliveryButton.configuration = compactControlConfiguration()
+        deliveryButton.contentHorizontalAlignment = .leading
+        deliveryButton.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
+        deliveryButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        deliveryButton.titleLabel?.numberOfLines = 2
+        let deliveryHeight = deliveryButton.heightAnchor.constraint(greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget)
+        deliveryHeight.priority = .defaultHigh
+        deliveryHeight.isActive = true
+        MobileButtonHaptics.install(on: deliveryButton)
         deliveryButton.showsMenuAsPrimaryAction = true
         deliveryButton.accessibilityIdentifier = "conversation.delivery-mode"
         queuedMessagesButton.accessibilityIdentifier = "conversation.queued-messages"
         queuedMessagesButton.addAction(UIAction { [weak self] _ in self?.showQueuedMessages() }, for: .touchUpInside)
+        MobileButtonHaptics.install(on: queuedMessagesButton)
         configureComposer()
 
         [
@@ -1213,11 +1307,10 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         deliveryButton.accessibilityHint = MobileL10n.string("Choose when the agent receives this message")
         let messages = delivery?.messages ?? []
         queuedMessagesButton.isHidden = messages.isEmpty
-        queuedMessagesButton.tintColor = theme.uiSecondaryLabel
         if let first = messages.first {
-            queuedMessagesButton.setTitle(
-                MobileL10n.string("%@ · %@", deliveryLabel(first.state), first.summary)
-                    + (messages.count > 1 ? MobileL10n.string(" · +%lld", messages.count - 1) : ""), for: .normal
+            queuedMessagesButton.update(
+                status: deliveryLabel(first.state), summary: first.summary,
+                additionalCount: messages.count - 1, theme: theme
             )
         }
         if !connection.conversationCanSend, delivery != nil {

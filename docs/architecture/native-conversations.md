@@ -1534,6 +1534,19 @@ caches that catalogue by configuration/default readings, transport availability 
 revision; unchanged streaming frames reuse it and omit it from deltas. A settings-only update
 notifies the composer without remounting timeline rows. Older hosts omit the capability.
 
+The delivery receipt is a compact outlined panel with a status heading, one truncated preview
+line and a disclosure arrow. Its two explicit labels own their line limits: assigning a
+multiline prompt to a configured button's title lets UIKit reflow the complete prompt into the
+pinned area despite an earlier `titleLabel.numberOfLines` assignment. The preview scans at most
+160 Unicode scalars before normalizing whitespace; one receipt represents the first message and
+the remaining count, even at the protocol's 20-message bound. Full summaries are mounted only
+when the existing delivery sheet opens. Updates retain the same labels and outline, and an
+empty receipt collapses completely. This remains host-only delivery chrome: themes supply the
+panel, border and typography, while lifecycle truth, queue/steer authority and details navigation
+remain owned by Threading. The shipping-controller regression covers 320/402-point widths,
+multiline summaries, a full queue, sheet opening and removal; the `chat-delivery-long` iOS
+evidence fixtures cover the product shell, themes, keyboard and accessibility text size.
+
 Settings are owner-device operations, admitted against current authorization, exact socket
 attachment, visible session and Focused input authority. The host validates the selected value
 against its current enabled choices and invokes the same model/effort/permission/speed handlers

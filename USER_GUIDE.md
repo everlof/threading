@@ -3239,8 +3239,10 @@ these owner settings. Both apps need a version that supports the controls.
 
 While a capable Mac is working, choose **After this task** to queue a follow-up or **Send now**
 to join the current task when the provider supports it. The delivery row shows **Queued**,
-**Delivered to agent**, or **Working on this**, using the Mac's actual receipts. Tap the row to
-see the full list. Older Macs retain their ordinary send behavior.
+**Delivered to agent**, or **Working on this**, using the Mac's actual receipts. Its compact
+panel shows one preview line and a count of additional messages. Tap the arrow or anywhere in
+the panel to see the complete delivery summaries and list. Older Macs retain their ordinary send
+behavior.
 
 Tap the microphone in an empty composer to dictate a draft, or choose **Dictate message** from
 the attachment menu to add speech to existing text. Tap Stop, edit the words, then Send. Tapping

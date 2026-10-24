@@ -11886,6 +11886,17 @@
         }
       }
     },
+    "Show message delivery details" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa information om meddelandeleverans"
+          }
+        }
+      }
+    },
     "Show more (%lld)" : {
       "extractionState" : "manual",
       "localizations" : {

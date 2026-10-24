@@ -460,6 +460,90 @@ final class ComposerTextViewPasteTests: XCTestCase {
         }
     }
 
+    func testDeliveryPreviewKeepsLongMultilinePromptsOutOfThePinnedLayout() throws {
+        for width in [CGFloat(320), 402] {
+            let short = RemoteConversationDeliveryDTO.Message(id: "working", summary: "Run the daily review", state: .working)
+            let fixture = try showCatchUp(
+                themeID: nil, lastSeenRowID: nil,
+                delivery: .init(canQueue: true, canSteer: true, messages: [short]),
+                size: CGSize(width: width, height: 874)
+            )
+            defer { fixture.window.isHidden = true }
+            let button = try XCTUnwrap(descendants(of: UIButton.self, in: fixture.window).first {
+                $0.accessibilityIdentifier == "conversation.queued-messages"
+            })
+            let shortHeight = button.bounds.height
+            XCTAssertGreaterThanOrEqual(shortHeight, MobileDesign.Size.minimumTapTarget)
+            XCTAssertLessThan(shortHeight, 80)
+
+            let long = RemoteConversationDeliveryDTO.Message(
+                id: short.id, summary: "Run the daily review\n" + String(repeating: "Permissions and workspace details.\n", count: 30),
+                state: .working
+            )
+            let messages = [long] + (1..<20).map {
+                RemoteConversationDeliveryDTO.Message(id: "queued-\($0)", summary: "Next task \($0)", state: .queued)
+            }
+            let rows = fixture.connection.conversationStore.state.rows
+            _ = fixture.connection.conversationStore.replace(with: .init(
+                rows: rows, canSend: false, revision: 2,
+                delivery: .init(canQueue: true, canSteer: true, messages: messages)
+            ))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            fixture.window.layoutIfNeeded()
+
+            XCTAssertEqual(button.bounds.height, shortHeight, accuracy: 1,
+                           "neither the multiline prompt nor the maximum queue may enlarge the pinned receipt")
+            let labels = descendants(of: UILabel.self, in: button).filter { $0.text?.isEmpty == false }
+            XCTAssertEqual(labels.count, 2)
+            XCTAssertTrue(labels.allSatisfy { $0.numberOfLines == 1 && $0.text?.contains("\n") == false })
+            XCTAssertLessThanOrEqual(try XCTUnwrap(button.accessibilityValue).unicodeScalars.count, 170)
+            XCTAssertEqual(button.accessibilityLabel, MobileL10n.string("Working on this"))
+            XCTAssertTrue(button.accessibilityTraits.contains(.button))
+            XCTAssertEqual(fixture.connection.conversationStore.state.delivery?.messages.first?.summary, long.summary)
+
+            button.sendActions(for: .touchUpInside)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            XCTAssertNotNil(fixture.controller.presentedViewController, "the compact receipt still opens the delivery sheet")
+            fixture.controller.dismiss(animated: false)
+
+            _ = fixture.connection.conversationStore.replace(with: .init(rows: rows, canSend: true, revision: 3))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            fixture.window.layoutIfNeeded()
+            XCTAssertTrue(button.isHidden)
+            XCTAssertEqual(button.bounds.height, 0, accuracy: 1, "an empty receipt must return its space to the chat")
+        }
+    }
+
+    func testDeliveryPreviewFollowsLiveThemeChangesWithoutReplacingItsContent() throws {
+        let message = RemoteConversationDeliveryDTO.Message(id: "working", summary: "Review the changes", state: .working)
+        let fixture = try showCatchUp(
+            themeID: nil, lastSeenRowID: nil,
+            delivery: .init(canQueue: true, canSteer: true, messages: [message])
+        )
+        defer { fixture.window.isHidden = true }
+        let button = try XCTUnwrap(descendants(of: UIButton.self, in: fixture.window).first {
+            $0.accessibilityIdentifier == "conversation.queued-messages"
+        })
+        let labels = descendants(of: UILabel.self, in: button).filter { $0.text?.isEmpty == false }
+        let outline = try XCTUnwrap(descendants(of: MobileThemeOutlineView.self, in: button).first)
+        let plate = try XCTUnwrap(outline.superview)
+        let square = try XCTUnwrap(RemoteAppModel.demoCatalogThemes.first { $0.id == "swiss-minimalist" })
+        for source in [RemoteAppModel.demoLightTheme, square, RemoteAppModel.demoSystemRemoteTheme] {
+            let theme = RemoteThemePalette(source)
+            let update = RemoteThemeUpdateDTO(theme: source, terminalTheme: RemoteAppModel.demoTerminalTheme)
+            fixture.connection.receiveServerTextForTesting(String(decoding: try JSONEncoder().encode(update), as: UTF8.self))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            fixture.window.layoutIfNeeded()
+
+            XCTAssertEqual(plate.backgroundColor, theme.uiConversationPanel)
+            XCTAssertEqual(plate.layer.cornerRadius, theme.panelRadius)
+            XCTAssertEqual(labels.first?.textColor, theme.uiAccent)
+            XCTAssertEqual(labels.last?.textColor, theme.uiSecondaryLabel)
+            XCTAssertEqual(descendants(of: MobileThemeOutlineView.self, in: button), [outline])
+            XCTAssertEqual(descendants(of: UILabel.self, in: button).filter { $0.text?.isEmpty == false }, labels)
+        }
+    }
+
     /// The system keyboard implements a held Backspace as repeated `deleteBackward()` calls on
     /// one uninterrupted editing session. The composer's render after each deletion must not
     /// reapply the same editability value and terminate that sequence after its first callback.
@@ -772,12 +856,16 @@ final class ComposerTextViewPasteTests: XCTestCase {
     private struct CatchUpFixture {
         let window: UIWindow
         let controller: RemoteConversationViewController
+        let connection: RemoteSessionConnection
         let button: UIButton
     }
 
     /// A demo conversation with one row read and one not, under a demo catalogue theme
     /// (`nil` keeps the demo default), pushed under a navigation bar on an iPhone 17 Pro.
-    private func showCatchUp(themeID: String?, lastSeenRowID: String?) throws -> CatchUpFixture {
+    private func showCatchUp(
+        themeID: String?, lastSeenRowID: String?, delivery: RemoteConversationDeliveryDTO? = nil,
+        size: CGSize = CGSize(width: 402, height: 874)
+    ) throws -> CatchUpFixture {
         let themeKey = "THREADING_MOBILE_THEME"
         let previousTheme = ProcessInfo.processInfo.environment[themeKey]
         if let themeID { setenv(themeKey, themeID, 1) } else { unsetenv(themeKey) }
@@ -790,7 +878,7 @@ final class ComposerTextViewPasteTests: XCTestCase {
         _ = connection.conversationStore.replace(with: .init(rows: [
             .init(id: "seen", kind: .user, text: "Check the change"),
             .init(id: "new", kind: .assistant, text: "Ready to review"),
-        ], canSend: true))
+        ], canSend: delivery == nil, delivery: delivery))
         let suite = UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
@@ -805,11 +893,11 @@ final class ComposerTextViewPasteTests: XCTestCase {
             notifications: RemoteNotificationManager(), inheritedTheme: RemoteThemePalette(nil)
         )
         let navigation = UINavigationController(rootViewController: controller)
-        let window = makeWindow(rootViewController: navigation, size: CGSize(width: 402, height: 874))
+        let window = makeWindow(rootViewController: navigation, size: size)
         let button = try XCTUnwrap(descendants(of: UIButton.self, in: window).first {
             $0.accessibilityIdentifier == "conversation.catch-up"
         })
-        return CatchUpFixture(window: window, controller: controller, button: button)
+        return CatchUpFixture(window: window, controller: controller, connection: connection, button: button)
     }
 
     private func render(_ window: UIWindow) -> UIImage {
