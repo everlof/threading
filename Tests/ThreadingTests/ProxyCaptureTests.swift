@@ -2,6 +2,7 @@ import XCTest
 import Foundation
 import Security
 import Darwin
+import ThreadingExtensionKit
 @testable import Threading
 
 final class ProxyCaptureTests: XCTestCase {
@@ -114,6 +115,42 @@ final class ProxyCaptureTests: XCTestCase {
         XCTAssertEqual(gone["capture"] as? String, "not_started")
     }
 
+    func testHostInjectsExtensionFixtureIntoBundledHelper() async throws {
+        let scope = try ProxyLaunchScope(TrafficStartArguments(
+            hosts: [], bodyLimit: nil, upstreamCA: nil,
+            mockExtension: "com.example.fixture"
+        ))
+        let fixture = ExtensionTrafficMock(
+            host: "127.0.0.1", port: 8080, method: "GET", path: "/v1/items",
+            status: 200, headers: ["Content-Type": "application/json"], body: "{\"items\":[]}"
+        )
+        let assets = ProxyHelperLocation.assets(in: ProxyHelperLocation.bundledPlugin())
+        let configuration = ProxyProcess.Configuration(
+            executable: assets.executable, setupScript: assets.setupScript,
+            temporaryRoot: FileManager.default.temporaryDirectory,
+            authority: { throw ProxyProcess.Failure.message("HTTP mock capture must not access Keychain") }
+        )
+        let worker = ProxyProcess(scope: scope, configuration: configuration, mockRules: [fixture])
+        defer { worker.cancel() }
+        let started = try Self.object(await worker.call(.start(TrafficStartArguments(
+            hosts: [], bodyLimit: nil, upstreamCA: nil,
+            mockExtension: "com.example.fixture"
+        ))))
+        XCTAssertEqual(started["mock_count"] as? Int, 1)
+        let port = try XCTUnwrap(started["port"] as? Int)
+        let bytes = try await Task.detached { try Self.performMockRequest(proxyPort: port) }.value
+        XCTAssertTrue(String(decoding: bytes, as: UTF8.self).contains("{\"items\":[]}"))
+        var flow: [String: Any]?
+        for _ in 0..<20 {
+            let listing = try Self.object(await worker.call(.list(TrafficListArguments(after: nil, limit: nil))))
+            flow = (listing["flows"] as? [[String: Any]])?.first
+            if flow != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let retainedFlow = try XCTUnwrap(flow)
+        XCTAssertEqual(retainedFlow["mocked"] as? Bool, true)
+    }
+
     @MainActor
     func testBundledTLSHelperAcceptsHostIssuedLeavesAndExportsOnlyPublicMaterial() async throws {
         let bundled = ProxyProcess.Configuration.bundled.withAuthority { try Self.authority() }
@@ -171,6 +208,38 @@ final class ProxyCaptureTests: XCTestCase {
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         var byte: UInt8 = 0
         XCTAssertEqual(read(client, &byte, 1), 0, "Unapproved client must close before any protocol data")
+    }
+
+    private static func performMockRequest(proxyPort: Int) throws -> Data {
+        let client = socket(AF_INET, SOCK_STREAM, 0)
+        guard client >= 0 else { throw ProxyProcess.Failure.message("fixture client") }
+        defer { close(client) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        address.sin_port = UInt16(proxyPort).bigEndian
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(client, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard connected == 0 else { throw ProxyProcess.Failure.message("fixture connect") }
+        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        let request = Data("GET http://127.0.0.1:8080/v1/items HTTP/1.1\r\nHost: 127.0.0.1:8080\r\n\r\n".utf8)
+        try request.withUnsafeBytes { bytes in
+            guard Darwin.write(client, bytes.baseAddress, bytes.count) == bytes.count else {
+                throw ProxyProcess.Failure.message("fixture write")
+            }
+        }
+        var result = Data(), buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = read(client, &buffer, buffer.count)
+            if count == 0 { return result }
+            guard count > 0 else { throw ProxyProcess.Failure.message("fixture read timed out") }
+            result.append(contentsOf: buffer.prefix(count))
+        }
     }
 
     /// A real origin and client; no URLSession connection-pool/proxy bypass behavior in the fixture.

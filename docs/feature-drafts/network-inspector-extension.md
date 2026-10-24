@@ -3,8 +3,9 @@
 > Status: feature draft — the product goal is an agent-usable, lightweight HTTP(S) traffic
 > inspector inside Threading. The durable work is a reusable rich-workbench surface, a live
 > companion data plane, movable extension-panel placement, and narrowly brokered development
-> environment mutation. The C HTTP/CONNECT/TLS engine in `Targets/ProxyHost` is now bundled
-> by Xcode and reached through Threading's session-owned built-in MCP tools. It captures URLs,
+> environment mutation. The C HTTP/CONNECT/TLS engine in `Targets/ProxyHost` now ships in the
+> optional signed Network Proxy plugin and is reached through Threading's session-owned built-in
+> MCP tools. It captures URLs,
 > original headers and bounded request/response bodies, with explicit raw access, gzip/deflate
 > previews, a host Keychain CA broker and public Apple certificate setup paths. See
 > [the implementation contract](../architecture/proxy-engine.md). The rich workbench, extension
@@ -13,6 +14,10 @@
 > The original metadata-default policy below is superseded for this MCP increment by the user's
 > request to debug payloads: capture stores bounded bodies, common credential fields are masked
 > in default structured views, and explicit raw reads are supported within the owning session.
+>
+> Exact static response fixtures are now a public safe-extension manifest contribution, selected
+> explicitly with `traffic_start(mock_extension: …)`. The dynamic replay, breakpoints and rewrite
+> phase below remains future work.
 
 
 ## Decision

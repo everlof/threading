@@ -1,0 +1,18 @@
+{
+  "formatVersion": 1,
+  "identifier": "codes.threading.example.traffic-mock",
+  "name": "Traffic Mock Example",
+  "version": "0.1.0",
+  "runtime": "webAssembly",
+  "executable": "bin/traffic-mock.wasm",
+  "capabilities": ["traffic.mock-responses"],
+  "trafficMocks": [{
+    "host": "127.0.0.1",
+    "port": 8080,
+    "method": "GET",
+    "path": "/v1/items",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"items\":[]}"
+  }]
+}

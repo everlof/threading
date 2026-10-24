@@ -799,6 +799,11 @@ grants, persisted exact-IP scope, expiry, dismissal and revocation. Extensions c
 Moving the signed portable helper and setup script into first-party `ProxyPlugin.bundle` changes
 installation and code delivery only. The existing host owns the commands, Tools settings,
 certificate authority and consent; no public extension can claim the proxy helper or its powers.
+The additive `traffic.mock-responses` data contribution lets an explicitly selected enabled
+extension provide exact test fixtures for one capture. Threading keeps listener and client
+approval, TLS host scope and CA custody, rule validation, connection lifetime, response framing,
+capture provenance and revocation host-owned. No request callback or proxy socket is handed to
+the extension process.
 
 The iPhone conversation's pinned composer dock and model, effort, permission and speed controls
 are host-only. Themes supply the existing ground, control material, ink and border. Threading

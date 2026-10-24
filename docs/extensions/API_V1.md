@@ -133,6 +133,10 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   only over HTTPS on the same exact host and method; any other redirect returns its 3xx for an
   independently granted re-request. The response's optional `finalURL` reports the URL that
   answered after same-host redirects without breaking decoding from an older host.
+- Manifest-declared exact HTTP response fixtures (`traffic.mock-responses`). The host applies
+  them only to a capture that explicitly selects the enabled extension; matching and response
+  delivery happen in the bounded proxy worker without per-request guest IPC. Capture, TLS scope,
+  CA custody, client approval and proxy routing stay host-owned.
 - Domain-keyed fact publication (`facts.provide`) with static manifest and registration
   definitions. Providers may replace bounded values only for canonical repository and
   repository-branch subjects and the identity-free `application` subject; this capability grants

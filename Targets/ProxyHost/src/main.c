@@ -46,11 +46,12 @@ static void report_flow(const px_flow *flow, void *context) {
     int length = snprintf(line, sizeof(line),
         "{\"version\":%d,\"event\":\"flow\",\"id\":\"%" PRIu64 "\",\"method\":\"%s\","
         "\"host\":\"%s\",\"port\":%u,\"status\":%u,\"tunnel\":%s,"
-        "\"tls_inspected\":%s,\"tls_version\":\"%s\","
+        "\"tls_inspected\":%s,\"mocked\":%s,\"tls_version\":\"%s\","
         "\"client_bytes\":%" PRIu64 ",\"upstream_bytes\":%" PRIu64 ",\"duration_ms\":%" PRIu64 ","
         "\"peak_pending_bytes\":%zu,\"result\":\"%s\",\"dropped_events\":%" PRIu64 "}\n",
         PX_PROTOCOL_VERSION, flow->id, flow->method, flow->host, flow->port, flow->status,
-        flow->tunnel ? "true" : "false", flow->tls_inspected ? "true" : "false", flow->tls_version,
+        flow->tunnel ? "true" : "false", flow->tls_inspected ? "true" : "false",
+        flow->mocked ? "true" : "false", flow->tls_version,
         flow->client_bytes, flow->upstream_bytes, flow->duration_ms,
         flow->peak_pending_bytes, flow->result, output->dropped);
     if (length > 0 && (size_t)length < sizeof(line)) px_output_send(output, line);
@@ -109,7 +110,7 @@ static void usage(void) {
 }
 
 int main(int argc, char **argv) {
-    px_config config = {0, PX_MAX_CONNECTIONS, PX_IDLE_TIMEOUT_MS, NULL, 0, "127.0.0.1", "127.0.0.1", false};
+    px_config config = {0, PX_MAX_CONNECTIONS, PX_IDLE_TIMEOUT_MS, NULL, 0, "127.0.0.1", "127.0.0.1", false, NULL};
     bool explicit_listener = false, explicit_client = false;
     px_tls_identity identities[PX_TLS_IDENTITIES];
     size_t identity_count = 0;

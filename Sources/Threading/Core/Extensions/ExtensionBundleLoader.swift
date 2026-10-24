@@ -234,6 +234,7 @@ enum ExtensionBundleInspector {
         .sessionIdentityRenderer,
         .themeProvider,
         .fontProvider,
+        .trafficMockResponses,
         .sourceControlRead,
         .keyValueStorage,
         .cacheStorage,

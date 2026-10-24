@@ -640,6 +640,26 @@ final class ExtensionPackageStoreTests: XCTestCase {
         manager.terminateAll()
     }
 
+    func testEnabledExtensionOffersOnlyItsDeclaredTrafficFixtures() throws {
+        let fixture = ExtensionTrafficMock(
+            host: "127.0.0.1", port: 8080, method: "GET", path: "/v1/items",
+            status: 200, headers: ["Content-Type": "application/json"], body: "{\"items\":[]}"
+        )
+        let source = try makePackage(
+            capabilities: [.trafficMockResponses], trafficMocks: [fixture]
+        )
+        let store = ExtensionPackageStore(rootURL: temporaryDirectory("traffic-fixtures"))
+        let bundle = try store.install(from: source)
+        XCTAssertTrue(ExtensionInstallProposal(bundle: bundle).message.contains("replace matching HTTP responses"))
+        let manager = ExtensionManager(store: store)
+        defer { manager.terminateAll() }
+        XCTAssertNil(manager.trafficMocks(for: "com.example.installed-test"))
+        try manager.setEnabled(true, identifier: "com.example.installed-test")
+        XCTAssertEqual(manager.trafficMocks(for: "com.example.installed-test"), [fixture])
+        try manager.setEnabled(false, identifier: "com.example.installed-test")
+        XCTAssertNil(manager.trafficMocks(for: "com.example.installed-test"))
+    }
+
     func testExtensionsSettingsUsesTheThemeBoundaryAndExposesImportAndEnableControls() throws {
         let source = try makePackage(tool: ExtensionMCPTool(
             id: "lookup",
@@ -3474,6 +3494,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
         settings: ExtensionSettingsContribution = .init(),
         settingsResponseIDs: [String] = [],
         settingsResponseError: String? = nil,
+        trafficMocks: [ExtensionTrafficMock] = [],
         exitsAfterRegistration: Bool = false
     ) throws -> URL {
         let root = temporaryDirectory("source")
@@ -3521,7 +3542,8 @@ final class ExtensionPackageStoreTests: XCTestCase {
             mcpTools: tools,
             settings: settings,
             services: services,
-            serviceDependencies: serviceDependencies
+            serviceDependencies: serviceDependencies,
+            trafficMocks: trafficMocks
         )
         try JSONEncoder().encode(manifest).write(
             to: root.appendingPathComponent(ExtensionBundleInspector.manifestName)

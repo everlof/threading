@@ -95,6 +95,21 @@ installation. There is no HTTP MCP control listener. Hostnames and all network-d
 remain untrusted input. HTTP targets, headers and bodies are now retained for debugging.
 The legacy JSONL observation mode remains metadata-only; MCP capture is a separate explicit mode.
 
+An enabled safe extension may declare up to eight exact `trafficMocks` under the public
+`traffic.mock-responses` capability. `traffic_start(mock_extension: …)` copies that immutable,
+validated manifest data into the helper before the listener starts. The helper's private
+`threading/setMocks` pipe method is not an agent tool. Method, host, port and path (including
+query) must all match; unmatched HTTP traffic forwards normally. Matched requests are consumed
+and receive the fixture response without reaching the HTTP origin, with `mocked` provenance in
+the captured flow. For selected TLS hosts, upstream TLS verification can precede the inner
+request and therefore precede the mock decision. Disabling the extension or changing its fixtures releases
+captures using its fixtures. The host still owns client consent, TLS scope and CA keys.
+
+Fixture bounds are eight rules, 4 KiB response bodies each, 2 KiB / 16 response headers per
+rule, and 48 KiB encoded across rules. Matching is O(8) after request headers, with no main
+actor, file or guest-process work per request. Expected load is 5–50 exchanges/second; the
+stress case is 1,000/second with eight rules. Body forwarding remains streaming and bounded.
+
 ## Scaling contract
 
 Expected development load is 1–16 concurrent connections and 5–50 exchanges/second. Stress is

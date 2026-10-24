@@ -12,6 +12,7 @@ The package contains:
 - versioned, manifest-declared extension services brokered without shared storage;
 - versioned, domain-keyed fact providers with bounded atomic publication;
 - read-only hosted-Git provider adapters with host-owned connections, credentials, and HTTPS;
+- exact, manifest-declared HTTP response fixtures for an explicitly selected traffic capture;
 - host-scoped persistent key-value and disposable cache storage;
 - a tokenized host client for atomic component and primitive identity publications plus safe
   project/session/provider/account snapshots, separately gated session-runtime telemetry, and
@@ -54,6 +55,7 @@ swift run GitLabStateExtensionExample --threading-register
 swift run ForgejoSourceControlExtensionExample --threading-register
 swift run ActivityInboxExtensionExample --threading-register
 swift run T3SidebarExtensionExample --threading-register
+swift run TrafficMockExtensionExample --threading-register
 ```
 
 Threading links this package, renders `ExtensionNode` through its own AppKit design system, and

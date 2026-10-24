@@ -32,6 +32,8 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     public let fonts: [ExtensionFontContribution]
     public let localizations: [ExtensionLocalizationContribution]
     public let networkGrants: [ExtensionNetworkGrant]
+    /// Exact HTTP fixtures the user may explicitly opt into for one traffic capture.
+    public let trafficMocks: [ExtensionTrafficMock]
     /// Stored only when it says something, so a manifest that never declares a scope encodes
     /// exactly as it did before the key existed.
     private let declaredComponentThemeScope: ExtensionComponentThemeScope?
@@ -67,6 +69,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         fonts: [ExtensionFontContribution] = [],
         localizations: [ExtensionLocalizationContribution] = [],
         networkGrants: [ExtensionNetworkGrant] = [],
+        trafficMocks: [ExtensionTrafficMock] = [],
         componentThemeScope: ExtensionComponentThemeScope = .always
     ) {
         self.formatVersion = formatVersion
@@ -89,6 +92,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         self.fonts = fonts
         self.localizations = localizations
         self.networkGrants = networkGrants
+        self.trafficMocks = trafficMocks
         declaredComponentThemeScope = componentThemeScope == .always ? nil : componentThemeScope
     }
 
@@ -96,7 +100,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         case formatVersion, identifier, name, version, dataVersion, runtime, executable, capabilities
         case workspaceNavigators, mcpTools, settings
         case services, factDefinitions, sourceControlProviders, serviceDependencies, companions, themes, fonts
-        case localizations, networkGrants
+        case localizations, networkGrants, trafficMocks
         case declaredComponentThemeScope = "componentThemeScope"
     }
 
@@ -158,6 +162,10 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         networkGrants = try container.decodeIfPresent(
             [ExtensionNetworkGrant].self,
             forKey: .networkGrants
+        ) ?? []
+        trafficMocks = try container.decodeIfPresent(
+            [ExtensionTrafficMock].self,
+            forKey: .trafficMocks
         ) ?? []
         let scope = try container.decodeIfPresent(
             ExtensionComponentThemeScope.self,
@@ -406,6 +414,26 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
                 path: "networkGrants",
                 message: "must declare at least one grant for 'network.brokered'"
             ))
+        }
+        if trafficMocks.count > ExtensionTrafficMock.maximumCount {
+            issues.append(.init(path: "trafficMocks", message: "must contain at most 8 response fixtures"))
+        }
+        if !trafficMocks.isEmpty, !capabilities.contains(.trafficMockResponses) {
+            issues.append(.init(path: "capabilities", message: "must contain 'traffic.mock-responses' when trafficMocks are declared"))
+        }
+        if capabilities.contains(.trafficMockResponses), trafficMocks.isEmpty {
+            issues.append(.init(path: "trafficMocks", message: "must declare at least one fixture for 'traffic.mock-responses'"))
+        }
+        var seenTrafficMatches: Set<String> = []
+        for (index, mock) in trafficMocks.enumerated() {
+            issues.append(contentsOf: mock.validationIssues(path: "trafficMocks[\(index)]"))
+            let key = "\(mock.method) \(mock.host):\(mock.port)\(mock.path)"
+            if !seenTrafficMatches.insert(key).inserted {
+                issues.append(.init(path: "trafficMocks[\(index)]", message: "duplicates an earlier match"))
+            }
+        }
+        if let encodedMocks = try? JSONEncoder().encode(trafficMocks), encodedMocks.count > 48 * 1_024 {
+            issues.append(.init(path: "trafficMocks", message: "encoded fixtures exceed 48 KiB"))
         }
         // Brokered responses only ever land inside the sandboxed guest — unless the same
         // extension also owns a raw socket through a companion, which is the one pairing that
@@ -720,6 +748,7 @@ public struct ExtensionCapability: RawRepresentable, Codable, Hashable, Sendable
     public static let secrets = Self(rawValue: "storage.secrets")
     public static let networkClient = Self(rawValue: "network.client")
     public static let networkBrokered = Self(rawValue: "network.brokered")
+    public static let trafficMockResponses = Self(rawValue: "traffic.mock-responses")
     /// Permission to answer host-owned, read-only change-request queries and make connection-
     /// scoped broker requests. It grants neither local Git access nor forge mutation.
     public static let sourceControlRead = Self(rawValue: "source-control.read")

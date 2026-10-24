@@ -64,6 +64,7 @@ public enum ThreadingExtensionAPI {
         // declared origin grants, with Threading's own credential resolution when a grant names
         // a provider. The guest still gains no socket and never sees a token.
         .networkBrokered,
+        .trafficMockResponses,
         .sourceControlRead
     ]
 

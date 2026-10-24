@@ -67,6 +67,8 @@ struct px_connection {
     bool finishing;
     bool response_started;
     bool inspecting;
+    const px_mock_rule *mock;
+    bool mock_response_started;
     bool admitted;
     uint64_t pending_client_id;
     struct sockaddr_storage addresses[PX_ADDRESS_LIMIT];
@@ -150,6 +152,7 @@ static void close_connection(px_connection *connection, const char *result) {
     connection->flow.port = connection->target.port;
     connection->flow.tunnel = connection->target.tunnel;
     connection->flow.tls_inspected = px_tls_ready(connection->client.tls);
+    connection->flow.mocked = connection->mock_response_started;
     connection->flow.tls_version = px_tls_version(connection->upstream.tls);
     connection->capture.request.complete = connection->request.complete;
     connection->capture.response.complete = connection->response.complete;
@@ -353,9 +356,42 @@ static void process_upstream(px_connection *connection, const char *data, size_t
             return;
         }
         if (!send_bytes(&connection->client, data, used)) return;
-        if (connection->response.complete) finish_response(connection, "complete");
+        if (connection->response.complete) finish_response(connection, connection->mock ? "mocked" : "complete");
         return; /* Surplus upstream bytes never become a second downstream response. */
     }
+}
+
+static const px_mock_rule *matching_mock(const px_connection *connection) {
+    const px_mock_rules *mocks = connection->proxy->config.mocks;
+    if (!mocks || connection->target.tunnel) return NULL;
+    px_span path = connection->target.path;
+    const char *method = px_http_method(&connection->request);
+    for (size_t i = 0; i < mocks->count; ++i) {
+        const px_mock_rule *rule = &mocks->rules[i];
+        if (rule->port != connection->target.port || strcmp(rule->host, connection->target.host) ||
+            strcmp(rule->method, method)) continue;
+        if (!path.length && strcmp(rule->path, "/") == 0) return rule;
+        if (path.length == strlen(rule->path) && memcmp(path.data, rule->path, path.length) == 0) return rule;
+    }
+    return NULL;
+}
+
+static void send_mock_response(px_connection *connection) {
+    const px_mock_rule *rule = connection->mock;
+    char headers[PX_MOCK_HEADER_LIMIT + 512];
+    int length = snprintf(headers, sizeof(headers),
+        "HTTP/1.1 %u Mock\r\n%.*sContent-Length: %zu\r\nConnection: close\r\n\r\n",
+        rule->status, (int)rule->headers_length, rule->headers, rule->body_length);
+    if (length <= 0 || (size_t)length >= sizeof(headers)) {
+        fail_connection(connection, 502, "invalid_mock");
+        return;
+    }
+    process_upstream(connection, headers, (size_t)length);
+    if (!connection->closing) connection->mock_response_started = true;
+    if (!connection->closing && !connection->finishing && rule->body_length) {
+        process_upstream(connection, rule->body, rule->body_length);
+    }
+    if (!connection->closing && !connection->finishing) process_upstream(connection, "", 0);
 }
 
 static void end_plaintext(px_peer *peer) {
@@ -629,16 +665,24 @@ static void process_client(px_connection *connection, const char *data, size_t l
         if (!connection->target.tunnel && connection->proxy->config.body_limit) {
             px_capture_headers(&connection->capture.request, &connection->request);
         }
+        connection->mock = matching_mock(connection);
         data += used;
         length -= used;
         if (connection->inspecting) {
-            char headers[PX_HEADER_LIMIT + 1024];
-            size_t header_length = 0;
-            if (px_http_render(&connection->request, &connection->target, headers, sizeof(headers), &header_length) != 0) {
-                fail_connection(connection, 400, "invalid_request");
-                return;
+            if (!connection->mock) {
+                char headers[PX_HEADER_LIMIT + 1024];
+                size_t header_length = 0;
+                if (px_http_render(&connection->request, &connection->target, headers, sizeof(headers), &header_length) != 0) {
+                    fail_connection(connection, 400, "invalid_request");
+                    return;
+                }
+                if (!send_bytes(&connection->upstream, headers, header_length)) return;
             }
-            if (!send_bytes(&connection->upstream, headers, header_length)) return;
+            process_client(connection, data, length);
+            return;
+        }
+        if (connection->mock) {
+            connection->connected = true;
             process_client(connection, data, length);
             return;
         }
@@ -656,8 +700,11 @@ static void process_client(px_connection *connection, const char *data, size_t l
         fail_connection(connection, 400, "invalid_request_body");
         return;
     }
-    send_bytes(&connection->upstream, data, used);
-    if (connection->request.complete) stop_reading(&connection->client);
+    if (!connection->mock) send_bytes(&connection->upstream, data, used);
+    if (connection->request.complete) {
+        stop_reading(&connection->client);
+        if (connection->mock) send_mock_response(connection);
+    }
 }
 
 static void admit_client(px_connection *connection) {
