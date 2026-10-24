@@ -329,6 +329,7 @@ private struct SessionDraftComposerScreen: View {
     @State private var isChoosingAttachmentSource = false
     @State private var pendingAttachmentSource: SessionDraftAttachmentSource?
     @State private var isPickingAttachmentPhotos = false
+    @State private var isTakingAttachmentPhoto = false
     @State private var isImportingAttachmentFiles = false
     @State private var clipboardOffersFiles = false
     @State private var presentedAttachmentEvidence = false
@@ -732,6 +733,7 @@ private struct SessionDraftComposerScreen: View {
             guard !isPresented, let source = pendingAttachmentSource else { return }
             pendingAttachmentSource = nil
             switch source {
+            case .camera: isTakingAttachmentPhoto = true
             case .photos: isPickingAttachmentPhotos = true
             case .files: isImportingAttachmentFiles = true
             case .clipboard: _ = stageClipboardFiles()
@@ -764,6 +766,7 @@ private struct SessionDraftComposerScreen: View {
             ),
             actions: [ThemedDialogAction("OK")]
         )
+        .mobileCameraCapture(isPresented: $isTakingAttachmentPhoto, tray: attachmentTray)
         .photosPicker(
             isPresented: $isPickingAttachmentPhotos,
             selection: $attachmentPhotoItems,
@@ -1196,6 +1199,9 @@ private struct SessionDraftComposerScreen: View {
                 pendingAttachmentSource = .clipboard
             })
         }
+        actions.append(ThemedDialogAction("Take Photo") {
+            pendingAttachmentSource = .camera
+        })
         actions.append(ThemedDialogAction("Photo Library") {
             pendingAttachmentSource = .photos
         })
@@ -2254,6 +2260,7 @@ private enum SessionDraftPromptMetrics {
 }
 
 private enum SessionDraftAttachmentSource {
+    case camera
     case clipboard
     case photos
     case files

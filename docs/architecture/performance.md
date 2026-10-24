@@ -1183,6 +1183,26 @@ THREADING_AUTOMATION_STRESS=1 scripts/test.sh fast \
   -only-testing:ThreadingTests/AutomationShellRenderTests/testRendersAutomationsInShippingWindow
 ```
 
+## iPhone camera attachment admission
+
+Camera capture is one user-confirmed image at a time, normally about 12 MP; the opt-in
+`MobileCameraCaptureTests.testCameraPreparationStress` also exercises a 48 MP source three times
+with `THREADING_CAMERA_STRESS=1`. Fixture manufacture is outside its reported worker duration.
+The composer reserves a slot synchronously before yielding, with the existing eight-file cap
+bounding pending items and preparation owners. The main actor installs only the placeholder,
+finished thumbnail and upload state; orientation normalization, raster reduction and JPEG
+encoding run in a detached worker. The output uses the existing 2,048-pixel longest-edge bound
+and per-file byte limit. Removal cancels the owner and late preparation cannot restore the item.
+No transcript-sized work or repeated capture polling is added. Device capture latency is a
+separate hardware check; simulator image preparation does not measure the camera itself.
+
+The October 24 Debug run on an iPhone 17 Pro simulator (iOS 26.5) measured 57.3 ms median /
+63.3 ms maximum for a 4,032 × 3,024 source and 120.0 / 126.8 ms for 8,064 × 6,048, three
+preparations each. These are background preparation times for generated two-color fixtures,
+not capture, upload or physical-device timings. The same focused run passed all 28 camera,
+clipboard, payload, strip and terminal-editor tests, including eight-slot admission, rotated
+and mirrored JPEGs and removal while preparation is pending.
+
 ## Implementation-time scaling gate
 
 Settings sidebar pages can come from installed extensions: 256 packages with eight pages each

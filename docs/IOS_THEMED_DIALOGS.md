@@ -120,6 +120,16 @@ The exception is UI whose presentation and trust boundary belong to iOS. Notific
 camera, microphone and tracking permission prompts, the share sheet, document picker, and
 similar operating-system surfaces remain native and are not imitated or themed.
 
+`MobileCameraCapture` contains the still-image `UIImagePickerController` behind one full-screen
+boundary shared by UIKit and SwiftUI composers. iOS owns capture, retake and acceptance; the
+surrounding unavailable/denied/restricted notices use `themedAlert` and the presentation carries
+`mobileTheme(_:)`. Only an explicit **Take Photo** choice requests camera access.
+
+The terminal Compose editor uses that same anchored source chooser instead of a context `Menu`.
+Opening it hands focus away from the editor before presentation. A context menu could keep its
+old anchor while the keyboard returned and cover its own photo choices; the shipping evidence
+capture checks that Take Photo, Photo Library and Files are all reachable with the keyboard down.
+
 `MobileSystemBrowser` contains Safari's independent public-site browsing. Safari owns its
 navigation, website authentication, and dismissal chrome. Localhost previews instead use
 `MobileBrowserView` with themed host controls around WebKit; website JavaScript dialogs use

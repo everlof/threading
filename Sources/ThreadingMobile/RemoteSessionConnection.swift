@@ -3352,6 +3352,7 @@ final class RemoteSessionConnection: ObservableObject {
         connection.surface = .conversation
         connection.capability = .interact
         connection.serverFeatures = Set(RemoteWebSocketFeature.allCases.map(\.rawValue))
+        connection.supportsComposerAttachmentUploads = demoMode == "conversation-attachments"
         connection.supportsAttentionRequests = true
         connection.supportsFocusedInputControl = true
         connection.inputControl = ownerOnlyInputControlState()

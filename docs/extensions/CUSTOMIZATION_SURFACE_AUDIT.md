@@ -698,6 +698,12 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+**The iPhone composer's Take Photo source** extends the existing host-only attachment workflow
+for the selected session or new-session draft. Threading owns camera consent, capacity, image
+preparation, upload custody, cancellation and explicit chat submission; iOS owns the native camera
+controls. Themes supply the shared refusal-dialog material. No extension may capture an image,
+read it before attachment, replace the permission prompt or submit it on the user's behalf.
+
 **Restored native plugin tabs** extend the existing signed native pane surface into dock groups
 and the drawer. The plugin still owns only the view inside its rectangle. Threading owns the tab
 shell, placement, active selection, persisted identifier, bounded route validation, current code

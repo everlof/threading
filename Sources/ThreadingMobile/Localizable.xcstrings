@@ -1992,6 +1992,23 @@
         }
       }
     },
+    "Allow camera access in Settings to take a photo for your message." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow camera access in Settings to take a photo for your message."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt kameraåtkomst i Inställningar för att ta en bild till ditt meddelande."
+          }
+        }
+      }
+    },
     "Allow collaboration" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2837,6 +2854,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Cachad indata"
+          }
+        }
+      }
+    },
+    "Camera" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Camera"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kamera"
+          }
+        }
+      }
+    },
+    "Camera access is restricted on this device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Camera access is restricted on this device."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kameraåtkomst är begränsad på den här enheten."
           }
         }
       }
@@ -12625,6 +12676,23 @@
         }
       }
     },
+    "Take Photo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take Photo"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bild"
+          }
+        }
+      }
+    },
     "Tap once to apply to the next key, twice to lock, again to release." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13635,6 +13703,23 @@
         }
       }
     },
+    "The camera isn’t available on this device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The camera isn’t available on this device."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kameran är inte tillgänglig på den här enheten."
+          }
+        }
+      }
+    },
     "The code under a Mac is the identity this iPhone pins. It is the same code that Mac prints under This Mac’s Identity, so the two can be compared by eye." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13807,6 +13892,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nästa återställningsdatum för ett påverkat fönster kan flyttas."
+          }
+        }
+      }
+    },
+    "The photo couldn’t be read. Please try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The photo couldn’t be read. Please try again."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilden kunde inte läsas. Försök igen."
           }
         }
       }

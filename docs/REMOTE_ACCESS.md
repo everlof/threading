@@ -1870,7 +1870,18 @@ whether somebody else holds the session either.
 
 ## Sending a file from the phone
 
-The composer's paperclip attaches a photo or a document to the next prompt. A direct-input TUI
+The composer's paperclip attaches a photo or a document to the next prompt. **Take Photo** opens
+the shared `MobileCameraCapture` boundary from the new-session, native conversation, terminal
+Compose and direct-input pickers. iOS owns the full-screen still camera, retake/accept controls and
+permission prompt. Camera access is checked only after that explicit choice; unavailable,
+restricted and denied access leave the draft unchanged, with Settings recovery for denial.
+No photo-library write or microphone grant is involved.
+
+Accepting reserves one tray slot synchronously before a bounded background worker normalizes
+orientation, scales to the existing upload dimension limit and encodes JPEG. The pending slot
+holds Send/Start until upload finishes and participates in ordinary removal/cancellation. The
+photo uses the same upload scope and claim as every other attachment, with no automatic chat
+submission. A direct-input TUI
 keeps the same paperclip leading its key bar's action row, above the key caps; picked files
 appear in a bounded tray above the bar, and its explicit Insert action types their quoted session
 paths at the current cursor without Return. The explicit step matters because an upload may
@@ -1878,7 +1889,7 @@ finish after the person has moved the TUI cursor. Neither mode lets asynchronous
 the terminal unexpectedly. This is the only route by which a remote client can cause the Mac to
 keep a file, so it is worth saying exactly what it does and where it stops.
 
-**The clipboard is the third source, because it is where the thing already is.** Photos and
+**The clipboard attaches something already copied.** Photos and
 Files are both places to go *looking*, and a picture copied out of a web page, a message or
 another app's share sheet is in neither until somebody saves it somewhere first. Pasting one into
 the composer did nothing at all — `UITextView` asks whether it can insert *text*, so a

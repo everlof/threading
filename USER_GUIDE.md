@@ -2986,7 +2986,7 @@ control does not produce a false confirmation. Photo, file and other system shee
 own feedback.
 
 **Attaching a photo or file from the phone.** The paperclip beside the plus attaches from your
-clipboard, photo library or Files — up to eight per message, images, MOV/MP4/M4V movies, PDFs,
+clipboard, camera, photo library or Files — up to eight per message, images, MOV/MP4/M4V movies, PDFs,
 HTML, archives and the common document formats. You can also paste a copied picture directly into
 the text area. Each
 one starts travelling to your Mac the moment you pick it, so the wait
@@ -2997,6 +2997,11 @@ a movie can play before it is sent. Send stays held
 until every attachment has arrived. Large photos are re-encoded smaller before sending, since an
 agent reading a screenshot or a photo of a screen gains nothing from a 12-megapixel original.
 A picture on its own is a valid message — you do not have to type anything with it.
+
+Choose **Take Photo** to photograph a device, screen or other debugging context. iOS asks for
+camera access when needed and lets you retake or accept the photo. Accepting stages it with your
+other attachments; it does not save a copy to Photos or send the message. Cancel leaves the draft
+unchanged. If access is denied, **Open Settings** takes you to the app's camera permission.
 
 Attachments arrive on the Mac exactly as they would if you had dropped them on its own composer:
 the agent gets the file's path in the prompt, and the file appears in the session's **Attachments**
@@ -3394,8 +3399,8 @@ shows "Resuming on your Mac…" for as long as that takes. The New Session navig
 title above the connected Mac and state, matching the two-row chat navigation title.
 
 The prompt is a native iOS text area: touch and hold to use **Paste** at the insertion point.
-Its paperclip adds **From Clipboard** when the clipboard holds a picture or file, plus **Photo
-Library** and **Files**. You can attach up to eight items, each up to 24 MB; their strip shows
+Its paperclip adds **From Clipboard** when the clipboard holds a picture or file, plus **Take
+Photo**, **Photo Library** and **Files**. You can attach up to eight items, each up to 24 MB; their strip shows
 upload progress and Start waits until every item is ready. The Mac takes the complete set into
 the first prompt when the session starts, or leaves the draft and its attachments in place if
 creation is refused.

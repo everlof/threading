@@ -1494,7 +1494,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         present(controller, animated: true)
     }
 
-    /// Offers the two places a file can come from on a phone.
+    /// Offers capture, the clipboard and the two system file pickers.
     ///
     /// Photos and files are deliberately separate entries rather than one combined picker: the
     /// photo library needs `PHPickerViewController` to stay out of the user's whole library
@@ -1516,6 +1516,10 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
                 style: .default
             ) { [weak self] _ in _ = self?.stageClipboardFiles() })
         }
+        sheet.addAction(UIAlertAction(
+            title: MobileL10n.string("Take Photo"),
+            style: .default
+        ) { [weak self] _ in self?.presentCamera() })
         sheet.addAction(UIAlertAction(
             title: MobileL10n.string("Photo Library"),
             style: .default
@@ -1559,6 +1563,21 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         picker.delegate = self
         picker.overrideUserInterfaceStyle = overrideUserInterfaceStyle
         present(picker, animated: true)
+    }
+
+    private func presentCamera() {
+        guard let tray = attachmentTray, tray.canAcceptMore else { return }
+        stopDictation()
+        let controller = UIHostingController(rootView:
+            MobileCameraCapture { image in
+                tray.addCapturedImage(image)
+            } onDismiss: { [weak self] in
+                self?.dismiss(animated: true)
+            }
+            .mobileTheme(theme)
+        )
+        controller.modalPresentationStyle = .fullScreen
+        present(controller, animated: true)
     }
 
     private func presentDocumentPicker() {

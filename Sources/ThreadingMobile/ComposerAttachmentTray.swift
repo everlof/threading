@@ -125,6 +125,38 @@ final class ComposerAttachmentTray {
 
     // MARK: - Public Methods
 
+    /// Reserve a slot before yielding so Send cannot race the camera's image preparation.
+    /// At most eight slots can own workers; image drawing and encoding stay off the main actor.
+    func addCapturedImage(_ image: UIImage) {
+        guard canAcceptMore else {
+            notice = MobileL10n.string("That is as many files as one message can carry.")
+            return
+        }
+        let item = ComposerAttachmentItem(
+            name: "photo-\(UUID().uuidString.prefix(8)).jpg",
+            thumbnail: nil,
+            systemImage: "photo"
+        )
+        notice = nil
+        items.append(item)
+        uploads[item.id] = Task { [weak self] in
+            guard !Task.isCancelled else { return }
+            let payload = await Task.detached(priority: .userInitiated) {
+                ComposerAttachmentPayload.capturedImage(image, name: item.name)
+            }.value
+            guard !Task.isCancelled, let self,
+                  let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+            guard let payload else {
+                items[index].state = .failed
+                notice = MobileL10n.string("Threading can’t send that file.")
+                uploads.removeValue(forKey: item.id)
+                return
+            }
+            items[index].thumbnail = payload.thumbnail
+            upload(payload, for: item.id)
+        }
+    }
+
     /// Stages one file's bytes and starts carrying them over.
     ///
     /// The caller has already read the file, because the two sources differ in how: a photo comes
@@ -349,6 +381,22 @@ struct ComposerAttachmentPayload {
     let thumbnail: UIImage?
     let systemImage: String
     let isMovie: Bool
+
+    /// Drawing applies UIImage's orientation before JPEG encoding, including portrait and
+    /// mirrored captures. Bound the raster before encoding instead of making a full-size JPEG.
+    static func capturedImage(_ image: UIImage, name: String) -> ComposerAttachmentPayload? {
+        guard let reduced = image.scaled(
+            toLongestEdge: RemoteAttachmentUploadClientDefaults.downscaledMaximumDimension
+        ), let data = reduced.jpegData(
+            compressionQuality: RemoteAttachmentUploadClientDefaults.downscaledCompressionQuality
+        ), !data.isEmpty, data.count <= RemoteAttachmentUploadLimits.maximumBytesPerFile else {
+            return nil
+        }
+        return ComposerAttachmentPayload(
+            data: data, name: name, type: .jpeg, thumbnail: reduced,
+            systemImage: "photo", isMovie: false
+        )
+    }
 
     /// Prepares one picked file, re-encoding a photo that is larger than an agent can use.
     ///

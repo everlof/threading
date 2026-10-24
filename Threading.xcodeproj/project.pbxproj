@@ -135,6 +135,7 @@
 		A70200010000000000000001 /* MobileHostRefreshSingleFlightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */; };
 		A70300010000000000000001 /* RemoteExtensionSceneScalingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */; };
 		A70400010000000000000001 /* ComposerClipboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70400010000000000000002 /* ComposerClipboardTests.swift */; };
+		D9CA00100000000000000001 /* MobileCameraCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9CA00100000000000000002 /* MobileCameraCaptureTests.swift */; };
 		A46200010000000000000001 /* ThemedDialogActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A46200010000000000000002 /* ThemedDialogActionTests.swift */; };
 		A70500010000000000000001 /* RemoteTerminalLayoutViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */; };
 		DA615910541442DC8D940C01 /* RemoteTerminalInitialViewportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA615910541442DC8D940C02 /* RemoteTerminalInitialViewportTests.swift */; };
@@ -165,8 +166,6 @@
 		A78200010000000000000001 /* MobileSessionOpenSpanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78200010000000000000002 /* MobileSessionOpenSpanTests.swift */; };
 		A72000010000000000000001 /* StatusIntegrityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72000010000000000000002 /* StatusIntegrityTests.swift */; };
 		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
-		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
-		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
 		B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC75BD17798FB18BE69A8D1 /* Cocoa.framework */; };
 		B70000010000000000000002 /* Sources/Threading/Resources/Fonts in Resources */ = {isa = PBXBuildFile; fileRef = B70000010000000000000001 /* Sources/Threading/Resources/Fonts */; };
 		B70000010000000000000003 /* Theme font fixtures and licenses in Mobile Resources */ = {isa = PBXBuildFile; fileRef = B70000010000000000000001 /* Sources/Threading/Resources/Fonts */; };
@@ -487,6 +486,7 @@
 		A70200010000000000000002 /* MobileHostRefreshSingleFlightTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileHostRefreshSingleFlightTests.swift; sourceTree = "<group>"; };
 		A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteExtensionSceneScalingTests.swift; sourceTree = "<group>"; };
 		A70400010000000000000002 /* ComposerClipboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ComposerClipboardTests.swift; sourceTree = "<group>"; };
+		D9CA00100000000000000002 /* MobileCameraCaptureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileCameraCaptureTests.swift; sourceTree = "<group>"; };
 		A46200010000000000000002 /* ThemedDialogActionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemedDialogActionTests.swift; sourceTree = "<group>"; };
 		A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalLayoutViewTests.swift; sourceTree = "<group>"; };
 		DA615910541442DC8D940C02 /* RemoteTerminalInitialViewportTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalInitialViewportTests.swift; sourceTree = "<group>"; };
@@ -552,6 +552,7 @@
 				ThreadingMobile/MobileBrowserProxy.swift,
 				ThreadingMobile/MobileBrowserView.swift,
 				ThreadingMobile/MobileButtonHaptics.swift,
+				ThreadingMobile/MobileCameraCapture.swift,
 				ThreadingMobile/MobileClipboardWriter.swift,
 				ThreadingMobile/MobileProjectDisclosureStore.swift,
 				ThreadingMobile/MobileProjectChatPreview.swift,
@@ -774,8 +775,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				E50000010000000000000014 /* Sentry-Dynamic in Frameworks */,
-				B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */,
-				B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -974,6 +973,7 @@
 				A70300010000000000000002 /* RemoteExtensionSceneScalingTests.swift */,
 				C11B04010000000000000002 /* MobileClipboardWriterTests.swift */,
 				A70400010000000000000002 /* ComposerClipboardTests.swift */,
+				D9CA00100000000000000002 /* MobileCameraCaptureTests.swift */,
 				A46200010000000000000002 /* ThemedDialogActionTests.swift */,
 				A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */,
 				DA615910541442DC8D940C02 /* RemoteTerminalInitialViewportTests.swift */,
@@ -1374,8 +1374,6 @@
 			name = ThreadingMobileTests;
 			packageProductDependencies = (
 				E50000010000000000000002 /* Sentry-Dynamic */,
-				A20000010000000000000011 /* ThreadingRemoteKit */,
-				F4000001000000000000007 /* ThreadingExtensionKit */,
 			);
 			productName = ThreadingMobileTests;
 			productReference = B20000010000000000000005 /* ThreadingMobileTests.xctest */;
@@ -1993,6 +1991,7 @@
 				A70300010000000000000001 /* RemoteExtensionSceneScalingTests.swift in Sources */,
 				C11B04010000000000000001 /* MobileClipboardWriterTests.swift in Sources */,
 				A70400010000000000000001 /* ComposerClipboardTests.swift in Sources */,
+				D9CA00100000000000000001 /* MobileCameraCaptureTests.swift in Sources */,
 				A46200010000000000000001 /* ThemedDialogActionTests.swift in Sources */,
 				A70500010000000000000001 /* RemoteTerminalLayoutViewTests.swift in Sources */,
 				DA615910541442DC8D940C01 /* RemoteTerminalInitialViewportTests.swift in Sources */,
@@ -2691,7 +2690,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Approve one credential operation on your paired Mac.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code or take a photo to attach to a message.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -2734,7 +2733,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Approve one credential operation on your paired Mac.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code shown on your Mac.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a private Threading pairing code or take a photo to attach to a message.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Threading connects to your Mac over Wi-Fi to show and control your chats.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
