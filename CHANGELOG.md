@@ -16,6 +16,29 @@ it for the tester: what to try, and what is known to be rough. When the stable r
 own section describes the whole change, not the difference since the last beta; nobody on stable
 saw the betas.
 
+## [0.10.0]
+
+### Added
+
+- Agents can work with the same Device Logs and Bluetooth panels you see: inspect capture state,
+  set filters, read or wait for rows, and reveal exact evidence in the pane.
+- The Devices extension can show snapshots from the Simulator workspace. Extensions can also
+  provide response fixtures for captured proxy traffic.
+- Hold Option in sidebar menus to reach alternate actions.
+
+### Changed
+
+- Device Logs shows capture availability and keeps its source, process, and filter choices in
+  sync with agent tools. Its optional output tap now identifies stdout and stderr separately.
+- Detached panes share a consistent window layout, and browser pages keep rendering while their
+  pane is in the background.
+- The account picker shows when each login's limits reset and how much of its weekly allowance
+  remains.
+
+### Fixed
+
+- Chat focus stays in place while an agent uses the browser.
+
 ## [0.9.0]
 
 ### Added

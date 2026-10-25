@@ -331,7 +331,7 @@ final class PluginContractTests: XCTestCase {
         )
     }
 
-    /// V6 adds callable device services. A new host can still run a v3 pane plugin, while an
+    /// V7 adds callable Simulator services. A new host can still run a v3 pane plugin, while an
     /// older host refuses a newer plugin before it calls a service the host does not have.
     func testTheAPIVersionCompatibilityWindowPreservesV3PanePlugins() {
         XCTAssertEqual(ThreadingPluginAPI.version, 7)
@@ -341,7 +341,8 @@ final class PluginContractTests: XCTestCase {
         XCTAssertTrue(ThreadingPluginAPI.supports(4))
         XCTAssertTrue(ThreadingPluginAPI.supports(5))
         XCTAssertTrue(ThreadingPluginAPI.supports(6))
-        XCTAssertFalse(ThreadingPluginAPI.supports(7))
+        XCTAssertTrue(ThreadingPluginAPI.supports(7))
+        XCTAssertFalse(ThreadingPluginAPI.supports(8))
     }
 
     /// Version 2 added `encodedTheme`, which is how a plugin linking `ThreadingDesignKit` gets the
