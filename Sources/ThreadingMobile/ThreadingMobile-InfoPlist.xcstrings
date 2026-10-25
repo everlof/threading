@@ -108,6 +108,23 @@
         }
       }
     },
+    "NSPhotoLibraryAddUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save images you choose from chat attachments to your photo library."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara bilder som du väljer från chattbilagor i ditt bildbibliotek."
+          }
+        }
+      }
+    },
     "NSSpeechRecognitionUsageDescription" : {
       "extractionState" : "manual",
       "localizations" : {

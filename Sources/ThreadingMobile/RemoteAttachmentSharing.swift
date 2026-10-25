@@ -1,5 +1,122 @@
 import Foundation
+import ImageIO
+import Photos
 import ThreadingRemoteKit
+import UIKit
+
+enum RemoteAttachmentImageAction: String, CaseIterable, Identifiable {
+    case copy, share, saveToPhotos
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .copy: MobileL10n.string("Copy Image")
+        case .share: MobileL10n.string("Share…")
+        case .saveToPhotos: MobileL10n.string("Save to Photos")
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .copy: "doc.on.doc"
+        case .share: "square.and.arrow.up"
+        case .saveToPhotos: "square.and.arrow.down"
+        }
+    }
+}
+
+struct RemoteAttachmentImageActionRequest: Identifiable {
+    let id = UUID()
+    let action: RemoteAttachmentImageAction
+    let data: Data
+    let name: String
+}
+
+enum RemoteAttachmentImageExportError: LocalizedError {
+    case unreadable, tooLarge, photosDenied
+
+    var errorDescription: String? {
+        switch self {
+        case .unreadable: MobileL10n.string("The image could not be decoded.")
+        case .tooLarge: MobileL10n.string("This image is too large to export from iPhone.")
+        case .photosDenied:
+            MobileL10n.string("Allow Threading to add photos in Settings, then try again.")
+        }
+    }
+}
+
+/// One explicit action retains the current image's original encoded bytes, at most 24 MB.
+/// Metadata inspection runs off-main and never creates a decoded full-size bitmap or a second
+/// encoding. Opening the three-item menu itself performs no file, codec or network work.
+struct RemoteAttachmentImageExport: Sendable {
+    let data: Data
+    let name: String
+    let typeIdentifier: String
+
+    static func prepare(data: Data, name: String) async throws -> Self {
+        let image = try await RemoteAttachmentImageExportWorker.shared.prepare(data: data, name: name)
+        try Task.checkCancellation()
+        return image
+    }
+
+    @MainActor
+    func copy(to pasteboard: UIPasteboard) {
+        pasteboard.setData(data, forPasteboardType: typeIdentifier)
+    }
+
+    func saveToPhotos(using library: RemoteAttachmentPhotoLibrary = .system) async throws {
+        try Task.checkCancellation()
+        let status = await library.requestAddAccess()
+        try Task.checkCancellation()
+        guard status == .authorized else { throw RemoteAttachmentImageExportError.photosDenied }
+        try await library.addImage(self)
+    }
+}
+
+/// A serial codec worker keeps rapid page changes from overlapping metadata inspections.
+private actor RemoteAttachmentImageExportWorker {
+    static let shared = RemoteAttachmentImageExportWorker()
+
+    func prepare(data: Data, name: String) throws -> RemoteAttachmentImageExport {
+        try Task.checkCancellation()
+        guard data.count <= RemoteAttachmentUploadLimits.maximumBytesPerFile else {
+            throw RemoteAttachmentImageExportError.tooLarge
+        }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0,
+              let type = CGImageSourceGetType(source),
+              CGImageSourceCopyPropertiesAtIndex(source, 0, nil) != nil else {
+            throw RemoteAttachmentImageExportError.unreadable
+        }
+        return RemoteAttachmentImageExport(
+            data: data,
+            name: RemoteAttachmentShareStager.safeFileName(name),
+            typeIdentifier: type as String
+        )
+    }
+}
+
+/// PhotoKit owns its add-only permission prompt and asynchronous library transaction. Tests
+/// substitute this boundary without asking for permission or changing the developer's library.
+struct RemoteAttachmentPhotoLibrary: Sendable {
+    var requestAddAccess: @Sendable () async -> PHAuthorizationStatus
+    var addImage: @Sendable (RemoteAttachmentImageExport) async throws -> Void
+
+    static let system = Self(
+        requestAddAccess: { await PHPhotoLibrary.requestAuthorization(for: .addOnly) },
+        addImage: { image in
+            try await PHPhotoLibrary.shared().performChanges {
+                let options = PHAssetResourceCreationOptions()
+                options.originalFilename = image.name
+                options.uniformTypeIdentifier = image.typeIdentifier
+                PHAssetCreationRequest.forAsset().addResource(
+                    with: .photo, data: image.data, options: options
+                )
+            }
+        }
+    )
+}
 
 /// How the phone obtains one selected attachment before handing its device-local file URL to the
 /// system share sheet.

@@ -3659,7 +3659,10 @@ in this gallery, streamed from the Mac in small authenticated pieces, so even a 
 than the ordinary attachment download limit remains visible without loading the whole file. Tap
 the Share button to send or save the attachment currently on screen through the standard iOS share
 sheet; large movies are prepared from the same bounded stream, and the temporary phone copy is
-removed when the sheet closes. If an agent opens a
+removed when the sheet closes. Long-press an image for **Copy Image**, **Share…**, or **Save to
+Photos**. Copy keeps the original image data; Save to Photos asks for permission to add pictures
+only when you choose it. **Save to Files** is available in the share sheet. VoiceOver exposes
+the same image actions. If an agent opens a
 page, Threading does not pull you away from the chat. The account
 disc takes one quiet breath and keeps a small dot until you open Browser. Browser is a
 full-screen, full-width read-only follow view of the Mac tab. Close returns to Workspace. It

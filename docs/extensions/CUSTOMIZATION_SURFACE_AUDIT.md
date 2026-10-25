@@ -680,8 +680,9 @@ able to turn into unbounded process work as the user installs more extensions. S
 The iPhone attachment gallery and the draft's local Quick View do not add another extension
 surface. They are mirrors of the existing host-owned fallback: `attachments.preview@1` continues
 to customize the Mac preview body only. Threading retains remote authorization and range bounds,
-gallery selection, navigation, playback transport, Share staging and cleanup, and visibility
-teardown; iOS owns the native share destinations and chrome. Letting an extension replace any of
+gallery selection, navigation, playback transport, image-copy identity, add-only Photos consent,
+Share staging and cleanup, and visibility teardown; iOS owns the native image menu, Photos
+permission prompt, share destinations and chrome. Letting an extension replace any of
 those would either grant file authority the preview contract does not carry or put high-frequency
 playback across the extension boundary.
 

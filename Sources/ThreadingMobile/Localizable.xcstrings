@@ -1992,6 +1992,17 @@
         }
       }
     },
+    "Allow Threading to add photos in Settings, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt Threading att lägga till bilder i Inställningar och försök sedan igen."
+          }
+        }
+      }
+    },
     "Allow camera access in Settings to take a photo for your message." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4188,6 +4199,17 @@
         }
       }
     },
+    "Copy Image" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera bild"
+          }
+        }
+      }
+    },
     "Copy Link" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4343,6 +4365,17 @@
         }
       }
     },
+    "Couldn’t copy image" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte kopiera bilden"
+          }
+        }
+      }
+    },
     "Couldn’t create link" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4466,6 +4499,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det gick inte att spara standardkontona"
+          }
+        }
+      }
+    },
+    "Couldn’t save image" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte spara bilden"
           }
         }
       }
@@ -6496,6 +6540,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inaktiv"
+          }
+        }
+      }
+    },
+    "Image copied" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilden kopierades"
+          }
+        }
+      }
+    },
+    "Image preview" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bildförhandsvisning"
           }
         }
       }
@@ -11010,6 +11076,17 @@
         }
       }
     },
+    "Save to Photos" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara i Bilder"
+          }
+        }
+      }
+    },
     "Saved Macs are unavailable" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11039,6 +11116,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sparad identitet"
+          }
+        }
+      }
+    },
+    "Saved to Photos" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparad i Bilder"
           }
         }
       }
@@ -11805,6 +11893,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Delad chatt · %@"
+          }
+        }
+      }
+    },
+    "Share…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela…"
           }
         }
       }
@@ -13797,6 +13896,17 @@
         }
       }
     },
+    "The image was added to your photo library." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilden har lagts till i ditt bildbibliotek."
+          }
+        }
+      }
+    },
     "The invite works once. After acceptance, access lasts until you stop sharing and never extends to another chat." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14618,6 +14728,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här iPhonens nyckel: %@"
+          }
+        }
+      }
+    },
+    "This image is too large to export from iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilden är för stor för att exportera från iPhone."
           }
         }
       }
