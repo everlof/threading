@@ -49,10 +49,16 @@ final class DevicesPluginBundleTests: XCTestCase {
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
             styleMask: [.titled, .closable], backing: .buffered, defer: false
         )
+        window.animationBehavior = .none
         window.contentViewController = host
         window.setContentSize(NSSize(width: 640, height: 420))
         window.makeKeyAndOrderFront(nil)
-        defer { window.close() }
+        // Closing the hosted window leaves an AppKit transform animation that can crash the
+        // next test's run-loop flush. Detach the pane after ordering this fixture out.
+        defer {
+            window.orderOut(nil)
+            window.contentViewController = nil
+        }
         host.view.layoutSubtreeIfNeeded()
         XCTAssertGreaterThanOrEqual(host.view.bounds.width, 600)
 
