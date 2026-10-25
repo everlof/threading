@@ -60,7 +60,9 @@ final class DeviceLogDecodingTests: XCTestCase {
         XCTAssertEqual(row.time, "15:11:04.497")
         XCTAssertEqual(row.level, "Notice")
         XCTAssertEqual(row.process, "backboardd")
-        XCTAssertEqual(row.subsystem, "com.apple.CoreBrightness.ChromaticCorrection / GCP")
+        XCTAssertEqual(row.subsystem, "com.apple.CoreBrightness.ChromaticCorrection")
+        XCTAssertEqual(row.category, "GCP")
+        XCTAssertEqual(row.subsystemLabel, "com.apple.CoreBrightness.ChromaticCorrection / GCP")
         XCTAssertEqual(row.message, "Lux changed")
         XCTAssertNotNil(row.timestamp)
     }

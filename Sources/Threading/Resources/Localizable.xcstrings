@@ -40762,6 +40762,23 @@
         }
       }
     },
+    "Open shared Device Logs or discover Bluetooth packet tools for a paired iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open shared Device Logs or discover Bluetooth packet tools for a paired iPhone."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna gemensamma enhetsloggar eller hitta Bluetooth-verktyg för en parkopplad iPhone."
+          }
+        }
+      }
+    },
     "Open source conversation" : {
       "extractionState" : "manual",
       "localizations" : {

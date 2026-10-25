@@ -144,11 +144,27 @@ public enum AppThemeLibrary {
 
 /// Where a user's recorded choice is read from.
 ///
-/// A plugin reads the host's answer and records nothing of its own, so this is the standard suite
-/// rather than the application's redirected store. See `themes.md` for the line between a
-/// behavioural setting and a recorded choice, which is why the application cannot simply use this.
+/// Plugins also record choices, such as Device Logs' selected app. Match the host's test/scenario
+/// redirect so loading a real plugin in a hosted test cannot overwrite the user's preferences.
+/// Production continues to read and write the host application's standard domain.
 public enum PreferenceStore {
-    public static let shared = UserDefaults.standard
+    private static let storage = PluginPreferenceStorage {
+        if let home = ProcessInfo.processInfo.environment["THREADING_UI_SCENARIO_HOME"],
+           let id = UUID(uuidString: URL(fileURLWithPath: home).lastPathComponent) {
+            return UserDefaults(suiteName: "codes.threading.ui-scenario.\(id.uuidString)")!
+        }
+        guard NSClassFromString("XCTestCase") != nil else { return .standard }
+        return UserDefaults(suiteName: "codes.threading.hosted-tests.\(ProcessInfo.processInfo.processIdentifier)")!
+    }
+
+    public static var shared: UserDefaults { storage.value }
+}
+
+/// Foundation permits concurrent UserDefaults access. Keep its missing Sendable annotation
+/// inside an immutable owner, as the host's PreferenceStore does.
+private final class PluginPreferenceStorage: @unchecked Sendable {
+    let value: UserDefaults
+    init(_ makeValue: () -> UserDefaults) { value = makeValue() }
 }
 
 /// What the usage history expects to happen to a window.

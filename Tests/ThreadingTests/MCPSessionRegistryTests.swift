@@ -138,6 +138,7 @@ final class MCPSessionRegistryTests: XCTestCase {
     XCTAssertTrue(serialized.contains("Content-Type: text/event-stream\r\n"))
     XCTAssertTrue(serialized.contains("Cache-Control: no-cache\r\n"))
     XCTAssertFalse(serialized.contains("Content-Length:"))
+    XCTAssertTrue(serialized.hasSuffix(": connected\n\n"))
 
     let event = String(decoding: MCPServer.toolsListChangedEvent, as: UTF8.self)
     XCTAssertTrue(event.hasPrefix("event: message\n"))

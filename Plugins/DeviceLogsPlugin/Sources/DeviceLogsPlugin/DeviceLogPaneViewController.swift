@@ -35,8 +35,15 @@ public final class DeviceLogPaneViewController: NSViewController {
     private let stream: Stream?
     var captureManagedByWorkspace = false
     var requestDiscovery: (() -> Void)?
+    var requestSourceRefresh: (() -> Void)?
+    private var sourceCatalogPending = false
+    private var sourceCatalogUpdatedAt: Date?
     var sourceFactory: ((DeviceLogSourceOption, DeviceLogSourceOption.Route, String?) -> DeviceLogRowSource?)?
     var selectedDeviceID: String? { selectedMachine?.id }
+    private var responsiveBars: [(bar: NSStackView, groups: [NSStackView])] = []
+    private var narrowBarConstraints: [NSLayoutConstraint] = []
+    private var usesNarrowBars = false
+    private var regularLayoutWidth: CGFloat = 0
     private var presentsRows = true
     private var presentationNeedsRefresh = false
     private(set) var presentationUpdateCount = 0
@@ -96,6 +103,11 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// definitions decoded. A view filter — the reader still records everything.
     private let packetPopUp = ThemedPopUp()
     private let filterField = ThemedTextField()
+    private let textModePopUp = ThemedPopUp()
+    private let subsystemField = ThemedTextField()
+    private let categoryField = ThemedTextField()
+    private let scopeLabel = NSTextField(labelWithString: "")
+    private lazy var pauseButton = ThemedButton(title: "Pause capture", target: self, action: #selector(toggleCapturePaused))
     private let statusLabel = NSTextField(labelWithString: "")
     private lazy var bluetoothProfileSetup = BluetoothProfileSetupView(
         preferredToolPath: preferredPymobiledevice3Path, deviceServices: deviceServices
@@ -175,6 +187,10 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     /// The running source's title *within* its machine, used to re-find it after a rescan.
     private var runningSourceTitleWithinMachine: String?
+    private var runningStableSourceKey: String?
+    private var focusSourceBundleID: String?
+    private var focusSourceProcess: String?
+    private var cachedFocus: LogFocus?
 
     private let followPlate = FollowPlateView()
 
@@ -194,8 +210,11 @@ public final class DeviceLogPaneViewController: NSViewController {
     private var discoveryGeneration = 0
     private var savedLogColumnWidths: [NSUserInterfaceItemIdentifier: CGFloat]?
     private var runningSourceTitle: String?
-    private var route: DeviceLogSourceOption.Route = .appLog
+    private var route: DeviceLogSourceOption.Route = .system
     private var rows: [DeviceLogRow] = []
+    private var rowByteSizes: [Int] = []
+    private var retainedByteCount = 0
+    static let ringByteCapacity = 128 * 1_024 * 1_024
     /// What the table draws: rows, and folds standing in for runs of them.
     ///
     /// This used to be the rows that matched, with the rest dropped — so the lines that explain a
@@ -215,10 +234,35 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// Ring positions an agent's search matched, marked so its reading is something you can see.
     private var agentHits: Set<Int> = []
     private var agentHitOffset = 0
-    private var filter = ""
+    private var captureHistoryGap = false
+    private var retainedHandoffDrops = 0
+    private var runningSourceInitialDrops = 0
+    private var panelReadInFlight = false
+    private var observedProcesses: [DeviceLogPanelProcess] = []
+    private var observedProcessKeys = Set<String>()
+    private var observedRecordSources = Set<String>()
+    private var observedDescriptorOrigins: [String: Set<String>] = [:]
+    private var lastReceivedAt: Date?
+    private var observedSelectedPID: Int?
+    private var panelRevision: UInt64 = 1
+    private var panelDataRevision: UInt64 = 0
+    private var panelEpoch = UUID().uuidString
+    private var capturePaused = false
+    private var sharedFilter = DeviceLogPanelFilter() {
+        didSet {
+            if sharedFilter != oldValue { panelRevision &+= 1; cachedFocus = nil }
+        }
+    }
+    private var filter: String {
+        get { sharedFilter.text }
+        set { sharedFilter.text = newValue }
+    }
     /// Whole-device Debug output is thousands of rows per second on a paired iPhone. Start at
     /// Info so the pane opens as a useful console; Debug remains one explicit menu choice away.
-    private var minimumSeverity = Metrics.initialSeverity
+    private var minimumSeverity: Int {
+        get { sharedFilter.minimumSeverity }
+        set { sharedFilter.minimumSeverity = newValue }
+    }
     /// The level the reader is asked for, which only the level menu moves.
     ///
     /// Rows below it are never read, so they are not decoded, kept in the ring or recorded. An
@@ -226,15 +270,26 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// every level, and following it here would quietly turn a phone's Debug firehose back on.
     private var captureSeverity = Metrics.initialSeverity
     private var runningCaptureSeverity: Int?
-    private var selectedProcess: String?
-    private(set) var packetFilter = BluetoothPacketFilter.all
+    private var selectedProcess: String? {
+        get { sharedFilter.process }
+        set { sharedFilter.process = newValue }
+    }
+    private(set) var packetFilter = BluetoothPacketFilter.all {
+        didSet { if packetFilter != oldValue { cachedFocus = nil } }
+    }
     private var processChoices: [String] = []
     private var knownProcesses: Set<String> = []
-    private var showingContext = false
+    private var showingContext: Bool {
+        get { sharedFilter.showingContext }
+        set { sharedFilter.showingContext = newValue }
+    }
     private var projectionGeneration = 0
+    private var projectionLimited = false
     private var projectionTask: Task<Void, Never>?
     // Context projection scans on a worker. Its entries refer to this immutable snapshot until
     // the next result arrives, so a rolling capture cannot silently change the lines on screen.
+    private var completedProjectionFocus: LogFocus?
+    private var completedProjectionContext = false
     private var projectedRows: [DeviceLogRow]?
     private var projectedRowOffset = 0
     private var rowOffset = 0
@@ -242,14 +297,22 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// The controls, as the fold layout reads them. Built rather than stored so the two cannot
     /// drift: the filter field and the level chooser *are* the focus.
     private var focus: LogFocus {
-        LogFocus(
+        if let cachedFocus { return cachedFocus }
+        let result = LogFocus(
             pattern: filter,
             minimumSeverity: minimumSeverity,
             context: DeviceLogLimits.foldContext,
             process: selectedProcess,
-            subsystem: packetFilter == .all ? nil : BluetoothATTSession.appProtocolName,
-            excluding: packetFilter == .complete ? BluetoothPacketFilter.problemMarker : nil
+            subsystem: sharedFilter.subsystem,
+            excluding: packetFilter == .complete ? BluetoothPacketFilter.problemMarker : nil,
+            textMode: sharedFilter.textMode, levels: sharedFilter.levels,
+            bundleID: sharedFilter.bundleID, pid: sharedFilter.pid, category: sharedFilter.category,
+            sourceBundleID: focusSourceBundleID,
+            sourceProcess: focusSourceProcess ?? selectedProcess,
+            requiredSubsystem: packetFilter == .all ? nil : BluetoothATTSession.appProtocolName
         )
+        cachedFocus = result
+        return result
     }
     private var drainTimer: Timer?
     private var boundsObserver: NSObjectProtocol?
@@ -260,6 +323,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     private var updatingTable = false
     private var rateTimer: Timer?
     private var received = 0
+    private var receivedInGeneration = 0
     private var lastCount = 0
     private var rate = 0
     /// When the running source was started, so a source that connects and then says nothing can
@@ -337,6 +401,20 @@ public final class DeviceLogPaneViewController: NSViewController {
         rebuildMenus()
     }
 
+    public override func viewDidLayout() {
+        super.viewDidLayout()
+        adaptRegularColumns()
+        let narrow = view.bounds.width < 640
+        guard narrow != usesNarrowBars else { return }
+        usesNarrowBars = narrow
+        for pair in responsiveBars {
+            pair.bar.orientation = narrow ? .vertical : .horizontal
+            pair.bar.alignment = narrow ? .leading : .centerY
+        }
+        if narrow { NSLayoutConstraint.activate(narrowBarConstraints) }
+        else { NSLayoutConstraint.deactivate(narrowBarConstraints) }
+    }
+
     public override func viewDidAppear() {
         super.viewDidAppear()
         guard !captureManagedByWorkspace else { return }
@@ -344,7 +422,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     }
 
     func startCapture(discover: Bool = true) {
-        guard drainTimer == nil else { return }
+        guard drainTimer == nil, !capturePaused else { return }
         drainTimer = Timer.scheduledTimer(
             withTimeInterval: Metrics.drainInterval,
             repeats: true
@@ -397,14 +475,17 @@ public final class DeviceLogPaneViewController: NSViewController {
         bluetoothProfileSetup.cancelBrowser()
         discoveryGeneration += 1
         sourceGeneration += 1
+        if source != nil { captureHistoryGap = true }
         // A hidden tab must not keep a child process reading a firehose.
         //
         // `runningSourceTitle` deliberately survives. It records *which* source the rows on screen
         // came from, not whether a process is alive, and clearing it here made every re-appearance
         // look like a source change — so switching tabs or sessions and coming back wiped the
         // whole log. `source == nil` is what says "not currently reading".
+        retireHandoffDrops()
         source?.stop()
         source = nil
+        panelDataRevision &+= 1
         drainTimer?.invalidate()
         drainTimer = nil
         rateTimer?.invalidate()
@@ -476,6 +557,31 @@ public final class DeviceLogPaneViewController: NSViewController {
         self.scroll = scroll
     }
 
+    /// A console's message remains readable at drawer widths. App identity is already named in
+    /// the controls, so narrow panes hide those redundant columns before sacrificing the content.
+    private func adaptRegularColumns() {
+        guard packetPopUp.isHidden, let scroll else { return }
+        let width = min(view.bounds.width, scroll.bounds.width, scroll.contentView.bounds.width)
+        guard width > 0, abs(width - regularLayoutWidth) > 1 else { return }
+        regularLayoutWidth = width
+        let narrow = width < 640
+        table.columnAutoresizingStyle = .noColumnAutoresizing
+        table.tableColumn(withIdentifier: Columns.process)?.isHidden = narrow
+        table.tableColumn(withIdentifier: Columns.subsystem)?.isHidden = narrow
+        let time: CGFloat = narrow ? 72 : 92
+        let level: CGFloat = narrow ? 50 : 62
+        let process: CGFloat = width < 900 ? 100 : 150
+        let subsystem: CGFloat = width < 900 ? 120 : 180
+        let metadataWidth = time + level + (narrow ? 0 : process + subsystem)
+        let gaps = table.intercellSpacing.width * CGFloat(narrow ? 3 : 5)
+        table.tableColumn(withIdentifier: Columns.time)?.width = time
+        table.tableColumn(withIdentifier: Columns.level)?.width = level
+        table.tableColumn(withIdentifier: Columns.process)?.width = process
+        table.tableColumn(withIdentifier: Columns.subsystem)?.width = subsystem
+        table.tableColumn(withIdentifier: Columns.message)?.width = max(180, width - metadataWidth - gaps)
+        table.setFrameSize(NSSize(width: width, height: table.frame.height))
+    }
+
     /// The level filter's thresholds, in menu order. `ThemedMenuItem` carries no tag, so the
     /// menu's own order is the mapping.
     private static let levelThresholds = [0, 1, 3]
@@ -490,9 +596,10 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// Deliberately separate from how the menu is *arranged*. Recents used to reorder the one flat
     /// list, which hoisted two apps above the simulator and the phone they belong to — the list
     /// stopped describing anything. Remembering a choice and ordering a menu are different jobs.
-    private enum Recents {
+    @MainActor private enum Recents {
         static let machineKey = "deviceLogRecentMachine"
         static let sourceKeyPrefix = "deviceLogRecentSource."
+        static let identityKeyPrefix = "deviceLogRecentSourceIdentity."
 
         static func machineID() -> String? {
             PreferenceStore.shared.string(forKey: machineKey)
@@ -506,8 +613,13 @@ public final class DeviceLogPaneViewController: NSViewController {
             PreferenceStore.shared.string(forKey: sourceKeyPrefix + id)
         }
 
-        static func rememberSource(_ title: String, forMachine id: String) {
+        static func stableSourceKey(forMachine id: String) -> String? {
+            PreferenceStore.shared.string(forKey: identityKeyPrefix + id)
+        }
+
+        static func rememberSource(_ title: String, stableKey: String, forMachine id: String) {
             PreferenceStore.shared.set(title, forKey: sourceKeyPrefix + id)
+            PreferenceStore.shared.set(stableKey, forKey: identityKeyPrefix + id)
         }
     }
 
@@ -527,7 +639,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         for route in DeviceLogSourceOption.Route.allCases {
             routePopUp.addItem(withTitle: route.title)
         }
-        routePopUp.selectItem(at: 0)
+        routePopUp.selectItem(at: route.rawValue)
         routePopUp.target = self
         routePopUp.action = #selector(routeChanged)
         routePopUp.setContentHuggingPriority(.defaultHigh, for: .horizontal)
@@ -541,6 +653,22 @@ public final class DeviceLogPaneViewController: NSViewController {
 
         filterField.placeholderString = L10n.string("Filter log lines")
         filterField.delegate = self
+        filterField.setAccessibilityIdentifier("device-log-text-filter")
+        for title in ["Literal", "Regex"] { textModePopUp.addItem(withTitle: title) }
+        textModePopUp.target = self
+        textModePopUp.action = #selector(textModeChanged)
+        textModePopUp.setAccessibilityIdentifier("device-log-text-mode")
+        subsystemField.placeholderString = "Subsystem"
+        categoryField.placeholderString = "Category"
+        subsystemField.delegate = self
+        categoryField.delegate = self
+        subsystemField.setAccessibilityIdentifier("device-log-subsystem-filter")
+        categoryField.setAccessibilityIdentifier("device-log-category-filter")
+        pauseButton.setAccessibilityIdentifier("device-log-pause-capture")
+        scopeLabel.applyFont(.compactCode)
+        scopeLabel.textColor = Design.Text.secondary
+        scopeLabel.lineBreakMode = .byTruncatingMiddle
+        scopeLabel.setAccessibilityIdentifier("device-log-active-scope")
 
         processPopUp.addItem(withTitle: L10n.string("All processes"))
         processPopUp.target = self
@@ -582,7 +710,9 @@ public final class DeviceLogPaneViewController: NSViewController {
         bluetoothProfileSetup.isHidden = true
         definitionsButton.isHidden = true
         timelinesButton.isHidden = true
-        let bar = NSStackView(views: [devicePopUp, sourcePopUp, routePopUp, bluetoothSetupButton, definitionsButton, timelinesButton, rescan, clear])
+        let sourceSelectors = NSStackView(views: [devicePopUp, sourcePopUp, routePopUp])
+        let sourceActions = NSStackView(views: [bluetoothSetupButton, definitionsButton, timelinesButton, rescan, clear])
+        let bar = NSStackView(views: [sourceSelectors, sourceActions])
         bar.setAccessibilityIdentifier("device-log-source-bar")
         bar.orientation = .horizontal
         bar.spacing = Design.Spacing.small
@@ -593,13 +723,44 @@ public final class DeviceLogPaneViewController: NSViewController {
             bottom: Design.Spacing.small,
             right: Design.Spacing.medium
         )
-        let filters = NSStackView(views: [processPopUp, packetPopUp, levelPopUp, filterField, contextPopUp])
+        let filterSelectors = NSStackView(views: [processPopUp, packetPopUp, levelPopUp, textModePopUp])
+        let filterText = NSStackView(views: [filterField, contextPopUp])
+        let filters = NSStackView(views: [filterSelectors, filterText])
         filters.setAccessibilityIdentifier("device-log-filter-bar")
+        filters.toolTip = "Text, app/process, level, subsystem and category filters combine with AND. Selected levels combine with OR. Literal text is the default; regex is explicit."
         filters.orientation = .horizontal
         filters.spacing = Design.Spacing.small
         filters.alignment = .centerY
         filters.edgeInsets = bar.edgeInsets
-        for control in [devicePopUp, sourcePopUp, routePopUp, levelPopUp, processPopUp, packetPopUp, contextPopUp] as [NSView] + [bluetoothSetupButton, timelinesButton, rescan, clear, filterField] {
+        let scopeFields = NSStackView(views: [subsystemField, categoryField])
+        let scopeIdentity = NSStackView(views: [scopeLabel, pauseButton])
+        let scope = NSStackView(views: [scopeFields, scopeIdentity])
+        scope.orientation = .horizontal
+        scope.spacing = Design.Spacing.small
+        scope.alignment = .centerY
+        scope.edgeInsets = bar.edgeInsets
+        scope.setAccessibilityIdentifier("device-log-scope-bar")
+        responsiveBars = [(bar, [sourceSelectors, sourceActions]), (filters, [filterSelectors, filterText]),
+                          (scope, [scopeFields, scopeIdentity])]
+        for pair in responsiveBars {
+            for group in pair.groups {
+                group.orientation = .horizontal
+                group.alignment = .centerY
+                group.spacing = Design.Spacing.small
+                narrowBarConstraints.append(group.widthAnchor.constraint(equalTo: pair.bar.widthAnchor,
+                    constant: -pair.bar.edgeInsets.left - pair.bar.edgeInsets.right))
+            }
+        }
+        for control in [devicePopUp, sourcePopUp, processPopUp, levelPopUp, scopeLabel] as [NSView] {
+            control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        sourceSelectors.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        filterText.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        scopeIdentity.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        subsystemField.widthAnchor.constraint(equalTo: categoryField.widthAnchor).isActive = true
+        subsystemField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        categoryField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for control in [devicePopUp, sourcePopUp, routePopUp, levelPopUp, processPopUp, packetPopUp, contextPopUp, textModePopUp] as [NSView] + [bluetoothSetupButton, timelinesButton, rescan, clear, filterField, subsystemField, categoryField, pauseButton] {
             control.heightAnchor.constraint(equalToConstant: Metrics.controlHeight).isActive = true
         }
 
@@ -620,7 +781,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         )
 
         guard let scroll else { return }
-        let stack = NSStackView(views: [bar, bluetoothProfileSetup, filters, scroll, footer])
+        let stack = NSStackView(views: [bar, bluetoothProfileSetup, filters, scope, scroll, footer])
         stack.orientation = .vertical
         stack.spacing = 0
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -631,6 +792,11 @@ public final class DeviceLogPaneViewController: NSViewController {
             stack.topAnchor.constraint(equalTo: view.topAnchor),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             bluetoothProfileSetup.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            bar.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            filters.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scope.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
 
         // Over the rows rather than in the chrome: it belongs to the thing that stopped moving,
@@ -682,6 +848,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     // MARK: Sources
 
     @objc private func reloadSources() {
+        beginSourceDiscovery()
         if let requestDiscovery { requestDiscovery(); return }
         discoveryGeneration += 1
         let generation = discoveryGeneration
@@ -696,8 +863,20 @@ public final class DeviceLogPaneViewController: NSViewController {
         }
     }
 
+    func beginSourceDiscovery() { sourceCatalogPending = true }
+
+    public func refreshPanelSources() -> DeviceLogPanelState {
+        beginSourceDiscovery()
+        if let requestSourceRefresh { requestSourceRefresh() }
+        else { reloadSources() }
+        return panelState()
+    }
+
     func acceptSources(_ found: [DeviceLogSourceOption]) {
+        sourceCatalogPending = false
+        sourceCatalogUpdatedAt = Date()
         options = found.filter { stream?.includes($0) ?? true }
+        discoverSourceProcesses()
         rebuildMenus()
         if isVisibleForCapture { startSelectedSource() }
     }
@@ -757,6 +936,7 @@ public final class DeviceLogPaneViewController: NSViewController {
             ?? machines.first { $0.id == Recents.machineID() }
             ?? machines[0]
         if requestedMachine != nil { requestedMachineID = nil }
+        if selectedMachine != machine { panelRevision &+= 1 }
         selectedMachine = machine
         machines.forEach { devicePopUp.addItem(withTitle: $0.title) }
         devicePopUp.selectItem(at: machines.firstIndex(of: machine) ?? 0)
@@ -766,10 +946,17 @@ public final class DeviceLogPaneViewController: NSViewController {
         // By title within the machine rather than by a remembered index: the list changes shape
         // whenever an app is installed or removed, and an index would then name something else.
         let wanted = Recents.sourceTitle(forMachine: recentMachineKey(machine.id))
-        let keep = sources.firstIndex { $0.title == runningSourceTitleWithinMachine }
+        let wantedIdentity = Recents.stableSourceKey(forMachine: recentMachineKey(machine.id))
+        let keep = sources.firstIndex { stableSourceKey($0) == runningStableSourceKey }
+            ?? sources.firstIndex { $0.title == runningSourceTitleWithinMachine }
+            ?? sources.firstIndex { stableSourceKey($0) == wantedIdentity }
             ?? sources.firstIndex { $0.title == wanted }
             ?? 0
         sourcePopUp.selectItem(at: keep)
+        if sharedFilter.pid == nil, let pid = sources[keep].processIdentity?.pid, pid != observedSelectedPID {
+            observedSelectedPID = pid
+            panelRevision &+= 1
+        }
         updateRouteVisibility()
     }
 
@@ -778,6 +965,13 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// which has one log and no choice to make — a control offering a decision that does not
     /// exist.
     private func updateRouteVisibility() {
+        let bundleID = selectedOption?.bundleID
+        let process = selectedOption?.processIdentity?.name
+        if focusSourceBundleID != bundleID || focusSourceProcess != process {
+            focusSourceBundleID = bundleID
+            focusSourceProcess = process
+            cachedFocus = nil
+        }
         let isBluetooth: Bool
         if let option = selectedOption, case .bluetooth = option.kind { isBluetooth = true }
         else { isBluetooth = stream == .bluetooth }
@@ -975,6 +1169,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     #endif
 
     private func updateBluetoothColumns(isBluetooth: Bool) {
+        regularLayoutWidth = 0
         guard isBluetooth != (savedLogColumnWidths != nil) else { return }
         if isBluetooth {
             savedLogColumnWidths = Dictionary(uniqueKeysWithValues: table.tableColumns.map { ($0.identifier, $0.width) })
@@ -1049,6 +1244,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     }
 
     private func startSelectedSource() {
+        guard !capturePaused else { updateStatus(); return }
         guard let option = selectedOption else {
             sourceGeneration += 1
             source?.stop()
@@ -1068,9 +1264,9 @@ public final class DeviceLogPaneViewController: NSViewController {
         // Scoped to the machine, because two phones both offer a "System log" and only the
         // machine tells them apart. A bare title would make switching between them look like
         // staying put, and the pane would never restart the reader.
-        let identity = "\(option.machine.id)/\(option.title)" + (isApp ? "#\(route.rawValue)" : "")
+        let identity = "\(option.machine.id)/\(stableSourceKey(option))" + (isApp ? "#\(route.rawValue)" : "")
             + (selectedProcess.map { "#process=\($0)" } ?? "")
-        let severity = option.readsAtLevel ? captureSeverity : 0
+        let severity = option.readsAtLevel(route: route) ? captureSeverity : 0
         // Already reading this one: restarting would throw away every row read so far.
         guard identity != runningSourceTitle || severity != runningCaptureSeverity
                 || source == nil || endedReason != nil else { return }
@@ -1080,14 +1276,18 @@ public final class DeviceLogPaneViewController: NSViewController {
         // for a live tail and better than an empty pane. A new level is the same source read
         // differently, so it keeps its rows too.
         let isSameSource = identity == runningSourceTitle
+        if !isSameSource { panelRevision &+= 1 }
         runningSourceTitle = identity
         runningCaptureSeverity = severity
         runningSourceTitleWithinMachine = option.title
+        runningStableSourceKey = stableSourceKey(option)
         Recents.rememberMachine(option.machine.id)
-        Recents.rememberSource(option.title, forMachine: recentMachineKey(option.machine.id))
+        Recents.rememberSource(option.title, stableKey: stableSourceKey(option), forMachine: recentMachineKey(option.machine.id))
 
         sourceGeneration += 1
         let generation = sourceGeneration
+        if source != nil, isSameSource { captureHistoryGap = true }
+        retireHandoffDrops()
         source?.stop()
         if !isSameSource {
             clearRows()
@@ -1118,6 +1318,7 @@ public final class DeviceLogPaneViewController: NSViewController {
                 MainActor.assumeIsolated {
                     guard let self, self.sourceGeneration == generation else { return }
                     self.endedReason = reason
+                    self.panelDataRevision &+= 1
                     self.updateStatus()
                 }
             }
@@ -1134,10 +1335,21 @@ public final class DeviceLogPaneViewController: NSViewController {
                 DispatchQueue.main.async { MainActor.assumeIsolated { apply(report) } }
             }
         }
+        observedRecordSources.removeAll()
+        observedDescriptorOrigins.removeAll()
         source = started
+        receivedInGeneration = 0
+        lastReceivedAt = nil
+        runningSourceInitialDrops = started.dropped
         started.start()
         startedAt = Date()
         updateStatus()
+    }
+
+    private func stableSourceKey(_ option: DeviceLogSourceOption) -> String {
+        if let bundleID = option.bundleID { return "bundle:" + bundleID }
+        if let path = option.processIdentity?.executablePath { return "process:" + path }
+        return "source:" + option.title
     }
 
     private func recentMachineKey(_ id: String) -> String {
@@ -1145,6 +1357,9 @@ public final class DeviceLogPaneViewController: NSViewController {
     }
 
     @objc private func sourceChanged() {
+        sharedFilter.bundleID = selectedOption?.bundleID
+        sharedFilter.pid = nil
+        observedSelectedPID = nil
         updateRouteVisibility()
         startSelectedSource()
     }
@@ -1162,6 +1377,7 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     @objc private func levelChanged() {
         let index = levelPopUp.indexOfSelectedItem
+        sharedFilter.levels = []
         minimumSeverity = Self.levelThresholds.indices.contains(index)
             ? Self.levelThresholds[index]
             : 0
@@ -1180,6 +1396,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// Shows only rows the project's definitions decoded, optionally only those whose bytes fit
     /// their definition exactly. Recorded history is unaffected.
     func setPacketFilter(_ filter: BluetoothPacketFilter) {
+        if packetFilter != filter { panelRevision &+= 1 }
         packetFilter = filter
         packetPopUp.selectItem(at: filter.rawValue)
         expandedGaps.removeAll()
@@ -1211,9 +1428,41 @@ public final class DeviceLogPaneViewController: NSViewController {
         updateStatus()
     }
 
+    private func discoverSourceProcesses() {
+        for option in options.prefix(512) {
+            guard let process = option.processIdentity else { continue }
+            if processChoices.count < Metrics.maximumProcessChoices, knownProcesses.insert(process.name).inserted {
+                processChoices.append(process.name)
+                if presentsRows { processPopUp.addItem(withTitle: process.name) }
+            }
+        }
+    }
+
     /// Incremental, capped discovery; never rebuild a menu for every log tick.
     private func discoverProcesses(in batch: [DeviceLogRow]) {
-        for row in batch where processChoices.count < Metrics.maximumProcessChoices {
+        let activeBundleID = sharedFilter.bundleID ?? focusSourceBundleID
+        let activeProcess = selectedProcess ?? focusSourceProcess
+        for row in batch {
+            observedRecordSources.insert(row.source.rawValue)
+            if row.source == .stdout || row.source == .stderr {
+                let origin = descriptorOrigin(bundleID: row.bundleID, process: row.process, pid: row.pid)
+                if observedDescriptorOrigins.count < Metrics.maximumProcessChoices || observedDescriptorOrigins[origin] != nil {
+                    observedDescriptorOrigins[origin, default: []].insert(row.source.rawValue)
+                }
+            }
+            let identity = DeviceLogPanelProcess(process: row.process, bundleID: row.bundleID, pid: row.pid)
+            let key = "\(row.process)\u{0}\(row.bundleID ?? "")\u{0}\(row.pid ?? 0)"
+            if observedProcesses.count < Metrics.maximumProcessChoices, observedProcessKeys.insert(key).inserted {
+                observedProcesses.append(identity)
+            }
+            let selectedIdentity = activeBundleID.map {
+                row.bundleID == $0 || (row.bundleID == nil && activeProcess == row.process)
+            } ?? activeProcess.map { row.process == $0 } ?? false
+            if selectedIdentity, let pid = row.pid, pid != observedSelectedPID {
+                observedSelectedPID = pid
+                panelRevision &+= 1
+            }
+            guard processChoices.count < Metrics.maximumProcessChoices else { continue }
             guard !row.process.isEmpty, knownProcesses.insert(row.process).inserted else { continue }
             processChoices.append(row.process)
             if presentsRows { processPopUp.addItem(withTitle: row.process) }
@@ -1225,8 +1474,19 @@ public final class DeviceLogPaneViewController: NSViewController {
         projectionTask?.cancel()
         projectionTask = nil
         rowOffset = 0
+        captureHistoryGap = false
+        retainedHandoffDrops = 0
+        runningSourceInitialDrops = source?.dropped ?? 0
+        panelEpoch = UUID().uuidString
+        panelDataRevision &+= 1
         projectedRows = nil
+        completedProjectionFocus = nil
         rows.removeAll(keepingCapacity: true)
+        rowByteSizes.removeAll(keepingCapacity: true)
+        retainedByteCount = 0
+        observedRecordSources.removeAll()
+        observedDescriptorOrigins.removeAll()
+        lastReceivedAt = nil
         entries.removeAll(keepingCapacity: true)
         expandedGaps.removeAll()
         table.reloadData()
@@ -1238,13 +1498,25 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// `design-system.md` asks for a rendered state on a new component, and this surface earns it:
     /// its header sat *on top of* the first rows for a whole build because nothing drew it.
     public func installRowsForTesting(_ fixture: [DeviceLogRow], focusing pattern: String = "") {
+        projectionGeneration += 1
+        projectionTask?.cancel()
+        projectionTask = nil
         projectedRows = nil
-        rows = fixture
+        rows.removeAll(keepingCapacity: true)
+        rowByteSizes.removeAll(keepingCapacity: true)
+        retainedByteCount = 0
+        rowOffset = appendToRing(fixture)
+        panelEpoch = UUID().uuidString
+        panelDataRevision &+= 1
         received = fixture.count
+        receivedInGeneration = fixture.count
+        lastReceivedAt = fixture.isEmpty ? nil : Date()
         discoverProcesses(in: fixture)
         filter = pattern
         filterField.stringValue = pattern
         entries = LogFocusLayout.entries(rows: rows, focus: focus, showingContext: showingContext)
+        completedProjectionFocus = focus
+        completedProjectionContext = showingContext
         table.reloadData()
         updateStatus()
     }
@@ -1262,6 +1534,9 @@ public final class DeviceLogPaneViewController: NSViewController {
         filter = pattern
         filterField.stringValue = pattern
         self.minimumSeverity = minimumSeverity
+        sharedFilter.levels = []
+        sharedFilter.textMode = .literal
+        synchronizePanelControls()
         expandedGaps.removeAll()
         agentHits.removeAll()
         recomputeVisible()
@@ -1311,7 +1586,21 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// spawns child processes and takes tens of seconds, which no render test should wait for.
     public func installSourcesForTesting(_ fixture: [DeviceLogSourceOption]) {
         options = fixture.filter { stream?.includes($0) ?? true }
+        discoverSourceProcesses()
         rebuildMenus()
+    }
+
+    public func selectAppForTesting(bundleID: String, route: DeviceLogSourceOption.Route = .system) {
+        guard let option = options.first(where: { $0.bundleID == bundleID }) else { return }
+        requestedMachineID = option.machine.id
+        rebuildMenus()
+        let choices = sources(of: selectedMachine)
+        guard let index = choices.firstIndex(of: option) else { return }
+        sourcePopUp.selectItem(at: index)
+        self.route = route
+        routePopUp.selectItem(at: route.rawValue)
+        updateRouteVisibility()
+        if isVisibleForCapture { startSelectedSource() }
     }
 
     public var isRouteControlHiddenForTesting: Bool { routePopUp.isHidden }
@@ -1333,6 +1622,14 @@ public final class DeviceLogPaneViewController: NSViewController {
     }
     /// The level the running reader was asked for; nil before one has started.
     public var captureSeverityForTesting: Int? { runningCaptureSeverity }
+    public var scrollOriginForTesting: NSPoint { scroll?.contentView.bounds.origin ?? .zero }
+    public var selectedRowIDsForTesting: [String] {
+        let snapshot = projectedRows ?? rows
+        return table.selectedRowIndexes.compactMap { position in
+            guard entries.indices.contains(position), case .row(let index) = entries[position], snapshot.indices.contains(index) else { return nil }
+            return snapshot[index].id
+        }
+    }
 
     /// Drives the same path a keystroke in the filter field takes.
     public func simulateUserFilterEditForTesting(_ text: String) {
@@ -1362,12 +1659,14 @@ public final class DeviceLogPaneViewController: NSViewController {
         let offset = projectedRows == nil ? rowOffset : projectedRowOffset
         if let position = displayIndex(containing: index), case .gap(let range) = entries[position] {
             expandedGaps.insert(range.lowerBound + offset)
+            panelRevision &+= 1
             entries = LogFocusLayout.entries(rows: displayed, focus: focus, expanded: expandedGaps(at: offset))
             table.reloadData()
         }
         guard let position = displayIndex(containing: index), case .row = entries[position] else { return false }
         revealingLinked = true
         defer { revealingLinked = false }
+        if isFollowing { panelRevision &+= 1 }
         isFollowing = false
         table.selectRowIndexes(IndexSet(integer: position), byExtendingSelection: false)
         table.scrollRowToVisible(position)
@@ -1402,6 +1701,8 @@ public final class DeviceLogPaneViewController: NSViewController {
             entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps(at: rowOffset))
             projectedRows = rows
             projectedRowOffset = rowOffset
+            completedProjectionFocus = focus
+            completedProjectionContext = showingContext
             return
         }
         if projectedRows == nil {
@@ -1413,17 +1714,23 @@ public final class DeviceLogPaneViewController: NSViewController {
         let offset = rowOffset
         let context = showingContext
         let expanded = expandedGaps(at: offset)
+        projectionLimited = false
         projectionTask = Task { [weak self] in
-            let worker = Task.detached(priority: .userInitiated) {
+            let worker = Task.detached(priority: .userInitiated) { () -> (entries: [LogDisplayEntry], limited: Bool) in
+                let deadline: UInt64? = selectedFocus.textMode == .regex
+                    ? DispatchTime.now().uptimeNanoseconds + 250_000_000 : nil
                 if context {
-                    return LogFocusLayout.entries(rows: snapshot, focus: selectedFocus, expanded: expanded)
+                    let result = LogFocusLayout.entries(rows: snapshot, focus: selectedFocus, expanded: expanded,
+                                                        evaluationDeadline: deadline)
+                    return (result, deadline.map { DispatchTime.now().uptimeNanoseconds >= $0 } ?? false)
                 }
                 var result: [LogDisplayEntry] = []
                 for index in snapshot.indices {
-                    if index % 128 == 0, Task.isCancelled { return result }
-                    if selectedFocus.matches(snapshot[index]) { result.append(.row(index)) }
+                    if index % 128 == 0, Task.isCancelled { return (result, false) }
+                    if let deadline, DispatchTime.now().uptimeNanoseconds >= deadline { return (result, true) }
+                    if selectedFocus.evaluation(of: snapshot[index], deadline: deadline).matches { result.append(.row(index)) }
                 }
-                return result
+                return (result, false)
             }
             let projected = await withTaskCancellationHandler {
                 await worker.value
@@ -1440,7 +1747,11 @@ public final class DeviceLogPaneViewController: NSViewController {
             let anchor = self.entries.indices.contains(first) ? self.entryStart(self.entries[first]) + oldOffset : nil
             let oldOrigin = self.scroll?.contentView.bounds.origin ?? .zero
             let pitch = self.table.rowHeight + self.table.intercellSpacing.height
-            self.entries = projected
+            let replacesDataset = self.completedProjectionFocus != selectedFocus || self.completedProjectionContext != context
+            self.entries = projected.entries
+            self.projectionLimited = projected.limited
+            self.completedProjectionFocus = selectedFocus
+            self.completedProjectionContext = context
             self.projectedRows = snapshot
             self.presentationNeedsRefresh = false
             self.projectedRowOffset = offset
@@ -1453,7 +1764,7 @@ public final class DeviceLogPaneViewController: NSViewController {
             let origin = anchor.flatMap { self.displayIndex(containing: $0 - offset) }.map {
                 NSPoint(x: oldOrigin.x, y: max(0, oldOrigin.y + CGFloat($0 - first) * pitch))
             }
-            if self.presentsRows { self.refreshStreamingTable(selection: selection, origin: origin) }
+            if self.presentsRows { self.refreshStreamingTable(selection: selection, origin: origin, replacingDataset: replacesDataset) }
             self.updateStatus()
             // Publish each completed snapshot, then catch up. Discarding every result
             // when more rows arrived would starve a busy device's view indefinitely.
@@ -1474,27 +1785,27 @@ public final class DeviceLogPaneViewController: NSViewController {
         let incoming = source.drain()
         guard !incoming.isEmpty else { return }
         received += incoming.count
+        receivedInGeneration += incoming.count
+        lastReceivedAt = Date()
+        panelDataRevision &+= 1
         discoverProcesses(in: incoming)
         // On disk as well as on screen: the ring is what the table can hold, the store is what a
         // question can reach back through once the ring has moved on.
         recorder?.record(incoming)
 
-        let projectBurst = !showingContext && isFiltering && incoming.count > Metrics.maximumSynchronousMatches
+        let projectBurst = !showingContext && isFiltering
+            && (incoming.count > Metrics.maximumSynchronousMatches || sharedFilter.textMode == .regex)
         if presentsRows, projectBurst, projectedRows == nil {
             projectedRows = rows
             projectedRowOffset = rowOffset
         }
         let previousCount = rows.count
-        rows.append(contentsOf: incoming)
-        let removedCount = max(0, rows.count - DeviceLogLimits.ringCapacity)
+        let removedCount = appendToRing(incoming)
         let removedEntries = entries.prefix { entry in
             guard case .row(let index) = entry else { return false }
             return index < removedCount
         }.count
         rowOffset += removedCount
-        if rows.count > DeviceLogLimits.ringCapacity {
-            rows.removeFirst(rows.count - DeviceLogLimits.ringCapacity)
-        }
 
         guard presentsRows, projectionTask == nil else {
             presentationNeedsRefresh = true
@@ -1507,6 +1818,8 @@ public final class DeviceLogPaneViewController: NSViewController {
             return
         }
         projectedRows = nil
+        completedProjectionFocus = focus
+        completedProjectionContext = showingContext
 
         if !showingContext {
             // Strict mode tests new rows only. Old matches shift with the ring; a whole-ring
@@ -1527,6 +1840,25 @@ public final class DeviceLogPaneViewController: NSViewController {
             // selected lines and paused viewport attached to those surviving entries.
             refreshStreamingTable(removing: removedEntries)
         }
+    }
+
+    /// One bounded value-ring mutation, shared by capture and deterministic fixtures.
+    @discardableResult
+    private func appendToRing(_ incoming: [DeviceLogRow]) -> Int {
+        rows.append(contentsOf: incoming)
+        let addedSizes = incoming.map(\.estimatedRetainedBytes)
+        rowByteSizes.append(contentsOf: addedSizes)
+        retainedByteCount += addedSizes.reduce(0, +)
+        var removedCount = 0
+        while rows.count - removedCount > DeviceLogLimits.ringCapacity || retainedByteCount > Self.ringByteCapacity {
+            retainedByteCount -= rowByteSizes[removedCount]
+            removedCount += 1
+        }
+        if removedCount > 0 {
+            rows.removeFirst(removedCount)
+            rowByteSizes.removeFirst(removedCount)
+        }
+        return removedCount
     }
 
     private func entryStart(_ entry: LogDisplayEntry) -> Int {
@@ -1603,14 +1935,21 @@ public final class DeviceLogPaneViewController: NSViewController {
     }
 
     private func refreshStreamingTable(removing removedEntries: Int = 0,
-                                       selection: IndexSet? = nil, origin restoredOrigin: NSPoint? = nil) {
+                                       selection: IndexSet? = nil, origin restoredOrigin: NSPoint? = nil,
+                                       replacingDataset: Bool = false) {
         updatingTable = true
         defer { updatingTable = false }
         let selected = table.selectedRowIndexes
         let origin = scroll?.contentView.bounds.origin ?? .zero
         // reloadData destroys every visible row and its cells. A live tail needs only its
         // count and the text in the existing viewport to change, including at a full ring.
-        table.noteNumberOfRowsChanged()
+        if replacingDataset {
+            // A different filter is a different dataset. Count-only updates leave AppKit's retired
+            // row presentations alive; reload the bounded viewport once for this user operation.
+            table.reloadData()
+        } else {
+            table.noteNumberOfRowsChanged()
+        }
         if let selection {
             table.selectRowIndexes(selection, byExtendingSelection: false)
         } else if removedEntries > 0 {
@@ -1645,14 +1984,17 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     /// The reader moved the view. Leaving the bottom stops the follow; arriving back resumes it.
     private func scrollPositionChanged() {
+        adaptRegularColumns()
         guard !updatingTable else { return }
         let atBottom = isPinnedToBottom()
         guard atBottom != isFollowing else { return }
         isFollowing = atBottom
+        panelRevision &+= 1
         updateFollowAffordance()
     }
 
     @objc private func resumeFollowing() {
+        if !isFollowing { panelRevision &+= 1 }
         isFollowing = true
         if !entries.isEmpty { table.scrollRowToVisible(entries.count - 1) }
         updateFollowAffordance()
@@ -1678,12 +2020,18 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     /// Puts the agent's note after whatever the pane was going to say.
     private func appending(_ text: String) -> String {
-        guard let agentNote else { return text }
-        return text + " · " + agentNote
+        let unavailable = currentSourceAvailability().unavailable
+            .filter { $0 == "stdout" || $0 == "stderr" }.map { "\($0) unavailable" }
+        return ([text] + unavailable + (agentNote.map { [$0] } ?? [])).joined(separator: " · ")
     }
 
     private func updateStatus() {
         guard presentsRows else { return }
+        updateScopeLabel()
+        if capturePaused {
+            statusLabel.stringValue = appending("Capture paused · \(rows.count) retained rows")
+            return
+        }
         // The agent's note is appended to every state, including these two. It says what happened
         // to what the person is looking at, and dropping it in exactly the states where the pane is
         // otherwise uninformative is where it would be missed most: a search of recorded history
@@ -1709,11 +2057,15 @@ public final class DeviceLogPaneViewController: NSViewController {
         // and then sends nothing looks identical to a quiet device unless the pane says so, and
         // that exact case cost an afternoon: `os_trace_relay` connects, streams nothing, and the
         // archive route through the same service works fine.
-        if received == 0, let startedAt, Date().timeIntervalSince(startedAt) > Metrics.silenceGrace {
+        if receivedInGeneration == 0, let startedAt, Date().timeIntervalSince(startedAt) > Metrics.silenceGrace {
             if let option = selectedOption, case .bluetooth = option.kind {
                 statusLabel.stringValue = appending(L10n.string("Waiting for Bluetooth packets. Check the iPhone logging profile and generate Bluetooth activity."))
             } else {
-                statusLabel.stringValue = appending(L10n.string("Connected, but no log lines yet."))
+                if source?.lastTransportActivity.map({ Date().timeIntervalSince($0) <= Metrics.silenceGrace }) == true {
+                    statusLabel.stringValue = appending("Live transport · no rows for the selected app/process yet")
+                } else {
+                    statusLabel.stringValue = appending("No live log data received yet")
+                }
             }
             statusLabel.textColor = Design.Status.warning
             return
@@ -1735,9 +2087,541 @@ public final class DeviceLogPaneViewController: NSViewController {
                 parts.append(L10n.string("no packet definitions loaded — see ?"))
             }
         }
-        if let agentNote { parts.append(agentNote) }
-        statusLabel.stringValue = parts.joined(separator: " · ")
+        if projectionLimited { parts.append("Regex projection limited — refine the filter") }
+        else if isFiltering, shown == 0, !rows.isEmpty { parts.append("No matching rows") }
+        statusLabel.stringValue = appending(parts.joined(separator: " · "))
     }
+    // MARK: Shared panel control plane
+
+    private func nonempty(_ value: String) -> String? { value.isEmpty ? nil : value }
+
+    private func validRoutes(for option: DeviceLogSourceOption) -> [DeviceLogSourceOption.Route] {
+        if case .app = option.kind { return [.system, .appLog, .console] }
+        if case .bluetooth = option.kind { return [] }
+        return [.system]
+    }
+
+    private func routeName(_ value: DeviceLogSourceOption.Route) -> String {
+        switch value { case .appLog: return "app_log"; case .console: return "console"; case .system: return "system" }
+    }
+
+    private func synchronizePanelControls() {
+        filterField.stringValue = sharedFilter.text
+        subsystemField.stringValue = sharedFilter.subsystem ?? ""
+        categoryField.stringValue = sharedFilter.category ?? ""
+        textModePopUp.selectItem(at: sharedFilter.textMode == .literal ? 0 : 1)
+        contextPopUp.selectItem(at: showingContext ? 1 : 0)
+        if sharedFilter.levels.isEmpty {
+            levelPopUp.selectItem(at: Self.levelThresholds.firstIndex(of: minimumSeverity) ?? 0)
+        } else {
+            let title = sharedFilter.levels.joined(separator: ", ")
+            levelPopUp.removeAllItems()
+            for item in ["All levels", "Info and above", "Errors only"] { levelPopUp.addItem(withTitle: L10n.string(item)) }
+            levelPopUp.addItem(withTitle: title)
+            levelPopUp.selectItem(at: Self.levelThresholds.count)
+        }
+        processPopUp.selectItem(at: selectedProcess.flatMap { processChoices.firstIndex(of: $0).map { $0 + 1 } } ?? 0)
+        pauseButton.title = capturePaused ? "Start capture" : "Pause capture"
+        updateScopeLabel()
+    }
+
+    private func updateScopeLabel() {
+        var labels: [String] = []
+        if let bundleID = sharedFilter.bundleID { labels.append(bundleID) }
+        if let process = sharedFilter.process { labels.append(process) }
+        if let pid = sharedFilter.pid ?? observedSelectedPID { labels.append("PID \(pid)") }
+        if !sharedFilter.levels.isEmpty { labels.append(sharedFilter.levels.joined(separator: ", ")) }
+        scopeLabel.stringValue = labels.isEmpty ? "All app identities" : labels.joined(separator: " · ")
+        scopeLabel.toolTip = scopeLabel.stringValue
+        textModePopUp.toolTip = sharedFilter.textMode == .regex
+            ? "Regex examines the first 4096 characters of each field; expensive matching stops cooperatively after 2ms per field."
+            : "Literal ignores ASCII letter case; non-ASCII bytes compare exactly. Searches message, process, subsystem or category."
+    }
+
+    @objc private func textModeChanged() {
+        let mode: DeviceLogPanelFilter.TextMode = textModePopUp.indexOfSelectedItem == 1 ? .regex : .literal
+        if mode == .regex, (try? NSRegularExpression(pattern: filter)) == nil {
+            textModePopUp.selectItem(at: sharedFilter.textMode == .literal ? 0 : 1)
+            statusLabel.stringValue = "Invalid regular expression"
+            return
+        }
+        sharedFilter.textMode = mode
+        showingContext = false
+        expandedGaps.removeAll()
+        clearAgentNote()
+        recomputeVisible(backgroundContext: true)
+        updateStatus()
+    }
+
+    @objc private func toggleCapturePaused() {
+        setCapturePaused(!capturePaused)
+        synchronizePanelControls()
+        updateStatus()
+    }
+
+    private func setCapturePaused(_ paused: Bool) {
+        guard paused != capturePaused else { return }
+        capturePaused = paused
+        panelRevision &+= 1
+        if paused { stopCapture() }
+        else { startCapture(discover: false) }
+    }
+
+    private var currentHandoffDrops: Int {
+        retainedHandoffDrops + max(0, (source?.dropped ?? runningSourceInitialDrops) - runningSourceInitialDrops)
+    }
+
+    private func retireHandoffDrops() {
+        retainedHandoffDrops = currentHandoffDrops
+        runningSourceInitialDrops = source?.dropped ?? 0
+    }
+
+    private func descriptorOrigin(bundleID: String?, process: String, pid: Int?) -> String {
+        "\(bundleID ?? "")|\(process)|\(pid ?? 0)"
+    }
+
+    private func currentSourceAvailability() -> (available: [String], unavailable: [String], observedDescriptors: [String], detail: String?) {
+        guard let option = selectedOption else { return ([], ["stdout", "stderr"], [], nil) }
+        let capability = option.captureAvailability(route: route)
+        let process = sharedFilter.process ?? option.processIdentity?.name
+            ?? observedProcesses.last(where: { $0.bundleID == option.bundleID && option.bundleID != nil })?.process
+        let pid = sharedFilter.pid ?? observedSelectedPID ?? option.processIdentity?.pid
+        var descriptors = Set<String>()
+        if let process {
+            let bundleID = sharedFilter.bundleID ?? option.bundleID
+            descriptors.formUnion(observedDescriptorOrigins[descriptorOrigin(bundleID: bundleID, process: process, pid: pid)] ?? [])
+            // Legacy rows can prove a descriptor for an exact process/PID without proving bundle ID.
+            descriptors.formUnion(observedDescriptorOrigins[descriptorOrigin(bundleID: nil, process: process, pid: pid)] ?? [])
+        }
+        return (Array(Set(capability.availableSources.map(\.rawValue)).union(descriptors)).sorted(),
+                capability.unavailableSources.map(\.rawValue).filter { !descriptors.contains($0) },
+                descriptors.sorted(), capability.detail)
+    }
+
+    /// Configuration and manual controls mutate this same filter and reader. Data arrival has a
+    /// separate revision so live traffic cannot invalidate every optimistic configuration edit.
+    public func panelState() -> DeviceLogPanelState {
+        let availability = currentSourceAvailability()
+        let captureState: String
+        if capturePaused { captureState = "paused" }
+        else if selectedOption == nil { captureState = "unavailable" }
+        else if endedReason != nil { captureState = "stopped" }
+        else if source == nil { captureState = "stopped" }
+        else if receivedInGeneration == 0 {
+            if source?.lastTransportActivity.map({ Date().timeIntervalSince($0) <= Metrics.silenceGrace }) == true {
+                captureState = "awaiting_matches"
+            } else {
+                captureState = startedAt.map { Date().timeIntervalSince($0) > Metrics.silenceGrace } == true
+                ? "awaiting_first_data" : "starting"
+            }
+        } else if source?.lastTransportActivity.map({ Date().timeIntervalSince($0) <= Metrics.silenceGrace }) == true {
+            captureState = "live"
+        } else if lastReceivedAt.map({ Date().timeIntervalSince($0) > 15 }) == true { captureState = "stale" }
+        else { captureState = "live" }
+        let sourceKind: String
+        switch selectedOption?.kind {
+        case .simulator?: sourceKind = "simulator"
+        case .device?, .structuredDevice?, .brokeredStructuredDevice?: sourceKind = "device"
+        case .app?: sourceKind = "app"
+        case .bluetooth?: sourceKind = "bluetooth"
+        case nil: sourceKind = "none"
+        }
+        return DeviceLogPanelState(
+            stream: stream?.rawValue ?? "regular",
+            bluetooth: stream == .bluetooth ? DeviceLogBluetoothState(packets: packetFilter, status: definitionStatus) : nil,
+            devices: machines.prefix(128).map { .init(id: $0.id, name: $0.title, simulator: $0.isSimulator) },
+            processes: Array((options.prefix(512).compactMap { option in
+                option.processIdentity.map { DeviceLogPanelProcess(process: $0.name, bundleID: $0.bundleID, pid: $0.pid) }
+            } + observedProcesses).prefix(512)),
+            sources: options.prefix(512).map { option in
+                DeviceLogPanelSource(deviceID: option.machine.id, title: option.title, bundleID: option.bundleID,
+                                     process: option.processIdentity?.name ?? option.application?.executableName,
+                                     pid: option.processIdentity?.pid,
+                                     routes: validRoutes(for: option).map(routeName),
+                                     catalogWarning: option.catalogWarning)
+            },
+            observedSources: observedRecordSources.filter { $0 != "stdout" && $0 != "stderr" }.sorted() + availability.observedDescriptors,
+            sourceAvailabilityDetail: availability.detail,
+            selectedPID: sharedFilter.pid ?? observedSelectedPID,
+            revision: panelRevision, dataRevision: panelDataRevision,
+            deviceID: selectedMachine?.id, deviceName: selectedMachine?.title,
+            source: selectedOption?.title, sourceKind: sourceKind, route: routeName(route),
+            filter: sharedFilter, captureMinimumSeverity: runningCaptureSeverity ?? captureSeverity,
+            projectionPending: projectionTask != nil, projectionLimited: projectionLimited,
+            readScope: showingContext ? "matches_context_and_expanded_folds" : "matching_rows",
+            filterEvaluationLimits: sharedFilter.textMode == .regex
+                ? "Regex examines the first 4096 characters per field with a cooperative 2ms field budget, 250ms shared projection budget and 50ms read budget. Limited evaluation is disclosed." : nil,
+            following: isFollowing, paused: capturePaused,
+            captureState: captureState, readerStatus: readerStatus,
+            retainedCount: rows.count, ringCapacity: DeviceLogLimits.ringCapacity,
+            retainedBytes: retainedByteCount, ringByteCapacity: Self.ringByteCapacity,
+            ringDropped: rowOffset, handoffDropped: currentHandoffDrops,
+            historyScope: "retained_buffer", historyHasGap: captureHistoryGap || currentHandoffDrops > 0, oldestRowID: rows.first?.id, newestRowID: rows.last?.id,
+            sourceGeneration: sourceGeneration, sourceCatalogPending: sourceCatalogPending,
+            sourceCatalogUpdatedAt: sourceCatalogUpdatedAt,
+            availableSources: availability.available,
+            unavailableSources: availability.unavailable
+        )
+    }
+
+    private func panelError(_ code: String, _ message: String) -> DeviceLogPanelError {
+        .init(code: code, message: message, state: panelState())
+    }
+
+    private func requireRevision(_ expected: UInt64?) throws {
+        if let expected, expected != panelRevision {
+            throw panelError("stale_revision", "The panel changed. Read its current state and retry with that revision.")
+        }
+    }
+
+    public func configurePanel(
+        _ configuration: DeviceLogPanelConfiguration, expectedRevision: UInt64? = nil
+    ) async throws -> DeviceLogPanelState {
+        if !isViewLoaded { loadView() }
+        try requireRevision(expectedRevision)
+        let nextPackets: BluetoothPacketFilter
+        if let packets = configuration.packets {
+            guard stream == .bluetooth,
+                  let filter = BluetoothPacketFilter.allCases.first(where: { $0.toolName == packets }) else {
+                throw panelError("invalid_packets", "packets is supported only for Bluetooth: all, app or complete.")
+            }
+            nextPackets = filter
+        } else {
+            nextPackets = configuration.clearFilter == true ? .all : packetFilter
+        }
+        if stream == .bluetooth,
+           configuration.bundleID != nil || configuration.process != nil || configuration.pid != nil || configuration.route != nil {
+            throw panelError("unsupported_filter", "Bluetooth captures phone-wide packets. Use device_id, packets and text; app/process/route choices belong to Regular Logs.")
+        }
+        var next = configuration.clearFilter == true ? DeviceLogPanelFilter() : sharedFilter
+        if configuration.clearFilter == true { next.minimumSeverity = 0 }
+        if let text = configuration.text { next.text = text }
+        if let mode = configuration.textMode { next.textMode = mode }
+        if let bundleID = configuration.bundleID {
+            if nonempty(bundleID) != next.bundleID {
+                next.process = nil
+                next.pid = nil
+            }
+            next.bundleID = nonempty(bundleID)
+        }
+        if configuration.source != nil, configuration.source != selectedOption?.title {
+            next.process = nil
+            next.pid = nil
+            if configuration.bundleID == nil { next.bundleID = nil }
+        }
+        if let process = configuration.process { next.process = nonempty(process) }
+        if let pid = configuration.pid {
+            guard pid >= 0 else { throw panelError("invalid_pid", "pid must be positive, or 0 to clear it.") }
+            next.pid = pid == 0 ? nil : pid
+        }
+        if let subsystem = configuration.subsystem { next.subsystem = nonempty(subsystem) }
+        if let category = configuration.category { next.category = nonempty(category) }
+        if let context = configuration.showContext { next.showingContext = context }
+        if let levels = configuration.levels {
+            let normalized = levels.map { $0.lowercased() }
+            guard normalized.allSatisfy(DeviceLogToolLevels.accepted.contains) else {
+                throw panelError("invalid_levels", "levels must contain debug, info, notice, warning, error or fault.")
+            }
+            next.levels = Array(Set(normalized)).sorted()
+            next.minimumSeverity = 0
+        }
+        guard next.text.utf8.count <= 512 else { throw panelError("invalid_filter", "The text filter exceeds 512 bytes.") }
+        if next.textMode == .regex {
+            do { _ = try NSRegularExpression(pattern: next.text, options: .caseInsensitive) }
+            catch { throw panelError("invalid_regex", "Invalid regular expression: \(error.localizedDescription)") }
+        }
+        let device = configuration.deviceID ?? selectedMachine?.id
+        if let device, !machines.contains(where: { $0.id == device }) {
+            throw panelError("device_unavailable", "That exact device is not in this panel's discovered sources.")
+        }
+        let candidates = options.filter { $0.machine.id == device }
+        let selected: DeviceLogSourceOption?
+        if let bundleID = next.bundleID {
+            selected = candidates.first { $0.bundleID == bundleID }
+            guard selected != nil else {
+                throw panelError("app_unavailable", "That bundle_id is not a discovered app on the selected device.")
+            }
+        } else if let title = configuration.source {
+            selected = candidates.first { $0.title == title }
+            guard selected != nil else { throw panelError("source_unavailable", "That source is not available on the selected device.") }
+        } else if let process = configuration.process, !process.isEmpty {
+            let matching = candidates.filter { $0.processIdentity?.name == process }
+            if let pid = next.pid {
+                selected = matching.first { $0.processIdentity?.pid == pid }
+                guard selected != nil || matching.isEmpty else {
+                    throw panelError("process_unavailable", "That process/PID pair is not in the discovered source catalog.")
+                }
+            } else {
+                let identities = Set(matching.compactMap { $0.processIdentity?.executablePath })
+                guard identities.count <= 1 else {
+                    throw panelError("ambiguous_process", "Multiple executable paths share that process name. Select an exact source or include its pid.")
+                }
+                selected = matching.first
+            }
+        } else { selected = nil }
+        let requestedRoute: DeviceLogSourceOption.Route?
+        if let name = configuration.route {
+            requestedRoute = DeviceLogSourceOption.Route.allCases.first { routeName($0) == name || String(describing: $0) == name }
+            guard requestedRoute != nil else { throw panelError("invalid_route", "Unknown capture route.") }
+        } else { requestedRoute = nil }
+
+        if let requestedRoute, let target = selected ?? selectedOption,
+           !validRoutes(for: target).contains(requestedRoute) {
+            throw panelError("unsupported_route", "That capture route is not supported by the selected source.")
+        }
+
+        // All validation precedes mutation, including expression compilation and exact identity.
+        if let device, device != selectedMachine?.id {
+            requestedMachineID = device
+            rebuildMenus()
+        }
+        if let selected {
+            let choices = sources(of: selectedMachine)
+            if let index = choices.firstIndex(of: selected) {
+                sourcePopUp.selectItem(at: index)
+                if runningSourceTitleWithinMachine != selected.title { panelRevision &+= 1 }
+            }
+        }
+        let oldRoute = route
+        if let requestedRoute { route = requestedRoute }
+        else if configuration.bundleID != nil, next.bundleID != nil { route = .system }
+        if oldRoute != route { panelRevision &+= 1 }
+        routePopUp.selectItem(at: route.rawValue)
+        let filterChanged = sharedFilter != next
+        sharedFilter = next
+        if nextPackets != packetFilter {
+            packetFilter = nextPackets
+            packetPopUp.selectItem(at: nextPackets.rawValue)
+            panelRevision &+= 1
+            expandedGaps.removeAll()
+        }
+        if configuration.levels != nil || configuration.clearFilter == true {
+            captureSeverity = next.levels.isEmpty ? 0 : next.levels.map { DeviceLogToolLevels.severity(named: $0) }.min() ?? 0
+        }
+        observedSelectedPID = next.pid ?? selectedOption?.processIdentity?.pid
+            ?? observedProcesses.last { $0.bundleID == next.bundleID && next.bundleID != nil }?.pid
+        if let follow = configuration.follow, isFollowing != follow {
+            isFollowing = follow
+            panelRevision &+= 1
+        }
+        if filterChanged { expandedGaps.removeAll() }
+        clearAgentNote()
+        updateRouteVisibility()
+        synchronizePanelControls()
+        if let paused = configuration.paused { setCapturePaused(paused) }
+        if isVisibleForCapture { startSelectedSource() }
+        recomputeVisible(backgroundContext: true)
+        updateStatus()
+        return panelState()
+    }
+
+    private struct PanelCursor {
+        let epoch: String
+        let revision: UInt64
+        let ordinal: Int
+        let dataRevision: UInt64
+        let sourceGeneration: Int
+        var encoded: String { "\(epoch):\(revision):\(ordinal):\(dataRevision):\(sourceGeneration)" }
+        init(epoch: String, revision: UInt64, ordinal: Int, dataRevision: UInt64, sourceGeneration: Int) {
+            self.epoch = epoch; self.revision = revision; self.ordinal = ordinal; self.dataRevision = dataRevision
+            self.sourceGeneration = sourceGeneration
+        }
+        init?(_ value: String) {
+            let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+            guard parts.count == 5, let sourceGeneration = Int(parts[4]), let revision = UInt64(parts[1]), let ordinal = Int(parts[2]),
+                  ordinal >= 0, let data = UInt64(parts[3]) else { return nil }
+            self.init(epoch: String(parts[0]), revision: revision, ordinal: ordinal, dataRevision: data, sourceGeneration: sourceGeneration)
+        }
+    }
+
+    /// A read scans at most 10,000 retained values on a worker, with at most one query in flight.
+    /// The cursor advances through examined rows even when none match. It never touches AppKit.
+    public func readPanel(
+        cursor: String? = nil, limit: Int = 50, expectedRevision: UInt64? = nil
+    ) async throws -> DeviceLogPanelReadPage {
+        try await readPanelSnapshot(cursor: cursor, limit: limit, expectedRevision: expectedRevision, allowRetry: true)
+    }
+
+    private func readPanelSnapshot(
+        cursor: String?, limit: Int, expectedRevision: UInt64?, allowRetry: Bool,
+        queryBudgetNanoseconds: UInt64 = 50_000_000
+    ) async throws -> DeviceLogPanelReadPage {
+        try requireRevision(expectedRevision)
+        guard (1...200).contains(limit) else { throw panelError("invalid_limit", "limit must be between 1 and 200.") }
+        guard !panelReadInFlight else { throw panelError("busy", "A bounded panel read is already in progress.") }
+        let supplied = cursor.flatMap(PanelCursor.init)
+        if cursor != nil, supplied == nil { throw panelError("invalid_cursor", "Malformed panel cursor.") }
+        let changeReason: String?
+        if let supplied, supplied.epoch != panelEpoch { changeReason = "source_changed" }
+        else if let supplied, supplied.revision != panelRevision { changeReason = "configuration_changed" }
+        else if let supplied, supplied.sourceGeneration != sourceGeneration { changeReason = "capture_restarted" }
+        else { changeReason = nil }
+        let parsed = [nil, "capture_restarted"].contains(changeReason) ? supplied : nil
+        let state = panelState()
+        if showingContext, projectionTask != nil,
+           completedProjectionFocus != focus || !completedProjectionContext {
+            let pendingCursor = supplied?.encoded ?? PanelCursor(epoch: panelEpoch, revision: panelRevision,
+                ordinal: rowOffset, dataRevision: panelDataRevision, sourceGeneration: sourceGeneration).encoded
+            return .init(state: state, rows: [], cursor: pendingCursor, count: 0, hasMore: true,
+                         cursorTruncated: false, timedOut: false, changed: changeReason != nil,
+                         outputTruncated: false, changeReason: changeReason, dataChanged: false, pending: true)
+        }
+        let context = showingContext
+        let snapshot = context ? (projectedRows ?? rows) : rows
+        let offset = context && projectedRows != nil ? projectedRowOffset : rowOffset
+        let displayEntries = context ? entries : []
+        let contextLimited = context && projectionLimited
+        let epoch = panelEpoch
+        let start = max(offset, parsed?.ordinal ?? offset) - offset
+        if start > snapshot.count, context, let parsed, parsed.ordinal <= rowOffset + rows.count {
+            // A tail wait may be ahead of the last completed UI projection while capture catches up.
+            return .init(state: state, rows: [], cursor: parsed.encoded, count: 0, hasMore: true,
+                         cursorTruncated: parsed.ordinal < rowOffset, timedOut: false, changed: changeReason != nil,
+                         outputTruncated: contextLimited, changeReason: changeReason,
+                         dataChanged: parsed.dataRevision != state.dataRevision, pending: true)
+        }
+        guard start <= snapshot.count else { throw panelError("invalid_cursor", "The cursor is beyond this capture buffer.") }
+        let selectedFocus = focus
+        panelReadInFlight = true
+        defer { panelReadInFlight = false }
+        let queryStarted = DispatchTime.now().uptimeNanoseconds
+        let worker = Task.detached(priority: .userInitiated) { () -> (rows: [DeviceLogPanelReadRow], next: Int, truncated: Bool) in
+            var selected: [DeviceLogPanelReadRow] = []
+            var next = start
+            var bytes = 0
+            var outputTruncated = contextLimited
+            // Context and opened folds read the completed projection the table itself uses.
+            // Preparing these bounded value indices performs no regex evaluation.
+            let displayed: Set<Int>? = context ? Set(displayEntries.compactMap {
+                if case .row(let index) = $0 { return index }; return nil
+            }) : nil
+            let deadline = DispatchTime.now().uptimeNanoseconds + queryBudgetNanoseconds
+            let scanEnd = min(snapshot.count, start + (selectedFocus.textMode == .regex ? 2_048 : 10_000))
+            while next < scanEnd, selected.count < limit, !Task.isCancelled {
+                if DispatchTime.now().uptimeNanoseconds >= deadline { outputTruncated = true; break }
+                let row = snapshot[next]
+                let evaluation = selectedFocus.evaluation(of: row, deadline: deadline)
+                outputTruncated = outputTruncated || evaluation.limited
+                let isMatch = evaluation.matches
+                if displayed?.contains(next) ?? isMatch {
+                    let value = DeviceLogPanelReadRow(row, isMatch: isMatch)
+                    let cost = value.message.utf8.count + value.rawLine.utf8.count + 1_024
+                    if !selected.isEmpty, bytes + cost > 128 * 1_024 { outputTruncated = true; break }
+                    selected.append(value)
+                    bytes += cost
+                    outputTruncated = outputTruncated || value.truncated
+                }
+                next += 1
+            }
+            return (selected, next, outputTruncated)
+        }
+        let result = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+        try Task.checkCancellation()
+        guard state.revision == panelRevision, epoch == panelEpoch, state.sourceGeneration == sourceGeneration else {
+            if allowRetry, expectedRevision == nil || state.revision == panelRevision {
+                panelReadInFlight = false
+                let elapsed = DispatchTime.now().uptimeNanoseconds - queryStarted
+                return try await readPanelSnapshot(cursor: cursor, limit: limit, expectedRevision: expectedRevision,
+                    allowRetry: false, queryBudgetNanoseconds: queryBudgetNanoseconds > elapsed ? queryBudgetNanoseconds - elapsed : 0)
+            }
+            throw panelError("stale_revision", "The panel changed during this read. Retry using its current revision.")
+        }
+        let next = PanelCursor(epoch: epoch, revision: state.revision, ordinal: offset + result.next, dataRevision: state.dataRevision, sourceGeneration: state.sourceGeneration)
+        return .init(state: state, rows: result.rows, cursor: next.encoded, count: result.rows.count,
+                     hasMore: result.next < snapshot.count, cursorTruncated: (parsed?.ordinal ?? offset) < offset,
+                     timedOut: false, changed: changeReason != nil,
+                     outputTruncated: result.truncated, changeReason: changeReason,
+                     dataChanged: supplied.map { $0.dataRevision != state.dataRevision } ?? false, pending: false)
+    }
+
+    public func waitPanel(
+        cursor: String? = nil, limit: Int = 50, timeout: TimeInterval = 5,
+        expectedRevision: UInt64? = nil
+    ) async throws -> DeviceLogPanelReadPage {
+        guard timeout.isFinite, (0...30).contains(timeout) else { throw panelError("invalid_timeout", "timeout must be between 0 and 30 seconds.") }
+        let deadline = Date().addingTimeInterval(timeout)
+        let initial = panelState()
+        var nextCursor = cursor ?? PanelCursor(epoch: panelEpoch, revision: panelRevision,
+                                               ordinal: rowOffset + rows.count, dataRevision: panelDataRevision, sourceGeneration: sourceGeneration).encoded
+        while true {
+            try Task.checkCancellation()
+            let remaining = max(0, deadline.timeIntervalSinceNow)
+            let budget = UInt64(min(0.05, remaining) * 1_000_000_000)
+            let page = try await readPanelSnapshot(cursor: nextCursor, limit: limit, expectedRevision: expectedRevision,
+                                                  allowRetry: true, queryBudgetNanoseconds: max(1_000_000, budget))
+            if !page.rows.isEmpty || page.changed || page.cursorTruncated || page.state.captureState != initial.captureState
+                || ["unavailable", "stopped", "paused"].contains(page.state.captureState) { return page }
+            nextCursor = page.cursor
+            if Date() >= deadline {
+                return .init(state: page.state, rows: [], cursor: page.cursor, count: 0,
+                             hasMore: page.hasMore, cursorTruncated: page.cursorTruncated, timedOut: true,
+                             changed: page.changed, outputTruncated: page.outputTruncated,
+                             changeReason: page.changeReason, dataChanged: page.dataChanged, pending: page.pending)
+            }
+            if !page.hasMore || page.pending {
+                try await Task.sleep(for: .milliseconds(Int64(min(50, max(1, deadline.timeIntervalSinceNow * 1_000)))))
+            }
+        }
+    }
+
+    /// Revealing is the only read-side operation that changes selection or scrolling. UUID row
+    /// identity is checked against the current ring before the table uses its immutable snapshot.
+    public func revealPanel(
+        rowID: String, throughRowID: String? = nil, expectedRevision: UInt64? = nil
+    ) async throws -> DeviceLogPanelState {
+        try requireRevision(expectedRevision)
+        guard projectionTask == nil || (completedProjectionFocus == focus && completedProjectionContext == showingContext) else {
+            throw panelError("projection_pending", "The shared panel projection is still updating. Retry when it is ready.")
+        }
+        let snapshot = projectedRows ?? rows
+        let displayEntries = entries
+        let epoch = panelEpoch
+        let revision = panelRevision
+        let offset = projectedRows == nil ? rowOffset : projectedRowOffset
+        let selectedFocus = focus
+        let result = await Task.detached(priority: .userInitiated) {
+            let start = snapshot.firstIndex { $0.id == rowID }
+            let end = throughRowID.flatMap { id in snapshot.firstIndex { $0.id == id } } ?? start
+            guard let start, let end, end >= start, end - start < 200 else {
+                return (entries: [LogDisplayEntry](), selection: [Int](), error: "row_unavailable")
+            }
+            guard selectedFocus.matches(snapshot[start]), selectedFocus.matches(snapshot[end]) else {
+                return (entries: [LogDisplayEntry](), selection: [Int](), error: "row_filtered")
+            }
+            let selected = displayEntries.indices.filter { position in
+                guard case .row(let index) = displayEntries[position] else { return false }
+                return (start...end).contains(index) && selectedFocus.matches(snapshot[index])
+            }
+            return (entries: displayEntries, selection: selected, error: "")
+        }.value
+        guard revision == panelRevision, epoch == panelEpoch else { throw panelError("stale_revision", "The panel changed during reveal.") }
+        guard result.error.isEmpty else {
+            throw panelError(result.error, result.error == "row_filtered"
+                             ? "The requested row is excluded by the active panel filter. Change the filter before revealing it."
+                             : "The requested stable row IDs are unavailable or the range exceeds 200 rows.")
+        }
+        guard rows.contains(where: { $0.id == rowID }),
+              rows.contains(where: { $0.id == (throughRowID ?? rowID) }) else {
+            throw panelError("row_unavailable", "The requested rows left the bounded ring during reveal.")
+        }
+        projectionTask?.cancel(); projectionTask = nil; projectionGeneration += 1
+        projectedRows = snapshot
+        projectedRowOffset = offset
+        entries = result.entries
+        updatingTable = true
+        revealingLinked = true
+        table.reloadData()
+        let selection = IndexSet(result.selection)
+        table.selectRowIndexes(selection, byExtendingSelection: false)
+        if let first = selection.first { table.scrollRowToVisible(first) }
+        revealingLinked = false
+        updatingTable = false
+        if isFollowing { isFollowing = false; panelRevision &+= 1 }
+        updateFollowAffordance()
+        updateStatus()
+        return panelState()
+    }
+
 }
 
 // MARK: - Filter field
@@ -1748,7 +2632,19 @@ extension DeviceLogPaneViewController: NSTextFieldDelegate {
         clearAgentNote()
         showingContext = false
         contextPopUp.selectItem(at: 0)
-        filter = filterField.stringValue.lowercased()
+        if notification.object as? ThemedTextField === subsystemField {
+            sharedFilter.subsystem = nonempty(subsystemField.stringValue)
+        } else if notification.object as? ThemedTextField === categoryField {
+            sharedFilter.category = nonempty(categoryField.stringValue)
+        } else {
+            let text = filterField.stringValue
+            guard text.utf8.count <= 512 else { statusLabel.stringValue = "Text filter exceeds 512 bytes"; return }
+            if sharedFilter.textMode == .regex, (try? NSRegularExpression(pattern: text)) == nil {
+                statusLabel.stringValue = "Invalid regular expression"
+                return
+            }
+            filter = text
+        }
         recomputeVisible()
         table.reloadData()
         updateStatus()
@@ -1809,7 +2705,7 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
                 font = .emphasizedCompactCode
             }
             // The match is why the fold opened around it, so it is what the eye should land on.
-            if focus.isActive, focus.matches(entry), identifier == Columns.message {
+            if focus.isActive, focus.textMode != .regex, focus.matches(entry), identifier == Columns.message {
                 // Same metrics as the rows around it, heavier ink: a bolder weight at the same size
                 // keeps the column aligned, which a larger one would not.
                 font = .emphasizedCompactCode
@@ -1895,6 +2791,7 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
         guard case .gap(let range) = entries[selected] else { return }
         let offset = projectedRows == nil ? rowOffset : projectedRowOffset
         expandedGaps.insert(range.lowerBound + offset)
+        panelRevision &+= 1
         let displayed = projectedRows ?? rows
         entries = LogFocusLayout.entries(rows: displayed, focus: focus, expanded: expandedGaps(at: offset))
         // A result already in flight was computed before the fold opened.
@@ -1907,7 +2804,7 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
         case Columns.time: return entry.time
         case Columns.level: return entry.level
         case Columns.process: return entry.process
-        case Columns.subsystem: return entry.subsystem ?? ""
+        case Columns.subsystem: return entry.subsystemLabel ?? ""
         default: return entry.message
         }
     }

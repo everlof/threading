@@ -16,9 +16,16 @@ final class DeviceConsoleLogSourceTests: XCTestCase {
     func testAMirroredLogLineKeepsItsTimeAndSubsystem() throws {
         let row = try XCTUnwrap(decode("2026-10-14 08:14:08.201345+0200 Ananke[423:9a1f3] [com.festina.chameleon:bluetooth] Pairing failed: peer removed pairing information"))
         XCTAssertEqual(row.time, "08:14:08.201")
-        XCTAssertEqual(row.subsystem, "com.festina.chameleon / bluetooth")
+        XCTAssertEqual(row.subsystem, "com.festina.chameleon")
+        XCTAssertEqual(row.category, "bluetooth")
+        XCTAssertEqual(row.subsystemLabel, "com.festina.chameleon / bluetooth")
         XCTAssertEqual(row.message, "Pairing failed: peer removed pairing information")
         XCTAssertEqual(row.process, "Ananke")
+        XCTAssertEqual(row.pid, 423)
+        XCTAssertEqual(row.bundleID, "com.festina.chameleon")
+        XCTAssertEqual(row.deviceID, "phone")
+        XCTAssertEqual(row.source, .stderr)
+        XCTAssertNotNil(row.timestamp)
     }
 
     func testAMirroredLineWithoutASubsystemAndPlainPrintsStillRead() throws {
@@ -28,6 +35,7 @@ final class DeviceConsoleLogSourceTests: XCTestCase {
         let printed = try XCTUnwrap(decode("error: could not open file"))
         XCTAssertEqual(printed.message, "error: could not open file")
         XCTAssertEqual(printed.level, "Error")
+        XCTAssertEqual(printed.source, .console, "the merged console cannot prove which descriptor produced a plain print")
         XCTAssertNil(decode("Acquired tunnel connection to device."))
     }
 }

@@ -582,6 +582,64 @@ executable path travels through placement arguments. Device Logs checks availabi
 worker-side source rescan, so an Advanced Settings installation can become active without
 reloading the plugin.
 
+### One Device Logs view for people and agents
+
+Bluetooth uses `bluetooth_state`, `bluetooth_configure`, `bluetooth_read`, `bluetooth_wait` and
+`bluetooth_reveal`, generated from the same bounded tool contract and routed to the Bluetooth
+controller explicitly. Each declaration reveals the `bluetooth` host section; the regular names
+continue to reveal `regular`. An unrelated tab selection never chooses the target of these tools.
+Bluetooth configuration adds `packets` (`all`, `app`, `complete`) and rejects app/process/PID/route
+fields. It validates before mutating, updates the existing packet chooser, and uses the same
+`LogFocus` as the table and reads. Clearing the filter clears the packet chooser too.
+State includes the current packet mode and the already loaded definitions report; state reads do
+no file work. Stable packet IDs use the same cursor/revision/reveal rules as regular logs.
+
+The added work is fixed metadata per response and five tool declarations per loaded plugin,
+not per packet. Existing capture/ring/worker/query/viewport bounds remain unchanged; the plugin
+still owns the capture, filters and definition report, and the host owns session authority,
+trust and section placement. `BluetoothSharedToolsTests` covers tab switches, user filter edits,
+atomic stale refusals and exact-row reveal; the product-shell evidence exercises the same tools.
+
+The regular pane is the controller for both its controls and the plugin tools `state`,
+`configure`, `read`, `wait` and `reveal` (published as `plugin__devicelogs__…`). They share the
+pane's bounded capture ring and `LogFocus` predicate. Tool JSON is decoded and encoded by the
+plugin adapter on workers; there is no second terminal-file reader or independently implemented
+agent filter. The older historical search tools remain separate, explicitly recorded-history
+queries; `read` and `wait` describe the current retained panel dataset.
+
+`DeviceLogPanelFilter` holds literal/regex mode, text, level selection, exact process/bundle/PID,
+subsystem and category. Independent predicates are ANDed; selected levels are ORed. Literal
+search keeps the existing ASCII case folding, and regex requires an explicit mode. Bundle
+identity, where available, persists the app choice without pinning a transient PID. Choosing an
+app defaults to its system-log route; the console route remains an explicit app restart.
+
+Configuration revisions change for manual and agent view edits, including selected process
+identity changes. Arriving rows have a separate data revision, so live traffic cannot continually
+invalidate `expected_revision`. A conflicting configure request returns the actual current state
+without partially applying the patch. Cursor and loss metadata identify the retained capture and
+revision; a cursor from a changed filter or source rebases explicitly unless the caller supplied
+an expected revision. Bounded reads do not scroll or change selection. Context mode uses the same
+layout selection, including expanded folds, and identifies whether each returned row is a match.
+Only `reveal` navigates to stable row identities in the current selection; it never inserts a
+filtered-out row behind the filter's back.
+
+Source capability is not evidence that an app's output was captured. System logs alone do not
+capture `print()`; merged console output cannot identify an individual file descriptor. New tap
+records carry distinct stdout/stderr markers, while older `[stdio]` records remain explicitly
+merged console output. The host still owns tap consent and preparation. Preparing a library
+does not install it in an already running app or prove the selected device is streaming.
+
+Structured rows keep one UUID through capture, projection and SQLite history, together with the
+original line, precise timestamp and independent subsystem/category fields. Existing databases
+migrate additively; legacy rows keep deterministic identities and unknown source metadata instead
+of invented provenance. Device discovery also retains running executable paths and PIDs: an
+empty installed-app catalogue does not prevent selecting a process, but it cannot manufacture a
+bundle identifier. Device, app and process discovery has explicit cardinality and byte limits.
+The app choice is remembered by bundle identity (or executable path when that is all discovery
+knows), with the old display title retained only as a migration fallback. DesignKit's
+`PreferenceStore` follows the host's per-process XCTest and UI-scenario suites: plugin tests that
+restore these choices must never write them into the running user's preferences.
+
 ### Bluetooth packet source
 
 The singleton Device Logs workspace contains **Regular Logs** and **Bluetooth** tabs.

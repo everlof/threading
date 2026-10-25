@@ -4345,17 +4345,49 @@ so the pane, its recorded history and the reader stay much lighter. Choose **All
 Debug too; the reader restarts at the new level and keeps the rows already on screen. Debug rows from
 before that choice were never read, so the recorded history does not contain them.
 
-To read an app's own logs in full, as Xcode's console shows them, choose **‹App› — full app logs
-(restarts the app)** in the same source menu. It is listed for each app you build and install
-yourself. Threading relaunches the app the way Xcode's Run does, so every `os_log` and `Logger` line
-the app writes arrives readable, with its `subsystem / category`, instead of as `<private>`.
+To watch one app, select its installed app in the source menu, or select its exact executable name in
+**All processes** (for example, **Ananke**). An app's **System** route observes its unified logs
+without relaunching it; **Console** can relaunch the app and may merge stdout and stderr;
+**App log** reads its saved log file. A system stream does not automatically contain ordinary
+`print()` output. The source's availability and capture status say what it can currently supply.
+An app can be listed before it emits a line; the process menu also includes processes observed
+in received rows. When available, rows retain the PID, bundle, subsystem, category and original
+line separately. Missing metadata stays missing.
 
-To watch one app, select its exact name in **All processes** (for example, **Ananke**).
-This scopes new buffered and recorded rows to that process, including when other system services
-mention the app in their messages. Changing process starts a new live buffer. **Matches only** is
-the default for text and level filtering: unrelated rows and fold markers are not shown.
-Choose **Show context** when you want neighbouring rows and expandable folds within that scope.
-The process menu is populated from observed logs, so an app appears after it emits a log line.
+Device, app/process, text, literal/regular-expression mode, level, subsystem and category choices
+form one shared panel filter. **Matches only** is the default: unrelated rows and fold markers
+are hidden. Choose **Show context** to include neighbouring rows and expandable folds within the
+selected app/process scope. Follow keeps the newest matching rows in view; pausing capture and
+stopping follow are separate choices. A source change can replace the live buffer, and the panel
+reports retained rows and dropped history rather than implying a complete recording.
+
+Literal text matches message, process, subsystem or category with ASCII letter case ignored;
+non-ASCII bytes compare exactly. Regular expressions use ICU case-insensitive matching. To keep
+the live stream responsive, regex examines only the first 4,096 characters of each field and
+stops cooperatively after 2 milliseconds per field, so later or expensive matches can be missed.
+The panel's regex projection also has a cooperative 250 millisecond aggregate budget. The
+returned state marks incomplete projections with `projection_limited`; contextual reads mark
+them with `output_truncated` too. Patterns are limited to 512 UTF-8 bytes. Different filter fields combine with AND; selected
+levels combine with OR. Reads include the context rows and expanded folds currently shown when
+**Show context** is active, with the scope stated in the returned panel state.
+
+Agents use that same panel through `plugin__devicelogs__state`, `configure`, `read`, `wait` and
+`reveal` (each has the `plugin__devicelogs__` prefix). An agent can select the exact device and app,
+set a filter once, read structured matching entries, wait for new matches, then highlight the
+exact rows it cites. The visible controls move with agent changes. Your manual edits are
+immediately authoritative; an agent using an old revision gets a refusal instead of overwriting
+them. Reads and waits leave the scroll position alone; reveal deliberately selects and scrolls
+to stable row identities. These tools use **Device Logs**, even if the separate Bluetooth tab
+was last selected. An agent can request **Rescan** through `state` with `refresh: true` after
+connecting a device or installing/restarting an app, then inspect catalog freshness while discovery
+finishes. See the [tool contract](docs/device-log-tools.md) for arguments and examples.
+
+`device_log_prepare` reveals the pane and can prepare a stdout/stderr tap. It explains the selected
+route's limitations; opening the pane alone does not prove that capture is connected. Preparing
+the tap builds a library, so you must apply its build/launch setting and rebuild/reinstall or
+relaunch the app before future output appears. Existing apps do not acquire a new tap merely by
+calling prepare. Current taps label stdout and stderr separately; older taps can provide merged
+console output. Linking the tap into a device app requires your consent.
 
 Threading does not bundle `pymobiledevice3`; installation is an explicit download into Threading's
 data folder and updates occur only when you press **Update**. If it is absent, too old, or the
@@ -4488,10 +4520,16 @@ Even without a file, the link's own events read as words under subsystem **Link*
 The format reference is
 [`docs/bluetooth-packet-definitions.md`](docs/bluetooth-packet-definitions.md).
 
-Agents can select it with `plugin__devicelogs__bluetooth` using the exact iPhone hardware UDID,
-which opens the Bluetooth tab if it is not already open, then read it with the existing `visible`, `search` and `time_range` tools; `linked` finds the
-packet an app log line is about, or the reverse. Hiding the pane stops
-capture. To keep a full raw capture for PacketLogger or Wireshark, use the external tool separately:
+Agents use `plugin__devicelogs__bluetooth_state`, `bluetooth_configure`, `bluetooth_read`,
+`bluetooth_wait` and `bluetooth_reveal` to control the same Bluetooth panel you see. These names
+target Bluetooth explicitly, including after a tab switch. Configuration selects an exact phone,
+text and packet filters; state reports the capture and project-definition status. Reads preserve
+your scroll position; reveal selects an exact returned packet. Your manual filter changes are
+reported to the agent on its next read. The older `plugin__devicelogs__bluetooth` capture shortcut
+still accepts the exact hardware UDID; `visible`, `search` and `time_range` operate on the selected
+stream, and `linked` finds a packet's related app log line or the reverse.
+An active Bluetooth capture keeps recording while hidden; closing its tab or session stops it.
+To keep a full raw capture for PacketLogger or Wireshark, use the external tool separately:
 `idevicebtlogger -u <UDID> -x -f pcap capture.pcap` (add `-n` for Wi-Fi).
 
 ### Overview

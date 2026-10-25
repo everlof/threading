@@ -795,6 +795,36 @@ final class SimulatorPaneRenderTests: XCTestCase {
             XCTAssertNotNil(fixture.panel.activateBluetoothLog(for: fixture.sessionID))
             XCTAssertTrue(fixture.panel.activateDeviceLog(for: fixture.sessionID) === logs)
             XCTAssertEqual(pluginTabTitles(), [L10n.string("Device Logs"), L10n.string("Bluetooth")])
+            let sharedPlugin = try XCTUnwrap(logs.loaded as? NSObject)
+            let sharedFixture = NSSelectorFromString("installSharedDeviceLogsForTesting")
+            XCTAssertTrue(sharedPlugin.responds(to: sharedFixture))
+            sharedPlugin.perform(sharedFixture)
+            func sharedTool(_ name: String, _ arguments: [String: Any] = [:]) throws -> [String: Any] {
+                let data = try JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
+                var answer: String?
+                var failed = false
+                logs.loaded?.invokeTool?(named: name, argumentsJSON: String(decoding: data, as: UTF8.self)) { text, isError in
+                    answer = text
+                    failed = isError
+                }
+                eventually(timeout: 10) { answer != nil }
+                let text = try XCTUnwrap(answer)
+                XCTAssertFalse(failed, text)
+                return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+            }
+            _ = try sharedTool("configure", [
+                "device_id": "device-logs-fixture", "bundle_id": "com.example.chameleon",
+                "text": "AirLab", "text_mode": "literal", "follow": false,
+            ])
+            let sharedRead = try sharedTool("read", ["limit": 50])
+            let sharedRows = try XCTUnwrap(sharedRead["rows"] as? [[String: Any]])
+            XCTAssertEqual(sharedRows.compactMap { $0["message"] as? String }, [
+                "[AirLab] TX NS", "[AirLab] RX ANCS CP", "[AirLab] TX DS",
+            ])
+            _ = try sharedTool("reveal", [
+                "row_id": try XCTUnwrap(sharedRows.first?["id"] as? String),
+                "through_row_id": try XCTUnwrap(sharedRows.last?["id"] as? String),
+            ])
             // cacheDisplay omitted the layer-backed chrome and plugin controls while every
             // geometry assertion above passed. Capture only this test-owned window, as the
             // sheet render tests do, so the evidence includes its actual composited controls.
@@ -808,6 +838,52 @@ final class SimulatorPaneRenderTests: XCTestCase {
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
                 to: Render.directory.appendingPathComponent("device-log-shell-\(name).png")
             )
+            let textFilter = try XCTUnwrap(find("device-log-text-filter", in: logs.view) as? NSTextField)
+            XCTAssertEqual(textFilter.stringValue, "AirLab", "Agent configuration must update the visible control")
+            textFilter.stringValue = "ANCS"
+            textFilter.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: textFilter))
+            let manualRead = try sharedTool("read", ["limit": 50])
+            XCTAssertEqual((manualRead["rows"] as? [[String: Any]])?.compactMap { $0["message"] as? String },
+                           ["[AirLab] RX ANCS CP"])
+            let beforeRevision = try XCTUnwrap((sharedRead["state"] as? [String: Any])?["revision"] as? NSNumber)
+            let afterRevision = try XCTUnwrap((manualRead["state"] as? [String: Any])?["revision"] as? NSNumber)
+            XCTAssertGreaterThan(afterRevision.uint64Value, beforeRevision.uint64Value)
+            settle(fixture.window)
+            let manualImage = try XCTUnwrap(CGWindowListCreateImage(
+                .null, .optionIncludingWindow, CGWindowID(fixture.window.windowNumber),
+                [.boundsIgnoreFraming, .nominalResolution]
+            ))
+            try XCTUnwrap(NSBitmapImageRep(cgImage: manualImage).representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("device-log-shell-manual-ancs-\(name).png")
+            )
+            if name == "system-dark" {
+                split.splitView.setPosition(split.splitView.bounds.width - 420 - split.splitView.dividerThickness, ofDividerAt: 0)
+                settle(fixture.window)
+                for identifier in ["device-log-text-filter", "device-log-text-mode", "device-log-subsystem-filter",
+                                   "device-log-category-filter", "device-log-pause-capture"] {
+                    let control = try XCTUnwrap(find(identifier, in: logs.view))
+                    XCTAssertFalse(control.isHiddenOrHasHiddenAncestor, identifier)
+                    XCTAssertTrue(logs.view.bounds.contains(control.convert(control.bounds, to: logs.view)), identifier)
+                }
+                func logTable(in view: NSView) -> NSTableView? {
+                    if let table = view as? NSTableView { return table }
+                    return view.subviews.lazy.filter { !$0.isHidden }.compactMap { logTable(in: $0) }.first
+                }
+                let narrowTable = try XCTUnwrap(logTable(in: logs.view))
+                let messageColumn = narrowTable.column(withIdentifier: .init("message"))
+                let messageFrame = narrowTable.convert(narrowTable.rect(ofColumn: messageColumn), to: logs.view)
+                XCTAssertGreaterThan(messageFrame.intersection(logs.view.bounds).width, 180,
+                                     "The revealed log message must be readable in a narrow panel")
+                let narrowImage = try XCTUnwrap(CGWindowListCreateImage(
+                    .null, .optionIncludingWindow, CGWindowID(fixture.window.windowNumber),
+                    [.boundsIgnoreFraming, .nominalResolution]
+                ))
+                try XCTUnwrap(NSBitmapImageRep(cgImage: narrowImage).representation(using: .png, properties: [:])).write(
+                    to: Render.directory.appendingPathComponent("device-log-shell-narrow-\(name).png")
+                )
+                split.splitView.setPosition(split.splitView.bounds.width - 700 - split.splitView.dividerThickness, ofDividerAt: 0)
+                settle(fixture.window)
+            }
 
             // Drag the real decorated workspace chip through its pointer path. The marker
             // must be visible in the product shell before the host persists the new order.
@@ -891,6 +967,29 @@ final class SimulatorPaneRenderTests: XCTestCase {
             settle(fixture.window)
             XCTAssertTrue(findTable(in: logs.view) === table, "switching tabs retains the Bluetooth view")
             XCTAssertEqual(table.numberOfRows, 2, "returning to Bluetooth retains its captured packets")
+            _ = try sharedTool("bluetooth_configure", ["text": "Write Command", "packets": "all", "follow": false])
+            let bluetoothRead = try sharedTool("bluetooth_read")
+            XCTAssertEqual(bluetoothRead["stream"] as? String, "bluetooth")
+            let bluetoothRows = try XCTUnwrap(bluetoothRead["rows"] as? [[String: Any]])
+            XCTAssertEqual(bluetoothRows.count, 1)
+            _ = try sharedTool("bluetooth_reveal", ["row_id": try XCTUnwrap(bluetoothRows.first?["id"] as? String)])
+            let bluetoothFilter = try XCTUnwrap(find("device-log-text-filter", in: logs.view) as? NSTextField)
+            XCTAssertEqual(bluetoothFilter.stringValue, "Write Command")
+            settle(fixture.window)
+            let sharedBluetoothImage = try XCTUnwrap(CGWindowListCreateImage(
+                .null, .optionIncludingWindow, CGWindowID(fixture.window.windowNumber),
+                [.boundsIgnoreFraming, .nominalResolution]
+            ))
+            try XCTUnwrap(NSBitmapImageRep(cgImage: sharedBluetoothImage).representation(using: .png, properties: [:])).write(
+                to: Render.directory.appendingPathComponent("device-log-shell-bluetooth-shared-\(name).png")
+            )
+            bluetoothFilter.stringValue = "Connection Complete"
+            bluetoothFilter.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: bluetoothFilter))
+            let editedBluetooth = try sharedTool("bluetooth_read")
+            let editedState = try XCTUnwrap(editedBluetooth["state"] as? [String: Any])
+            XCTAssertEqual((editedState["filter"] as? [String: Any])?["text"] as? String, "Connection Complete")
+            XCTAssertGreaterThan(try XCTUnwrap(editedBluetooth["revision"] as? Int), try XCTUnwrap(bluetoothRead["revision"] as? Int))
+            _ = try sharedTool("bluetooth_configure", ["clear_filter": true])
             let setup = try XCTUnwrap(find("bluetooth-profile-setup", in: logs.view))
             XCTAssertFalse(setup.isHiddenOrHasHiddenAncestor)
             XCTAssertTrue(setup.accessibilityPerformPress())

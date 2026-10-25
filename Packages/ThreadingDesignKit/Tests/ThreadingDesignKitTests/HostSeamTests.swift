@@ -11,6 +11,18 @@ import XCTest
 /// is the failure worth a test.
 final class HostSeamTests: XCTestCase {
 
+    func testPluginChoicesUseTheHostsScratchPreferencesInTests() throws {
+        let key = "plugin-choice-isolation-\(UUID().uuidString)"
+        let expected = try XCTUnwrap(UserDefaults(suiteName:
+            "codes.threading.hosted-tests.\(ProcessInfo.processInfo.processIdentifier)"))
+        XCTAssertFalse(PreferenceStore.shared === UserDefaults.standard)
+        XCTAssertNil(UserDefaults.standard.object(forKey: key))
+        defer { PreferenceStore.shared.removeObject(forKey: key) }
+        PreferenceStore.shared.set("com.example.chameleon", forKey: key)
+        XCTAssertEqual(expected.string(forKey: key), "com.example.chameleon")
+        XCTAssertNil(UserDefaults.standard.object(forKey: key), "A plugin test must not record a real user choice")
+    }
+
     override func tearDown() {
         AppThemePalette.install(AppThemeStyles.threading)
         AppSettings.appTextSize = .standard

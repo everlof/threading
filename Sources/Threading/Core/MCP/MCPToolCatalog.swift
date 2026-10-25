@@ -416,19 +416,28 @@ enum MCPToolCatalog {
     id: "device-log",
     family: .deviceLog,
     title: "Device logs",
-    summary: "Let agents open a live log stream from a simulator or a paired iPhone.",
+    summary: "Open shared Device Logs or discover Bluetooth packet tools for a paired iPhone.",
     symbol: "list.bullet.rectangle",
     tools: [],
     instruction: """
       When the user wants to see what an iOS app is actually saying, use Threading's Device logs \
       pane rather than telling them to open Xcode or Console. Start with device_log_prepare: it \
-      reveals the pane and returns the exact build setting to add to your own xcodebuild.
+      reveals the pane and returns capture/setup guidance and an optional tap build setting.
 
-      The setting matters more than it looks. An app's `print()` output never reaches the unified \
-      log at all, so without the tap the pane shows the system's account of the app and nothing \
-      the app itself wrote. Add the returned OTHER_LDFLAGS value as a command-line build setting, \
-      not through an -xcconfig, which a target that sets OTHER_LDFLAGS without $(inherited) \
-      silently overrides.
+      Use plugin__devicelogs__state/configure/read/wait/reveal to inspect and control the same \
+      Regular Logs panel the user sees. Configure once, then read or wait with its revision and \
+      cursor; manual filter changes remain authoritative. Capture availability depends on the \
+      source: unified logs do not automatically include print()/stdout/stderr, while an app-console \
+      route may provide merged console output. Preparing a tap alone does not change a running app. \
+      If a tap is needed, add its returned OTHER_LDFLAGS as a command-line xcodebuild setting, \
+      since a target can override an xcconfig, then rebuild/reinstall and verify received entries.
+
+      For the Bluetooth panel, discover plugin__devicelogs__bluetooth_state, bluetooth_configure, \
+      bluetooth_read, bluetooth_wait and bluetooth_reveal. They target Bluetooth explicitly and \
+      share its packet filter and buffer. If the plugin tools are absent, device_log_prepare loads \
+      the log plugin; discover its tools again. Bluetooth captures phone-wide HCI packets, needs \
+      a paired phone and Apple's logging profile, and does not require an app stdout tap. Check \
+      capture state and received rows; an open tab or successful start alone proves neither.
       """
   )
 
@@ -930,12 +939,13 @@ enum MCPToolCatalog {
     enabledDefinitions.map(\.name)
   }
 
-  /// Exact identities a provider may need during the lifetime of one launched process.
+  /// Known identities to preapprove during the lifetime of one launched process.
   ///
   /// This is deliberately a ceiling rather than a snapshot of one session's current
   /// `tools/list`. The user can confer or revoke Manager while that process is running, and can
   /// toggle the Supervision group before or after doing so. Those identities therefore have to
-  /// survive the provider's fixed launch-time filter even when they are initially hidden.
+  /// retain preapproval even when they are initially hidden. This is not a visibility filter:
+  /// plugins can contribute further identities after launch.
   /// `definitions(for:)` remains the live visibility policy and `admits(_:for:)` rechecks it on
   /// every call, so inclusion here grants no authority by itself.
   /// The launch ceiling for a session on a remote execution host.

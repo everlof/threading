@@ -1386,6 +1386,40 @@ THREADING_DEVICE_LOG_RENDER_STRESS=1 swift test --package-path Plugins/DeviceLog
 # THREADING_TAB_DRAG_STRESS=1 … -XCTest ThreadingTests.ThemedTabStripViewTests/testDragStressKeepsChipsAndCommitsOnlyOnce
 ```
 
+The 2026-10-25 shared Device Logs tools use that same pane, ring and immutable matcher; they do
+not open a second reader or build a second table. Expected traffic and the 5,800-row/s stress
+contract above remain unchanged. The ring now also has a conservative 128 MiB retained-byte
+ceiling, and each 20,000-row reader handoff has a 16 MiB ceiling. Evictions and handoff losses
+are counted and returned with capture history; source replacement and reconnect have distinct
+generation/revision semantics. Rows remain value models with viewport-owned cells. Reads never
+move the user's viewport; only explicit reveal changes selection and scrolling.
+
+Sparse queries bound examined work as well as output: one worker read at a time scans at most
+10,000 literal rows or 2,048 regex rows within a cooperative 50 ms slice. Its cursor advances
+over examined nonmatches. The plugin exports at most 50 rows using an estimated 128 KiB row
+payload budget, with 8,192-byte message/raw-line prefixes and explicit truncation; the bounded
+state catalog and JSON escaping add serialization overhead. Regex patterns have
+512-byte, 4,096-character field-prefix and cooperative 2 ms per-field limits; the pane and
+tools share those matching rules. Regex projection has a 250 ms aggregate budget and reports
+partial evaluation. Context reads reuse the pane's completed projection, returning pending
+when a new filter has not completed, rather than synchronously projecting the full ring.
+Waits reuse these bounded reads and cap their requested duration at 30 seconds.
+
+`DeviceLogSharedPanelTests.testFullRingSparseReadStress` builds 50,000 rows outside the timing
+window, then configures a filter and reads all six sparse matches with two-row pages. Run with
+`THREADING_DEVICE_LOG_SHARED_STRESS=1 swift test --package-path Plugins/DeviceLogsPlugin --filter DeviceLogSharedPanelTests`.
+Three serial Debug runs without concurrent task-owned builds completed in 186.806, 183.125 and
+193.277 ms (median 186.806 ms, maximum 193.277 ms), each using five bounded pages. The existing
+50,000-row focus gate's worst-of-five results were 82.4, 99.3 and 98.3 ms (maximum 99.3 ms,
+below its unchanged 120 ms ceiling). There was no previous shared-tool query path for a matched
+before measurement. An earlier full-suite run during Xcode compilation exceeded that focus
+ceiling; repeated idle runs passed without changing the algorithm or threshold. Artifacts:
+`.build/device-log-shared-idle-{1,2,3}.log` and `.build/device-log-shared-final.log`.
+The focused lifecycle fixtures also use adversarial regex input to verify finite wait deadlines
+and disclosed partial results. These are Debug worker/model checks, not physical-device capture
+or Release frame-rate measurements; the existing rendered streaming and cell-count gates above
+continue to own viewport performance.
+
 Device Logs' Regular Logs and Bluetooth tabs admit at most two readers per visible workspace.
 Each keeps the existing 20,000-row handoff, 50,000-row ring and 500,000-row history; histories
 have distinct files. Expect about 5,800 regular rows/s plus 100–6,000 Bluetooth packets/s;

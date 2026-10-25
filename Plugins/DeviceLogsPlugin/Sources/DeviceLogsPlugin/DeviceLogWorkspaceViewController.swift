@@ -49,6 +49,8 @@ final class DeviceLogWorkspaceViewController: NSViewController {
     var discover: ((@escaping ([DeviceLogSourceOption]) -> Void) -> Void)?
     var sourceFactory: ((DeviceLogSourceOption, DeviceLogSourceOption.Route, String?) -> DeviceLogRowSource?)?
 
+    var regularPaneForTools: DeviceLogPaneViewController { panes[.regular] ?? makePane(.regular) }
+
     var selectedPane: DeviceLogPaneViewController? { panes[selectedStream] }
 
     init(
@@ -154,6 +156,7 @@ final class DeviceLogWorkspaceViewController: NSViewController {
         pane.captureManagedByWorkspace = true
         pane.sourceFactory = sourceFactory
         pane.requestDiscovery = { [weak self] in self?.reloadSources() }
+        pane.requestSourceRefresh = { [weak self] in self?.reloadSources(force: true) }
         pane.onRowSelected = { [weak self] row in self?.revealLinked(to: row, from: stream) }
         panes[stream] = pane
         addChild(pane)
@@ -194,13 +197,14 @@ final class DeviceLogWorkspaceViewController: NSViewController {
         return linked.row
     }
 
-    private func reloadSources() {
-        guard isPresented else { return }
+    private func reloadSources(force: Bool = false) {
+        guard isPresented || force else { return }
+        panes.values.forEach { $0.beginSourceDiscovery() }
         discoveryGeneration += 1
         let generation = discoveryGeneration
         let completion: @Sendable ([DeviceLogSourceOption]) -> Void = { [weak self] sources in
             MainActor.assumeIsolated {
-                guard let self, self.isPresented, self.discoveryGeneration == generation else { return }
+                guard let self, self.isPresented || force, self.discoveryGeneration == generation else { return }
                 self.discoveredSources = sources
                 self.panes.values.forEach { $0.acceptSources(sources) }
             }

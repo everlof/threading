@@ -19,7 +19,10 @@ extension AgentToolCoordinator {
             completion(result)
             return
         }
-        displayPaneController.activateDeviceLog(for: sessionID)
+        guard displayPaneController.activateDeviceLog(for: sessionID) != nil else {
+            completion(.failure("Device Logs could not be opened for this session."))
+            return
+        }
         revealDisplayPane(for: sessionID)
         guard platform.isLinked else {
             Task { completion(await DeviceLogAgentCommandService.result(building: platform)) }

@@ -770,10 +770,10 @@ enum AgentLauncher {
     /// Deliberately not `--strict-mcp-config`: that would suppress the user's own MCP servers
     /// for every session Threading launches, which is a much larger change than adding one.
     ///
-    /// Exact Threading tool identities are pre-approved. The launch list is a lifetime ceiling,
-    /// not the session's current catalogue: Manager can be conferred while the process is
-    /// running, so its grant-derived names must already be accepted by the provider. The MCP
-    /// server still owns live visibility and re-authorizes every call. Tools that need finer
+    /// Exact known Threading tool identities are pre-approved, including Manager tools whose
+    /// grant may arrive while the process runs. Later plugin tools remain discoverable and use
+    /// the provider's default approval policy. The MCP server owns live visibility and
+    /// re-authorizes every call. Tools that need finer
     /// trust boundaries enforce them in the app: in particular, browser access is origin-gated
     /// and form submissions are confirmed because WKWebView may hold credentials the shell does
     /// not.
@@ -792,9 +792,9 @@ enum AgentLauncher {
         to command: inout ShellCommand,
         decision mcpDecision: MCPBridgeDecision
     ) {
-        // Codex interprets `enabled_tools` as a fixed allowlist. Use the provider-lifetime
-        // ceiling, including live grant-derived identities, while `tools/list` remains the
-        // session-specific source of what is actually visible now.
+        // These names preapprove known tools; they must not become a fixed visibility filter.
+        // A native plugin can load after this process starts. The server's live tools/list and
+        // dispatch admission own visibility and authority, including later Manager grants.
         let launchTools = MCPToolCatalog.providerLaunchToolNames
         guard !launchTools.isEmpty else { return }
 
@@ -824,12 +824,6 @@ enum AgentLauncher {
             let server = "mcp_servers.\(MCPDefaults.serverName)"
 
             appendCodexServerAddress(binding, under: server, to: &command)
-            appendCodexConfigOverride(
-                "\(server).enabled_tools",
-                tomlValue: tomlArray(launchTools),
-                to: &command
-            )
-
             for tool in launchTools {
                 appendCodexConfigOverride(
                     "\(server).tools.\(tool).approval_mode",

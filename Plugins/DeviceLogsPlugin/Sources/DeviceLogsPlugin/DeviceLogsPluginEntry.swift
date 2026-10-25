@@ -103,12 +103,57 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
     @objc public func showBluetoothProfileBrowserForTesting() {
         MainActor.assumeIsolated { pane?.showBluetoothProfileBrowserForTesting() }
     }
+
+    /// The product-shell evidence uses the loaded bundle and the production shared-panel tools.
+    @objc public func installSharedDeviceLogsForTesting() {
+        MainActor.assumeIsolated {
+            guard let workspace else { return }
+            workspace.setPresented(false)
+            let phone = DeviceLogSourceOption.Machine(
+                id: "device-logs-fixture", title: "David’s 16 Pro", isSimulator: false
+            )
+            let options = [
+                DeviceLogSourceOption(machine: phone, title: "Chameleon",
+                    kind: .app(deviceID: phone.id, bundleID: "com.example.chameleon", appName: "Chameleon"),
+                    application: .init(bundleID: "com.example.chameleon", name: "Chameleon", executableName: "Ananke",
+                        executablePath: "/private/var/containers/Bundle/Application/fixture/Chameleon.app/Ananke")),
+                DeviceLogSourceOption(machine: phone, title: "OtherApp",
+                    kind: .app(deviceID: phone.id, bundleID: "com.example.otherapp", appName: "OtherApp")),
+                DeviceLogSourceOption(machine: phone, title: "System log (USB)",
+                    kind: .device(udid: phone.id, overNetwork: false)),
+            ]
+            workspace.discover = { $0(options) }
+            workspace.sourceFactory = { _, _, _ in BufferedDeviceLogSource() }
+            for pane in workspace.panes.values { pane.sourceFactory = workspace.sourceFactory }
+            workspace.selectStream(.regular)
+            workspace.setPresented(true)
+            guard let regular = workspace.panes[.regular] else { return }
+            regular.selectAppForTesting(bundleID: "com.example.chameleon", route: .system)
+            regular.installRowsForTesting([
+                .init(time: "09:41:00.001", level: "Info", process: "Ananke", subsystem: "com.example.chameleon",
+                    message: "[AirLab] TX NS", id: "shared-log-tx-ns", deviceID: phone.id,
+                    bundleID: "com.example.chameleon", pid: 4242, category: "Bluetooth", source: .stdout),
+                .init(time: "09:41:00.012", level: "Info", process: "OtherApp", subsystem: "com.example.otherapp",
+                    message: "Background refresh completed", id: "shared-log-other-app", deviceID: phone.id,
+                    bundleID: "com.example.otherapp", pid: 5252, category: "Lifecycle", source: .system),
+                .init(time: "09:41:00.024", level: "Info", process: "Ananke", subsystem: "com.example.chameleon",
+                    message: "[AirLab] RX ANCS CP", id: "shared-log-rx-cp", deviceID: phone.id,
+                    bundleID: "com.example.chameleon", pid: 4242, category: "Bluetooth", source: .stdout),
+                .init(time: "09:41:00.036", level: "Info", process: "Ananke", subsystem: "com.example.chameleon",
+                    message: "Scene became active", id: "shared-log-unrelated", deviceID: phone.id,
+                    bundleID: "com.example.chameleon", pid: 4242, category: "Lifecycle", source: .system),
+                .init(time: "09:41:00.048", level: "Error", process: "Ananke", subsystem: "com.example.chameleon",
+                    message: "[AirLab] TX DS", id: "shared-log-tx-ds", deviceID: phone.id,
+                    bundleID: "com.example.chameleon", pid: 4242, category: "Bluetooth", source: .stderr),
+            ])
+        }
+    }
     #endif
 
     // MARK: - Tools
 
     public var pluginTools: [PluginTool] {
-        [
+        DeviceLogSharedToolDefinitions.tools + DeviceLogSharedToolDefinitions.bluetoothTools + [
             PluginTool(
                 name: DeviceLogToolNames.search,
                 title: "Device logs",
@@ -191,7 +236,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 detail: "Read a paired iPhone's Bluetooth packets",
                 symbol: "antenna.radiowaves.left.and.right",
                 summary: """
-                    Open the Bluetooth tab and select packet capture for one paired iPhone in this chat's Device Logs pane. Regular Logs keeps capturing while Bluetooth is selected. Requires its exact hardware UDID, external idevicebtlogger (brew install libimobiledevice), and Apple's Bluetooth logging profile on the phone. Captures phone-wide HCI traffic, not an app's text logs or an over-the-air sniffer. Use visible/search/time_range to read the selected tab's packet summaries and bounded raw hex. Starting is not proof of received packets; visible reports reader status. Rescan in the pane after connecting a phone or installing tools. Switching log tabs keeps both streams running; hiding the whole Device Logs pane stops both.
+                    Open the Bluetooth tab and select packet capture for one paired iPhone in this chat's Device Logs pane. Requires its exact hardware UDID, external idevicebtlogger (brew install libimobiledevice), and Apple's Bluetooth logging profile on the phone. Captures phone-wide HCI traffic, not app stdout or an over-the-air sniffer. Prefer bluetooth_state/configure/read/wait/reveal for explicit Bluetooth targeting and shared filters; visible/search/time_range are legacy selected-tab queries. Starting is not proof of received packets; bluetooth_state reports reader status. Use bluetooth_state with refresh:true after connecting a phone or installing tools. A running Bluetooth capture continues while hidden and stops when its tab or session closes.
                     """,
                 inputSchemaJSON: #"{"type":"object","properties":{"device_id":{"type":"string","description":"Exact paired iPhone hardware UDID."}},"required":["device_id"]}"#,
                 paneSectionToReveal: "bluetooth"
@@ -204,6 +249,16 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
         argumentsJSON: String,
         completion: @escaping (String, Bool) -> Void
     ) {
+        if let route = DeviceLogSharedToolDefinitions.route(name) {
+            MainActor.assumeIsolated {
+                DeviceLogSharedToolAdapter.invoke(
+                    named: route.name, argumentsJSON: argumentsJSON, pane: workspace?.panes[route.stream],
+                    stream: route.stream.rawValue,
+                    completion: completion
+                )
+            }
+            return
+        }
         let arguments = (try? JSONSerialization.jsonObject(with: Data(argumentsJSON.utf8)))
             as? [String: Any] ?? [:]
         MainActor.assumeIsolated {

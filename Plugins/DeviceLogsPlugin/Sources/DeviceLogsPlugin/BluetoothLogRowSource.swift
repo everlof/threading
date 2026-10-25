@@ -19,6 +19,7 @@ public final class BluetoothLogRowSource: BufferedDeviceLogSource, @unchecked Se
         self.udid = udid
         self.overNetwork = overNetwork
         self.toolPath = toolPath
+        super.init(deviceID: udid, source: .bluetooth)
     }
 
     static func arguments(udid: String, overNetwork: Bool) -> [String] {
@@ -28,6 +29,7 @@ public final class BluetoothLogRowSource: BufferedDeviceLogSource, @unchecked Se
     }
 
     public override func start() {
+        resetTransportActivity()
         worker.start(
             toolPath: toolPath,
             arguments: Self.arguments(udid: udid, overNetwork: overNetwork),

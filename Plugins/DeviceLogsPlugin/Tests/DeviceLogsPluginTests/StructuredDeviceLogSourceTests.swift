@@ -49,6 +49,7 @@ final class StructuredDeviceLogSourceTests: XCTestCase {
             wait(for: [ended], timeout: 5)
             source.stop()
             XCTAssertTrue(source.didDecodeStructuredRow)
+            XCTAssertNotNil(source.lastTransportActivity, "a quiet selected process does not make the full transport silent")
             XCTAssertEqual(source.drain().map(\.process), process == "Ananke" ? ["Ananke"] : [])
             XCTAssertEqual(source.dropped, 0)
         }

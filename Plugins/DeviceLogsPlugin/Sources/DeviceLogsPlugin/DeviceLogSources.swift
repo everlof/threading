@@ -6,20 +6,55 @@ import TimberLineParser
 
 // MARK: - Row
 
+/// The origin the transport can actually distinguish. A merged console is deliberately distinct
+/// from stdout and stderr: observing a system log is never evidence that stdout was captured.
+public enum DeviceLogRecordSource: String, Codable, CaseIterable, Sendable {
+    case system, stdout, stderr, console, appLog, bluetooth, unknown
+}
+
+public struct DeviceLogCaptureAvailability: Equatable, Sendable {
+    public let availableSources: [DeviceLogRecordSource]
+    public let unavailableSources: [DeviceLogRecordSource]
+    public let detail: String
+}
+
 /// One log line, kept as a value.
 ///
 /// Externally sized content never becomes a view until the table asks for the row that holds it,
 /// which is the whole reason this is a value and the pane is a table. See
 /// [`device-and-simulator-logs.md`](../../../../docs/feature-drafts/device-and-simulator-logs.md).
 public struct DeviceLogRow: Sendable {
+    /// Assigned once when decoded, and retained by projection, recording and subsequent reads.
+    public let id: String
     public let time: String
     public let level: String
     public let process: String
-    /// Absent when a source carries no label. The modern live-device route keeps its subsystem
-    /// and category here as `subsystem / category`; the legacy relay can only offer sender image.
-    /// Optional rather than empty so the difference stays visible.
+    public let processPath: String?
+    /// The original subsystem; category remains a separate field for exact filtering.
     public let subsystem: String?
+    public let category: String?
     public let message: String
+    public let rawLine: String
+    public let deviceID: String?
+    public let bundleID: String?
+    public let pid: Int?
+    public let source: DeviceLogRecordSource
+
+    /// Conservative payload accounting for aggregate stream budgets. Shared String storage may
+    /// use less memory, but the bound never depends on that implementation detail or deduplication.
+    public var estimatedRetainedBytes: Int {
+        let fixedMetadataBytes = 256
+        return fixedMetadataBytes + id.utf8.count + time.utf8.count + level.utf8.count
+            + process.utf8.count + (processPath?.utf8.count ?? 0)
+            + (subsystem?.utf8.count ?? 0) + (category?.utf8.count ?? 0)
+            + message.utf8.count + rawLine.utf8.count + (deviceID?.utf8.count ?? 0)
+            + (bundleID?.utf8.count ?? 0) + (link?.utf8.count ?? 0)
+    }
+
+    public var subsystemLabel: String? {
+        let parts = [subsystem, category].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " / ")
+    }
 
     /// When the line was written, as an instant.
     ///
@@ -43,15 +78,38 @@ public struct DeviceLogRow: Sendable {
         subsystem: String?,
         message: String,
         timestamp: Date? = nil,
-        link: String? = nil
+        link: String? = nil,
+        id: String = UUID().uuidString,
+        deviceID: String? = nil,
+        bundleID: String? = nil,
+        pid: Int? = nil,
+        category: String? = nil,
+        source: DeviceLogRecordSource = .unknown,
+        rawLine: String? = nil,
+        processPath: String? = nil
     ) {
+        self.id = id
         self.link = link
         self.time = time
         self.level = level
         self.process = process
+        self.processPath = processPath
         self.subsystem = subsystem
         self.message = message
         self.timestamp = timestamp
+        self.deviceID = deviceID
+        self.bundleID = bundleID
+        self.pid = pid
+        self.category = category
+        self.source = source
+        self.rawLine = rawLine ?? message
+    }
+
+    func withCaptureContext(deviceID: String?, bundleID: String?, source: DeviceLogRecordSource?) -> Self {
+        Self(time: time, level: level, process: process, subsystem: subsystem, message: message,
+             timestamp: timestamp, link: link, id: id, deviceID: self.deviceID ?? deviceID,
+             bundleID: self.bundleID ?? bundleID, pid: pid, category: category,
+             source: source ?? self.source, rawLine: rawLine, processPath: processPath)
     }
 
     /// Ordering for the level filter. `log` and the syslog relay use different vocabularies for
@@ -81,6 +139,9 @@ public protocol DeviceLogRowSource: AnyObject {
     /// Rows produced but never collected because the handoff was full. A drop is the honest signal
     /// that the consumer is behind; growing the buffer would only hide it in memory.
     var dropped: Int { get }
+    /// Valid transport input before severity/process filtering. A selected app can be quiet while
+    /// the phone's reader is healthy; admitted rows alone cannot distinguish those conditions.
+    var lastTransportActivity: Date? { get }
     /// Called once, off the main thread, when the source stops producing on its own.
     ///
     /// A reader that has died looks exactly like a device that has gone quiet, and the pane cannot
@@ -88,14 +149,33 @@ public protocol DeviceLogRowSource: AnyObject {
     var onStreamEnded: ((String) -> Void)? { get set }
 }
 
+public extension DeviceLogRowSource {
+    var lastTransportActivity: Date? { nil }
+}
+
 /// Shared batching and bounded handoff. Every source is a producer on its own queue and the pane
 /// is a consumer on the main one; this is the only place that boundary is implemented.
 public class BufferedDeviceLogSource: DeviceLogRowSource {
     public static let handoffCapacity = 20_000
+    public static let handoffByteCapacity = 16 * 1_048_576
 
     private var pending: [DeviceLogRow] = []
+    private var pendingBytes = 0
+    private var transportActivity: Date?
     private let lock = NSLock()
     private var droppedCount = 0
+    private let captureDeviceID: String?
+    private let captureBundleID: String?
+    private let captureSource: DeviceLogRecordSource?
+    private let captureIdentity: DeviceLogProcessIdentity?
+
+    public init(deviceID: String? = nil, bundleID: String? = nil, source: DeviceLogRecordSource? = nil,
+                processIdentity: DeviceLogProcessIdentity? = nil) {
+        captureDeviceID = deviceID
+        captureBundleID = bundleID
+        captureSource = source
+        captureIdentity = processIdentity
+    }
 
     public var onStreamEnded: ((String) -> Void)?
 
@@ -105,26 +185,56 @@ public class BufferedDeviceLogSource: DeviceLogRowSource {
         return droppedCount
     }
 
-    public func start() {}
+    public var lastTransportActivity: Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        return transportActivity
+    }
+
+    public func markTransportActivity() {
+        lock.lock()
+        transportActivity = Date()
+        lock.unlock()
+    }
+
+    public func start() { resetTransportActivity() }
     public func stop() {}
+
+    public func resetTransportActivity() {
+        lock.lock()
+        transportActivity = nil
+        lock.unlock()
+    }
 
     public func drain() -> [DeviceLogRow] {
         lock.lock()
         defer { lock.unlock() }
         let rows = pending
         pending.removeAll(keepingCapacity: true)
+        pendingBytes = 0
         return rows
     }
 
     public func enqueue(_ rows: [DeviceLogRow]) {
         guard !rows.isEmpty else { return }
+        markTransportActivity()
+        let matchingRows = captureIdentity.map { identity in rows.filter(identity.matches) } ?? rows
+        let rows = captureDeviceID != nil || captureBundleID != nil || captureSource != nil
+            ? matchingRows.map { row in
+                let bundleID = captureIdentity.map { $0.provesBundleIdentity(of: row) ? captureBundleID : nil } ?? captureBundleID
+                return row.withCaptureContext(deviceID: captureDeviceID, bundleID: bundleID, source: captureSource)
+            }
+            : matchingRows
         lock.lock()
-        let room = Self.handoffCapacity - pending.count
-        if room >= rows.count {
-            pending.append(contentsOf: rows)
-        } else {
-            if room > 0 { pending.append(contentsOf: rows.prefix(room)) }
-            droppedCount += rows.count - max(0, room)
+        for row in rows {
+            let bytes = row.estimatedRetainedBytes
+            guard pending.count < Self.handoffCapacity,
+                  bytes <= Self.handoffByteCapacity - pendingBytes else {
+                droppedCount += 1
+                continue
+            }
+            pending.append(row)
+            pendingBytes += bytes
         }
         lock.unlock()
     }
@@ -454,6 +564,9 @@ public enum DeviceLogLimits {
     public static let appListDeadline: TimeInterval = 25
     /// Apps offered per device. Their own developer builds, so the list is short in practice.
     public static let maximumApps = 40
+    public static let maximumMachines = 16
+    public static let maximumProcesses = 256
+    public static let maximumCatalogEntries = 16_384
     /// Listing or copying inside an app container talks to the device over its own transport, so
     /// it gets a longer leash than a local `simctl` call — and still a deadline.
     public static let containerDeadline: TimeInterval = 40
@@ -609,10 +722,12 @@ public final class SimulatorLogRowSource: BufferedDeviceLogSource {
     private let predicate: String?
     private let minimumSeverity: Int
 
-    public init(udid: String, predicate: String?, minimumSeverity: Int = 0) {
+    public init(udid: String, predicate: String?, minimumSeverity: Int = 0, bundleID: String? = nil,
+                processIdentity: DeviceLogProcessIdentity? = nil) {
         self.udid = udid
         self.predicate = predicate
         self.minimumSeverity = minimumSeverity
+        super.init(deviceID: udid, bundleID: bundleID, processIdentity: processIdentity)
     }
 
     var arguments: [String] {
@@ -637,6 +752,7 @@ public final class SimulatorLogRowSource: BufferedDeviceLogSource {
     }
 
     public override func start() {
+        resetTransportActivity()
         reader.run(
             executable: "/usr/bin/xcrun",
             arguments: arguments,
@@ -693,15 +809,18 @@ public final class PairedDeviceLogRowSource: BufferedDeviceLogSource, @unchecked
         DeviceRelayReclaim.reclaimOrphanedReaders(udid: device, toolPath: path)
     }
 
-    public init(udid: String, overNetwork: Bool, toolPath: String, processName: String? = nil, minimumSeverity: Int = 0) {
+    public init(udid: String, overNetwork: Bool, toolPath: String, processName: String? = nil, minimumSeverity: Int = 0, bundleID: String? = nil,
+                processIdentity: DeviceLogProcessIdentity? = nil) {
         self.processName = processName
         self.minimumSeverity = minimumSeverity
         self.udid = udid
         self.overNetwork = overNetwork
         self.toolPath = toolPath
+        super.init(deviceID: udid, bundleID: bundleID, processIdentity: processIdentity)
     }
 
     public override func start() {
+        resetTransportActivity()
         let request = generation.advance()
         lifecycle.async { [self] in startOnQueue(request: request) }
     }
@@ -718,9 +837,11 @@ public final class PairedDeviceLogRowSource: BufferedDeviceLogSource, @unchecked
             executable: toolPath,
             arguments: arguments,
             onLine: { [weak self] line in
-                if let self, self.generation.contains(request), let row = DeviceLogDecoding.syslog(line),
-                   row.severity >= self.minimumSeverity,
+                if let self, self.generation.contains(request), let row = DeviceLogDecoding.syslog(line) {
+                    self.markTransportActivity()
+                    if row.severity >= self.minimumSeverity,
                    self.processName == nil || row.process == self.processName { self.enqueue(row) }
+                }
             },
             onEnd: { [weak self] reason in
                 guard let self, self.generation.contains(request) else { return }
@@ -779,7 +900,9 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         fallbackToolPath: String?,
         structuredStartupDeadline: TimeInterval = 6,
         processName: String? = nil,
-        minimumSeverity: Int = 0
+        minimumSeverity: Int = 0,
+        bundleID: String? = nil,
+        processIdentity: DeviceLogProcessIdentity? = nil
     ) {
         self.udid = udid
         self.overNetwork = overNetwork
@@ -789,6 +912,7 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         self.structuredStartupDeadline = structuredStartupDeadline
         self.processName = processName
         self.minimumSeverity = minimumSeverity
+        super.init(deviceID: udid, bundleID: bundleID, processIdentity: processIdentity)
     }
 
     public init(
@@ -798,7 +922,9 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         fallbackToolPath: String?,
         structuredStartupDeadline: TimeInterval = 6,
         processName: String? = nil,
-        minimumSeverity: Int = 0
+        minimumSeverity: Int = 0,
+        bundleID: String? = nil,
+        processIdentity: DeviceLogProcessIdentity? = nil
     ) {
         self.udid = udid
         self.overNetwork = overNetwork
@@ -808,6 +934,7 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
         self.structuredStartupDeadline = structuredStartupDeadline
         self.processName = processName
         self.minimumSeverity = minimumSeverity
+        super.init(deviceID: udid, bundleID: bundleID, processIdentity: processIdentity)
     }
 
     var structuredArguments: [String] {
@@ -824,6 +951,7 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
     }
 
     public override func start() {
+        resetTransportActivity()
         let request = generation.advance()
         lifecycle.async { [self] in
             guard generation.contains(request) else { return }
@@ -895,6 +1023,7 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
 
     private func receiveStructuredLine(_ line: ArraySlice<UInt8>, request: Int) {
         guard generation.contains(request), let row = DeviceLogDecoding.pymobiledevice3(line) else { return }
+        markTransportActivity()
         let isFirstStructuredRow = markDecodedStructuredRow()
         // Errors only still receives Notice rows: the tool can clear Debug and Info, not more.
         if row.severity >= minimumSeverity,
@@ -963,9 +1092,11 @@ public final class StructuredPairedDeviceLogRowSource: BufferedDeviceLogSource, 
             executable: toolPath,
             arguments: arguments,
             onLine: { [weak self] line in
-                if let self, self.generation.contains(request), let row = DeviceLogDecoding.syslog(line),
-                   row.severity >= self.minimumSeverity,
+                if let self, self.generation.contains(request), let row = DeviceLogDecoding.syslog(line) {
+                    self.markTransportActivity()
+                    if row.severity >= self.minimumSeverity,
                    self.processName == nil || row.process == self.processName { self.enqueue(row) }
+                }
             },
             onEnd: { [weak self] fallbackReason in
                 guard let self, self.generation.contains(request) else { return }
@@ -1042,9 +1173,11 @@ public final class DeviceConsoleLogSource: BufferedDeviceLogSource {
         self.deviceID = deviceID
         self.bundleID = bundleID
         self.appName = appName
+        super.init(deviceID: deviceID, bundleID: bundleID)
     }
 
     public override func start() {
+        resetTransportActivity()
         reader.run(
             executable: "/usr/bin/xcrun",
             arguments: [
@@ -1068,7 +1201,7 @@ public final class DeviceConsoleLogSource: BufferedDeviceLogSource {
     /// A mirrored `os_log` line: `2026-10-14 08:14:00.656123+0200 Ananke[423:9a1f] [sub:cat] text`.
     /// The tag is absent for a logger without a subsystem.
     private static let mirrored = try! NSRegularExpression(
-        pattern: #"^\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}\.\d{3})\d*[+-]\d{4} [^\[\s]+\[\d+:[0-9a-fx]+\] (?:\[([^\]]+)\] )?(.*)$"#
+        pattern: #"^(\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}\.\d{3})\d*[+-]\d{4}) ([^\[\s]+)\[(\d+):[0-9a-fx]+\] (?:\[([^\]]+)\] )?(.*)$"#
     )
 
     /// Plain console output carries no timestamp, level or subsystem of its own, so the row is
@@ -1081,22 +1214,40 @@ public final class DeviceConsoleLogSource: BufferedDeviceLogSource {
         guard !Self.preamble.contains(where: { trimmed.contains($0) }) else { return nil }
         var time = Self.clock.string(from: Date())
         var subsystem: String?
+        var category: String?
+        var pid: Int?
+        var process = appName
+        var timestamp: Date?
+        var source: DeviceLogRecordSource = .console
         var message = trimmed
         let whole = NSRange(trimmed.startIndex..., in: trimmed)
         if let match = Self.mirrored.firstMatch(in: trimmed, range: whole) {
             func group(_ index: Int) -> String? {
                 Range(match.range(at: index), in: trimmed).map { String(trimmed[$0]) }
             }
-            time = group(1) ?? time
-            subsystem = group(2).map { $0.replacingOccurrences(of: ":", with: " / ") }
-            message = group(3) ?? trimmed
+            timestamp = DeviceLogDecoding.instant(in: group(1))
+            time = group(2) ?? time
+            process = group(3) ?? appName
+            pid = group(4).flatMap(Int.init)
+            let label = group(5)?.split(separator: ":", maxSplits: 1).map(String.init) ?? []
+            subsystem = label.first
+            category = label.count > 1 ? label[1] : nil
+            message = group(6) ?? trimmed
+            source = .stderr
         }
         return DeviceLogRow(
             time: time,
             level: message.contains("[ERROR]") || message.contains("error:") ? "Error" : "Default",
-            process: appName,
+            process: process,
             subsystem: subsystem,
-            message: message
+            message: message,
+            timestamp: timestamp,
+            deviceID: deviceID,
+            bundleID: bundleID,
+            pid: pid,
+            category: category,
+            source: source,
+            rawLine: text
         )
     }
 }
@@ -1132,9 +1283,11 @@ public final class AppContainerLogSource: BufferedDeviceLogSource {
         self.deviceID = deviceID
         self.bundleID = bundleID
         self.appName = appName
+        super.init(deviceID: deviceID, bundleID: bundleID, source: .appLog)
     }
 
     public override func start() {
+        resetTransportActivity()
         stopped = false
         queue.async { [weak self] in
             while let self, !self.stopped {
@@ -1230,7 +1383,9 @@ public enum DeviceLogDecoding {
             process: appName,
             subsystem: subsystem,
             message: String(rest),
-            timestamp: instant(in: trimmed)
+            timestamp: instant(in: trimmed),
+            source: .appLog,
+            rawLine: line
         )
     }
 
@@ -1330,22 +1485,29 @@ public enum DeviceLogDecoding {
             time = String(raw.dropFirst(11).prefix(12))
         }
         let subsystem = (object["subsystem"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let category = string(object["category"])
+        let message = (object["eventMessage"] as? String) ?? ""
         return DeviceLogRow(
             time: time,
             level: (object["messageType"] as? String) ?? "Default",
             process: process,
             subsystem: subsystem,
-            message: (object["eventMessage"] as? String) ?? "",
-            timestamp: instant(in: object["timestamp"] as? String)
+            message: message,
+            timestamp: instant(in: object["timestamp"] as? String),
+            bundleID: string(object["bundleIdentifier"] ?? object["bundleID"]),
+            pid: integer(object["processID"] ?? object["pid"]),
+            category: category,
+            source: recordSource(subsystem: subsystem, category: category, message: message),
+            rawLine: String(decoding: line, as: UTF8.self),
+            processPath: object["processImagePath"] as? String
         )
     }
 
     /// One NDJSON object emitted by `pymobiledevice3 syslog live --format json`.
     ///
     /// Captured from a physical iPhone on iOS 26.6.2. The label is nested rather than using the
-    /// macOS `log stream` keys, and contains both subsystem and category. The pane has one label
-    /// column, so both are retained there as `subsystem / category`; this also makes either value
-    /// searchable and records both in SQLite without a schema fork for one source.
+    /// macOS `log stream` keys, and contains both subsystem and category. Their original fields
+    /// remain distinct, while `subsystemLabel` combines them for the pane's one label column.
     public static func pymobiledevice3(_ line: ArraySlice<UInt8>) -> DeviceLogRow? {
         let data = Data(line)
         guard data.first == 0x7B,
@@ -1361,7 +1523,8 @@ public enum DeviceLogDecoding {
         let rawLevel = object["level"] as? String
         let level = rawLevel.map(Self.unifiedLogLevel) ?? "Default"
         let label = object["label"] as? [String: Any]
-        let subsystem = Self.combinedLabel(label)
+        let subsystem = string(label?["subsystem"])
+        let category = string(label?["category"])
 
         return DeviceLogRow(
             time: time,
@@ -1369,7 +1532,13 @@ public enum DeviceLogDecoding {
             process: process,
             subsystem: subsystem,
             message: message,
-            timestamp: instant(in: rawTimestamp)
+            timestamp: instant(in: rawTimestamp),
+            bundleID: string(object["bundleIdentifier"] ?? object["bundle_id"]),
+            pid: integer(object["pid"]),
+            category: category,
+            source: recordSource(subsystem: subsystem, category: category, message: message),
+            rawLine: String(decoding: line, as: UTF8.self),
+            processPath: processPath
         )
     }
 
@@ -1393,12 +1562,23 @@ public enum DeviceLogDecoding {
         }
     }
 
-    private static func combinedLabel(_ label: [String: Any]?) -> String? {
-        guard let label else { return nil }
-        let subsystem = (label["subsystem"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let category = (label["category"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let components = [subsystem, category].compactMap { $0 }
-        return components.isEmpty ? nil : components.joined(separator: " / ")
+    private static func string(_ value: Any?) -> String? {
+        (value as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    private static func integer(_ value: Any?) -> Int? {
+        if let number = value as? Int { return number }
+        return (value as? String).flatMap(Int.init)
+    }
+
+    /// Only the host's named tap proves which descriptor a unified-log entry came from. A
+    /// message saying `[stdout]` in another subsystem is ordinary application text.
+    static func recordSource(subsystem: String?, category: String?, message: String) -> DeviceLogRecordSource {
+        guard subsystem == "codes.threading.logtap", category == "tap" else { return .system }
+        if message.hasPrefix("[stdout] ") { return .stdout }
+        if message.hasPrefix("[stderr] ") { return .stderr }
+        if message.hasPrefix("[stdio] ") { return .console }
+        return .system
     }
 
     /// `idevicesyslog` output, which looks like:
@@ -1429,7 +1609,9 @@ public enum DeviceLogDecoding {
         guard let angle = head.range(of: " <") else { return nil }
         let level = String(head[head.index(angle.lowerBound, offsetBy: 2)...])
         var name = String(head[head.startIndex..<angle.lowerBound])
+        var pid: Int?
         if let bracket = name.range(of: "[", options: .backwards) {
+            pid = Int(name[bracket.upperBound...].dropLast())
             name = String(name[name.startIndex..<bracket.lowerBound])
         }
         var subsystem: String?
@@ -1443,7 +1625,10 @@ public enum DeviceLogDecoding {
             process: name,
             subsystem: subsystem,
             message: message,
-            timestamp: instant(in: text)
+            timestamp: instant(in: text),
+            pid: pid,
+            source: .system,
+            rawLine: text
         )
     }
 }
@@ -1495,19 +1680,62 @@ public struct DeviceLogSourceOption: Equatable, Sendable {
     /// device it belongs to is `machine`, not a suffix on this.
     public let title: String
     public let kind: Kind
+    public let application: DeviceLogApplication?
+    public let processIdentity: DeviceLogProcessIdentity?
+    public let catalogWarning: String?
+    private let systemLogKind: Kind?
+
+    public init(machine: Machine, title: String, kind: Kind, application: DeviceLogApplication? = nil,
+                processIdentity: DeviceLogProcessIdentity? = nil, catalogWarning: String? = nil,
+                systemLogKind: Kind? = nil) {
+        self.machine = machine
+        self.title = title
+        self.kind = kind
+        self.application = application
+        self.processIdentity = processIdentity ?? application?.processIdentity
+        self.catalogWarning = catalogWarning
+        self.systemLogKind = systemLogKind
+    }
+
+    public var bundleID: String? {
+        if let application { return application.bundleID }
+        if case .app(_, let bundleID, _) = kind { return bundleID }
+        return processIdentity?.bundleID
+    }
 
     /// Whether an app entry reads the app's own persisted log or its live console. Two genuinely
     /// different contents, so it is a choice rather than a fallback.
     public enum Route: Int, CaseIterable {
         case appLog
         case console
+        case system
 
         public var title: String {
             switch self {
             case .appLog: return L10n.string("App log")
             case .console: return L10n.string("Console")
+            case .system: return L10n.string("System log")
             }
         }
+    }
+
+    public func captureAvailability(route: Route = .system) -> DeviceLogCaptureAvailability {
+        let sources: [DeviceLogRecordSource]
+        let detail: String
+        if case .bluetooth = kind {
+            sources = [.bluetooth]
+            detail = "Bluetooth packet capture; application stdout and stderr are unavailable."
+        } else if case .app = kind, route == .appLog {
+            sources = [.appLog]
+            detail = "The app's persisted log file; stdout and stderr are unavailable."
+        } else if case .app = kind, route == .console {
+            sources = [.console]
+            detail = "Explicit app relaunch console. Plain stdout/stderr are merged; only mirrored system lines can be identified as stderr."
+        } else {
+            sources = [.system]
+            detail = "Unified/system log. Application stdout and stderr are unavailable unless this capture observes descriptor-specific entries from codes.threading.logtap for the selected process."
+        }
+        return DeviceLogCaptureAvailability(availableSources: sources, unavailableSources: [.stdout, .stderr], detail: detail)
     }
 
     /// Whether this source leaves rows below the pane's level unread. The system logs are a
@@ -1519,24 +1747,35 @@ public struct DeviceLogSourceOption: Equatable, Sendable {
         }
     }
 
+    public func readsAtLevel(route: Route) -> Bool {
+        if case .app = kind { return route == .system }
+        return readsAtLevel
+    }
+
     public func makeSource(
-        predicate: String?, route: Route = .appLog, processName: String? = nil,
+        predicate: String?, route: Route = .system, processName: String? = nil,
         minimumSeverity: Int = 0, deviceServices: (any PluginDeviceServices)? = nil
     ) -> DeviceLogRowSource? {
-        let severity = readsAtLevel ? minimumSeverity : 0
+        let severity = readsAtLevel(route: route) ? minimumSeverity : 0
         switch kind {
         case .simulator(let udid):
-            let processPredicate = processName.map { NSPredicate(format: "process == %@", $0).predicateFormat }
+            let processPredicate: String?
+            if let path = processIdentity?.executablePath {
+                processPredicate = NSPredicate(format: "processImagePath == %@", path).predicateFormat
+            } else {
+                processPredicate = (processName ?? processIdentity?.name).map { NSPredicate(format: "process == %@", $0).predicateFormat }
+            }
             let clauses = [predicate, processPredicate].compactMap { $0 }.filter { !$0.isEmpty }
             return SimulatorLogRowSource(
                 udid: udid,
                 predicate: clauses.isEmpty ? nil : clauses.map { "(\($0))" }.joined(separator: " AND "),
-                minimumSeverity: severity
+                minimumSeverity: severity, bundleID: bundleID, processIdentity: processIdentity
             )
         case .device(let udid, let overNetwork):
             guard let tool = DeviceLogSourceCatalog.syslogToolPath else { return nil }
             return PairedDeviceLogRowSource(
-                udid: udid, overNetwork: overNetwork, toolPath: tool, processName: processName, minimumSeverity: severity
+                udid: udid, overNetwork: overNetwork, toolPath: tool, processName: processName, minimumSeverity: severity,
+                bundleID: bundleID, processIdentity: processIdentity
             )
         case .bluetooth(let udid, let overNetwork, let toolPath):
             return BluetoothLogRowSource(udid: udid, overNetwork: overNetwork, toolPath: toolPath)
@@ -1547,14 +1786,14 @@ public struct DeviceLogSourceOption: Equatable, Sendable {
                 toolPath: tool,
                 fallbackToolPath: fallbackTool,
                 processName: processName,
-                minimumSeverity: severity
+                minimumSeverity: severity, bundleID: bundleID, processIdentity: processIdentity
             )
         case .brokeredStructuredDevice(let udid, let overNetwork, let fallbackTool):
             guard let deviceServices else { return nil }
             return StructuredPairedDeviceLogRowSource(
                 udid: udid, overNetwork: overNetwork, deviceServices: deviceServices,
                 fallbackToolPath: fallbackTool, processName: processName,
-                minimumSeverity: severity
+                minimumSeverity: severity, bundleID: bundleID, processIdentity: processIdentity
             )
         case .app(let deviceID, let bundleID, let appName):
             switch route {
@@ -1570,6 +1809,17 @@ public struct DeviceLogSourceOption: Equatable, Sendable {
                     bundleID: bundleID,
                     appName: appName
                 )
+            case .system:
+                let identity = processIdentity ?? DeviceLogProcessIdentity(name: appName, bundleID: bundleID)
+                let option = DeviceLogSourceOption(
+                    machine: machine, title: title,
+                    kind: systemLogKind ?? .brokeredStructuredDevice(
+                        udid: deviceID, overNetwork: false, fallbackToolPath: DeviceLogSourceCatalog.syslogToolPath
+                    ),
+                    processIdentity: identity
+                )
+                return option.makeSource(predicate: predicate, processName: processName,
+                                         minimumSeverity: minimumSeverity, deviceServices: deviceServices)
             }
         }
     }
@@ -1671,17 +1921,21 @@ public enum DeviceLogSourceCatalog {
             ) : nil
             let fallbackTool = syslogToolPath
             let bluetoothTool = bluetoothToolPath
-            // A simulator is its own machine and offers exactly one thing to read, so it is a
-            // group of one rather than a special case in the menu.
-            var options = bootedSimulators().map {
-                DeviceLogSourceOption(
-                    machine: .init(id: $0.udid, title: $0.name, isSimulator: true),
+            var options: [DeviceLogSourceOption] = []
+            for simulator in bootedSimulators().prefix(DeviceLogLimits.maximumMachines) {
+                let machine = DeviceLogSourceOption.Machine(id: simulator.udid, title: simulator.name, isSimulator: true)
+                options.append(DeviceLogSourceOption(
+                    machine: machine,
                     title: L10n.string("System log"),
-                    kind: .simulator(udid: $0.udid)
-                )
+                    kind: .simulator(udid: simulator.udid)
+                ))
+                for app in simulatorApplications(deviceID: simulator.udid) {
+                    options.append(DeviceLogSourceOption(machine: machine, title: app.name,
+                                                        kind: .simulator(udid: simulator.udid), application: app))
+                }
             }
             let devices = pairedDevices()
-            for device in devices {
+            for device in devices.prefix(DeviceLogLimits.maximumMachines) {
                 let transport = device.overNetwork ? "Wi-Fi" : "USB"
                 let name = deviceName(udid: device.udid, overNetwork: device.overNetwork)
                     ?? String(device.udid.prefix(8)) + "…"
@@ -1725,17 +1979,28 @@ public enum DeviceLogSourceCatalog {
                 ))
                 // One entry per app the user builds themselves. This is the route worth reaching
                 // for first: live, Apple-native, and unredacted, unlike the system log beside it.
-                for app in developerApps(deviceID: device.udid) {
+                let processes = runningAppProcesses(deviceID: device.udid)
+                let apps = developerApps(deviceID: device.udid, processes: processes)
+                for app in apps {
                     options.append(DeviceLogSourceOption(
                         machine: machine,
-                        // Says what choosing it does: the app is restarted, and its own logs
-                        // arrive whole, which the system log above cannot offer.
-                        title: L10n.format("%@ — full app logs (restarts the app)", app.name),
+                        title: app.name,
                         kind: .app(
                             deviceID: device.udid,
                             bundleID: app.bundleID,
                             appName: app.name
-                        )
+                        ),
+                        application: app,
+                        systemLogKind: systemLogKind
+                    ))
+                }
+                for process in processes where !apps.contains(where: { $0.executablePath == process.executablePath }) {
+                    options.append(DeviceLogSourceOption(
+                        machine: machine, title: "\(process.name) (PID \(process.pid ?? 0))",
+                        kind: systemLogKind, processIdentity: process,
+                        catalogWarning: apps.isEmpty
+                            ? "Installed-app metadata was unavailable or empty. Running process identity is available; its bundle ID is unknown."
+                            : "This running process has no matching installed-app bundle identity."
                     ))
                 }
             }
@@ -1802,7 +2067,7 @@ public enum DeviceLogSourceCatalog {
     ///
     /// `devicectl --device` accepts a UDID as well as its own identifier, so the same value that
     /// names a device to libimobiledevice names it here.
-    private static func developerApps(deviceID: String) -> [(name: String, bundleID: String)] {
+    private static func developerApps(deviceID: String, processes: [DeviceLogProcessIdentity]) -> [DeviceLogApplication] {
         let output = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-apps-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: output) }
@@ -1814,21 +2079,80 @@ public enum DeviceLogSourceCatalog {
             ],
             deadline: DeviceLogLimits.appListDeadline
         ) != nil else { return [] }
-        guard let data = try? Data(contentsOf: output),
+        guard let data = boundedMetadata(at: output),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let result = root["result"] as? [String: Any],
               let apps = result["apps"] as? [[String: Any]]
         else { return [] }
-        return apps.compactMap { app -> (String, String)? in
+        return apps.prefix(DeviceLogLimits.maximumCatalogEntries).compactMap { app -> DeviceLogApplication? in
             guard app["builtByDeveloper"] as? Bool == true,
                   let bundleID = app["bundleIdentifier"] as? String,
                   let name = app["name"] as? String
             else { return nil }
-            return (name, bundleID)
+            let bundlePath = (app["url"] as? String).flatMap(URL.init(string:))?.path
+            let executable = processes.first { process in
+                guard let bundlePath, let path = process.executablePath else { return false }
+                let root = DeviceLogProcessIdentity.normalized(bundlePath)
+                return DeviceLogProcessIdentity.normalized(path).hasPrefix(root.hasSuffix("/") ? root : root + "/")
+            }
+            return DeviceLogApplication(bundleID: bundleID, name: (app["displayName"] as? String) ?? name,
+                                        executableName: executable?.name ?? name, executablePath: executable?.executablePath)
         }
-        .sorted { $0.0.localizedCaseInsensitiveCompare($1.0) == .orderedAscending }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         .prefix(DeviceLogLimits.maximumApps)
-        .map { (name: $0.0, bundleID: $0.1) }
+        .map { $0 }
+    }
+
+    private static func simulatorApplications(deviceID: String) -> [DeviceLogApplication] {
+        guard let output = BoundedDeviceLogCommand.run("/usr/bin/xcrun", ["simctl", "listapps", deviceID]),
+              let data = output.data(using: .utf8) else { return [] }
+        return decodeSimulatorApplications(data)
+    }
+
+    static func decodeSimulatorApplications(_ data: Data) -> [DeviceLogApplication] {
+        guard data.count <= DeviceLogLimits.maximumDiscoveryOutputBytes,
+              let apps = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: [String: Any]]
+        else { return [] }
+        return apps.sorted { $0.key < $1.key }.prefix(DeviceLogLimits.maximumCatalogEntries).compactMap { bundleID, app in
+            guard app["ApplicationType"] as? String != "System",
+                  let executable = app["CFBundleExecutable"] as? String else { return nil }
+            let path = (app["Path"] as? String) ?? (app["Bundle"] as? String).flatMap(URL.init(string:))?.path
+            return DeviceLogApplication(bundleID: bundleID,
+                                        name: (app["CFBundleDisplayName"] as? String) ?? (app["CFBundleName"] as? String) ?? executable,
+                                        executableName: executable,
+                                        executablePath: path.map { URL(fileURLWithPath: $0).appendingPathComponent(executable).path })
+        }.prefix(DeviceLogLimits.maximumApps).map { $0 }
+    }
+
+    private static func runningAppProcesses(deviceID: String) -> [DeviceLogProcessIdentity] {
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("threading-processes-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: output) }
+        guard BoundedDeviceLogCommand.run("/usr/bin/xcrun", [
+            "devicectl", "device", "info", "processes", "--device", deviceID,
+            "--json-output", output.path,
+        ], deadline: DeviceLogLimits.discoveryDeadline) != nil,
+              let data = boundedMetadata(at: output) else { return [] }
+        return decodeRunningAppProcesses(data)
+    }
+
+    static func decodeRunningAppProcesses(_ data: Data) -> [DeviceLogProcessIdentity] {
+        guard data.count <= DeviceLogLimits.maximumDiscoveryOutputBytes,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let result = root["result"] as? [String: Any],
+              let processes = result["runningProcesses"] as? [[String: Any]] else { return [] }
+        return processes.prefix(DeviceLogLimits.maximumCatalogEntries).compactMap { process in
+            guard let raw = process["executable"] as? String,
+                  let url = URL(string: raw), url.isFileURL,
+                  url.path.contains(".app/"), let pid = process["processIdentifier"] as? Int else { return nil }
+            return DeviceLogProcessIdentity(name: url.lastPathComponent, executablePath: url.path, pid: pid)
+        }.sorted { ($0.name, $0.pid ?? 0) < ($1.name, $1.pid ?? 0) }
+            .prefix(DeviceLogLimits.maximumProcesses).map { $0 }
+    }
+
+    private static func boundedMetadata(at url: URL) -> Data? {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size <= DeviceLogLimits.maximumDiscoveryOutputBytes else { return nil }
+        return try? Data(contentsOf: url)
     }
 
     /// The newest `.log` in an app's data container, with the modification date that says whether

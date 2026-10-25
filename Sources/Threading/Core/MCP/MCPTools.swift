@@ -6668,7 +6668,7 @@ enum MCPTools {
         openWorldHint: false
       ),
       title: "Prepare Device Logs",
-      detail: "Reveal this session's live log pane and build the tap an app links to be readable.",
+      detail: "Reveal this session's shared log panel and explain capture routes and optional tap setup.",
       symbol: "list.bullet.rectangle",
       decodeArguments: { container in
         try container.decodeIfPresent(DeviceLogPrepareArguments.self, forKey: .arguments)
@@ -6679,11 +6679,16 @@ enum MCPTools {
         handler.deviceLogPrepare(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Reveal this session's Device logs pane and return the exact build setting that makes an \
-        app's own output readable in it. Call this before building an app whose `print()` output \
-        the user wants to see: printed output never reaches the unified log, so without the tap \
-        the pane shows only framework noise and nothing the app itself wrote. The returned value \
-        is added to your own xcodebuild invocation; Threading does not build the project for you.
+        Reveal this session's shared Device Logs panel and return truthful capture availability \
+        guidance plus the optional stdout/stderr tap's build or launch setting. Use the plugin's \
+        state/configure/read/wait/reveal tools to work with the same panel filter the user sees. \
+        Unified logs, app-console output and saved app logs are distinct sources; ordinary print() \
+        does not reach unified logs automatically. Preparing the tap alone does not instrument or \
+        relaunch an app. Apply the returned setting to your own build/launch, then verify received \
+        output in the panel. Linking the tap into a device app requires the user's consent.
+        This also loads the plugin's Bluetooth packet tools: discover bluetooth_state, \
+        bluetooth_configure, bluetooth_read, bluetooth_wait and bluetooth_reveal afterward. \
+        Bluetooth HCI capture does not use the app stdout tap.
         """,
       inputSchema: MCPInputSchema(
         properties: [

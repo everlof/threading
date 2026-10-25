@@ -699,6 +699,19 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+**Shared Device Logs controls and agent reads** extend the existing approved native plugin pane.
+The plugin owns the single capture buffer, filter engine, revisioned configuration and exact-row
+selection used by its controls and tools. Themes style the existing DesignKit controls; this adds
+no safe-extension presentation slot. Threading keeps session routing, plugin trust, pane placement,
+device-service execution and app log-tap consent host-owned. A read does not move the user's
+viewport; the explicit reveal command owns that navigation. Selecting an app does not grant
+permission to install a tap or silently relaunch the app.
+
+The explicit Bluetooth counterparts reuse that host/plugin boundary. Phone-wide packet capture,
+packet-mode and text predicates, the definitions report and stable-row reveal remain owned by
+the existing pane. Neither a tool-discovery announcement nor a tab reveal grants new device or
+plugin execution authority.
+
 **The iPhone composer's Take Photo source** extends the existing host-only attachment workflow
 for the selected session or new-session draft. Threading owns camera consent, capacity, image
 preparation, upload custody, cancellation and explicit chat submission; iOS owns the native camera

@@ -82,6 +82,17 @@ public final class DeviceLogStore {
                 message TEXT NOT NULL
             )
         """)
+        // Existing histories remain readable. Migration is owned by this same serial store
+        // worker; the pane never opens a second metadata database or rewrites captured rows.
+        let additions = [
+            ("record_id", "TEXT"), ("device_id", "TEXT"), ("bundle_id", "TEXT"),
+            ("pid", "INTEGER"), ("category", "TEXT"), ("source", "TEXT"),
+            ("raw_line", "TEXT"), ("link", "TEXT"), ("instant_seconds", "REAL"), ("process_path", "TEXT"),
+        ]
+        let existing = try columnNames()
+        for (name, type) in additions where !existing.contains(name) {
+            try execute("ALTER TABLE rows ADD COLUMN \(name) \(type)")
+        }
         // A range query filters on the instant, and a level filter on severity. Neither is an FTS
         // column, and an FTS5 table indexes nothing but its own text — so these are stated here or
         // every filtered query is a table scan.
@@ -116,8 +127,10 @@ public final class DeviceLogStore {
 
     private func prepareInsert() throws {
         let sql = """
-            INSERT INTO rows (id, instant_ms, clock, level, severity, process, subsystem, message)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO rows (id, instant_ms, clock, level, severity, process, subsystem, message,
+                              record_id, device_id, bundle_id, pid, category, source, raw_line, link,
+                              instant_seconds, process_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         guard sqlite3_prepare_v2(handle, sql, -1, &insert, nil) == SQLITE_OK else {
             throw StoreError.prepare(lastMessage)
@@ -133,6 +146,7 @@ public final class DeviceLogStore {
     @discardableResult
     public func append(_ batch: [DeviceLogRow]) throws -> Int64 {
         guard !batch.isEmpty, let insert else { return nextID }
+        let firstID = nextID
         try execute("BEGIN IMMEDIATE TRANSACTION")
         do {
             for row in batch {
@@ -154,12 +168,25 @@ public final class DeviceLogStore {
                     sqlite3_bind_null(insert, 7)
                 }
                 sqlite3_bind_text(insert, 8, row.message, -1, transientText)
+                bind(row.id, to: insert, at: 9)
+                bind(row.deviceID, to: insert, at: 10)
+                bind(row.bundleID, to: insert, at: 11)
+                if let pid = row.pid { sqlite3_bind_int64(insert, 12, Int64(pid)) }
+                else { sqlite3_bind_null(insert, 12) }
+                bind(row.category, to: insert, at: 13)
+                bind(row.source.rawValue, to: insert, at: 14)
+                bind(row.rawLine, to: insert, at: 15)
+                bind(row.link, to: insert, at: 16)
+                if let timestamp = row.timestamp { sqlite3_bind_double(insert, 17, timestamp.timeIntervalSince1970) }
+                else { sqlite3_bind_null(insert, 17) }
+                bind(row.processPath, to: insert, at: 18)
                 guard sqlite3_step(insert) == SQLITE_DONE else { throw StoreError.step(lastMessage) }
                 nextID += 1
             }
             try execute("COMMIT")
         } catch {
             try? execute("ROLLBACK")
+            nextID = firstID
             throw error
         }
         return nextID
@@ -204,7 +231,11 @@ public final class DeviceLogStore {
     public func row(_ id: Int64) throws -> DeviceLogRow? {
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
-        let sql = "SELECT clock, level, process, subsystem, message, instant_ms FROM rows WHERE id = \(id)"
+        let sql = """
+            SELECT clock, level, process, subsystem, message, instant_ms, record_id,
+                   device_id, bundle_id, pid, category, source, raw_line, link, instant_seconds, process_path
+            FROM rows WHERE id = \(id)
+        """
         guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
             throw StoreError.prepare(lastMessage)
         }
@@ -212,16 +243,28 @@ public final class DeviceLogStore {
         func text(_ column: Int32) -> String? {
             sqlite3_column_text(statement, column).map { String(cString: $0) }
         }
-        let instant = sqlite3_column_type(statement, 5) == SQLITE_NULL
-            ? nil
-            : Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 5)) / 1000)
+        let instant: Date?
+        if sqlite3_column_type(statement, 14) != SQLITE_NULL {
+            instant = Date(timeIntervalSince1970: sqlite3_column_double(statement, 14))
+        } else if sqlite3_column_type(statement, 5) != SQLITE_NULL {
+            instant = Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 5)) / 1000)
+        } else { instant = nil }
         return DeviceLogRow(
             time: text(0) ?? "",
             level: text(1) ?? "",
             process: text(2) ?? "",
             subsystem: text(3),
             message: text(4) ?? "",
-            timestamp: instant
+            timestamp: instant,
+            link: text(13),
+            id: text(6) ?? "legacy:\(url.lastPathComponent):\(id)",
+            deviceID: text(7),
+            bundleID: text(8),
+            pid: sqlite3_column_type(statement, 9) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(statement, 9)),
+            category: text(10),
+            source: text(11).flatMap(DeviceLogRecordSource.init(rawValue:)) ?? .unknown,
+            rawLine: text(12) ?? text(4),
+            processPath: text(15)
         )
     }
 
@@ -229,6 +272,24 @@ public final class DeviceLogStore {
 
     private var lastMessage: String {
         handle.map { String(cString: sqlite3_errmsg($0)) } ?? "no database"
+    }
+
+    private func bind(_ value: String?, to statement: OpaquePointer, at index: Int32) {
+        if let value { sqlite3_bind_text(statement, index, value, -1, transientText) }
+        else { sqlite3_bind_null(statement, index) }
+    }
+
+    private func columnNames() throws -> Set<String> {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(handle, "PRAGMA table_info(rows)", -1, &statement, nil) == SQLITE_OK else {
+            throw StoreError.prepare(lastMessage)
+        }
+        var names = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let name = sqlite3_column_text(statement, 1) { names.insert(String(cString: name)) }
+        }
+        return names
     }
 
     private func execute(_ sql: String) throws {
