@@ -8137,8 +8137,12 @@ final class ThemedControlTests: HostedStoreTestCase {
         // overlay for an app event and owns only the cooldown (ThemeCharacterTests).
         // The audio viewport observer owns only clip notifications, not pixels; the spectrum
         // story shows its consumer and AudioSpectrumPresentationTests covers clipping demand.
+        // The browser window gates focus, and the background host transports existing views
+        // through an invisible panel. Browser focus and off-screen capture tests cover them.
         let nonvisualModels: Set<String> = [
             "AudioSpectrumViewportObserver",
+            "BackgroundRenderingHost",
+            "BrowserHostingWindow",
             "SimulatorTouchOverlayModel",
             "ThemeParticleHold",
             "ThemeTransitionPresenter",

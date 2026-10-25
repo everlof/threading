@@ -1753,7 +1753,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let deviceLogs = NativePluginManagedOffer.deviceLogs
         if !declared.contains(where: { $0.pane.pluginIdentifier == deviceLogs.identifier }),
            let route = deviceLogs.paneRoute(NativePluginManagedOffer.DeviceLogsRoute.fromDevice) {
-            entries.insert(.item(ThemedMenuItem(title: deviceLogs.name,
+            let titleKey = deviceLogs.paneSections.first { $0.identifier == route.section }?.command?.titleKey
+                ?? deviceLogs.nameKey
+            let title = L10n.string(titleKey)
+            entries.insert(.item(ThemedMenuItem(title: title,
                 onChoose: { [weak self] in
                     guard let self else { return }
                     _ = self.openNativePluginPane(

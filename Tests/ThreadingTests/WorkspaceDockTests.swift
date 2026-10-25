@@ -19,7 +19,7 @@ final class WorkspaceDockTests: HostedStoreTestCase {
     ))
     let menu = try XCTUnwrap(controller.displayPaneController.onDevicePluginRoutes?(session, "first"))
     let logsAction = try XCTUnwrap(menu.compactMap { entry -> ThemedMenuItem? in
-      guard case .item(let item) = entry, item.title == L10n.string("Device Logs") else { return nil }
+      guard case .item(let item) = entry, item.title == L10n.string("Device logs") else { return nil }
       return item
     }.first)
     logsAction.onChoose?()

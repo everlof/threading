@@ -3376,11 +3376,14 @@ final class BrowserViewController: NSViewController {
                 if self.annotationAnchorRefreshPending { self.refreshAnnotationAnchors() }
             }
             guard self.agentPageIdentity == identity else { return }
+            // Geometry reads work in an occluded renderer. A paint-readiness wait here can
+            // stall forever when WebKit suspends animation frames.
             let positions: [BrowserAnnotationAnchorPosition]? = try? await self.callAgentScript(
                 BrowserAgentScripts.annotationAnchorPositions,
                 arguments: self.pointArguments(x: 0, y: 0).merging([
                     "tokens": tokens, "releasedTokens": released
-                ]) { _, new in new }
+                ]) { _, new in new },
+                preparesRendering: false
             )
             guard self.agentPageIdentity == identity, let positions else { return }
             self.capturedAnnotationAnchorTokens[identity.webView]?.subtract(released)

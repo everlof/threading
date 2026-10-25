@@ -644,7 +644,9 @@ Geometry refresh is O(notes × frame depth), expected 5–10 notes and stress-te
 DOM/frame enumeration. Scroll/resize and mutations in documents containing an anchored target or
 one of its frames share a requestAnimationFrame invalidation, with one event-triggered 100 ms
 fallback when an occluded renderer suspends animation frames; the native bridge keeps one geometry
-batch in flight and one pending invalidation. The mutation callback never walks its record list.
+batch in flight and one pending invalidation. The geometry batch reads layout without waiting for
+new paint frames, which may also be suspended while the renderer is occluded. The mutation callback
+never walks its record list.
 Deleting/cancelling the last anchored note releases its weak handles and disconnects observation.
 Page identity rejects late replies; UUID tokens prevent a cancelled draft from attaching to the
 next draft that reuses its numeric pin ID.
