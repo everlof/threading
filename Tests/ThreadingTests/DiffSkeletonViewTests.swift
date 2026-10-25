@@ -80,6 +80,7 @@ final class DiffSkeletonViewTests: XCTestCase {
             backing: .buffered,
             defer: true
         )
+        window.animationBehavior = .none
         defer { window.orderOut(nil) }
         window.contentView?.addSubview(view)
         XCTAssertTrue(view.isPulsing, "hosted in a window, the ghost breathes")
@@ -106,6 +107,7 @@ final class DiffSkeletonViewTests: XCTestCase {
             backing: .buffered,
             defer: true
         )
+        window.animationBehavior = .none
         defer { window.orderOut(nil) }
 
         window.contentView?.addSubview(view)
@@ -183,6 +185,7 @@ final class DiffSkeletonViewTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.animationBehavior = .none
         defer { window.orderOut(nil) }
         window.contentView?.addSubview(view)
         window.contentView?.layoutSubtreeIfNeeded()
