@@ -154,7 +154,7 @@ final class BrowserAgentFocusTests: HostedStoreTestCase {
         }
 
         func tearDown() {
-            window.makeFirstResponder(nil)
+            _ = window.makeFirstResponder(nil)
             window.orderOut(nil)
             window.contentViewController = nil
             for tab in pane.tabs(for: sessionID) { _ = pane.closeTab(id: tab.id, for: sessionID) }

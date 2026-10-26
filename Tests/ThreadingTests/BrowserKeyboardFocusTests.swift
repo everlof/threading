@@ -23,7 +23,7 @@ final class BrowserKeyboardFocusTests: XCTestCase {
             XCTAssertTrue(window.firstResponder === editor)
             finishInner()
             XCTAssertTrue(window.makeFirstResponder(page), "Focus is available after the last operation")
-            window.makeFirstResponder(nil)
+            _ = window.makeFirstResponder(nil)
         }
     }
 
@@ -34,7 +34,7 @@ final class BrowserKeyboardFocusTests: XCTestCase {
         window.contentView?.addSubview(editor)
         window.contentView?.addSubview(page)
         let finish = BrowserKeyboardFocus.beginAgentOperation(on: page)
-        defer { finish(); window.makeFirstResponder(nil) }
+        defer { finish(); _ = window.makeFirstResponder(nil) }
 
         for event in [NSEvent.EventType.leftMouseDown, .keyDown] {
             XCTAssertTrue(window.makeFirstResponder(editor))
@@ -70,7 +70,7 @@ final class BrowserKeyboardFocusTests: XCTestCase {
         XCTAssertTrue(window.makeFirstResponder(first))
         finishSecond()
         XCTAssertTrue(window.makeFirstResponder(second))
-        window.makeFirstResponder(nil)
+        _ = window.makeFirstResponder(nil)
     }
 
     private func makeWindow(main: Bool = false) -> BrowserHostingWindow {

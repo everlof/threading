@@ -138,7 +138,9 @@ final class ProxyCaptureTests: XCTestCase {
         ))))
         XCTAssertEqual(started["mock_count"] as? Int, 1)
         let port = try XCTUnwrap(started["port"] as? Int)
-        let bytes = try await Task.detached { try Self.performMockRequest(proxyPort: port) }.value
+        let bytes = try await Task.detached {
+            try ProxyCaptureTests.performMockRequest(proxyPort: port)
+        }.value
         XCTAssertTrue(String(decoding: bytes, as: UTF8.self).contains("{\"items\":[]}"))
         var flow: [String: Any]?
         for _ in 0..<20 {
