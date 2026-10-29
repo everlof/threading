@@ -152,6 +152,7 @@ extension AgentToolCoordinator {
                 origin: .base(name: base.name)
             ).text
             let warnings = await ThemeImageLegibility.warnings(for: theme)
+                + ThemeArtAdvisory.warnings(for: theme)
             if arguments.apply ?? true {
                 try await applyAppThemeChoice(theme)
                 return .success(
@@ -358,6 +359,7 @@ extension AgentToolCoordinator {
                 origin: .previous
             ).text
             let warnings = await ThemeImageLegibility.warnings(for: updated)
+                + ThemeArtAdvisory.warnings(for: updated)
             return .success(
                 "Updated \(updated.name) (\(updated.id.rawValue)).\(state)\n\n\(layers)\(warnings)"
             )

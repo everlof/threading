@@ -1,4 +1,5 @@
 import { SignJWT, importPKCS8 } from "jose";
+import { setFailurePrincipal, type FailureField, type FailureReason } from "./service-failure-context";
 import type { Env } from "./environment";
 import { HttpError } from "./environment";
 import { sha256Hex } from "./crypto";
@@ -100,12 +101,13 @@ export async function handleAPNSPush(request: Request, env: Env): Promise<Respon
   }
   const principal = await authorizeRendezvousCredential(bearerToken(request), "host", env);
   if (principal.kind !== "host") throw new HttpError(403, "forbidden", "Host credential required");
+  setFailurePrincipal(request, principal);
   const body = await readJSON(request, 8 * 1024);
   assertExactKeys(body, requestKeys);
-  if (typeof body.playsSound !== "boolean") invalid("playsSound is invalid");
+  if (typeof body.playsSound !== "boolean") invalid("playsSound is invalid", "playsSound");
   const soundName = body.soundName;
   if (soundName !== undefined && (typeof soundName !== "string"
-    || !/^threading-theme-[0-9a-f]{64}\.caf$/u.test(soundName))) invalid("soundName is invalid");
+    || !/^threading-theme-[0-9a-f]{64}\.caf$/u.test(soundName))) invalid("soundName is invalid", "soundName");
   const event = normalizedEvent(requiredObject(body.event, "event"));
   if (event.hostID !== principal.hostID) {
     throw new HttpError(403, "forbidden", "Notification host does not match credential");
@@ -169,6 +171,7 @@ export async function handleAPNSRetraction(request: Request, env: Env): Promise<
   }
   const principal = await authorizeRendezvousCredential(bearerToken(request), "host", env);
   if (principal.kind !== "host") throw new HttpError(403, "forbidden", "Host credential required");
+  setFailurePrincipal(request, principal);
   const body = await readJSON(request, 4 * 1024);
   assertExactKeys(body, retractionRequestKeys);
   const retraction = normalizedRetraction(requiredObject(body.retraction, "retraction"));
@@ -235,14 +238,14 @@ export async function validateAPNSConfiguration(env: Env): Promise<void> {
 }
 
 function normalizedEvent(value: Record<string, unknown>): NotificationEvent {
-  assertExactKeys(value, eventKeys);
-  if (value.type !== "notification") invalid("event.type is invalid");
+  assertExactKeys(value, eventKeys, "event");
+  if (value.type !== "notification") invalid("event.type is invalid", "event.type");
   const id = machineToken(value.id, "event.id", 128);
-  const kind = boundedEnum(value.kind, kinds);
+  const kind = boundedEnum(value.kind, kinds, "event.kind");
   const hostID = machineToken(value.hostID, "event.hostID", 128);
   const sessionID = machineToken(value.sessionID, "event.sessionID", 128);
   if (!validateIdentifier(hostID) || !validateIdentifier(sessionID)) {
-    invalid("event identifiers are invalid");
+    invalid("event identifiers are invalid", "event", "invalidShape");
   }
   const title = safeText(value.title, "event.title", 160);
   const body = safeText(value.body, "event.body", 1_500);
@@ -250,7 +253,7 @@ function normalizedEvent(value: Record<string, unknown>): NotificationEvent {
   const bodyLocalization = optionalLocalization(value.bodyLocalization, "bodyLocalization");
   const destination = normalizedDestination(requiredObject(value.destination, "destination"));
   if (typeof value.createdAt !== "number" || !Number.isFinite(value.createdAt)) {
-    invalid("event.createdAt is invalid");
+    invalid("event.createdAt is invalid", "event.createdAt");
   }
   const turnGeneration = value.turnGeneration;
   if (turnGeneration !== undefined && (
@@ -258,11 +261,11 @@ function normalizedEvent(value: Record<string, unknown>): NotificationEvent {
       || !Number.isSafeInteger(turnGeneration)
       || turnGeneration < 0
   )) {
-    invalid("event.turnGeneration is invalid");
+    invalid("event.turnGeneration is invalid", "event.turnGeneration");
   }
   const now = Date.now() / 1_000;
   if (value.createdAt < now - 2 * 24 * 60 * 60 || value.createdAt > now + 5 * 60) {
-    invalid("event.createdAt is outside the accepted window");
+    invalid("event.createdAt is outside the accepted window", "event.createdAt", "outsideTimeWindow");
   }
   return {
     type: "notification",
@@ -281,20 +284,20 @@ function normalizedEvent(value: Record<string, unknown>): NotificationEvent {
 }
 
 function normalizedRetraction(value: Record<string, unknown>): NotificationRetraction {
-  assertExactKeys(value, retractionKeys);
-  if (value.type !== "notificationRetraction") invalid("retraction.type is invalid");
+  assertExactKeys(value, retractionKeys, "retraction");
+  if (value.type !== "notificationRetraction") invalid("retraction.type is invalid", "retraction.type");
   const hostID = machineToken(value.hostID, "retraction.hostID", 128);
   const sessionID = machineToken(value.sessionID, "retraction.sessionID", 128);
   const eventID = machineToken(value.eventID, "retraction.eventID", 128);
-  const kind = boundedEnum(value.kind, kinds);
+  const kind = boundedEnum(value.kind, kinds, "retraction.kind");
   if (!validateIdentifier(hostID) || !validateIdentifier(sessionID)
-    || !supportsRetraction(kind)) invalid("retraction is invalid");
+    || !supportsRetraction(kind)) invalid("retraction is invalid", "retraction", "invalidShape");
   return { type: "notificationRetraction", hostID, sessionID, eventID, kind };
 }
 
 function normalizedDestination(value: Record<string, unknown>): NotificationEvent["destination"] {
-  assertExactKeys(value, destinationKeys);
-  const kind = boundedEnum(value.kind, destinationKinds);
+  assertExactKeys(value, destinationKeys, "destination");
+  const kind = boundedEnum(value.kind, destinationKinds, "destination.kind");
   const fields = {
     attachmentID: optionalMachineToken(value.attachmentID, "destination.attachmentID"),
     browserTabID: optionalMachineToken(value.browserTabID, "destination.browserTabID"),
@@ -310,26 +313,26 @@ function normalizedDestination(value: Record<string, unknown>): NotificationEven
     : kind === "attachment" ? ["attachmentID"]
     : kind === "browserTab" ? ["browserTabID"]
     : ["extensionIdentifier", "extensionPanelID"];
-  if (JSON.stringify(present) !== JSON.stringify(expected)) invalid("destination is invalid");
+  if (JSON.stringify(present) !== JSON.stringify(expected)) invalid("destination is invalid", "destination", "invalidShape");
   return { kind, ...Object.fromEntries(Object.entries(fields).filter(([, item]) => item)) };
 }
 
 function optionalLocalization(
   value: unknown,
-  name: string,
+  name: "titleLocalization" | "bodyLocalization",
 ): { key: string; arguments: string[] } | undefined {
   if (value === undefined || value === null) return undefined;
   const object = requiredObject(value, name);
-  assertExactKeys(object, localizationKeys);
+  assertExactKeys(object, localizationKeys, name);
   const key = safeText(object.key, `${name}.key`, 160);
   if (!Array.isArray(object.arguments) || object.arguments.length > 8) {
-    invalid(`${name}.arguments is invalid`);
+    invalid(`${name}.arguments is invalid`, `${name}.arguments`);
   }
   return {
     key,
-    arguments: object.arguments.map((item, index) => safeText(
+    arguments: object.arguments.map((item) => safeText(
       item,
-      `${name}.arguments[${index}]`,
+      `${name}.arguments`,
       160,
     )),
   };
@@ -469,19 +472,19 @@ function normalizedAPNSID(value: string | null): string | null {
   return value;
 }
 
-function boundedEnum<Value extends string>(value: unknown, accepted: Set<Value>): Value {
-  if (typeof value !== "string" || !accepted.has(value as Value)) invalid("enum value is invalid");
+function boundedEnum<Value extends string>(value: unknown, accepted: Set<Value>, field: FailureField): Value {
+  if (typeof value !== "string" || !accepted.has(value as Value)) invalid("enum value is invalid", field);
   return value as Value;
 }
 
-function machineToken(value: unknown, name: string, maximumBytes: number): string {
+function machineToken(value: unknown, name: FailureField, maximumBytes: number): string {
   if (typeof value !== "string" || value.length === 0
     || new TextEncoder().encode(value).byteLength > maximumBytes
-    || !machineTokenPattern.test(value)) invalid(`${name} is invalid`);
+    || !machineTokenPattern.test(value)) invalid(`${name} is invalid`, name);
   return value;
 }
 
-function optionalMachineToken(value: unknown, name: string): string | undefined {
+function optionalMachineToken(value: unknown, name: FailureField): string | undefined {
   if (value === undefined || value === null) return undefined;
   return machineToken(value, name, 512);
 }
@@ -495,15 +498,15 @@ function configuredToken(value: string | undefined, name: string, maximumBytes: 
   return value;
 }
 
-function safeText(value: unknown, name: string, maximumBytes: number): string {
+function safeText(value: unknown, name: FailureField, maximumBytes: number): string {
   if (typeof value !== "string" || value.trim().length === 0
     || new TextEncoder().encode(value).byteLength > maximumBytes
-    || /[\u0000-\u001f\u007f]/u.test(value)) invalid(`${name} is invalid`);
+    || /[\u0000-\u001f\u007f]/u.test(value)) invalid(`${name} is invalid`, name);
   return value;
 }
 
-function requiredObject(value: unknown, name: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) invalid(`${name} is invalid`);
+function requiredObject(value: unknown, name: FailureField): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) invalid(`${name} is invalid`, name);
   return value as Record<string, unknown>;
 }
 
@@ -517,6 +520,6 @@ function truncateUTF8(value: string, maximumBytes: number): string {
   return `${result}…`;
 }
 
-function invalid(message: string): never {
-  throw new HttpError(400, "invalidPush", message);
+function invalid(message: string, field: FailureField, reason: FailureReason = "invalidValue"): never {
+  throw new HttpError(400, "invalidPush", message, { reason, field });
 }

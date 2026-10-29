@@ -1937,10 +1937,13 @@ extension ProjectSidebarViewController {
     func promptToRenameSession(_ sessionID: SessionID) {
         guard let session = projectStore.session(withID: sessionID) else { return }
 
-        promptRename(
+        promptForText(
             title: L10n.string("Rename Session"),
-            current: session.customTitle ?? "",
-            placeholder: session.displayTitle,
+            confirmTitle: L10n.string("Rename"),
+            clearTitle: session.customTitle?.isEmpty == false
+                ? L10n.string("Use Agent's Name") : nil,
+            current: session.displayTitle,
+            placeholder: L10n.string("Name"),
             allowsEmpty: true
         ) { newTitle in
             guard self.projectStore.renameSession(id: sessionID, to: newTitle).succeeded else {

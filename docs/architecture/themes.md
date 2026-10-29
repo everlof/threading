@@ -2517,7 +2517,9 @@ text and are shown as written in every language.
 `GeneratedAppIcon` already drew a contributed theme's icon mark on the theme's plate in place of
 the Threading mark; `brand.dockIcon` is the same opt-in for a custom theme's own logo image, so
 "the silhouette never changes" keeps its exception list at one shape of exception. The logo slot
-is now stored at 512 pixels so the Dock, which never upscales a mark, gets a sharp one.
+is now stored at 512 pixels so the Dock gets a sharp one. *Since 2026-10-28 a smaller mark is
+enlarged to fill its box, up to the tile's largest presentation, and a mark that disappears into
+its plate is rimmed — see "the whole look by default" below.*
 
 ### Assets, tools and contributed themes
 
@@ -2597,6 +2599,83 @@ missing.
 `AppThemeLayerReportTests` holds the states over System and over a period base, the inherited-
 frame note, a partial theme naming only what is missing, the update wording, a removed layer,
 the report through the create tool, and the decision leading the description.
+
+## 2026-10-28 — the whole look by default, and art that stands apart
+
+The first agent-made theme reviewed from outside (a colleague's "Poops & Wind", made on 0.10.0)
+was well built and still had four flaws, and three were the host's:
+
+1. **Close sat third from the corner.** Its buttons were placed `leading` but listed in the
+   default order, which is Windows order written for `trailing` — so Close landed where a Mac
+   hand reaches for Zoom, and the pills style made it hard to see in the preview.
+2. **The Dock tile's mark was small.** A 256-pixel logo was drawn at its own size, because a
+   contributed mark was never enlarged: under half the box it was given.
+3. **Dark art was the light art.** Every picture was copied into its dark slot unchanged, so a
+   dark-outlined character stood on a near-black column and the Dock tile was a brown mark on a
+   brown-black plate. Nothing the agent read said so.
+4. **It stored a copy of Chalkboard SE**, a face every Mac has, while naming the family anyway.
+
+And the person had to ask for "an immersive chrome and theme" to get past colours at all. The
+cause was a regression: the 2026-10-02 rule that *a request that names a world wants all four
+layers* was compressed out of `create_app_theme`'s description in a later bulk commit, leaving
+"for an unspecified theme, ask the person how far to go" — so "a poop theme" read as unspecified.
+The assertion guarding the description checked only the asking phrase, and kept passing.
+
+What changed:
+
+- **The rule is back, and spelled out.** A request naming a world or a subject gets the whole
+  look *without asking*, and the description lists what that is: a backdrop, chrome, an image
+  logo with `logo_in_dock` as the Dock icon, a mascot, sprites, words, a welcome, moments and a
+  transition. `testANamedWorldGetsTheWholeLookWithoutAsking` pins it by meaning.
+- **The report names unused parts** (`WholeLookPart`). A layer counts as stated as soon as any
+  part of it is, so "all four layers" was true of a frame and a word list with no logo or mascot.
+  Once a theme goes beyond colours, every create and update lists the parts no variant states,
+  in the tools' spelling.
+- **Close takes its cluster's outer edge** (`ButtonPlacement.clusters(of:)`): first on the leading
+  side, last on the trailing, other operations in authored order. Every stock frame already
+  wrote it that way (`testEveryStockFrameDrawsAsItIsWritten`), so the rule only catches a theme
+  that did not — including stored ones, which draw correctly without being edited.
+- **A mark fills its box.** `GeneratedAppIcon.drawMark` now fits a contributed mark to the safe
+  area, measured in pixels, enlarging it up to `maximumMarkEnlargement` — the ratio between the
+  1024 canvas and `largestPresentedTile` (256 pixels, the Dock's largest magnification), so the
+  enlargement never reaches a screen. Below `minimumSharpMarkPixels` it still grows as far as
+  that allows and the tools say so.
+- **Identity art is rimmed; decorative art is reported** (`ThemeArtSeparation`). Separation is
+  measured on a picture's *edge* — opaque pixels bordering transparency — against every ground it
+  can land on, at the 3:1 non-text floor; half the edge must clear it. The Dock tile's mark and
+  the sidebar's brand logo say *this is the app* and must be findable, so when they fail the host
+  draws them with a rim in the label (the header's ink on a band). The mascot is decoration and a
+  deliberately murky figure is a design choice, so it is left as drawn and the agent is told.
+  `ThemeArtAdvisory` appends those lines — what failed, against which ground, what the host did,
+  and whether the slot holds the other appearance's very bytes.
+- **The preview draws the Dock tile** for each appearance at 128, 64, 32 and 16 points on that
+  appearance's shelf, and the sample band shows the previewed theme's icon rather than the
+  applied one's. The shelf is a fixed neutral, not a theme role: it is the system's surface.
+- **A font macOS installs is refused** (`ThemeFontStore.StoreError.shipsWithMacOS`), matched by
+  PostScript name against faces under `/System/Library/Fonts/` and told to name the family.
+- **The schema says what it wants**: the logo slot asks for a square transparent 512-pixel PNG
+  readable at 16 points and drawn for its appearance's ground; the mascot asks for poses drawn
+  per sidebar; `visible_buttons` and `button_placement` state the Close rule.
+
+**Bounds.** A measure draws one 64-pixel thumbnail and makes one pass. A rim draws the picture
+37 times into one canvas the picture's size plus the rim — on the main actor for the brand logo
+and the Dock mark, once per picture, ground, ink and size: the result is cached by the source
+image's identity, and the entry retains its source so the identity cannot be reused. The rim is
+drawn at the most pixels its place can show, not at the stored size: 96 on the brand logo's
+longer side (`SidebarStyleLimits.rimmedLogoPixels`, the 24-point slot at 2× doubled for a motion
+beat) and about 141 for the Dock mark (`GeneratedAppIcon.Layout.minimumSharpMarkPixels`, its box
+at the tile's 256-pixel presentation). Its cost grows with the square of the side; measured cold
+in a Debug build, a 512-pixel logo cost 46 ms to rim at full size, 14.5 ms at 256, 4.8 ms at 141
+and 2.2 ms at 96 — see performance.md. `brand(for:)` reads the stated gradient stops rather than resolving the sidebar
+backdrop, since it runs on every brand read. The advisory reads at most two logo grounds and five
+poses per variant on a detached worker. The colour arithmetic the two checks share moved to
+`ThemeLuminance` because `SidebarAppearance` also compiles inside `ThreadingDesignKit`, which links
+the app's sources by symlink; `ThemeLuminance.swift` and `ThemeArtSeparation.swift` are linked
+there too.
+
+`ThemeArtSeparationTests`, `WindowButtonClusterTests`, `ThemeFontStoreTests`,
+`AppThemePreviewDockTests`, the two new `AppIconRenderTests` and the new
+`AppThemeLayerReportTests` hold each of these.
 
 ## 2026-10-02 — a shop app's vocabulary
 

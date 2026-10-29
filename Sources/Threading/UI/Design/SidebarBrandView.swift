@@ -23,14 +23,9 @@ final class SidebarBrandView: NSView, ThemedComponent {
     // MARK: - Properties
 
     private enum Layout {
-        /// The logo slot, sized to the band it lives in.
-        ///
-        /// 24 rather than 20: the mark is six strands and a hexagonal rim inside its own box,
-        /// so it carries more detail per point than an SF Symbol does, and at 20 its strokes
-        /// came out barely a point wide — thin enough that the whole thing read as soft even
-        /// once it was rasterising at the right scale. Four points is the difference between
-        /// a logo and a smudge, and the band has the room.
-        static let logoSide: CGFloat = 24
+        /// The logo slot, sized to the band it lives in. Shared with the brand's resolution,
+        /// which rims a vanishing logo at the resolution this slot can show.
+        static let logoSide = SidebarStyleLimits.logoSide
     }
 
     /// Weave is the compact treatment: its dots stay on the actual shield and thread paths,

@@ -73,6 +73,44 @@ final class BrowserReloadJourneyUITests: XCTestCase {
         composer.typeKey("r", modifierFlags: .command)
         XCTAssertTrue(app.buttons["Rename"].waitForExistence(timeout: 5),
                       "Cmd+R outside the browser must still open Rename Session")
+        let name = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Name")).firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        let originalName = try XCTUnwrap(name.value as? String)
+        XCTAssertFalse(originalName.isEmpty, "the displayed name must be editable text")
+        XCTAssertFalse(app.buttons["Use Agent's Name"].exists)
+        try recordScenarioScreenshot(
+            checkpoint: "rename-selected", order: 2, title: "Current session name selected",
+            description: "The rename dialog opens with the displayed name selected for copying or replacement.",
+            journey: "Focused browser reload", in: sandbox, of: app.windows.firstMatch
+        )
+
+        // Copy without clicking or selecting: the initial selection must already be usable.
+        app.typeKey("c", modifierFlags: .command)
+        app.typeKey(.delete, modifierFlags: [])
+        XCTAssertEqual(name.value as? String, "", "Delete must remove the whole initial selection")
+        try recordScenarioScreenshot(
+            checkpoint: "rename-placeholder", order: 3, title: "Empty name shows a real placeholder",
+            description: "Clearing the selected name reveals the Name placeholder.",
+            journey: "Focused browser reload", in: sandbox, of: app.windows.firstMatch
+        )
+        app.typeKey("v", modifierFlags: .command)
+        XCTAssertEqual(name.value as? String, originalName, "Cmd+C must copy the initial name")
+        app.typeKey(.escape, modifierFlags: [])
+
+        composer.typeKey("r", modifierFlags: .command)
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        app.typeText("Renamed session")
+        XCTAssertEqual(name.value as? String, "Renamed session", "typing must replace the selected name")
+        app.buttons["Rename"].click()
+        composer.typeKey("r", modifierFlags: .command)
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        XCTAssertEqual(name.value as? String, "Renamed session")
+        XCTAssertTrue(app.buttons["Use Agent's Name"].exists)
+        app.buttons["Use Agent's Name"].click()
+        composer.typeKey("r", modifierFlags: .command)
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        XCTAssertEqual(name.value as? String, originalName)
+        XCTAssertFalse(app.buttons["Use Agent's Name"].exists)
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(app.staticTexts["Load 5"].exists)
     }

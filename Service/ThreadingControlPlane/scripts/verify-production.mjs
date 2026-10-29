@@ -39,6 +39,7 @@ export async function verifyProduction({
         && value.rendezvousProtocol === expectedProtocolVersion
         && value.notificationProtocol === expectedNotificationProtocolVersion) {
         await verifyPushBoundaries(origin, fetchImplementation);
+        await verifyFailurePickupBoundary(origin, fetchImplementation);
         await verifyAnonymousEnrollmentRoute(origin, fetchImplementation);
         reportSuccess(`Production readiness verified at ${readinessURL}.\n`);
         return;
@@ -115,6 +116,16 @@ async function verifyAnonymousEnrollmentRoute(origin, fetchImplementation) {
   const body = JSON.parse(await boundedResponseText(response));
   if (response.status !== 400 || body?.error?.code !== "invalidRequest") {
     throw new Error("accountless host enrollment route is unavailable");
+  }
+}
+
+async function verifyFailurePickupBoundary(origin, fetchImplementation) {
+  // Authentication precedes lookup, so this neither creates an incident nor exposes evidence.
+  const path = "/v1/developer/service-failures/sf-1793214420000-push-400";
+  const response = await request(fetchImplementation, `${origin}${path}`);
+  await boundedResponseText(response);
+  if (response.status !== 401) {
+    throw new Error(`Service failure pickup did not require a developer credential (HTTP ${response.status})`);
   }
 }
 

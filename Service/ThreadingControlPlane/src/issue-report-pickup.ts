@@ -17,7 +17,7 @@ export async function handleIssueReportPickup(
   return listReports(new URL(request.url), env);
 }
 
-async function authorizeDeveloper(request: Request, env: Env): Promise<void> {
+export async function authorizeDeveloper(request: Request, env: Env): Promise<void> {
   const presented = bearerToken(request);
   const expected = env.REPORT_PICKUP_TOKEN;
   if (typeof expected !== "string" || new TextEncoder().encode(expected).byteLength < 32

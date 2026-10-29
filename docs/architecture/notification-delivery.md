@@ -243,6 +243,12 @@ suppression reason, and preview-present/byte-count metadata. Only a request that
 response is recorded as `status=transport`; service rejections must not be flattened into it.
 Prompts, responses, tokens, device tokens and notification bodies are forbidden.
 
+Hosted HTTP failures also retain seven-day server evidence independently of the Pushover alert
+outbox. Push operations and validation fields are typed; verified principals provide pseudonymous
+account/host/device correlation. The alert's `sf-…` reference retrieves up to eight examples and
+the exact omitted count through developer pickup, without Cloudflare Observability permission.
+See [issue-report-diagnostics.md](issue-report-diagnostics.md#deployment-compatibility-and-failed-deliveries).
+
 `status=transport` is reserved for a request that received no HTTP response, so a refusal decided
 on this Mac — no provider configured, a device that never registered, a registration retired with
 its service, consent withdrawn or a question answered while the send was queued — carries

@@ -946,6 +946,12 @@ specific route. Each draws the registry's current binding and keeps the same cle
 agent rename contract. A rebind therefore changes both what fires and what every action menu
 promises.
 
+The rename prompt seeds its field with `displayTitle`, selected by the native field editor,
+and uses the localized “Name” placeholder. This makes agent and first-prompt names copyable as
+soon as the dialog opens and lets typing replace them. The clear action still depends on
+`customTitle`, not the seeded field: only an existing manual override offers **Use Agent's Name**.
+This remains a host-only, single-record form; input, selection and persistence stay host-owned.
+
 Claude records both kinds of title in the transcript as different record types, measured
 across this machine's transcripts rather than assumed: `ai-title` is the CLI's own name,
 re-appended every turn (so the *last* one is current, and `SessionNaming` reads the file's

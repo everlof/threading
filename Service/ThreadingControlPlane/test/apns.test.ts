@@ -24,6 +24,10 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await testEnv.DB.batch([
+    testEnv.DB.prepare("DELETE FROM service_failure_alerts"),
+    testEnv.DB.prepare("DELETE FROM service_failure_diagnostics"),
+  ]);
   const now = Math.floor(Date.now() / 1_000);
   await testEnv.DB.prepare(
     "INSERT INTO accounts (id, created_at, updated_at) VALUES (?, ?, ?) "
@@ -36,6 +40,49 @@ afterEach(() => {
 });
 
 describe("hosted APNs broker", () => {
+  it("makes send, registration and retraction refusals diagnosable through the shipping pickup route", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID, deviceCredential } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch");
+    const body = pushBody(hostID, crypto.randomUUID().toLowerCase(), registrationID);
+    const stale = { ...body, event: { ...body.event as object, createdAt: Date.now() / 1000 - 3 * 86400 } };
+    const responses = [
+      await sendPush(hostCredential, stale),
+      await sendPush(hostCredential, { ...body, event: { ...body.event as object, "private unknown key": "secret" } }),
+      await sendRetraction(hostCredential, { registrationID, retraction: { type: "private-invalid-type" } }),
+      await worker.fetch(new Request("https://service.test/v1/push/registrations", {
+        method: "POST", headers: { Authorization: `Bearer ${deviceCredential}` },
+        body: JSON.stringify({ deviceToken: "private-token", environment: "sandbox" }),
+      }), testEnv),
+    ];
+    for (const response of responses) expect(response.status).toBe(400);
+    expect(upstream).not.toHaveBeenCalled();
+    const row = await testEnv.DB.prepare("SELECT window_start FROM service_failure_diagnostics WHERE route = 'push' AND status = 400")
+      .first<{ window_start: number }>();
+    const pickup = await worker.fetch(new Request(
+      `https://service.test/v1/developer/service-failures/sf-${row!.window_start}-push-400`,
+      { headers: { Authorization: `Bearer ${testEnv.REPORT_PICKUP_TOKEN}` } },
+    ), testEnv);
+    const evidence = await pickup.json<{ samples: Record<string, string>[] }>();
+    expect(pickup.status).toBe(200);
+    expect(evidence.samples).toHaveLength(4);
+    const expected = [
+      { operation: "push.send", reason: "outsideTimeWindow", field: "event.createdAt" },
+      { operation: "push.send", reason: "unknownField", field: "event" },
+      { operation: "push.retract", reason: "invalidValue", field: "retraction.type" },
+      { operation: "push.register", reason: "invalidValue", field: "deviceToken" },
+    ];
+    for (const [index, sample] of evidence.samples.entries()) {
+      expect(sample).toMatchObject(expected[index]!);
+      expect(sample.requestID).toBe(responses[index]!.headers.get("X-Threading-Request-ID"));
+      expect(sample.hostRef).toBe(evidence.samples[0]!.hostRef);
+    }
+    expect(evidence.samples[3]!.deviceRef).toMatch(/^device-[0-9a-f]{24}$/u);
+    expect(JSON.stringify(evidence)).not.toContain("private");
+    expect(JSON.stringify(evidence)).not.toContain(hostID);
+    expect(JSON.stringify(evidence)).not.toContain(hostCredential);
+  });
+
   it("delivers a confirmed theme filename, honors silence, and rejects paths", async () => {
     const hostID = `host-${crypto.randomUUID()}`;
     const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
@@ -355,7 +402,7 @@ async function enrollHost(hostID: string): Promise<string> {
 async function enrollPushRecipient(
   hostID: string,
   environment = "sandbox",
-): Promise<{ hostCredential: string; registrationID: string }> {
+): Promise<{ hostCredential: string; registrationID: string; deviceCredential: string }> {
   const hostCredential = await enrollHost(hostID);
   const deviceID = `device-${crypto.randomUUID()}`;
   const deviceResponse = await worker.fetch(new Request(
@@ -383,7 +430,7 @@ async function enrollPushRecipient(
   ), testEnv);
   expect(registrationResponse.status).toBe(201);
   const registration = await registrationResponse.json<{ registrationID: string }>();
-  return { hostCredential, registrationID: registration.registrationID };
+  return { hostCredential, registrationID: registration.registrationID, deviceCredential: device.credential };
 }
 
 async function sendPush(credential: string, body: Record<string, unknown>): Promise<Response> {

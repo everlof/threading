@@ -3330,20 +3330,7 @@ private extension ProjectSidebarViewController {
                 }
             }
         } else if let node = outlineView.item(atRow: row) as? SessionNode {
-            let session = projectStore.session(withID: node.sessionID)
-            promptRename(
-                title: L10n.string("Rename Session"),
-                current: session?.customTitle ?? "",
-                placeholder: session?.displayTitle ?? "",
-                allowsEmpty: true
-            ) { newTitle in
-                guard self.projectStore.renameSession(id: node.sessionID, to: newTitle).succeeded
-                else {
-                    self.reload()
-                    self.presentProjectNotice(L10n.string("The project data could not be saved."))
-                    return
-                }
-            }
+            promptToRenameSession(node.sessionID)
         } else if let node = outlineView.item(atRow: row) as? TerminalNode {
             let terminal = projectStore.terminal(withID: node.terminalID)
             promptRename(

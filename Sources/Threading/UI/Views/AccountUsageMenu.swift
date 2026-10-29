@@ -37,21 +37,26 @@ enum AccountUsageMenu {
     /// logins the same person named the same thing on two runtimes are told apart at a glance.
     /// Left nil where the runtime is a foregone conclusion, and the ring stays.
     ///
-    /// **The reading is columns now, not a sentence.** It used to be one toned line —
-    /// `Claude Code · Max · 5h 27% · 7d 81% · 7d resets in 19h 36m` — and for one row that reads
+    /// **The reading is two meter lines, not a sentence.** It used to be one toned line —
+    /// `Claude Code · Max · 5h 27% · 7d 81% · 7d resets in 19h 36m` — and for one row it read
     /// fine. The menu's job is comparing several, and in a sentence a value's position is set by
-    /// the length of the name in front of it: three logins put their three 5-hour numbers at
-    /// three different x positions, so the comparison the menu exists for became a search. Worse,
-    /// the line overran the panel's width cap and the segment that lost its characters was the
-    /// countdown — `7d resets in 5d 1…`.
+    /// the length of the name in front of it: three logins put their three 5-hour numbers at three
+    /// different x positions, so the comparison the menu exists for became a search.
     ///
-    /// So each window becomes a `ThemedMenuMetric`: a named column, a bar, and the number, with
-    /// every row's `7d` stacked under every other row's. The plan moves onto the title's line,
-    /// the countdown gets a column of its own that can never be the thing that truncates, and
-    /// the subtitle is left for the one thing that does not fit a shared column — a scoped model
-    /// window, which most logins do not have. The runtime is no longer written at all: the
-    /// composer files these rows under a section head per runtime, which says it once for the
-    /// group instead of on every row, and that is what freed the width the columns needed.
+    /// Side-by-side columns fixed the sentence and broke on width: two bars, two values, a rule
+    /// and a countdown did not fit beside a name under the panel's cap, so the `7d` column fell
+    /// into the subtitle — one window read beside the name, the other under it, in different
+    /// places on different menus. So each window is a `ThemedMenuMetric` on a *line* of its own:
+    /// `5h` on the title's line, `7d` directly under it, on every row. Stacked, the block is one
+    /// meter wide instead of two, and the room that frees goes into what a glance needs: a longer
+    /// bar, the clock's tick across it — fill short of the tick is spending slower than time,
+    /// fill past it faster — and the window's own countdown at the end of its line, so each
+    /// reset sits beside the window it belongs to and needs no name of its own.
+    ///
+    /// The plan stays on the title's line; the subtitle keeps the one thing a shared line cannot
+    /// hold — a scoped model window, which most logins do not have — and, when such a window is
+    /// what binds the model this session would run, when it comes back. The runtime is not
+    /// written at all: the composer files these rows under a section head per runtime.
     static func decorate(
         _ item: inout ThemedMenuItem,
         for account: AgentAccount,
@@ -62,7 +67,7 @@ enum AccountUsageMenu {
 
         let usage = AccountUsageService.shared.usage(for: account)
 
-        // The reading columns carry usage; the icon consistently carries account identity.
+        // The meter lines carry usage; the icon consistently carries account identity.
         item.image = AccountBadge.mark(for: account, surface: .chooser)
 
         guard let usage else { return }
@@ -88,9 +93,8 @@ enum AccountUsageMenu {
     ) {
         item.titleDetail = usage.planLabel?.isEmpty == false ? usage.planLabel : nil
         item.metrics = identityMetrics(for: usage, at: now, limits: limits)
-        item.trailingDetail = resetColumn(for: usage, metering: model, at: now)
 
-        var scoped = scopedSegments(for: usage, at: now, limits: limits)
+        var scoped = scopedSegments(for: usage, metering: model, at: now, limits: limits)
         appendOmittedWindows(
             max(0, usage.windows.count - UsageReadingLabel.maximumReadings),
             to: &scoped
@@ -98,17 +102,24 @@ enum AccountUsageMenu {
         if !scoped.isEmpty { item.setSubtitle(scoped) }
     }
 
-    /// The account's own windows as columns — `5h`, `7d` — in the order the provider reports
-    /// them, which is the order every row's columns are then aligned in.
+    /// The account's own windows as meter lines — `5h`, `7d` — in the order the provider reports
+    /// them, which is the order every row's lines are then stacked in.
     ///
     /// Account windows only. A scoped model window's name is its length *and* its model
-    /// (`7d Fable`), so giving each one a column would add a wide, permanently empty column to
-    /// every login that does not meter that model — and most do not. Those go on the row's own
-    /// second line instead, where they cost nothing to the rows without them.
-    /// A user-authored limit moves the **tone** of a column and nothing else about it. The label
+    /// (`7d Fable`), so giving each one a line would reserve a permanently empty meter on every
+    /// login that does not meter that model — and most do not. Those go on the row's own
+    /// subtitle instead, where they cost nothing to the rows without them.
+    ///
+    /// Each line carries the window's clock twice, at two resolutions: the tick on the bar is
+    /// how far through the window we are, the countdown after the value is how long until it
+    /// resets. A window whose reset has passed carries neither — its number is gone, and so is
+    /// any position in a window that has already ended. The countdown takes the critical ink
+    /// when its window does: on a spent window, when it comes back is the one number that matters.
+    ///
+    /// A user-authored limit moves the **tone** of a line and nothing else about it. The label
     /// is the window, the value is the provider's own percentage and the bar is that percentage's
-    /// length — a column that shortened or renumbered itself under a rule would be answering a
-    /// different question from the one the other logins' columns answer, on the one surface where
+    /// length — a line that shortened or renumbered itself under a rule would be answering a
+    /// different question from the one the other logins' lines answer, on the one surface where
     /// two logins are read side by side.
     ///
     /// This is where a fenced-off login has to read as pressured, because it is the moment an
@@ -121,46 +132,37 @@ enum AccountUsageMenu {
         limits: [CustomLimit] = []
     ) -> [ThemedMenuMetric] {
         let windows = Array(usage.windows.prefix(UsageReadingLabel.maximumReadings))
-        return CustomLimitBounds.retinted(
+        let readings = CustomLimitBounds.retinted(
             usage.readings(of: windows, at: now),
             of: windows,
             in: limits
-        ).map { reading in
-            ThemedMenuMetric(
+        )
+        return zip(windows, readings).map { window, reading in
+            let live = !window.isExpired(at: now)
+            let resetsAt = live ? window.resetsAt : nil
+            let lineTone = tone(for: reading.severity)
+            return ThemedMenuMetric(
                 label: reading.name,
                 value: reading.value,
                 fraction: reading.fraction,
-                tone: tone(for: reading.severity)
+                tone: lineTone,
+                timeMark: live ? window.elapsedFraction(at: now) : nil,
+                detail: resetsAt.map { UsageFormat.remaining(until: $0, from: now) },
+                spokenDetail: resetsAt.map { UsageFormat.resets(until: $0, from: now) },
+                detailTone: lineTone == .critical ? .critical : .muted
             )
         }
     }
 
-    /// `7d · 19h 36m` — when the window that binds a session on `model` comes back.
+    /// The windows a shared line cannot hold: the ones scoped to a single model.
     ///
-    /// Still attributed to its window, for the reason the written line attributed it: the
-    /// binding window is not always the last column, and a bare countdown at the end of a row is
-    /// read as belonging to whichever is. `resets in` is dropped — a column of countdowns states
-    /// what it is by being one, and the phrase was repeated on every row of the menu.
-    static func resetColumn(
-        for usage: AccountUsage,
-        metering model: String?,
-        at now: Date = Date()
-    ) -> String? {
-        guard let binding = usage.bindingWindow(at: now, metering: model),
-              let resetsAt = binding.resetsAt
-        else { return nil }
-
-        return binding.compactName
-            + UsageDefaults.segmentSeparator
-            + UsageFormat.remaining(until: resetsAt, from: now)
-    }
-
-    /// The windows a shared column cannot hold: the ones scoped to a single model.
-    ///
-    /// Empty for most logins, which is the point — a row only grows a second line when it has
-    /// something the columns could not say.
+    /// Empty for most logins, which is the point — a row only writes into its subtitle when it
+    /// has something the meters could not say. When one of these is what binds a session on
+    /// `model`, its reset follows it here: the meter lines carry only their own windows'
+    /// countdowns, and the one that would stop this session must not be the one left unsaid.
     static func scopedSegments(
         for usage: AccountUsage,
+        metering model: String? = nil,
         at now: Date = Date(),
         limits: [CustomLimit] = []
     ) -> [ThemedMenuSubtitleSegment] {
@@ -174,6 +176,18 @@ enum AccountUsageMenu {
             joining: false
         )
         appendOmittedWindows(usage.modelWindows.count - windows.count, to: &segments)
+
+        if let binding = usage.bindingWindow(at: now, metering: model),
+           binding.scopeName != nil,
+           windows.contains(where: { $0.id == binding.id }),
+           let resetsAt = binding.resetsAt {
+            let countdown = UsageFormat.resets(until: resetsAt, from: now)
+            segments.append(separator)
+            segments.append(ThemedMenuSubtitleSegment(
+                windows.count > 1 ? "\(binding.compactName) \(countdown)" : countdown,
+                .muted
+            ))
+        }
         return segments
     }
 
@@ -411,7 +425,7 @@ enum AccountUsageMenu {
         return segments
     }
 
-    /// Compact menu rows keep a constant amount of attributed and column state. The virtual
+    /// Compact menu rows keep a constant amount of attributed and meter state. The virtual
     /// account popover owns the complete inventory; the row states when that inventory was cut
     /// instead of silently pretending its first few windows are all the provider reported.
     private static func appendOmittedWindows(

@@ -89,6 +89,69 @@ enum AppThemeLayer: String, CaseIterable, Sendable {
     }
 }
 
+// MARK: - Whole Look Part
+
+/// One part of a theme that dresses the whole app, spelled as the tools spell its block.
+///
+/// The layer is the right grain for "did the agent stop at colours"; the part is the right grain
+/// for "what is still missing". Ordered as a person meets them: the frame and the ground first,
+/// then the theme's identity, then what moves and speaks.
+enum WholeLookPart: String, CaseIterable, Sendable {
+    case chrome
+    case backdrop = "material.backdrop"
+    case sidebarGround = "sidebar.gradient/image"
+    case band = "sidebar.band"
+    case logo = "sidebar.logo"
+    case logoInDock = "sidebar.logo_in_dock"
+    case mascot = "sidebar.mascot"
+    case sprites
+    case words
+    case welcome
+    case moments
+    case transition
+    case titleMorph = "title_morph"
+
+    /// What the part is, in the words an agent reads in a tool result.
+    var gloss: String {
+        switch self {
+        case .chrome: return "its own title band, buttons and frame"
+        case .backdrop: return "a picture, wash or particles behind the panes"
+        case .sidebarGround: return "a ground under the project list"
+        case .band: return "the header in the theme's colour"
+        case .logo: return "an image logo of its own"
+        case .logoInDock: return "that logo as the Dock icon"
+        case .mascot: return "a character whose pose follows the agents"
+        case .sprites: return "pictures for its particles"
+        case .words: return "its own working words and placeholder"
+        case .welcome: return "the new-session greeting"
+        case .moments: return "sounds and showers when a turn ends or a session waits"
+        case .transition: return "how it arrives when chosen"
+        case .titleMorph: return "how chat names change"
+        }
+    }
+
+    func isStated(in variant: AppTheme.Variant) -> Bool {
+        let brand = variant.sidebar?.brand
+        switch self {
+        case .chrome: return variant.chrome != nil
+        case .backdrop: return variant.material.backdrop != nil
+        case .sidebarGround: return variant.sidebar?.background != nil
+        case .band: return brand?.band != nil
+        case .logo:
+            if case .asset = brand?.logo { return true }
+            return false
+        case .logoInDock: return brand?.dockIcon == true
+        case .mascot: return variant.sidebar?.mascot != nil
+        case .sprites: return !variant.sprites.isEmpty
+        case .words: return variant.words != nil
+        case .welcome: return variant.welcome != nil
+        case .moments: return variant.moments != nil
+        case .transition: return variant.transition != nil
+        case .titleMorph: return variant.titleMorph != nil
+        }
+    }
+}
+
 // MARK: - App Theme Layer Report
 
 /// What one create or update did to each layer, and what the agent that made it should hear.
@@ -112,6 +175,12 @@ struct AppThemeLayerReport: Equatable {
 
     let states: [AppThemeLayer: State]
     let origin: Origin
+    /// The parts of a whole look no variant states, in `WholeLookPart` order.
+    ///
+    /// A layer counts as stated as soon as any part of it is, so "all four layers" was true of a
+    /// theme with a frame and a word list and no logo, mascot or backdrop — and an agent read
+    /// it as done. The parts are the checklist the layer line is too coarse to be.
+    let unusedParts: [WholeLookPart]
     /// Variants whose chrome colours changed while their terminal palette stayed what it was.
     ///
     /// The palette layer counts as changed when either half moved, so a theme that recoloured
@@ -142,6 +211,10 @@ struct AppThemeLayerReport: Equatable {
         }
         self.states = states
         self.origin = origin
+        let variants = theme.availableVariants.compactMap { theme.variant($0) }
+        self.unusedParts = WholeLookPart.allCases.filter { part in
+            !variants.contains(where: part.isStated)
+        }
         self.terminalLeftBehind = theme.availableVariants.filter { kind in
             guard let after = theme.variant(kind) else { return false }
             let prior = before.variant(kind) ?? fallback
@@ -203,10 +276,23 @@ struct AppThemeLayerReport: Equatable {
         } else {
             sentences.append("All four layers are stated.")
         }
+        if let unused = unusedPartsNote { sentences.append(unused) }
         if let inherited = inheritedNote { sentences.append(inherited) }
         if let terminal = terminalNote { sentences.append(terminal) }
         sentences.append("Check it with preview_app_theme.")
         return sentences.joined(separator: " ")
+    }
+
+    /// Once a theme goes beyond colours it is building a look, and the look's unused parts are
+    /// named in the tools' own spelling — the logo-in-Dock and the mascot are exactly what a
+    /// "theme" leaves out when nobody lists them. Silent for a colours-only theme, which the
+    /// recolour sentence already addresses, and for a theme that uses every part.
+    private var unusedPartsNote: String? {
+        guard Self.layersBeyondPalette.contains(where: { state(of: $0) != .absent }),
+              !unusedParts.isEmpty else { return nil }
+        return "Not yet used for a whole look: "
+            + Self.joined(unusedParts.map { "\($0.rawValue) (\($0.gloss))" })
+            + ". Add what suits the theme's world unless the person ruled it out."
     }
 
     /// A create that changed only the colours wears its base's shape, frame and character,

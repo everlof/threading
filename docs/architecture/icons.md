@@ -322,6 +322,13 @@ to see. The bytes go through `ProjectIconStore.normalizedPNGData` first — the 
 every untrusted image passes — which is why that function grew a `maxPixelSize` parameter rather
 than a second copy at icon scale.
 
+**A contributed mark fills its box and stays findable** (2026-10-28, themes.md). It is fitted to
+the safe area by its pixels, enlarged at most by the ratio between the 1024 canvas and the tile's
+largest presentation, so a 256-pixel logo no longer stands at a quarter of the plate. And a mark
+whose edge disappears into the plate — a dark logo on a dark ground — is drawn with a rim in the
+theme's label (`ThemeArtSeparation`), because the Dock tile is how the app is found. A custom
+theme's `logo_in_dock` logo takes the same path.
+
 `Packages/ThreadingExtensionKit/Examples/StormThemeExtension` is the worked example, and
 `ExtensionAppearanceTests.testTheShippedStormExampleIsValid` pins it: the manifest validates, the
 theme document decodes and passes `AppThemeEditing.validate`, and the mark clears both gates

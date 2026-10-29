@@ -7070,6 +7070,33 @@ case. `RealDevicePaneTests` checks actual snapshot/movie output, immediate stop,
 disconnect, hidden recording demand and presenter/input revocation. The physical-iPhone evidence
 entry renders the toolbar, device menu and recording state in the product shell.
 
+## Theme identity-art rim (2026-10-28)
+
+The brand logo and the theme's Dock mark are host-rimmed when their edge would vanish into their
+ground (`ThemeArtSeparation`, see [`themes.md`](themes.md)). The rim runs on the main actor,
+where both pictures are resolved, so its contract is stated at the placement: one rim per
+picture, ground, ink and size, cached by the source image's identity; cardinality is at most two
+variants × two places. A measure draws one 64-pixel thumbnail regardless of the source.
+
+The rim draws the picture 37 times into a canvas of its own size plus the rim, so its cost grows
+with the square of the side. The first version rimmed at the stored size. Measured cold (a fresh
+`NSImage` each sample, so the cache never hits), a 512-pixel source with a dark ground, Debug,
+M-series, median of 11:
+
+| Rimmed at | Main-actor cost |
+|---|---|
+| 512 px (stored size, first version) | 46.1 ms |
+| 256 px (Dock tile's largest presentation, whole canvas) | 14.5 ms |
+| 141 px (`GeneratedAppIcon.Layout.minimumSharpMarkPixels`, the mark's box at 256) | 4.8 ms |
+| 96 px (`SidebarStyleLimits.rimmedLogoPixels`, the 24-pt slot at 2× doubled for a motion beat) | 2.2 ms |
+| cached read | ~0.007 ms |
+
+The fix removes work rather than moving it: nothing presents either picture larger than its cap,
+so the pixels above it were never shown. `ThemeArtSeparationTests` holds the bound —
+`testTheRimIsDrawnNoLargerThanItsPlaceCanShow` fails if a rim comes back larger than its place.
+The probe that took these numbers was temporary; to repeat them, time `ThemeArtSeparation.legible`
+on a fresh `NSImage` per sample at each `maximumPixels`. Release numbers were not taken.
+
 ## Account conversation-history copying
 
 Account migration retains one admitted operation and uses `TranscriptMigrationWorker`'s serial

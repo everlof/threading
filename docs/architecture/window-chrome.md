@@ -1075,7 +1075,9 @@ branches. It also interprets a full-width or leading-tab shape, authored tab wid
 ordered visible-button set. `leading` keeps Aqua's complete traffic-light cluster at the start;
 `split` gives Close its classic-Mac leading exception; `bookends`
 instead preserves authored order by leading with the first visible operation and trailing the
-rest. A leading tab owns a fixed-width layout guide: title and buttons
+rest. Within either cluster Close takes the outer edge — first when leading, last when trailing —
+because the default list is Windows order and a leading cluster kept it put Close third
+(`ButtonPlacement.clusters(of:)`; see themes.md, 2026-10-28). A leading tab owns a fixed-width layout guide: title and buttons
 centre within the yellow tab while its remaining top shoulder stays transparent. The frame
 draws the rectangular application body below it, and `WindowChromeCoordinator` makes the
 window backing nonopaque only for that shape so the system shadow follows the silhouette.

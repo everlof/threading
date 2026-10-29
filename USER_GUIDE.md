@@ -1655,6 +1655,8 @@ first-prompt names.
 
 Rename with **Project > Rename Session…** (**Cmd+R**), via right-click in the sidebar, or by
 right-clicking inside the terminal and choosing **Rename Session…**.
+The current name opens selected: press **Cmd+C** to copy it or start typing to replace it.
+Clearing the field shows the **Name** placeholder; confirming an empty field removes your custom name.
 
 **Terminals name themselves after where they are and what they are doing.** A standalone
 terminal's row, and each shell tab in the drawer, shows the command currently running in it —
@@ -2447,16 +2449,19 @@ Choosing a login is when the number actually changes a decision — an account a
 week is a poor place to start a long task — so the composer shows it twice over:
 
 - **In the identity chip's menu**, the logins are filed under a heading per agent — the same
-  login name often exists on two of them — and each row's reading is laid out in **columns**
-  rather than written as a line. Every window gets its own column with a small bar and its
-  value, so one login's `7d` sits directly under the next one's and the accounts compare at a
-  glance instead of by reading. A plan with only a weekly window leaves the `5h` column empty,
-  which is how the shape itself tells you which windows a plan has. The plan name sits quietly
-  after the login's name, the reset countdown has the last column to itself, and a window a
-  single model meters separately (`7d Fable 89%`) goes on a second line, only on the rows that
-  have one. Everything stays monochrome while usage is comfortable; a bar and its value turn
+  login name often exists on two of them — and each row shows its windows as **two stacked
+  meters** at the right: `5h` beside the login's name, `7d` directly under it, on every row and
+  at the same spot, so the accounts compare at a glance down one column of bars. Each meter is a
+  bar for how much of the window is used, a thin **tick for how much of the window's time has
+  passed**, the percentage, and when that window resets (`13m`, `4d 2h`). Fill short of the tick
+  means you are using the window more slowly than time passes; fill past it means faster. A plan
+  with only a weekly window leaves the `5h` line empty, which is how the shape itself tells you
+  which windows a plan has. The plan name sits quietly after the login's name, and a window a
+  single model meters separately (`7d Fable 89%`) is written under the name, only on the rows
+  that have one. Everything stays monochrome while usage is comfortable; a bar and its value turn
   amber past 75% of their window and red past 92% — the same colours the toolbar pill uses, and
-  the numbers say the same thing in any ink. Point at a row for the whole reading in words.
+  the numbers say the same thing in any ink. A red window's reset time turns red too, since that
+  is when the login comes back. Point at a row for the whole reading in words.
 - **In the model chip's menu**, the account's own windows are stated once, in a header naming
   the login they belong to — they are the same under every model. Each model row then carries
   only a window the plan meters for *it* separately (`7d Fable 89% · resets in 15h`), with a
@@ -5924,7 +5929,10 @@ A theme can have a **character**, too — ask your agent for one and it can give
   phone, never on a guest's; lines showing an extension's report stay on the Mac). The screen's
   own hint stays beneath it. An agent can see a theme's welcome before applying it: the theme
   preview draws it under each window.
-- **A Dock icon** made from the theme's logo, drawn on the theme's own plate.
+- **A Dock icon** made from the theme's logo, drawn on the theme's own plate and filling it. If
+  the logo would disappear into the plate — a dark logo on a dark theme — Threading draws a thin
+  rim around it in the theme's text colour so the app stays easy to find. The logo at the top of
+  the sidebar gets the same rim when it would vanish into the header.
 - **Pictures pinned to an edge.** A sidebar or pane picture can stand on the bottom edge (or
   any edge or corner) at any window size, rather than always being centred.
 
@@ -6053,7 +6061,8 @@ terminal marks the cell you are on. Everything still works the way a window does
 double-click it for your System Settings titlebar action, resize from any edge, minimize to the
 Dock, and enter full screen as usual. Switching back to System restores the native frame exactly
 as you left it. Custom themes can opt into every one of these frame and scrollbar vocabularies
-through the theme tools.
+through the theme tools. Whichever side a theme puts its window buttons on, the close button sits
+at the outer corner, where your hand expects it.
 
 **Threading's own theme keeps the native macOS window.** AppKit owns its title bar, traffic
 lights, dragging, resizing, full screen, and the user's configured title-bar double-click action;
@@ -6085,7 +6094,8 @@ immediately. The iPhone app has one fixed icon; iOS does not allow an app to dra
 
 An extension's theme can bring its own icon *mark* — its glyph replaces the chevron, but the
 tile behind it is still drawn from the theme's own background, so an extension can never make
-Threading's icon look like a different app. A contributed theme without a mark gets the same
+Threading's icon look like a different app. A mark that would disappear into that background gets
+the same thin rim a custom theme's logo does. A contributed theme without a mark gets the same
 generated icon every built-in style does.
 
 An installed extension can offer app themes of its own. They appear in the picker under a

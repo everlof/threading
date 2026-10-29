@@ -73,6 +73,46 @@ final class AppThemeLayerReportTests: XCTestCase {
         XCTAssertFalse(report.text.contains("Only the colours are new"), report.text)
     }
 
+    /// "All four layers" was true of a frame and a word list with no logo, mascot or backdrop,
+    /// and an agent read it as done. The parts it has not used are named in the tools' spelling.
+    func testAWholeLookNamesThePartsItHasNotUsed() throws {
+        let base = AppThemeStyles.win98
+        let original = try XCTUnwrap(base.variant(.light))
+        let dressed = original.replacingCharacter(
+            sprites: original.sprites,
+            moments: original.moments,
+            words: ThemeWords(working: ["Defragmenting…"])
+        )
+        let report = AppThemeLayerReport(
+            theme: custom(variant: dressed),
+            startingFrom: base,
+            origin: .base(name: base.name)
+        )
+
+        XCTAssertTrue(report.unusedParts.contains(.logoInDock), "\(report.unusedParts)")
+        XCTAssertTrue(report.unusedParts.contains(.mascot), "\(report.unusedParts)")
+        XCTAssertFalse(report.unusedParts.contains(.chrome), "Windows 98 states its frame")
+        XCTAssertFalse(report.unusedParts.contains(.words), "the words were stated")
+        XCTAssertTrue(report.text.contains("Not yet used for a whole look"), report.text)
+        XCTAssertTrue(report.text.contains("sidebar.logo_in_dock (that logo as the Dock icon)"), report.text)
+    }
+
+    func testAColoursOnlyThemeIsNotHandedThePartsList() {
+        let report = AppThemeLayerReport(
+            theme: custom(variant: AppTheme.Variant(
+                roles: [.accent: .systemTeal],
+                terminalPalette: .basic,
+                material: .system
+            )),
+            startingFrom: .system,
+            origin: .base(name: AppTheme.system.name)
+        )
+        XCTAssertFalse(
+            report.text.contains("Not yet used"),
+            "the recolour sentence already speaks to a palette: \(report.text)"
+        )
+    }
+
     func testAPartialThemeNamesOnlyTheMissingLayers() throws {
         let base = AppThemeStyles.swissMinimalist
         let original = try XCTUnwrap(base.availableVariants.first.flatMap { base.variant($0) })
@@ -212,6 +252,21 @@ final class AppThemeLayerReportTests: XCTestCase {
         )
         XCTAssertTrue(createDescription.contains("ask the person how far to go"))
         XCTAssertTrue(update?.description.contains("four layers") == true)
+    }
+
+    /// The rule that a named world gets the whole look was compressed out of this description
+    /// once, while the assertion above kept passing — and "make a theme of X" went back to
+    /// stopping at colours unless the person spelled out "immersive chrome and theme". Pinned
+    /// by meaning: the rule, the parts it names, and that it is built without asking.
+    func testANamedWorldGetsTheWholeLookWithoutAsking() throws {
+        let create = try XCTUnwrap(MCPTools.definitions.first { $0.name == MCPTools.createAppTheme })
+        let description = create.description.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        XCTAssertTrue(description.contains("names a world or a subject"), description)
+        XCTAssertTrue(description.contains("built without asking"), description)
+        for part in ["chrome", "logo_in_dock", "mascot", "sprites", "welcome", "moments"] {
+            XCTAssertTrue(description.contains(part), "the whole look names \(part)")
+        }
+        XCTAssertTrue(description.contains("Dock tile"), "the preview's Dock tile is pointed at")
     }
 
     // MARK: - Private Methods

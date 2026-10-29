@@ -32,9 +32,16 @@ enum ThemeFontStore {
         case tooMany(maximum: Int)
         case invalidTheme
         case writeFailed(String)
+        /// Every face in the file is one macOS installs on every Mac.
+        case shipsWithMacOS(families: [String])
 
         var errorDescription: String? {
             switch self {
+            case .shipsWithMacOS(let families):
+                let names = families.map { "\"\($0)\"" }.joined(separator: ", ")
+                return "\(names) ships with macOS, so the theme needs no copy of it: name the "
+                    + "family directly in font_family. Add a font file only for a face the Mac "
+                    + "does not have."
             case .tooLarge(let maximumBytes):
                 return "The font file exceeds \(maximumBytes / (1024 * 1024)) MB."
             case .notAFont:
@@ -70,6 +77,9 @@ enum ThemeFontStore {
         guard let descriptors = CTFontManagerCreateFontDescriptorsFromData(fontData as CFData)
             as? [CTFontDescriptor], !descriptors.isEmpty else {
             throw StoreError.notAFont
+        }
+        if descriptors.allSatisfy(shipsWithMacOS) {
+            throw StoreError.shipsWithMacOS(families: families(of: descriptors))
         }
         guard let folder = folder(for: themeID) else { throw StoreError.invalidTheme }
         guard storedFileNames(in: folder).count < maximumFonts else {
@@ -143,6 +153,32 @@ enum ThemeFontStore {
             .appendingPathComponent(ThemeAssetDefaults.assetDirectoryName)
             .appendingPathComponent(themeID.rawValue, isDirectory: true)
     }
+
+    /// Whether macOS itself installs this face, in the system's own font folder, on every Mac.
+    ///
+    /// A theme named its wordmark face by family *and* stored a copy of the system's own
+    /// Chalkboard SE file — half a megabyte that did nothing, since the family resolves without
+    /// it, and a copy of Apple's font travelling with every shared theme. Matched by PostScript
+    /// name against every installed face rather than one best match, because a theme that
+    /// already registered a copy would otherwise answer for the system's.
+    private static func shipsWithMacOS(_ descriptor: CTFontDescriptor) -> Bool {
+        guard let name = CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute) as? String else {
+            return false
+        }
+        let query = CTFontDescriptorCreateWithAttributes([kCTFontNameAttribute: name] as CFDictionary)
+        let collection = CTFontCollectionCreateWithFontDescriptors([query] as CFArray, nil)
+        let installed = CTFontCollectionCreateMatchingFontDescriptors(collection) as? [CTFontDescriptor] ?? []
+        return installed.contains { match in
+            guard let url = CTFontDescriptorCopyAttribute(match, kCTFontURLAttribute) as? URL else {
+                return false
+            }
+            return url.standardizedFileURL.path.hasPrefix(systemFontDirectory)
+        }
+    }
+
+    /// Where macOS installs the faces every Mac has. Downloadable system faces live elsewhere
+    /// and are not on every Mac, so they do not count.
+    private static let systemFontDirectory = "/System/Library/Fonts/"
 
     private static func storedFileNames(in folder: URL) -> [String] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []

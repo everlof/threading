@@ -217,6 +217,42 @@ public struct WindowChromeStyle: Codable, Equatable {
             /// at the trailing edge. Unlike `split`, this preserves a system's own ordering:
             /// OPENSTEP starts with Miniaturize and ends with Close.
             case bookends
+
+            /// The operations drawn at each edge, in drawing order from leading to trailing.
+            ///
+            /// Authored order, with one exception: **Close takes its cluster's outer edge** —
+            /// first in a leading cluster, last in a trailing one. Every desktop this
+            /// vocabulary reproduces puts it there, Aqua at the left corner and Windows at the
+            /// right, and every stock style already states it that way. The default list is
+            /// Windows order, written for the default trailing placement, so a theme that
+            /// moved its cluster to the leading edge and kept the default list put Close third
+            /// — where a Mac hand reaches for Zoom. The first agent-made theme reviewed did
+            /// exactly that, with nothing in its preview to show it.
+            public func clusters(
+                of visible: [ButtonRole]
+            ) -> (leading: [ButtonRole], trailing: [ButtonRole]) {
+                let leading: [ButtonRole]
+                let trailing: [ButtonRole]
+                switch self {
+                case .trailing:
+                    leading = []
+                    trailing = visible
+                case .leading:
+                    leading = visible
+                    trailing = []
+                case .split:
+                    leading = visible.filter { $0 == .close }
+                    trailing = visible.filter { $0 != .close }
+                case .bookends:
+                    leading = Array(visible.prefix(1))
+                    trailing = Array(visible.dropFirst())
+                }
+                let isClose: (ButtonRole) -> Bool = { $0 == .close }
+                return (
+                    leading.filter(isClose) + leading.filter { !isClose($0) },
+                    trailing.filter { !isClose($0) } + trailing.filter(isClose)
+                )
+            }
         }
 
         public enum Shape: String, Codable, CaseIterable {

@@ -1,4 +1,4 @@
-import { recordServiceFailure, flushServiceFailureAlerts } from "./service-failure-alerts";
+import { recordServiceFailure, flushServiceFailureAlerts, handleServiceFailurePickup } from "./service-failure-alerts";
 import { signInAnonymousHost } from "./anonymous-auth";
 import { publicInvitationResponse } from "./invitation-worker";
 import type { Env, RendezvousPrincipal } from "./environment";
@@ -116,6 +116,10 @@ export default {
         && !isOperatedDevelopment(env)) {
         return await handleIssueReportPickup(request, env);
       }
+      const failurePickup = /^\/v1\/developer\/service-failures\/([^/]+)$/u.exec(url.pathname);
+      if (request.method === "GET" && failurePickup?.[1] && !isOperatedDevelopment(env)) {
+        return await handleServiceFailurePickup(request, env, failurePickup[1]);
+      }
       const pickupMatch = /^\/v1\/developer\/reports\/([^/]+)$/u.exec(url.pathname);
       if (request.method === "GET" && pickupMatch?.[1] && !isOperatedDevelopment(env)) {
         return await handleIssueReportPickup(request, env, decodePath(pickupMatch[1]));
@@ -149,14 +153,18 @@ export default {
       throw new HttpError(404, "notFound", "Endpoint was not found");
     } catch (error) {
       if (error instanceof HttpError) {
-        await recordServiceFailure(request, env, error.status, error.code);
-        return json({ error: { code: error.code, message: error.message } }, error.status);
+        const requestID = await recordServiceFailure(request, env, error);
+        const response = json({ error: { code: error.code, message: error.message } }, error.status);
+        if (requestID) response.headers.set("X-Threading-Request-ID", requestID);
+        return response;
       }
-      await recordServiceFailure(request, env, 500, "internal");
+      const requestID = await recordServiceFailure(request, env, new HttpError(500, "internal", "Internal service error"));
       console.error("request_failed", {
         reason: error instanceof Error ? error.name : "unknown",
       });
-      return json({ error: { code: "internal", message: "Internal service error" } }, 500);
+      const response = json({ error: { code: "internal", message: "Internal service error" } }, 500);
+      if (requestID) response.headers.set("X-Threading-Request-ID", requestID);
+      return response;
     }
   },
 
@@ -338,6 +346,7 @@ async function probeStorage(env: Env, includeIssueReports = true): Promise<void>
     env.DB.prepare("SELECT invitation_digest FROM anonymous_host_identities LIMIT 1"),
     env.DB.prepare("SELECT claimed_secret_digest FROM pilot_invitations LIMIT 1"),
     env.DB.prepare("SELECT count, maximum FROM turn_issuance_budget LIMIT 1"),
+    env.DB.prepare("SELECT samples, count FROM service_failure_diagnostics LIMIT 1"),
   ]);
   if (includeIssueReports) {
     await env.ISSUE_REPORTS.head("health/readiness-probe");
@@ -464,7 +473,8 @@ function rateLimitGroup(pathname: string): string {
   if (pathname.startsWith("/v1/rendezvous/")) return "rendezvous";
   if (pathname.startsWith("/v1/hosts")) return "hosts";
   if (pathname.startsWith("/v1/auth/")) return "auth";
-  if (pathname.startsWith("/v1/developer/reports")) return "developerReports";
+  if (pathname.startsWith("/v1/developer/reports")
+    || pathname.startsWith("/v1/developer/service-failures/")) return "developerReports";
   if (pathname === "/v1/reports" || pathname === "/v1/reports/validate") return "reports";
   if (pathname === "/v1/push" || pathname === "/v1/push/registrations"
     || pathname === "/v1/push/retractions") return "push";

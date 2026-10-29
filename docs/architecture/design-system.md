@@ -727,28 +727,56 @@ the pointer keeping its hover invitation is the behaviour the overlay-handoff ru
 depends on.
 
 **A menu row's line stops being a line once the menu is a table.** `ThemedMenuMetric` is a
-reading a row states as a *column* — a name, a bar, and the value — instead of as words inside
-its subtitle, and `ThemedMenuEntry.header` is the name over a group of such rows. Both exist for
-the account rows (see [`accounts.md`](accounts.md)), and both come from one observation: in a
-sentence, a value's position is decided by the length of the name in front of it, so three
-logins put their three 5-hour numbers at three different x positions and the comparison the menu
-exists for becomes a search. The menu measures **one column plan across every row**
-(`ThemedMenuMetrics.metricColumns` / `metricColumnWidth`), so a label appearing on any row gets
-the same slot on all of them; a row with no reading for a column leaves the cell **empty rather
-than closed up**, since closing it would slide that row's remaining readings under a different
-heading. The reservation comes out of the *title's* width rather than being added to the panel's
-once the width cap is reached — the inversion is the point, because the line this replaced
-truncated its countdown (`7d resets in 5d 1…`) while the name it was competing with stayed
-whole. A name is the one thing on a row still recognisable from its first half, so the name is
-what gives way. `trailingDetail` is the right-aligned column after the metrics, `titleDetail` the
-quiet qualifier sharing the title's line, and `spokenSummary` all of it joined for the two
-consumers that see neither a column nor a bar — the tooltip and VoiceOver. A header is not a
-submenu and adds no press, which is what lets grouping pay for itself: the group's name comes off
-every row inside it. Between the readings and the countdown there is a **rule**, not more air:
-they are different kinds of fact, and at the gap that parts two columns they joined into one run
-of numbers. Its *space* belongs to the menu's column plan so the cursor steps over it on every
-row; its *ink* is the row's, or a runtime with no login draws a rule standing alone in an empty
-row.
+reading a row states as a *meter line* — a name, a bar, the value, and an optional detail —
+instead of as words inside its subtitle, and `ThemedMenuEntry.header` is the name over a group of
+such rows. Both exist for the account rows (see [`accounts.md`](accounts.md)), and both come from
+one observation: in a sentence, a value's position is decided by the length of the name in front
+of it, so three logins put their three 5-hour numbers at three different x positions and the
+comparison the menu exists for becomes a search.
+
+**The readings stack; they do not sit side by side.** The first version made each reading a
+*column* on the title's line, and a menu at `ThemedMenuLayout.maximumWidth` could not hold two
+columns, a rule and a countdown beside a readable name — so `entries(_:fitting:)` dropped the
+second column into the subtitle, and the same window was read beside one name and under the next
+(reported from a real menu: `5h` on the right of every row, `7d` under every name). Now a row's
+two lines each carry one meter: the menu measures **one line plan across every row**
+(`ThemedMenuMetrics.metricLines`, at most `maximumMetricLines` = 2) and **one meter geometry**
+(`ThemedMenuMetricPlan` — the widest name, value and detail anywhere in the menu), so every row's
+`5h` is beside its name and every `7d` directly under it, with every bar at one x. The plan is an
+*ordered* union (`metricLabels`): a label met late goes in ahead of the first planned label its
+own row states after it, so a weekly-only login listed first cannot put `7d` on the top line for
+the whole menu. A row with no reading for a line leaves it **empty rather than closed up**, and a
+meter on the second line asks `heights(for:)` for the second line exactly as a subtitle does.
+Stacked, the block is one meter wide however many lines it has, so it fits beside a name at the
+cap; when it does not (a narrow screen, the largest text size), every reading is written into the
+subtitle at once — never one window as a meter and the other as words. A label past the plan's
+lines is written there either way. The name's floor in that decision (96pt, scaled with chrome
+text) is **never more than the widest text in the menu**: `width(for:)` sizes the panel to that
+text plus the block, so a fixed floor wider than every name judged the readings not to fit a panel
+measured to hold them. That, not width, is what put `7d` under the names in the report: its panel
+was below the cap, and at a content-sized width the floor is the only way the check can fail.
+
+The room stacking frees goes into the bar (`metricBarWidth`, 64pt) and into **the clock**:
+`timeMark` draws a tick where the window's time stands, in the label's ink, standing proud of the
+bar at both ends and cut *through* it — track and fill are one transparency layer and half a
+hairline either side of the tick is cleared out of it, so the panel, the hover pill or a classic
+band shows through without the bar knowing which. A painted gap could not promise that, and
+without any gap a tick over a fill of nearly its own ink merged into it. Where the cut would leave
+less bar beyond it than the bar's own height, it takes that sliver too: a tick near either end
+otherwise left two pixels of fill past it, read as a stray dot rather than as the rest of a
+window. The `detail` is a right-aligned cell at
+the line's end — the account rows' countdown — parted from the value by `metricDetailGap`, wider
+than the gaps inside the line, because a reading and its countdown are different kinds of fact.
+`spokenDetail` is that cell in words for the tooltip and VoiceOver (`resets in 13m` for `13m`).
+The reservation comes out of the *title's* width rather than being added to the panel's once the
+width cap is reached — the inversion is the point, because the line this replaced truncated its
+countdown (`7d resets in 5d 1…`) while the name it was competing with stayed whole. A name is the
+one thing on a row still recognisable from its first half, so the name is what gives way.
+`titleDetail` is the quiet qualifier sharing the title's line, and `spokenSummary` all of it
+joined for the two consumers that see neither a meter nor a tick. A header is not a submenu and
+adds no press, which is what lets grouping pay for itself: the group's name comes off every row
+inside it. `ThemedMenuReferenceFixture.meterLines` reports where each line's bar and tick were
+drawn, asked of the row, so a test checks the drawing rather than a copy of its arithmetic.
 
 **A menu row may explain more than its title without becoming two lines tall.**
 `ThemedMenuItem.help` is supplementary consequence text: the shared row presents it as the Help
@@ -774,7 +802,7 @@ as if it were the only one on screen.
   by view *class* and so laid a 30pt section head out in a 13pt separator's slot.
 - **The first line is an axis, not each element's own centring**
   (`ThemedMenuMetrics.firstLineCenter(inRowOf:reservesSubtitleLine:)`). The checkmark, the mark,
-  the title and its qualifier, the metric columns, the trailing detail and the submenu chevron all
+  the title and its qualifier, the first meter line and the submenu chevron all
   sit on it. Every one of them was centred on the row instead — right for a single-line row, wrong
   for every row beside one: a title with a subtitle is placed as a centred *block*, so its line
   sits above the row's middle while the mark next to it sank to between the two lines, and a

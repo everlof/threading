@@ -1,3 +1,5 @@
+import type { FailureDiagnostic } from "./service-failure-context";
+
 export interface Env {
   DB: D1Database;
   ISSUE_REPORTS: R2Bucket;
@@ -63,6 +65,7 @@ export class HttpError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly diagnostic?: FailureDiagnostic,
   ) {
     super(message);
   }
