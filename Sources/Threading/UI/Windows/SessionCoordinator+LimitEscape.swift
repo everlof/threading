@@ -167,12 +167,14 @@ extension SessionCoordinator {
         // spend a rate limit faster. The receipt fires either way, so a pause the server asked
         // for degrades to "decide on what is cached" rather than hanging the press.
         AccountUsageService.shared.refresh(account, force: true) { [weak self] in
-            self?.continueEscape(
-                for: sessionID,
-                to: account,
-                model: offer.model,
-                trigger: trigger
-            )
+            Task {
+                await self?.continueEscape(
+                    for: sessionID,
+                    to: account,
+                    model: offer.model,
+                    trigger: trigger
+                )
+            }
         }
     }
 
@@ -183,7 +185,7 @@ extension SessionCoordinator {
         to account: AgentAccount,
         model: String?,
         trigger: LimitEscapeTrigger
-    ) {
+    ) async {
         let store = LimitEscapeSuggestionStore.shared
         guard store.suggestion(for: sessionID) != nil else { return }
 
@@ -224,7 +226,7 @@ extension SessionCoordinator {
         // asked is looking at the pane — and wrong for a policy, where a sheet nobody dismisses
         // stops the app until somebody comes back to it. The failure is still news: it goes to the
         // journal and onto the strip, which is where the session will be found.
-        guard moveSessionWithoutConfirmation(
+        guard await moveSessionWithoutConfirmation(
             sessionID,
             to: account,
             alertingOnFailure: trigger == .press

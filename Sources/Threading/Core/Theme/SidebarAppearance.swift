@@ -157,6 +157,15 @@ public enum SidebarAppearance {
         let theme = AppThemePalette.current
         let stated = theme.variant(for: appearance)?.sidebar?.brand
 
+        let band = stated?.band.flatMap { band in
+            ThemeBackdropAppearance.gradient(band.gradient).map { gradient in
+                Brand.Band(
+                    gradient: gradient,
+                    ink: band.ink ?? theme.resolved(.label, appearance: appearance)
+                )
+            }
+        }
+
         let logo: Brand.Logo
         switch stated?.logo ?? .mark {
         case .mark:
@@ -165,7 +174,9 @@ public enum SidebarAppearance {
             logo = .hidden
         case .asset(let name):
             // A dangling asset name is the default mark, not a hole where a logo should be.
-            logo = image(named: name, themeID: theme.id).map(Brand.Logo.image) ?? .mark
+            logo = image(named: name, themeID: theme.id).map {
+                Brand.Logo.image(legibleLogo($0, band: band, appearance: appearance))
+            } ?? .mark
         }
 
         let title = stated?.title
@@ -175,15 +186,6 @@ public enum SidebarAppearance {
         } else {
             let custom = title?.text?.trimmingCharacters(in: .whitespacesAndNewlines)
             text = (custom?.isEmpty == false ? custom : nil) ?? AppInfo.name
-        }
-
-        let band = stated?.band.flatMap { band in
-            ThemeBackdropAppearance.gradient(band.gradient).map { gradient in
-                Brand.Band(
-                    gradient: gradient,
-                    ink: band.ink ?? theme.resolved(.label, appearance: appearance)
-                )
-            }
         }
 
         let motion = stated?.motion.map { motion in
@@ -302,6 +304,44 @@ public enum SidebarAppearance {
 
     private static func image(named name: String, themeID: AppThemeID) -> NSImage? {
         ThemeBackdropAppearance.image(named: name, themeID: themeID)
+    }
+
+    /// The brand logo is identity art — the theme's name for the app at the head of its list —
+    /// so a logo whose edge would vanish into the header is rimmed in the ink the header's own
+    /// wordmark and controls draw in (`ThemeArtSeparation`). The header's ground is the band
+    /// when one is stated, else the sidebar's surface under its gradient.
+    private static func legibleLogo(
+        _ logo: NSImage,
+        band: Brand.Band?,
+        appearance: NSAppearance
+    ) -> NSImage {
+        let theme = AppThemePalette.current
+        // The stated stops rather than `background(for:)`: this runs on every brand read, and
+        // resolving the whole backdrop decodes its picture and sprites to learn two colours.
+        let wash = theme.variant(for: appearance)?.sidebar?.background?.gradient?.stops.map(\.color) ?? []
+        var grounds: [NSColor] = []
+        var ink = band?.ink ?? theme.resolved(.label, appearance: appearance)
+        // Inside the appearance, so a role that falls back to a dynamic colour is measured as
+        // this appearance draws it — the same trap `GeneratedAppIcon.Recipe` documents.
+        appearance.performAsCurrentDrawingAppearance {
+            func concrete(_ colour: NSColor) -> NSColor { colour.usingColorSpace(.sRGB) ?? colour }
+            ink = concrete(ink)
+            if let band {
+                grounds = band.gradient.colors.map(concrete)
+                return
+            }
+            let surface = concrete(theme.resolved(.surface, appearance: appearance))
+            grounds = [surface] + wash.map { colour in
+                surface.blended(withFraction: colour.alphaComponent, of: concrete(colour).withAlphaComponent(1))
+                    ?? concrete(colour)
+            }
+        }
+        return ThemeArtSeparation.legible(
+            logo,
+            grounds: grounds,
+            ink: ink,
+            maximumPixels: SidebarStyleLimits.rimmedLogoPixels
+        )
     }
 }
 

@@ -1,4 +1,5 @@
 import { HttpError } from "./environment";
+import type { FailureField } from "./service-failure-context";
 
 const encoder = new TextEncoder();
 
@@ -9,14 +10,14 @@ export async function readJSON(
   const contentLength = request.headers.get("Content-Length");
   const declared = contentLength === null ? undefined : Number(contentLength);
   if (declared !== undefined && (!Number.isSafeInteger(declared) || declared < 0)) {
-    throw new HttpError(400, "invalidRequest", "Content-Length is invalid");
+    throw new HttpError(400, "invalidRequest", "Content-Length is invalid", { reason: "invalidContentLength", field: "request" });
   }
   if (declared !== undefined && declared > maximumBytes) {
-    throw new HttpError(413, "requestTooLarge", "Request body is too large");
+    throw new HttpError(413, "requestTooLarge", "Request body is too large", { reason: "bodyTooLarge", field: "request" });
   }
   const reader = request.body?.getReader();
   if (!reader) {
-    throw new HttpError(400, "invalidRequest", "Request body is empty");
+    throw new HttpError(400, "invalidRequest", "Request body is empty", { reason: "emptyBody", field: "request" });
   }
   const chunks: Uint8Array[] = [];
   let received = 0;
@@ -26,12 +27,12 @@ export async function readJSON(
     received += value.byteLength;
     if (received > maximumBytes) {
       await reader.cancel();
-      throw new HttpError(413, "requestTooLarge", "Request body is too large");
+      throw new HttpError(413, "requestTooLarge", "Request body is too large", { reason: "bodyTooLarge", field: "request" });
     }
     chunks.push(value);
   }
   if (received === 0) {
-    throw new HttpError(400, "invalidRequest", "Request body is empty");
+    throw new HttpError(400, "invalidRequest", "Request body is empty", { reason: "emptyBody", field: "request" });
   }
   const data = new Uint8Array(received);
   let offset = 0;
@@ -43,10 +44,10 @@ export async function readJSON(
   try {
     value = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(data));
   } catch {
-    throw new HttpError(400, "invalidJSON", "Request body is not valid JSON");
+    throw new HttpError(400, "invalidJSON", "Request body is not valid JSON", { reason: "invalidJSON", field: "request" });
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new HttpError(400, "invalidRequest", "Request body must be a JSON object");
+    throw new HttpError(400, "invalidRequest", "Request body must be a JSON object", { reason: "bodyNotObject", field: "request" });
   }
   return value as Record<string, unknown>;
 }
@@ -75,9 +76,9 @@ export function json(value: unknown, status = 200): Response {
   });
 }
 
-export function assertExactKeys(value: Record<string, unknown>, keys: string[]): void {
+export function assertExactKeys(value: Record<string, unknown>, keys: string[], field: FailureField = "request"): void {
   const expected = new Set(keys);
   if (Object.keys(value).some((key) => !expected.has(key))) {
-    throw new HttpError(400, "invalidRequest", "Request contains an unknown field");
+    throw new HttpError(400, "invalidRequest", "Request contains an unknown field", { reason: "unknownField", field });
   }
 }

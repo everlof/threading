@@ -11,6 +11,23 @@
 
 typedef struct px_proxy px_proxy;
 
+enum { PX_MOCK_LIMIT = 8, PX_MOCK_BODY_LIMIT = 4096, PX_MOCK_HEADER_LIMIT = 2048 };
+typedef struct {
+    char host[PX_HOST_LIMIT + 1];
+    unsigned port;
+    char method[17];
+    char path[4097];
+    unsigned status;
+    char headers[PX_MOCK_HEADER_LIMIT + 16 * 4 + 1];
+    size_t headers_length;
+    char body[PX_MOCK_BODY_LIMIT + 1];
+    size_t body_length;
+} px_mock_rule;
+typedef struct {
+    size_t count;
+    px_mock_rule rules[PX_MOCK_LIMIT];
+} px_mock_rules;
+
 typedef struct {
     unsigned port; /* Zero selects an ephemeral port. */
     unsigned max_connections;
@@ -20,6 +37,7 @@ typedef struct {
     const char *listen_address; /* Borrowed canonical private/link-local/loopback IPv4. */
     const char *client_address; /* Exactly one admitted source IPv4; not authentication. */
     bool ask_clients; /* Hold unknown sources until the owning host decides over private IPC. */
+    const px_mock_rules *mocks; /* Borrowed immutable exact-match fixtures; outlive the proxy. */
 } px_config;
 
 enum { PX_CLIENT_LIMIT = 32, PX_PENDING_CLIENT_LIMIT = 8, PX_CLIENT_CONNECTION_LIMIT = 8 };
@@ -39,6 +57,7 @@ typedef struct {
     unsigned status;
     bool tunnel;
     bool tls_inspected;
+    bool mocked;
     const char *tls_version;
     uint64_t client_bytes;
     uint64_t upstream_bytes;

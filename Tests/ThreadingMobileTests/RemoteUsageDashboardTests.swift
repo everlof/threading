@@ -640,14 +640,22 @@ final class MobileUsagePeriodTests: XCTestCase {
     private final class Loader {
         var pending: [Int: CheckedContinuation<RemoteUsageLimitDTO, Error>] = [:]
         var heldDays: Set<Int> = []
+        var pendingWindows: [String: CheckedContinuation<RemoteUsageLimitDTO, Error>] = [:]
+        var heldWindows: Set<String> = []
         func fetch(_ id: String, _ days: Int) async throws -> RemoteUsageLimitDTO {
             if heldDays.contains(days) {
                 return try await withCheckedThrowingContinuation { pending[days] = $0 }
+            }
+            if heldWindows.contains(id) {
+                return try await withCheckedThrowingContinuation { pendingWindows[id] = $0 }
             }
             return try RemoteUsageDemo.limit(seriesID: id, days: days)
         }
         func finish(_ days: Int, id: String) throws {
             pending.removeValue(forKey: days)?.resume(returning: try RemoteUsageDemo.limit(seriesID: id, days: days))
+        }
+        func finishWindow(_ id: String, days: Int) throws {
+            pendingWindows.removeValue(forKey: id)?.resume(returning: try RemoteUsageDemo.limit(seriesID: id, days: days))
         }
         func fail(_ days: Int) {
             pending.removeValue(forKey: days)?.resume(throwing: URLError(.timedOut))
@@ -662,23 +670,9 @@ final class MobileUsagePeriodTests: XCTestCase {
         let id = try XCTUnwrap(model.limitSeries.first { $0.windowDuration == 7 * 86_400 }?.id)
         model.selectedLimitID = id
         await model.loadLimit(seriesID: id, days: 30)
-        let root = Color.black.sheet(isPresented: .constant(true)) {
-            RemoteUsageDashboardView(link: link, isDemo: true, model: model)
-                .mobileTheme(RemoteThemePalette(nil))
-        }
-        let controller = UIHostingController(rootView: root)
-        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
-        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        window.rootViewController = controller
-        window.makeKeyAndVisible()
+        let (window, sheet, scroll) = try await presentSheet(model, link: link)
         defer { window.isHidden = true }
-        await settle(window)
-        let sheet = try XCTUnwrap(controller.presentedViewController)
-        let scroll = try XCTUnwrap(descendants(sheet.view, of: UIScrollView.self).first {
-            $0.contentSize.height > $0.bounds.height
-        })
-        let picker = try XCTUnwrap(descendants(sheet.view, of: UISegmentedControl.self).first {
+        let picker = try XCTUnwrap(descendants(sheet, of: UISegmentedControl.self).first {
             $0.numberOfSegments == 3 && ($0.titleForSegment(at: 0)?.contains("7") == true)
         })
         let offset = min(180, scroll.contentSize.height - scroll.bounds.height)
@@ -713,6 +707,48 @@ final class MobileUsagePeriodTests: XCTestCase {
         XCTAssertEqual(model.limit?.days, 7, "failure retains the last displayed history")
         XCTAssertEqual(scroll.contentOffset.y, beforeOffset, accuracy: 1)
         capture(window, name: "usage-period-error")
+    }
+
+    /// Scrolled to the bottom, where the history card sits, any shrink of the extent clamps the
+    /// reader upward — so a window whose history is still on its way must not take the
+    /// displayed window's chart, legend and summary away. It starts on the window without a
+    /// banked-reset button so the replacement can only grow the page.
+    func testWindowRequestKeepsTheShippingSheetsScrollExtent() async throws {
+        let link = try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#usage-test"))
+        let loader = Loader()
+        let model = RemoteUsageDashboardModel(link: link, isDemo: true, fetchLimit: loader.fetch)
+        await model.load()
+        let weekly = model.limitSeries.filter { $0.windowDuration == 7 * 86_400 }
+        let displayed = try XCTUnwrap(weekly.first { $0.canRedeemBankedReset != true }?.id)
+        let requested = try XCTUnwrap(weekly.first { $0.canRedeemBankedReset == true }?.id)
+        model.selectedLimitID = displayed
+        await model.loadLimit(seriesID: displayed, days: 30)
+        let (window, _, scroll) = try await presentSheet(model, link: link)
+        defer { window.isHidden = true }
+        let bottom = scroll.contentSize.height + scroll.adjustedContentInset.bottom
+            - scroll.bounds.height
+        XCTAssertGreaterThan(bottom, 20, "the fixture must actually scroll")
+        scroll.setContentOffset(CGPoint(x: 0, y: bottom), animated: false)
+        await settle(window)
+        let beforeOffset = scroll.contentOffset.y
+        let beforeHeight = scroll.contentSize.height
+        capture(window, name: "usage-window-before")
+        loader.heldWindows = [requested]
+        // What the Window picker's binding writes.
+        model.selectedLimitID = requested
+        await settle(window)
+        XCTAssertNotNil(loader.pendingWindows[requested], "drive the selected window's request")
+        XCTAssertEqual(model.limit?.series.id, displayed)
+        XCTAssertEqual(scroll.contentSize.height, beforeHeight, accuracy: 1,
+                       "pending history must not remove the chart, legend and summary")
+        XCTAssertEqual(scroll.contentOffset.y, beforeOffset, accuracy: 1)
+        capture(window, name: "usage-window-loading")
+        try loader.finishWindow(requested, days: 30)
+        await settle(window)
+        XCTAssertEqual(model.limit?.series.id, requested)
+        XCTAssertGreaterThanOrEqual(scroll.contentSize.height, beforeHeight - 1)
+        XCTAssertEqual(scroll.contentOffset.y, beforeOffset, accuracy: 1)
+        capture(window, name: "usage-window-after")
     }
 
     func testAnOlderPeriodResponseCannotReplaceTheLatestRequestOrClearItsLoadingState() async throws {
@@ -769,6 +805,29 @@ final class MobileUsagePeriodTests: XCTestCase {
         XCTAssertEqual(model.limit?.days, 90)
         XCTAssertNil(model.limitErrorMessage)
         XCTAssertFalse(model.isLoadingLimit)
+    }
+
+    /// The shipping sheet over a phone-sized window, settled, with the page's own scroller.
+    private func presentSheet(
+        _ model: RemoteUsageDashboardModel,
+        link: RemoteConnectionLink
+    ) async throws -> (window: UIWindow, sheet: UIView, scroll: UIScrollView) {
+        let root = Color.black.sheet(isPresented: .constant(true)) {
+            RemoteUsageDashboardView(link: link, isDemo: true, model: model)
+                .mobileTheme(RemoteThemePalette(nil))
+        }
+        let controller = UIHostingController(rootView: root)
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        await settle(window)
+        let sheet = try XCTUnwrap(controller.presentedViewController?.view)
+        let scroll = try XCTUnwrap(descendants(sheet, of: UIScrollView.self).first {
+            $0.contentSize.height > $0.bounds.height
+        })
+        return (window, sheet, scroll)
     }
 
     private func waitForRequest(_ days: Int, loader: Loader) async {

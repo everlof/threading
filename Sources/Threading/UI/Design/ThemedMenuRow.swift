@@ -16,9 +16,7 @@ struct ThemedMenuRowPlan {
     private let hasSubmenuColumn: Bool
     private let hasAccessoryColumn: Bool
     private let shortcutColumnWidth: CGFloat
-    private let metricColumns: [String]
-    private let metricColumnWidth: CGFloat
-    private let trailingDetailWidth: CGFloat
+    private let metricPlan: ThemedMenuMetricPlan
 
     init(entries: [ThemedMenuEntry], selectedEntryIndex: Int? = nil) {
         self.entries = entries
@@ -32,9 +30,7 @@ struct ThemedMenuRowPlan {
         hasSubmenuColumn = ThemedMenuMetrics.hasSubmenuColumn(entries)
         hasAccessoryColumn = ThemedMenuMetrics.hasAccessoryColumn(entries)
         shortcutColumnWidth = ThemedMenuMetrics.shortcutColumnWidth(entries)
-        metricColumns = ThemedMenuMetrics.metricColumns(entries)
-        metricColumnWidth = ThemedMenuMetrics.metricColumnWidth(entries)
-        trailingDetailWidth = ThemedMenuMetrics.trailingDetailWidth(entries)
+        metricPlan = ThemedMenuMetrics.metricPlan(entries)
         heights = ThemedMenuMetrics.heights(for: entries)
     }
 
@@ -53,20 +49,20 @@ struct ThemedMenuRowPlan {
             hasAccessoryColumn: hasAccessoryColumn,
             shortcutColumnWidth: shortcutColumnWidth,
             preferredHeight: heights[index],
-            metricColumns: metricColumns,
-            metricColumnWidth: metricColumnWidth,
-            trailingDetailWidth: trailingDetailWidth
+            metricPlan: metricPlan
         )
     }
 }
 
-/// The production menu row, shared by the in-window presenter and hosts that own a bounded
-/// menu viewport. The host supplies the menu's measured column plan and owns admission,
-/// highlight routing and dismissal; the row owns its presentation and control behavior.
 final class ThemedMenuRowView: ThemedControl {
 
     let entryIndex: Int
-    let item: ThemedMenuItem
+    /// The row as its caller built it. `item` is what it says *now*, which differs only while an
+    /// alternate's chord is held — and every path that reads the row (choosing, filtering, the
+    /// tooltip, VoiceOver) reads `item`, so none of them can act on a name the row is not showing.
+    let authoredItem: ThemedMenuItem
+    private(set) var item: ThemedMenuItem
+    private(set) var showsAlternate = false
     let preferredHeight: CGFloat
 
     var onChoose: ((Int, ThemedMenuItem) -> Void)?
@@ -102,11 +98,9 @@ final class ThemedMenuRowView: ThemedControl {
     /// would end at two different places.
     private let hasAccessoryColumn: Bool
     private let shortcutColumnWidth: CGFloat
-    /// The menu's shared column plan, so this row puts its `7d` where every other row puts its
-    /// `7d` — including the rows that have no `7d` and leave the cell empty.
-    private let metricColumns: [String]
-    private let metricColumnWidth: CGFloat
-    private let trailingDetailWidth: CGFloat
+    /// The menu's shared meter block, so this row puts its `7d` where every other row puts its
+    /// `7d` — including the rows that have no `7d` and leave the line empty.
+    private let metricPlan: ThemedMenuMetricPlan
     /// Whether this row's *run* keeps a second line — not whether this row fills it. See
     /// `firstLineCenterY`.
     private let reservesSubtitleLine: Bool
@@ -142,7 +136,7 @@ final class ThemedMenuRowView: ThemedControl {
     private var drawsTitle: Bool { item.preview?.placement != .title }
 
     /// The axis **everything on a row's first line** is placed on: the checkmark, the mark, the
-    /// title and its qualifier, the metric columns, the trailing detail, the submenu chevron.
+    /// title and its qualifier, the first meter line, the submenu chevron.
     ///
     /// Each of those used to be centred on the row instead, which is right for a single-line row
     /// and wrong for every row beside one. A title with a subtitle is placed as a centred *block*,
@@ -161,6 +155,113 @@ final class ThemedMenuRowView: ThemedControl {
         )
     }
 
+    /// The bottom edges of the title's and the subtitle's line boxes: the two lines placed as one
+    /// block whose top line is `firstLineCenterY`. See `draw(_:)` for why they are one block.
+    private var lineOrigins: (title: CGFloat, subtitle: CGFloat) {
+        let titleHeight = Design.Typography.lineHeight(of: ThemedMenuMetrics.titleFont)
+        let subtitleHeight = Design.Typography.lineHeight(of: Design.Typography.detail())
+        let title = firstLineCenterY - titleHeight / 2 + ThemedMenuMetrics.titleBaselineOffset
+        return (title, title - ThemedMenuMetrics.subtitleGap - subtitleHeight)
+    }
+
+    /// Everything reserved at the trailing edge before the readings begin: the chevron column
+    /// and the accessory column, each present only if some row in this menu carries one.
+    private var trailingColumnsWidth: CGFloat {
+        (hasSubmenuColumn ? ThemedMenuMetrics.submenuChevronSlot : 0)
+            + (hasAccessoryColumn ? ThemedMenuMetrics.accessorySlot : 0)
+    }
+
+    private var shortcutReservation: CGFloat {
+        shortcutColumnWidth > 0 ? ThemedMenuMetrics.shortcutGap + shortcutColumnWidth : 0
+    }
+
+    /// What the meter block takes out of this row's width. Zero on a row with nothing to meter:
+    /// plain actions do not belong to the readings table, and a shared reservation here hid
+    /// their titles too when another provider contributed a metric line.
+    private var meterReservation: CGFloat {
+        guard !item.metrics.isEmpty else { return 0 }
+        return ThemedMenuMetrics.metricReservation(metricPlan)
+    }
+
+    /// One meter line of this row, in the row's own coordinates.
+    struct MeterLine {
+        let metric: ThemedMenuMetric
+        let labelRect: NSRect
+        let barRect: NSRect
+        let tickRect: NSRect?
+        let valueRect: NSRect
+        let detailRect: NSRect?
+    }
+
+    /// This row's meters as they are drawn — the one computation `draw(_:)` and the reference
+    /// fixture both read, so a test aims at the pixels the row puts down rather than at a second
+    /// copy of the arithmetic that would pass when both copies are wrong the same way.
+    ///
+    /// The block is anchored to the trailing edge, so it lands in the same place on every row
+    /// whatever its name is, and each line keeps the plan's label — `5h` on the title's line,
+    /// `7d` under it, on every row. A line this row has no reading for is left empty rather than
+    /// closed up: a weekly reading moving up beside the name on the one row without a 5-hour
+    /// window is exactly the drift the stacked plan exists to stop.
+    var meterLines: [MeterLine] {
+        guard !item.metrics.isEmpty, !metricPlan.isEmpty else { return [] }
+        let plan = metricPlan
+        let textHeight = Design.Typography.lineHeight(of: ThemedMenuMetrics.metricFont)
+        let barHeight = ThemedMenuMetrics.metricBarHeight
+        let origins = lineOrigins
+        let centers = [
+            origins.title + Design.Typography.lineHeight(of: ThemedMenuMetrics.titleFont) / 2,
+            origins.subtitle + Design.Typography.lineHeight(of: Design.Typography.detail()) / 2
+        ]
+        let originX = bounds.maxX - ThemedMenuMetrics.contentInset - trailingColumnsWidth
+            - shortcutReservation - plan.width
+        let barX = originX + plan.labelWidth + plan.innerGap
+        let valueX = barX + plan.barWidth + plan.innerGap
+        let detailX = valueX + plan.valueWidth + plan.detailGap
+
+        return zip(centers, plan.lines).compactMap { centerY, label -> MeterLine? in
+            guard let metric = item.metrics.first(where: { $0.label == label }) else { return nil }
+            let textY = centerY - textHeight / 2
+            // On whole device pixels, like the tick: a line's centre is wherever its font's line
+            // height puts it, and a 4pt bar on a fractional y draws soft top and bottom edges
+            // that read as a smudge beside crisp digits.
+            let bar = backingAlignedRect(
+                NSRect(
+                    x: barX, y: centerY - barHeight / 2, width: plan.barWidth, height: barHeight
+                ),
+                options: .alignAllEdgesNearest
+            )
+            let hasDetail = plan.detailWidth > 0 && metric.detail?.isEmpty == false
+            return MeterLine(
+                metric: metric,
+                labelRect: NSRect(x: originX, y: textY, width: plan.labelWidth, height: textHeight),
+                barRect: bar,
+                tickRect: metric.timeMark.map { tickRect(at: $0, across: bar) },
+                valueRect: NSRect(x: valueX, y: textY, width: plan.valueWidth, height: textHeight),
+                detailRect: hasDetail
+                    ? NSRect(x: detailX, y: textY, width: plan.detailWidth, height: textHeight)
+                    : nil
+            )
+        }
+    }
+
+    /// The clock's tick for `mark`, standing proud of `bar` at both ends and kept inside its
+    /// length, on whole device pixels so a 2pt line stays two crisp pixels rather than three
+    /// soft ones.
+    private func tickRect(at mark: Double, across bar: NSRect) -> NSRect {
+        let width = ThemedMenuMetrics.metricTickWidth
+        let overhang = ThemedMenuMetrics.metricTickOverhang
+        let centre = bar.minX + bar.width * CGFloat(min(max(mark, 0), 1))
+        return backingAlignedRect(
+            NSRect(
+                x: min(max(centre - width / 2, bar.minX), bar.maxX - width),
+                y: bar.minY - overhang,
+                width: width,
+                height: bar.height + overhang * 2
+            ),
+            options: .alignAllEdgesNearest
+        )
+    }
+
     init(
         entryIndex: Int,
         item: ThemedMenuItem,
@@ -174,11 +275,10 @@ final class ThemedMenuRowView: ThemedControl {
         /// The menu's, not the row's: `ThemedMenuMetrics.heights(for:)` decides it from the run
         /// this row sits in, so neighbours stacked against each other keep one rhythm.
         preferredHeight: CGFloat,
-        metricColumns: [String] = [],
-        metricColumnWidth: CGFloat = 0,
-        trailingDetailWidth: CGFloat = 0
+        metricPlan: ThemedMenuMetricPlan = .empty
     ) {
         self.entryIndex = entryIndex
+        authoredItem = item
         self.item = item
         selected = isSelected
         self.checkColumn = checkColumn
@@ -187,9 +287,7 @@ final class ThemedMenuRowView: ThemedControl {
         self.hasSubmenuColumn = hasSubmenuColumn
         self.hasAccessoryColumn = hasAccessoryColumn
         self.shortcutColumnWidth = shortcutColumnWidth
-        self.metricColumns = metricColumns
-        self.metricColumnWidth = metricColumnWidth
-        self.trailingDetailWidth = trailingDetailWidth
+        self.metricPlan = metricPlan
         self.preferredHeight = preferredHeight
         reservesSubtitleLine = preferredHeight >= ThemedMenuMetrics.subtitleRowHeight
         super.init(frame: .zero)
@@ -213,10 +311,30 @@ final class ThemedMenuRowView: ThemedControl {
         if let help = item.help, !help.isEmpty {
             toolTip = help
         } else {
-            toolTip = item.metrics.isEmpty && item.trailingDetail == nil
-                ? item.subtitle
-                : item.spokenSummary
+            toolTip = item.metrics.isEmpty ? item.subtitle : item.spokenSummary
         }
+    }
+
+    // MARK: - Alternate
+
+    func showAlternate(holding modifiers: NSEvent.ModifierFlags) {
+        let showsAlternate = authoredItem.showsAlternate(holding: modifiers)
+        guard showsAlternate != self.showsAlternate else { return }
+        self.showsAlternate = showsAlternate
+        item = authoredItem.resolved(holding: modifiers)
+        updateToolTip()
+        needsDisplay = true
+        NSAccessibility.post(element: self, notification: .titleChanged)
+    }
+
+    /// Chooses the alternate whatever is held — the accessibility action's route, which no key
+    /// can reach.
+    @discardableResult
+    func performAlternate() -> Bool {
+        guard authoredItem.isEnabled, let alternate = authoredItem.alternate,
+              authoredItem.showsAlternate(holding: alternate.modifiers) else { return false }
+        onChoose?(entryIndex, authoredItem.resolved(holding: alternate.modifiers))
+        return true
     }
 
     // MARK: - Submenu
@@ -543,13 +661,24 @@ final class ThemedMenuRowView: ThemedControl {
     /// platform's own answer for "this element can do a second thing", it is announced with the
     /// row rather than found by hunting inside it, and it reaches exactly the same code the
     /// pointer does.
+    ///
+    /// The alternate is offered the same way, and for a stronger reason: its only other route is
+    /// a held key, which VoiceOver's own keys are already chorded with. Offered only while the row
+    /// is not already showing it, since pressing the row does that.
     override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
-        guard item.isEnabled, let accessory = item.accessory else { return nil }
-        return [
-            NSAccessibilityCustomAction(name: accessory.title) { [weak self] in
+        guard item.isEnabled else { return nil }
+        var actions: [NSAccessibilityCustomAction] = []
+        if let accessory = item.accessory {
+            actions.append(NSAccessibilityCustomAction(name: accessory.title) { [weak self] in
                 self?.performAccessory() ?? false
-            }
-        ]
+            })
+        }
+        if !showsAlternate, let alternate = authoredItem.alternate, authoredItem.submenu == nil {
+            actions.append(NSAccessibilityCustomAction(name: alternate.title) { [weak self] in
+                self?.performAlternate() ?? false
+            })
+        }
+        return actions.isEmpty ? nil : actions
     }
 
     // MARK: - Drawing
@@ -743,29 +872,16 @@ final class ThemedMenuRowView: ThemedControl {
         // alternating weights rather than as pairs.
         //
         // The block's top line is `firstLineCenterY`, which every other part of the row is placed
-        // against too — so the title, the mark beside it and the columns across from it share one
+        // against too — so the title, the mark beside it and the meter across from it share one
         // axis, and a row without a subtitle keeps its title on that same axis instead of sliding
         // down to the middle of its slot.
-        let titleY = lineY - titleHeight / 2 + ThemedMenuMetrics.titleBaselineOffset
-        let subtitleY = titleY - ThemedMenuMetrics.subtitleGap - subtitleHeight
-        // Everything reserved at the trailing edge before the readings begin: the chevron column
-        // and the accessory column, each present only if some row in this menu carries one.
-        let trailingColumns = (hasSubmenuColumn ? ThemedMenuMetrics.submenuChevronSlot : 0)
-            + accessoryColumn
-        let shortcutReservation = shortcutColumnWidth > 0
-            ? ThemedMenuMetrics.shortcutGap + shortcutColumnWidth
-            : 0
-        // Drawn before the title, because what it returns is how much room the title has left.
-        // The columns are fixed and the name is elastic — the inversion of the line this
+        let (titleY, subtitleY) = lineOrigins
+        let trailingColumns = trailingColumnsWidth
+        // The meters are fixed and the name is elastic — the inversion of the line this
         // replaced, where the name set the numbers' positions and the countdown lost its digits.
-        let metricReservation = drawMetricColumns(
-            trailingEdge: bounds.maxX - ThemedMenuMetrics.contentInset - trailingColumns
-                - shortcutReservation,
-            centeredOn: titleY + titleHeight / 2,
-            selection: selection,
-            alpha: alpha,
-            secondary: secondary
-        )
+        // One meter on each of the row's two lines, on the same axes as the title and subtitle.
+        let metricReservation = meterReservation
+        drawMetricLines(selection: selection, alpha: alpha, secondary: secondary)
         let textWidth = max(
             0,
             bounds.maxX - ThemedMenuMetrics.contentInset - trailingColumns
@@ -871,11 +987,18 @@ final class ThemedMenuRowView: ThemedControl {
                     .font: subtitleFont, .foregroundColor: tone, .paragraphStyle: truncating
                 ]))
             }
+            // Short of the meter block, which owns the trailing end of this line too: the second
+            // meter sits on it. A row whose readings went into these words has no block, and the
+            // line has the row's whole width.
             line.draw(
                 in: NSRect(
                     x: x,
                     y: subtitleY,
-                    width: max(0, bounds.maxX - ThemedMenuMetrics.contentInset - trailingColumns - x),
+                    width: max(
+                        0,
+                        bounds.maxX - ThemedMenuMetrics.contentInset - trailingColumns
+                            - metricReservation - x
+                    ),
                     height: subtitleHeight
                 )
             )
@@ -885,31 +1008,22 @@ final class ThemedMenuRowView: ThemedControl {
         }
     }
 
-    /// Draws this row's readings into the menu's shared columns, and returns what they took out
-    /// of the row's width.
+    /// Draws this row's readings into the menu's shared meter block, at `meterLines`.
     ///
-    /// Laid out from the trailing edge inward — trailing detail first, then the columns
-    /// right-to-left — so the whole block is anchored to the panel's edge and lands in the same
-    /// place on every row whatever its name is. A cell whose column this row has no reading for
-    /// is left empty rather than closed up: closing it would slide the remaining readings under
-    /// a different heading, which is the one thing a column must never do.
-    private func drawMetricColumns(
-        trailingEdge: CGFloat,
-        centeredOn centerY: CGFloat,
+    /// The old side-by-side columns put the reading in two places: when the panel could not fit
+    /// both beside a name, the second fell into the subtitle under it, so the same window was
+    /// read beside one name and under the next. Stacked, the block is one meter wide and fits.
+    private func drawMetricLines(
         selection: SelectionSurface?,
         alpha: CGFloat,
         secondary: NSColor
-    ) -> CGFloat {
-        // Plain actions do not belong to the readings table. A shared reservation here hid
-        // their titles too when another provider contributed a third metric column.
-        guard !item.metrics.isEmpty || item.trailingDetail?.isEmpty == false else { return 0 }
-        guard !metricColumns.isEmpty || trailingDetailWidth > 0 else { return 0 }
+    ) {
+        let lines = meterLines
+        guard !lines.isEmpty else { return }
 
         let font = ThemedMenuMetrics.metricFont
-        let height = Design.Typography.lineHeight(of: font)
-        let y = centerY - height / 2 + ThemedMenuMetrics.titleBaselineOffset
-        // A band flattens every tone to its own authored ink, text and bar alike: a status hue
-        // over a solid classic selection is exactly the unmeasured contrast the pair prevents.
+        // A band flattens every tone to its own authored ink, text, bar and tick alike: a status
+        // hue over a solid classic selection is exactly the unmeasured contrast the pair prevents.
         let banded = selection?.ink.label
         let muted = banded ?? ink(Design.Text.tertiary, alpha)
 
@@ -923,97 +1037,35 @@ final class ThemedMenuRowView: ThemedControl {
             }
         }
 
-        var cursor = trailingEdge
-        if trailingDetailWidth > 0 {
-            if let detail = item.trailingDetail, !detail.isEmpty {
-                draw(
-                    detail,
-                    rightAlignedIn: NSRect(
-                        x: cursor - trailingDetailWidth,
-                        y: y,
-                        width: trailingDetailWidth,
-                        height: height
-                    ),
-                    font: font,
-                    color: muted
-                )
-            }
-            cursor -= trailingDetailWidth
-            if metricColumns.isEmpty {
-                cursor -= ThemedMenuMetrics.metricColumnGap
-            } else {
-                // A rule, not more air. The countdown is a different kind of fact from the
-                // readings — not the next window — and at the gap that parts two columns it
-                // joined them: `99%` and `7d · 5d 3h` read as one run of numbers.
-                //
-                // The *space* it sits in belongs to the menu's column plan, so the cursor steps
-                // over it on every row and the columns to its left stay aligned. The *ink* is
-                // this row's: a row with nothing on both sides of it — a runtime with no login —
-                // otherwise drew a rule standing alone in an empty row.
-                let x = (cursor - ThemedMenuMetrics.metricDividerGap
-                    - ThemedMenuMetrics.metricDividerWidth).rounded()
-                if !item.metrics.isEmpty, item.trailingDetail?.isEmpty == false {
-                    (banded?.withAlphaComponent(ThemedMenuMetrics.metricTrackOpacity)
-                        ?? ink(Design.Surface.divider, alpha)).setFill()
-                    NSRect(
-                        x: x,
-                        y: centerY - height / 2,
-                        width: ThemedMenuMetrics.metricDividerWidth,
-                        height: height
-                    ).fill()
-                }
-                cursor = x - ThemedMenuMetrics.metricDividerGap
-            }
-        }
-
-        // Right-to-left over the reversed plan, so column order on screen stays left-to-right.
-        for label in metricColumns.reversed() {
-            let originX = cursor - metricColumnWidth
-            defer { cursor = originX - ThemedMenuMetrics.metricColumnGap }
-            guard let metric = item.metrics.first(where: { $0.label == label }) else { continue }
-
+        for line in lines {
+            let metric = line.metric
             (metric.label as NSString).draw(
-                in: NSRect(x: originX, y: y, width: metricColumnWidth, height: height),
+                in: line.labelRect,
                 withAttributes: [.font: font, .foregroundColor: muted]
             )
-
-            let labelWidth = ceil(metric.label.size(withAttributes: [.font: font]).width)
-            let barX = originX + labelWidth + ThemedMenuMetrics.metricInnerGap
             drawMetricBar(
                 metric,
-                in: NSRect(
-                    x: barX,
-                    y: centerY - ThemedMenuMetrics.metricBarHeight / 2,
-                    width: ThemedMenuMetrics.metricBarWidth,
-                    height: ThemedMenuMetrics.metricBarHeight
-                ),
+                in: line.barRect,
+                tick: line.tickRect,
                 fill: banded ?? metricBarFill(metric.tone, alpha: alpha),
                 // `tertiary`, not `quaternary`. The fainter role is right for a ring drawn
-                // *around* a glyph and wrong here: at 3pt on an elevated panel it disappeared,
-                // and a fill with no visible track behind it reads as a coloured dash floating
-                // in the row rather than as a part of a whole — which is the one thing a bar
-                // says that the number beside it does not.
+                // *around* a glyph and wrong here: at this height on an elevated panel it
+                // disappeared, and a fill with no visible track behind it reads as a coloured
+                // dash floating in the row rather than as a part of a whole — which is the one
+                // thing a bar says that the number beside it does not.
                 track: banded?.withAlphaComponent(
                     ThemedMenuMetrics.metricTrackOpacity
-                ) ?? ink(Design.Text.tertiary, alpha * ThemedMenuMetrics.metricTrackOpacity)
+                ) ?? ink(Design.Text.tertiary, alpha * ThemedMenuMetrics.metricTrackOpacity),
+                // The label's own ink: the tick is the one mark on the bar that is not a
+                // reading, and it has to stay legible over the fill, the track and the hover
+                // pill alike — which only the row's strongest ink is measured against.
+                tickInk: banded ?? ink(Design.Text.label, alpha)
             )
-
-            let valueX = barX + ThemedMenuMetrics.metricBarWidth
-                + ThemedMenuMetrics.metricInnerGap
-            draw(
-                metric.value,
-                rightAlignedIn: NSRect(
-                    x: valueX,
-                    y: y,
-                    width: max(0, originX + metricColumnWidth - valueX),
-                    height: height
-                ),
-                font: font,
-                color: toned(metric.tone)
-            )
+            draw(metric.value, rightAlignedIn: line.valueRect, font: font, color: toned(metric.tone))
+            if let detail = metric.detail, let detailRect = line.detailRect {
+                draw(detail, rightAlignedIn: detailRect, font: font, color: toned(metric.detailTone))
+            }
         }
-
-        return trailingEdge - cursor
     }
 
     /// A calm bar is the same ink as the number beside it, not the accent.
@@ -1036,34 +1088,74 @@ final class ThemedMenuRowView: ThemedControl {
         }
     }
 
+    /// Track, fill, and the clock's tick across both.
+    ///
+    /// The tick is cut *through* the bar rather than painted on it: the track and fill are one
+    /// transparency layer, and a hairline either side of the tick is cleared out of it before the
+    /// tick is drawn. A gap painted in a background colour would have to know what is under the
+    /// bar — the panel, the hover pill, a classic band — and the clear knows none of them. Without
+    /// the cut, a tick over a fill of nearly its own ink merged into it, which is exactly where
+    /// the reading needs it: spend running level with time.
     private func drawMetricBar(
         _ metric: ThemedMenuMetric,
         in rect: NSRect,
+        tick tickRect: NSRect?,
         fill: NSColor,
-        track: NSColor
+        track: NSColor,
+        tickInk: NSColor
     ) {
         let radius = ThemedMenuMetrics.usesClassicGrammar ? 0 : rect.height / 2
+        let context = NSGraphicsContext.current?.cgContext
+        context?.beginTransparencyLayer(auxiliaryInfo: nil)
         // The full track is always drawn, so a window with no readable number still reads as a
-        // window rather than as a column this row forgot.
+        // window rather than as a line this row forgot.
         track.setFill()
         NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
 
-        guard let fraction = metric.fraction else { return }
-        // Below the floor the fill is shorter than its own cap and draws as a dot at the track's
-        // head; the floor is the honest picture of "barely touched". Same rule, same reason, as
-        // `AccountMarkImage`'s meter.
-        let visible = max(ThemedMenuMetrics.metricMinimumFraction, min(fraction, 1))
-        fill.setFill()
-        NSBezierPath(
-            roundedRect: NSRect(
-                x: rect.minX,
-                y: rect.minY,
-                width: max(rect.height, rect.width * CGFloat(visible)),
-                height: rect.height
-            ),
-            xRadius: radius,
-            yRadius: radius
-        ).fill()
+        if let fraction = metric.fraction {
+            // Below the floor the fill is shorter than its own cap and draws as a dot at the
+            // track's head; the floor is the honest picture of "barely touched". Same rule, same
+            // reason, as `AccountMarkImage`'s meter.
+            let visible = max(ThemedMenuMetrics.metricMinimumFraction, min(fraction, 1))
+            fill.setFill()
+            NSBezierPath(
+                roundedRect: NSRect(
+                    x: rect.minX,
+                    y: rect.minY,
+                    width: max(rect.height, rect.width * CGFloat(visible)),
+                    height: rect.height
+                ),
+                xRadius: radius,
+                yRadius: radius
+            ).fill()
+        }
+        if let tickRect, let context {
+            context.saveGState()
+            context.setBlendMode(.clear)
+            context.fill(knockout(around: tickRect, in: rect))
+            context.restoreGState()
+        }
+        context?.endTransparencyLayer()
+
+        guard let tickRect else { return }
+        let tickRadius = ThemedMenuMetrics.usesClassicGrammar ? 0 : tickRect.width / 2
+        tickInk.setFill()
+        NSBezierPath(roundedRect: tickRect, xRadius: tickRadius, yRadius: tickRadius).fill()
+    }
+
+    /// The cut either side of the tick — and, where it leaves less bar beyond it than the bar's
+    /// own height, that sliver too. A few pixels of fill or track past a tick near either end
+    /// drew as a stray dot rather than as the rest of a window; without them the bar ends (or
+    /// begins) at the tick, which is what the clock is saying, and the countdown has the minutes.
+    private func knockout(around tick: NSRect, in bar: NSRect) -> NSRect {
+        var cut = tick.insetBy(dx: -ThemedMenuMetrics.metricTickKnockout, dy: 0)
+        if cut.minX - bar.minX < bar.height {
+            cut = NSRect(x: bar.minX, y: cut.minY, width: cut.maxX - bar.minX, height: cut.height)
+        }
+        if bar.maxX - cut.maxX < bar.height {
+            cut.size.width = bar.maxX - cut.minX
+        }
+        return cut
     }
 
     private func draw(

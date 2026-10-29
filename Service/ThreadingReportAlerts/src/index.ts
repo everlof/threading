@@ -49,6 +49,8 @@ interface FailureNotification {
   status: number;
   count: number;
   windowStart: string;
+  diagnosticReference?: string;
+  example?: { operation: string; code: string; reason: string; field: string };
 }
 
 type Notification = TriageNotification | FailureNotification;
@@ -170,13 +172,26 @@ async function readNotification(request: Request): Promise<Notification | null> 
   if (typeof parsed !== "object" || parsed === null) return null;
   const value = parsed as Record<string, unknown>;
   if (value.event === "threading.service-failure.summary") {
-    if (Object.keys(value).some(key => !["event", "alertID", "route", "status", "count", "windowStart"].includes(key))) return null;
+    if (Object.keys(value).some(key => !["event", "alertID", "route", "status", "count", "windowStart", "diagnosticReference", "example"].includes(key))) return null;
     if (typeof value.route !== "string" || !["reports", "auth", "push", "hosts", "account", "rendezvous"].includes(value.route)) return null;
     if (typeof value.status !== "number" || ![400, 409, 413, 415, 429, 500, 502, 503, 504].includes(value.status)) return null;
     if (!Number.isSafeInteger(value.count) || (value.count as number) < 1 || (value.count as number) > 1000000000) return null;
     if (typeof value.windowStart !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/u.test(value.windowStart)) return null;
     const time = Date.parse(value.windowStart);
     if (!Number.isFinite(time) || value.alertID !== `${time}-${value.route}-${value.status}-${value.count}`) return null;
+    if (value.diagnosticReference !== undefined || value.example !== undefined) {
+      if (value.diagnosticReference !== `sf-${time}-${value.route}-${value.status}`) return null;
+      const example = value.example;
+      if (!example || typeof example !== "object" || Array.isArray(example)) return null;
+      const fields = example as Record<string, unknown>;
+      if (Object.keys(fields).length !== 4
+        || Object.keys(fields).some(key => !["operation", "code", "reason", "field"].includes(key))) return null;
+      for (const key of ["operation", "code", "reason", "field"]) {
+        if (typeof fields[key] !== "string" || !/^[A-Za-z][A-Za-z0-9.]{0,63}$/u.test(fields[key])) return null;
+      }
+      const operations = value.route === "push" ? ["push", "push.send", "push.register", "push.retract"] : [value.route];
+      if (!operations.includes(fields.operation as string)) return null;
+    }
     return value as unknown as FailureNotification;
   }
   if (value.event !== "threading.issue-report.received") return null;
@@ -200,7 +215,7 @@ async function forward(notification: Notification, env: Env): Promise<boolean> {
     token: env.PUSHOVER_APP_TOKEN,
     user: env.PUSHOVER_USER_KEY,
     title: failure ? `Threading HTTP ${notification.status}` : `Threading ${notification.kind}`,
-    message: failure ? `${notification.count} failed ${notification.route} requests since ${notification.windowStart}` : [
+    message: failure ? failureMessage(notification) : [
       notification.reference,
       notification.source,
       notification.trigger,
@@ -233,6 +248,16 @@ async function forward(notification: Notification, env: Env): Promise<boolean> {
     });
     return false;
   }
+}
+
+function failureMessage(notification: FailureNotification): string {
+  const lines = [`${notification.count} failed ${notification.route} requests since ${notification.windowStart}`];
+  if (notification.example && notification.diagnosticReference) {
+    const example = notification.example;
+    lines.push(`Example: ${example.operation}: ${example.code} / ${example.reason} (${example.field})`);
+    lines.push(`Diagnostic: ${notification.diagnosticReference}`);
+  }
+  return lines.join("\n");
 }
 
 function status(code: number): Response {

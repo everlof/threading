@@ -370,10 +370,11 @@ public enum ThemedMenuMetrics {
 
     /// The image column is reserved only when some item actually carries an image. Reserving
     /// it always left an 18pt hole between checkmark and title in every icon-less menu.
+    /// An alternate's own mark counts, or holding its key would draw a title with no room for it.
     public static func hasImageColumn(_ entries: [ThemedMenuEntry]) -> Bool {
         entries.contains { entry in
             guard case .item(let item) = entry else { return false }
-            return item.image != nil
+            return item.image != nil || item.alternate?.image != nil
         }
     }
 
@@ -395,33 +396,43 @@ public enum ThemedMenuMetrics {
         }
     }
 
-    // MARK: - Metric Columns
+    // MARK: - Metric Lines
 
-    /// The font every metric column is drawn and measured in. Tabular by role: a column of
+    /// The font every meter line is drawn and measured in. Tabular by role: a column of
     /// proportional digits is only accidentally a column, and `27%` over `81%` misaligning by
     /// the width of a `2` is the whole reason the numbers left the subtitle.
     public static var metricFont: NSFont {
         usesClassicGrammar ? titleFont : Design.Typography.numericDetail()
     }
 
-    /// The bar between a column's name and its value. Wide enough that two readings differing
-    /// by ten points differ visibly — the 14pt meter under `AccountMarkImage` could only ever
-    /// carry a hue, which the value's own tint already said.
-    public static var metricBarWidth: CGFloat { usesClassicGrammar ? 22 : 28 }
-
-    /// The air around the rule between the columns and the trailing detail. Wider than the gap
-    /// between two columns, because what it parts is a change of *kind* rather than the next
-    /// window: readings and the countdown are not the same sort of fact, and at an equal gap
-    /// `99%` and `7d · 5d 3h` ran together as one line of numbers.
-    public static var metricDividerGap: CGFloat { Design.Spacing.inset }
-    public static var metricDividerWidth: CGFloat { Design.Radius.border }
-    /// Thick enough to hold a status hue at this size without becoming a second row of content.
-    public static var metricBarHeight: CGFloat { Design.Spacing.tight - 1 }
-    /// Inside a column: name, bar, value.
-    public static var metricInnerGap: CGFloat { Design.Spacing.tight }
-    /// Between one column and the next, and between the last one and the trailing detail. Wider
-    /// than the inner gap, so a column reads as one group rather than as three loose runs.
-    public static var metricColumnGap: CGFloat { Design.Spacing.medium }
+    /// The bar between a line's name and its value.
+    ///
+    /// It was 28pt while two windows had to share the title's line side by side, which was
+    /// enough to rank two fills and not enough for anything else. Stacked, the block is one
+    /// meter wide instead of two, and the room that frees goes here: long enough that the clock's
+    /// tick has a position worth reading — on a 5-hour window, a pixel is under three minutes.
+    public static var metricBarWidth: CGFloat { usesClassicGrammar ? 48 : 64 }
+    /// Thick enough that the tick's knockout reads as a cut through the bar rather than a smudge
+    /// on it, and still thin enough to stay a gauge beside 11pt digits rather than a second row.
+    public static var metricBarHeight: CGFloat { Design.Spacing.tight }
+    /// The clock's tick: the time mark's width everywhere else a window is drawn as a bar, so the
+    /// line means the same thing in the menu as in the pill's popover.
+    public static var metricTickWidth: CGFloat { Design.UsageBar.timeMarkWidth }
+    /// How far the tick stands proud of the bar at each end. Over a fill of nearly its own ink
+    /// the tick inside the bar is only its knockout; the ends are what say "here" on any fill.
+    public static var metricTickOverhang: CGFloat { Design.Spacing.hairline }
+    /// The gap cut through the bar either side of the tick, so it separates from a fill whose
+    /// ink it shares instead of merging into it — the outline the popover's tick wears, as air.
+    /// Half a hairline each side, the arithmetic `fillInset` uses to part two adjacent fills.
+    public static var metricTickKnockout: CGFloat { Design.Spacing.hairline / 2 }
+    /// Inside a line: name, bar, value.
+    public static var metricInnerGap: CGFloat { Design.Spacing.small }
+    /// Between a line's value and its detail. Wider than the inner gap, because what it parts is
+    /// a change of *kind* rather than the next cell: a reading and its countdown are not the same
+    /// sort of fact, and at an equal gap `99%` and `5d 3h` ran together as one run of numbers.
+    public static var metricDetailGap: CGFloat { Design.Spacing.inset }
+    /// The least air between a name and the meter block beside it.
+    public static var metricBlockGap: CGFloat { Design.Spacing.medium }
     /// Below this a fill is shorter than its own cap and draws as a dot at the track's head.
     public static let metricMinimumFraction = 0.02
     /// How much of its ink an empty track keeps — of `tertiary` normally, and of a classic
@@ -429,99 +440,119 @@ public enum ThemedMenuMetrics {
     /// against the band's solid fill.
     public static let metricTrackOpacity: CGFloat = 0.45
 
-    /// A fixed upper bound on candidate columns. `entries(_:fitting:)` further admits only
-    /// those that leave a readable name at the panel's actual width and text scale.
-    public static let maximumMetricColumns = 3
+    /// A row has two lines — its title's and its subtitle's — and a meter sits on each. A third
+    /// label anywhere in the menu is written into the subtitle instead.
+    public static let maximumMetricLines = 2
+    /// How many labels the line plan is chosen from. More than `maximumMetricLines`, because a
+    /// label met late can still belong above one met early (see `metricLabels`); bounded, because
+    /// the labels come from provider data and a menu open must stay a constant amount of work.
+    public static let maximumMetricLabels = 8
 
-    /// The columns this menu reserves, in first-seen order.
+    /// Every label a row in this menu states, in the order the lines take them.
     ///
     /// A union across every row rather than per row: a plan metering one window and a plan
-    /// metering two must put their shared `7d` reading in the same place, which is exactly the
-    /// comparison that a per-row layout destroys. The empty cell that leaves on the shorter
-    /// plan's row is not a hole — it says that plan has no window there.
-    public static func metricColumns(_ entries: [ThemedMenuEntry]) -> [String] {
-        var seen: Set<String> = []
+    /// metering two must put their shared `7d` in the same place, which is exactly the
+    /// comparison a per-row layout destroys — the old columns let a weekly reading land beside
+    /// one name and under the next. And an *ordered* union rather than first-seen: a login
+    /// reporting only `7d` ahead of one reporting `5h, 7d` would otherwise put the weekly window
+    /// on top for the whole menu. A label new to the plan goes in ahead of the first label already
+    /// there that its own row states after it, so each row's order holds wherever rows agree.
+    public static func metricLabels(_ entries: [ThemedMenuEntry]) -> [String] {
         var ordered: [String] = []
         for entry in entries {
             guard case .item(let item) = entry else { continue }
-            for metric in item.metrics where seen.insert(metric.label).inserted {
-                ordered.append(metric.label)
-                if ordered.count == maximumMetricColumns { return ordered }
+            let stated = item.metrics.prefix(maximumMetricLabels)
+            for (index, metric) in stated.enumerated() where !ordered.contains(metric.label) {
+                guard ordered.count < maximumMetricLabels else { return ordered }
+                let successor = stated.dropFirst(index + 1)
+                    .lazy
+                    .compactMap { ordered.firstIndex(of: $0.label) }
+                    .first
+                ordered.insert(metric.label, at: successor ?? ordered.endIndex)
             }
         }
         return ordered
     }
 
-    /// One width for every column, measured from the widest name and the widest value anywhere
-    /// in the menu. Equal columns rather than each sized to its own content, because unequal
-    /// ones put the second column's bar at a different offset on rows whose first column is
-    /// absent — and a bar that moves sideways between rows cannot be compared by length.
-    public static func metricColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
-        metricColumnWidth(entries, columns: metricColumns(entries))
+    /// The labels that get a meter line, top down — `["5h", "7d"]`. The first beside the title,
+    /// the second under it, on every row: a row with no reading for a line leaves it empty
+    /// rather than moving its other reading up, which is how a plan metering one window says so
+    /// beside a plan metering two.
+    public static func metricLines(_ entries: [ThemedMenuEntry]) -> [String] {
+        Array(metricLabels(entries).prefix(maximumMetricLines))
     }
 
-    private static func metricColumnWidth(_ entries: [ThemedMenuEntry], columns: [String]) -> CGFloat {
-        let admitted = Set(columns)
-        let all = entries.flatMap { entry -> [ThemedMenuMetric] in
-            guard case .item(let item) = entry else { return [] }
-            return item.metrics.filter { admitted.contains($0.label) }
-        }
-        guard !all.isEmpty else { return 0 }
+    /// The meter block every row of this menu shares.
+    public static func metricPlan(_ entries: [ThemedMenuEntry]) -> ThemedMenuMetricPlan {
+        metricPlan(entries, lines: metricLines(entries))
+    }
 
+    /// One measurement across the whole menu: the widest name, value and detail anywhere in it.
+    /// Per-row widths would start the next row's bar at a different x, and a bar that moves
+    /// sideways between rows cannot be compared by length.
+    private static func metricPlan(
+        _ entries: [ThemedMenuEntry],
+        lines: [String]
+    ) -> ThemedMenuMetricPlan {
+        guard !lines.isEmpty else { return .empty }
+        let admitted = Set(lines)
         let font = metricFont
-        let label = all.map { ceil($0.label.size(withAttributes: [.font: font]).width) }.max() ?? 0
-        let value = all.map { ceil($0.value.size(withAttributes: [.font: font]).width) }.max() ?? 0
-        return label + metricInnerGap + metricBarWidth + metricInnerGap + value
-    }
+        func measured(_ text: String) -> CGFloat {
+            ceil(text.size(withAttributes: [.font: font]).width)
+        }
 
-    /// The trailing detail's own column, measured from the longest one present.
-    public static func trailingDetailWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
-        entries.compactMap { entry -> CGFloat? in
-            guard case .item(let item) = entry,
-                  let detail = item.trailingDetail,
-                  !detail.isEmpty else { return nil }
-            return ceil(detail.size(withAttributes: [.font: metricFont]).width)
-        }.max() ?? 0
-    }
-
-    /// Everything the columns take out of a row's width, including the gaps between them.
-    ///
-    /// Reserved off the *title's* width rather than added to the panel's, once the panel is at
-    /// its cap. That inversion is the point: today's rows overflow, and the segment that loses
-    /// its characters is the countdown — `7d resets in 5d 1…`, a sentence claiming to be
-    /// complete. A name is the one thing on this row a reader can still recognise from its
-    /// first half, so the name is what gives way and the numbers never do.
-    public static func metricReservation(_ entries: [ThemedMenuEntry]) -> CGFloat {
-        metricReservation(
-            columns: metricColumns(entries),
-            columnWidth: metricColumnWidth(entries),
-            detailWidth: trailingDetailWidth(entries)
+        var labelWidth: CGFloat = 0
+        var valueWidth: CGFloat = 0
+        var detailWidth: CGFloat = 0
+        for entry in entries {
+            guard case .item(let item) = entry else { continue }
+            for metric in item.metrics.prefix(maximumMetricLabels)
+            where admitted.contains(metric.label) {
+                labelWidth = max(labelWidth, measured(metric.label))
+                valueWidth = max(valueWidth, measured(metric.value))
+                if let detail = metric.detail, !detail.isEmpty {
+                    detailWidth = max(detailWidth, measured(detail))
+                }
+            }
+        }
+        return ThemedMenuMetricPlan(
+            lines: lines,
+            labelWidth: labelWidth,
+            barWidth: metricBarWidth,
+            valueWidth: valueWidth,
+            detailWidth: detailWidth,
+            innerGap: metricInnerGap,
+            detailGap: metricDetailGap
         )
     }
 
-    private static func metricReservation(
-        columns: [String], columnWidth: CGFloat, detailWidth: CGFloat
-    ) -> CGFloat {
-        var total: CGFloat = 0
-        if !columns.isEmpty {
-            total += CGFloat(columns.count) * columnWidth
-                + CGFloat(columns.count - 1) * metricColumnGap
-        }
-        if detailWidth > 0 {
-            total += (total > 0 ? metricDividerGap * 2 + metricDividerWidth : 0) + detailWidth
-        }
-        return total > 0 ? total + metricColumnGap : 0
+    /// Everything the meter block takes out of a row's width, the gap before it included.
+    ///
+    /// Reserved off the *title's* width rather than added to the panel's, once the panel is at
+    /// its cap. That inversion is the point: a reading written into a line overflows, and the
+    /// segment that loses its characters is the countdown — `7d resets in 5d 1…`, a sentence
+    /// claiming to be complete. A name is the one thing on this row a reader can still recognise
+    /// from its first half, so the name is what gives way and the numbers never do.
+    public static func metricReservation(_ entries: [ThemedMenuEntry]) -> CGFloat {
+        metricReservation(metricPlan(entries))
     }
 
-    /// The name remains readable even when the union of different providers' windows grows.
-    /// Overflow readings move to the subtitle before heights or views are constructed. This
-    /// is a value-only, O(entries) pass over at most three candidate columns per menu open.
+    static func metricReservation(_ plan: ThemedMenuMetricPlan) -> CGFloat {
+        plan.isEmpty ? 0 : plan.width + metricBlockGap
+    }
+
+    /// The name remains readable at any width and text size. The meter block is one width
+    /// whatever the number of windows, so this is a single decision rather than a column-by-
+    /// column retreat: the block fits beside a readable name, or every reading is written into
+    /// the subtitle — the row's full width, before heights or views are constructed. A label
+    /// past the plan's two lines is written there either way. Value-only and O(entries) over at
+    /// most `maximumMetricLabels` labels a row, once per menu open.
     public static func entries(
         _ entries: [ThemedMenuEntry], fitting width: CGFloat, selectedEntryIndex: Int? = nil
     ) -> [ThemedMenuEntry] {
-        var columns = metricColumns(entries)
-        let detailWidth = trailingDetailWidth(entries)
-        guard !columns.isEmpty || detailWidth > 0 else { return entries }
+        let labels = metricLabels(entries)
+        guard !labels.isEmpty else { return entries }
+        let lines = Array(labels.prefix(maximumMetricLines))
 
         let marks = checkColumn(entries, selectedEntryIndex: selectedEntryIndex)
         let leading = titleInset(
@@ -534,28 +565,26 @@ public enum ThemedMenuMetrics {
             + (hasSubmenuColumn(entries) ? submenuChevronSlot : 0)
             + (hasAccessoryColumn(entries) ? accessorySlot : 0)
             + (shortcuts > 0 ? shortcutGap + shortcuts : 0)
-        let titleFloor = minimumMetricTitleWidth * Design.Typography.scale
+        // The floor protects a name from being squeezed, so it is never more than the widest name
+        // there is. A fixed floor wider than every name is what spilled the readings of a menu of
+        // short logins: `width(for:)` sizes the panel to its widest text plus the meters, the
+        // floor then asked 96pt of names that needed less, and the meters "did not fit" a panel
+        // measured to hold them — so `7d` fell under the name on every row.
+        //
+        // Titles only, never subtitles: a subtitle is where this pass writes what it spills, so
+        // measuring one would let a second projection of its own output judge differently.
+        let titleFloor = min(
+            minimumMetricTitleWidth * Design.Typography.scale,
+            titleColumnWidth(entries)
+        )
         let budget = max(0, width - outerInset * 2 - leading - trailing - titleFloor)
-
-        while !columns.isEmpty, metricReservation(
-            columns: columns,
-            columnWidth: metricColumnWidth(entries, columns: columns),
-            detailWidth: detailWidth
-        ) > budget {
-            columns.removeLast()
-        }
-        let keepsDetail = metricReservation(
-            columns: columns,
-            columnWidth: metricColumnWidth(entries, columns: columns),
-            detailWidth: detailWidth
-        ) <= budget
-        let admitted = Set(columns)
+        let fits = metricReservation(metricPlan(entries, lines: lines)) <= budget
+        let admitted = fits ? Set(lines) : []
 
         return entries.map { entry in
             guard case .item(var item) = entry else { return entry }
             let overflow = item.metrics.filter { !admitted.contains($0.label) }
-            let overflowDetail = keepsDetail ? nil : item.trailingDetail
-            guard !overflow.isEmpty || overflowDetail != nil else { return entry }
+            guard !overflow.isEmpty else { return entry }
 
             var segments = item.subtitleSegments
                 ?? item.subtitle.map { [ThemedMenuSubtitleSegment($0)] }
@@ -566,15 +595,11 @@ public enum ThemedMenuMetrics {
                 }
                 segments.append(ThemedMenuSubtitleSegment(metric.label + " ", .muted))
                 segments.append(ThemedMenuSubtitleSegment(metric.value, metric.tone))
-            }
-            if let overflowDetail, !overflowDetail.isEmpty {
-                if !segments.isEmpty {
-                    segments.append(ThemedMenuSubtitleSegment(metricOverflowSeparator, .muted))
+                if let detail = metric.detail, !detail.isEmpty {
+                    segments.append(ThemedMenuSubtitleSegment(" " + detail, metric.detailTone))
                 }
-                segments.append(ThemedMenuSubtitleSegment(overflowDetail, .muted))
             }
             item.metrics.removeAll { !admitted.contains($0.label) }
-            if !keepsDetail { item.trailingDetail = nil }
             item.setSubtitle(segments)
             return .item(item)
         }
@@ -587,7 +612,7 @@ public enum ThemedMenuMetrics {
     /// bottom edge.
     ///
     /// Everything on that line is placed against it — the checkmark, the mark, the title and its
-    /// qualifier, the metric columns, the trailing detail, the submenu chevron. Each of those was
+    /// qualifier, the first meter line, the submenu chevron. Each of those was
     /// centred on the row instead, which is right for a single-line row and wrong for every row
     /// beside one: a title with a subtitle is placed as a centred *block*, so its line sits above
     /// the row's middle while the mark next to it sank to between the two lines, and a
@@ -766,18 +791,31 @@ public enum ThemedMenuMetrics {
     /// actions sit after a separator, so they stay short while the projects above them keep the
     /// height their paths need. A change of height across a rule or a heading is explained by
     /// the rule or the heading; a change of height between two adjacent rows is not.
+    ///
+    /// A meter on the second line asks for the second line exactly as a subtitle does: the
+    /// `7d` under every name is the plan's, so a run whose rows read only weekly windows is as
+    /// tall as one whose rows read both. A label past the plan's lines is going to be written
+    /// into the subtitle, so it asks too.
     public static func heights(for entries: [ThemedMenuEntry]) -> [CGFloat] {
         var heights = [CGFloat](repeating: 0, count: entries.count)
         var run: [Int] = []
+        let lines = metricLines(entries)
+        let firstMetricLine = lines.first
 
-        @MainActor func closeRun() {
+        func closeRun() {
             guard !run.isEmpty else { return }
             var tall = false
             for index in run {
-                if entries[index].item?.subtitle?.isEmpty == false {
+                guard let item = entries[index].item else { continue }
+                if item.subtitle?.isEmpty == false {
                     tall = true
                     break
                 }
+                for metric in item.metrics where metric.label != firstMetricLine {
+                    tall = true
+                    break
+                }
+                if tall { break }
             }
             for index in run { heights[index] = tall ? subtitleRowHeight : rowHeight }
             run.removeAll()
@@ -844,16 +882,7 @@ public enum ThemedMenuMetrics {
         minimum: CGFloat,
         selectedEntryIndex: Int? = nil
     ) -> CGFloat {
-        let text = entries.compactMap { entry -> CGFloat? in
-            guard case .item(let item) = entry else { return nil }
-            let title = ceil(titleLine(of: item).size(
-                withAttributes: [.font: titleFont]
-            ).width)
-            let subtitle = ceil((item.subtitle ?? "").size(
-                withAttributes: [.font: Design.Typography.detail()]
-            ).width)
-            return max(title, subtitle)
-        }.max() ?? 0
+        let text = textColumnWidth(entries)
 
         let imageColumn = hasImageColumn(entries) ? imageSlot : 0
         let previewColumn = hasPreviewColumn(entries) ? previewSlot : 0
@@ -871,6 +900,32 @@ public enum ThemedMenuMetrics {
             + metricReservation(entries)
             + (shortcutColumn > 0 ? shortcutGap + shortcutColumn : 0)
         return min(max(minimum, content), ThemedMenuLayout.maximumWidth)
+    }
+
+    /// The room `width(for:)` gives the text: the widest title, or the widest subtitle if wider.
+    private static func textColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
+        let subtitle = entries.compactMap { entry -> CGFloat? in
+            guard case .item(let item) = entry else { return nil }
+            return ceil((item.subtitle ?? "").size(
+                withAttributes: [.font: Design.Typography.detail()]
+            ).width)
+        }.max() ?? 0
+        return max(titleColumnWidth(entries), subtitle)
+    }
+
+    /// The widest title any row draws, its qualifier included.
+    private static func titleColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
+        entries.compactMap { entry -> CGFloat? in
+            guard case .item(let item) = entry else { return nil }
+            // Measured for the alternate too: a panel that grew when Option went down would move
+            // every row's trailing column under the pointer that is about to press one.
+            let titles = [item] + (item.alternate.map {
+                [item.resolved(holding: $0.modifiers)]
+            } ?? [])
+            return titles.map {
+                ceil(titleLine(of: $0).size(withAttributes: [.font: titleFont]).width)
+            }.max() ?? 0
+        }.max() ?? 0
     }
 
     /// The title as it is drawn: the name, and the qualifier that shares its line.

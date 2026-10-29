@@ -77,6 +77,21 @@ test("rejects a production service without the accountless enrollment route", as
   );
 });
 
+test("rejects a service with missing or unprotected diagnostic pickup", async () => {
+  for (const status of [200, 404]) {
+    await assert.rejects(verifyProduction({
+      attempts: 1,
+      fetchImplementation: async (url) => {
+        const path = new URL(url).pathname;
+        if (path === "/ready") return readyResponse();
+        if (path.startsWith("/v1/developer/service-failures/")) return Response.json({}, { status });
+        if (path === "/v1/auth/anonymous-host") return Response.json({ error: { code: "invalidRequest" } }, { status: 400 });
+        return Response.json({}, { status: 401 });
+      },
+    }), /production readiness failed/u);
+  }
+});
+
 test("bounds an untrusted readiness response before parsing", async () => {
   await assert.rejects(
     verifyProduction({

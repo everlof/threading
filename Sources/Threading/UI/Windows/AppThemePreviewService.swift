@@ -27,6 +27,10 @@ import SwiftTerm
 /// picked with a fixed seed (`WelcomeSample`), so the band reads the same every time and carries
 /// nothing of the person's. A variant without one draws exactly what it drew before the band
 /// existed.
+///
+/// **The tool's image ends with the Dock tile** for each appearance (`dockStrips`), at the sizes
+/// the Dock and the switcher draw it. The icon is the one part of a theme an author could not see
+/// at all, and the one a person uses to find the app.
 @MainActor
 enum AppThemePreviewService {
 
@@ -47,6 +51,18 @@ enum AppThemePreviewService {
         /// least this tall — taller when a large mark and a scaled greeting need the room, so
         /// the hero is never the one a short pane hides.
         static let welcomeMinimumHeight: CGFloat = 340
+
+        /// The Dock tile at the sizes it is actually seen at: the largest magnification, the
+        /// standard Dock, the switcher's small rows, and the 16-point floor where a mark stops
+        /// being a mark. In points, drawn at the preview's scale.
+        static let dockTileSides: [CGFloat] = [128, 64, 32, 16]
+        static let dockStripInset: CGFloat = 20
+        static let dockTileGap: CGFloat = 24
+        /// The Dock's shelf belongs to macOS, not to the theme, so it is a fixed neutral per
+        /// appearance rather than a theme role — a role would show the tile on a ground it never
+        /// sits on. Close to the system's own shelf over an ordinary desktop.
+        static let lightDockShelfWhite: CGFloat = 0.9
+        static let darkDockShelfWhite: CGFloat = 0.2
     }
 
     /// The moment and the values a previewed welcome is rendered with — invented, so the band
@@ -150,17 +166,19 @@ enum AppThemePreviewService {
         }
 
         // Drawn here, where the views live; encoded on a worker, where PNG compression belongs.
-        guard let rendering = rendering(theme, kinds: kinds, frameCount: count) else {
+        let tiles = dockStrips(theme, kinds: kinds)
+        guard let rendering = rendering(theme, kinds: kinds, frameCount: count),
+              let image = stack([rendering.image] + tiles.map(\.image)) else {
             completion(.failure("The preview could not be drawn."))
             return
         }
-        let image = rendering.image
         let text = "Preview of \(theme.name) (\(theme.id.rawValue)), "
             + kinds.map(\.rawValue).joined(separator: " and ")
             + ", drawn on a sample window — top to bottom in that order. Particles are shown "
             + "as a still frame."
             + (count == Layout.driftFrameCount ? " Each appearance shows its gradient drift at 0, ⅓ and ⅔ of one cycle." : "")
             + welcomeSummary(rendering.welcomes, frameCount: count)
+            + dockSummary(tiles)
         Task {
             let png = await Task.detached(priority: .userInitiated) { pngData(image) }.value
             guard let png else {
@@ -205,25 +223,64 @@ enum AppThemePreviewService {
             if let first = bands.first { welcomes.append(first) }
             return window + bands.map(\.image)
         }
-        guard !frames.isEmpty else { return nil }
+        return stack(frames).map { Rendering(image: $0, welcomes: welcomes) }
+    }
 
-        let width = frames.map(\.width).max() ?? 0
-        let height = frames.map(\.height).reduce(0, +)
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-        var top = height
-        for frame in frames {
-            top -= frame.height
-            context.draw(frame, in: CGRect(x: 0, y: top, width: frame.width, height: frame.height))
+    /// One appearance's Dock tile as drawn, and what drew it.
+    struct DockStrip {
+        let kind: AppTheme.VariantKind
+        let image: CGImage
+        /// The theme's own logo (or a package's mark) rather than the Threading mark.
+        let usesThemeMark: Bool
+        /// The host rimmed that mark because its edge disappears into the plate.
+        let isRimmed: Bool
+    }
+
+    /// The Dock tile per appearance at `Layout.dockTileSides`, on the shelf the system draws for
+    /// that appearance — empty for the System theme, whose tile is the bundle's own icon.
+    ///
+    /// The agent that made the theme otherwise never sees its icon: the real tile is in the
+    /// Dock, and only the applied theme's. A 256-pixel logo standing at a quarter of its plate and
+    /// a brown mark on a brown-black plate were both invisible from the sample window alone.
+    static func dockStrips(_ theme: AppTheme, kinds: [AppTheme.VariantKind]) -> [DockStrip] {
+        kinds.compactMap { kind in
+            guard let appearance = kind.appearance,
+                  let recipe = GeneratedAppIcon.Recipe(theme: theme, appearance: appearance),
+                  let icon = GeneratedAppIcon.image(for: theme, appearance: appearance),
+                  let tile = icon.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                return nil
+            }
+            let mark = ExtensionAppearanceRegistry.shared.iconMark(forThemeID: theme.id)
+                ?? GeneratedAppIcon.logoMark(for: theme, appearance: appearance)
+            let isRimmed = mark.map { GeneratedAppIcon.legibleMark($0, on: recipe) !== $0 } ?? false
+
+            let scale = Layout.scale
+            let largest = Layout.dockTileSides.max() ?? 0
+            let width = Int(Layout.size.width * scale)
+            let height = Int((largest + Layout.dockStripInset * 2) * scale)
+            guard let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return nil }
+            let shelf = kind == .dark ? Layout.darkDockShelfWhite : Layout.lightDockShelfWhite
+            context.setFillColor(CGColor(gray: shelf, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            context.interpolationQuality = .high
+            context.scaleBy(x: scale, y: scale)
+            var leading = Layout.dockStripInset
+            for side in Layout.dockTileSides {
+                context.draw(tile, in: CGRect(x: leading, y: Layout.dockStripInset, width: side, height: side))
+                leading += side + Layout.dockTileGap
+            }
+            return context.makeImage().map {
+                DockStrip(kind: kind, image: $0, usesThemeMark: mark != nil, isRimmed: isRimmed)
+            }
         }
-        return context.makeImage().map { Rendering(image: $0, welcomes: welcomes) }
     }
 
     /// The new-session composer as `kind`'s welcome dresses it, at drift `phase`, or nil when
@@ -272,6 +329,47 @@ enum AppThemePreviewService {
 
     // MARK: - Private Methods
 
+    /// Images stacked top to bottom in the order given, as wide as the widest.
+    private static func stack(_ frames: [CGImage]) -> CGImage? {
+        guard !frames.isEmpty else { return nil }
+        let width = frames.map(\.width).max() ?? 0
+        let height = frames.map(\.height).reduce(0, +)
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        var top = height
+        for frame in frames {
+            top -= frame.height
+            context.draw(frame, in: CGRect(x: 0, y: top, width: frame.width, height: frame.height))
+        }
+        return context.makeImage()
+    }
+
+    /// What the tool's text says about the Dock strips beneath the window samples.
+    private static func dockSummary(_ strips: [DockStrip]) -> String {
+        guard !strips.isEmpty else { return "" }
+        let sizes = Layout.dockTileSides.map { "\(Int($0))" }.joined(separator: ", ")
+        let notes = strips.map { strip -> String in
+            let mark: String
+            switch (strip.usesThemeMark, strip.isRimmed) {
+            case (false, _): mark = "the Threading mark in the theme's ink"
+            case (true, false): mark = "the theme's own logo"
+            case (true, true):
+                mark = "the theme's own logo, rimmed in the label colour because its edge "
+                    + "disappears into the plate"
+            }
+            return "\(strip.kind.rawValue): \(mark)"
+        }
+        return " Beneath the windows, the Dock tile for each appearance at \(sizes) points on "
+            + "that appearance's Dock shelf — " + notes.joined(separator: "; ") + "."
+    }
+
     private static func renderFrame(
         theme: AppTheme,
         kind: AppTheme.VariantKind,
@@ -298,7 +396,12 @@ enum AppThemePreviewService {
                 content.trailingAnchor.constraint(equalTo: host.trailingAnchor)
             ])
             if let style = WindowChromeAppearance.resolve(for: appearance) {
-                let band = WindowTitleBandView()
+                // The previewed theme's own tile, not the running app's: a band that shows its
+                // app icon would otherwise show whichever theme happens to be applied.
+                let band = WindowTitleBandView(appIconProvider: {
+                    GeneratedAppIcon.image(for: theme, appearance: appearance)
+                        ?? NSApplication.shared.applicationIconImage
+                })
                 band.fixtureStyle = style
                 band.fixtureIsKey = true
                 band.setTitle(theme.name)

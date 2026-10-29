@@ -25,7 +25,7 @@ final class SupervisionActionRegistry {
             ScheduledSessionPlan, String, SessionID
         ) -> Result<AgentSession, SupervisionActionFailure>
         let resume: (SessionID) -> Bool
-        let move: (SessionID, AgentAccount, SessionID) -> Result<String, SupervisionActionFailure>
+        let move: (SessionID, AgentAccount, SessionID) async -> Result<String, SupervisionActionFailure>
         let finish: (SessionID, SessionID) -> Bool
     }
 

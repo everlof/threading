@@ -86,6 +86,21 @@ enum GeneratedAppIcon {
         return ThemeBackdropAppearance.image(named: name, themeID: theme.id)
     }
 
+    /// A contributed mark as the tile draws it. It is identity art, so a mark whose edge would
+    /// vanish into the plate is rimmed in the label rather than leave the app unfindable in the
+    /// Dock (`ThemeArtSeparation`). Rimmed at the pixels the mark occupies at the tile's largest
+    /// presentation, since nothing shows it larger: measured cold in a Debug build, rimming a
+    /// 512-pixel logo there costs 4.8 ms on the main actor, against 14.5 ms at 256 and 46 ms at
+    /// its full size. The preview asks the same question to say whether it rimmed.
+    static func legibleMark(_ mark: NSImage, on recipe: Recipe) -> NSImage {
+        ThemeArtSeparation.legible(
+            mark,
+            grounds: [recipe.ground],
+            ink: recipe.label,
+            maximumPixels: Int(Layout.minimumSharpMarkPixels)
+        )
+    }
+
     /// The stated-mark form, for tests and previews that must not depend on what is installed.
     static func image(
         for theme: AppTheme,
@@ -93,7 +108,9 @@ enum GeneratedAppIcon {
         mark: NSImage?
     ) -> NSImage? {
         guard var recipe = Recipe(theme: theme, appearance: appearance) else { return nil }
-        recipe.mark = mark
+        // The answer is cached by the mark's identity, so the key below stays stable across
+        // refreshes.
+        recipe.mark = mark.map { legibleMark($0, on: recipe) }
 
         let key = recipe.cacheKey as NSString
         if let cached = cache.object(forKey: key) { return cached }
@@ -132,6 +149,9 @@ enum GeneratedAppIcon {
     struct Recipe {
         let ground: NSColor
         let ink: NSColor
+        /// The theme's label on this appearance: the rim a contributed mark is given when its
+        /// own edge disappears into the plate. A valid theme keeps it legible on its ground.
+        let label: NSColor
         let shadow: Shadow?
         let corner: Corner
         let grid: Grid
@@ -172,6 +192,7 @@ enum GeneratedAppIcon {
 
             var resolvedGround = NSColor.black
             var resolvedInk = NSColor.white
+            var resolvedLabel = NSColor.white
             var resolvedShadow: Shadow?
 
             // Stated, not ambient. Material is variant-owned — a pale style may want a hard ink
@@ -211,6 +232,8 @@ enum GeneratedAppIcon {
 
                 resolvedGround = ground
                 resolvedInk = ink
+                resolvedLabel = theme.resolved(.label, appearance: appearance)
+                    .usingColorSpace(.sRGB) ?? .white
 
                 if let glow = material.glow {
                     let color = theme.resolved(glow.role, appearance: appearance)
@@ -237,6 +260,7 @@ enum GeneratedAppIcon {
 
             ground = resolvedGround
             ink = resolvedInk
+            label = resolvedLabel
             shadow = resolvedShadow
             // The mark is a small element, so its corners follow the radius the theme gives its
             // small elements. Without this Bauhaus and Newsprint are two beige plates carrying
@@ -352,20 +376,31 @@ enum GeneratedAppIcon {
 
     /// A contributed mark, fitted inside the mark box and wearing the theme's own shadow.
     ///
-    /// **Aspect is preserved and the mark is never upscaled past the safe area.** An author
-    /// exports whatever shape their glyph is; forcing it into a square would letterbox some
-    /// marks and stretch others, and neither is a failure the author can see from their own
-    /// asset. The theme's glow applies here for the same reason it applies to the default mark — a
-    /// printed style's mark should sit on the page the way its panels do.
+    /// **Aspect is preserved, and the mark fills the safe area unless that would enlarge it past
+    /// the resolution the tile is ever shown at.** An author exports whatever shape their glyph
+    /// is; forcing it into a square would letterbox some marks and stretch others, and neither is
+    /// a failure the author can see from their own asset. The theme's glow applies here for the
+    /// same reason it applies to the default mark — a printed style's mark should sit on the page
+    /// the way its panels do.
+    ///
+    /// It used to be never enlarged at all, measured in points. A 256-pixel logo therefore stood
+    /// at a quarter of the canvas, less than half the box it was given, and read as a small
+    /// sticker in the middle of a large plate — while the canvas itself is never presented above
+    /// `Layout.largestPresentedTile`, so enlarging those pixels up to that ratio costs nothing
+    /// anyone can see. Measured in pixels, so a 2× asset is not halved by its own density.
     private static func drawMark(_ mark: NSImage, _ recipe: Recipe, in markBox: NSRect) {
-        let size = mark.size
+        let size = ThemeArtSeparation.pixelSize(of: mark)
         guard size.width > 0, size.height > 0 else { return }
 
         let safe = markBox.insetBy(
             dx: markBox.width * Layout.contributedMarkInsetRatio,
             dy: markBox.height * Layout.contributedMarkInsetRatio
         )
-        let scale = min(safe.width / size.width, safe.height / size.height, 1)
+        let scale = min(
+            safe.width / size.width,
+            safe.height / size.height,
+            Layout.maximumMarkEnlargement
+        )
         let drawn = NSRect(
             x: safe.midX - size.width * scale / 2,
             y: safe.midY - size.height * scale / 2,
@@ -588,6 +623,27 @@ extension GeneratedAppIcon {
         /// drawn to the plate's edge would read as a different *kind* of icon beside every stock
         /// style, which is the one thing the mark-only rule exists to prevent.
         static let contributedMarkInsetRatio: CGFloat = 0.05
+
+        /// The largest the tile is ever presented, in pixels: 128 points at 2×, the Dock's
+        /// largest magnification and the application switcher's size. The canvas is drawn at
+        /// four times this so a shadow is the same at every size; nothing shows it whole.
+        static let largestPresentedTile: CGFloat = 256
+
+        /// How far a contributed mark may be enlarged on the canvas: up to the ratio between
+        /// the canvas and its largest presentation, so the enlargement never reaches a screen.
+        static let maximumMarkEnlargement: CGFloat = canvasSide / largestPresentedTile
+
+        /// The side of the square a contributed mark is fitted into on the Dock canvas.
+        static var contributedMarkSafeSide: CGFloat {
+            markBoxSide(on: .dock) * (1 - contributedMarkInsetRatio * 2)
+        }
+
+        /// The fewest pixels a mark's longer side needs to fill its safe area without being
+        /// enlarged past the tile's largest presentation. Below this it still fills as far as it
+        /// can, and the authoring tools report it (`ThemeArtAdvisory`).
+        static var minimumSharpMarkPixels: CGFloat {
+            (contributedMarkSafeSide / maximumMarkEnlargement).rounded(.up)
+        }
 
         /// The square the mark's geometry is stated in, for one grid.
         ///

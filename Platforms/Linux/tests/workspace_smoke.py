@@ -177,11 +177,13 @@ def panes():
     children = [frame.get_child_at_index(index) for index in range(frame.get_child_count())]
     lists = [item for item in children if item.get_role_name() == 'list']
     terminals = [item for item in children if item.get_role_name() == 'terminal']
-    assert [item.get_role_name() for item in children] == [
-        'list', 'push button', 'terminal', 'push button', 'push button']
+    roles = [item.get_role_name() for item in children]
+    expected = ['list', 'push button', 'terminal', 'push button', 'push button', 'push button']
+    assert roles == expected, [(item.get_role_name(), item.get_accessible_id()) for item in children]
     assert children[1].get_accessible_id() == 'linux.page-title'
     assert children[3].get_accessible_id() == 'linux.actions'
     assert children[4].get_accessible_id() == 'linux.add-project'
+    assert children[5].get_accessible_id() == 'sidebar.settings'
     assert len(lists) == len(terminals) == 1
     assert 0 < lists[0].get_child_count() <= 32
     assert lists[0].get_state_set().contains(Atspi.StateType.SHOWING)
@@ -391,7 +393,7 @@ with log_path.open('w+') as log:
             project_title(index)
         _, listed, _ = panes()
         assert listed.get_child_count() <= 10
-        assert listed.get_description() == 'Showing 5 through 12 of 12 items'
+        assert listed.get_description() == 'Showing 7 through 12 of 12 items'
         assert listed.get_selection_iface().get_selected_child(0).get_name().startswith('Workspace12 ')
         assert len([value for value in durable() if value['terminals']]) == 2
         assert state(0)['input'] == payload.encode().hex()

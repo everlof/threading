@@ -290,6 +290,33 @@ content-free event/field vocabulary shared with the apps; raw unified logs, `.ip
 terminal output, prompts, paths, credentials, and notification text are not accepted by the
 intake schema.
 
+## Investigating an HTTP failure alert
+
+The counter is service-wide: a push alert can concern another installation, a device registration,
+or a retraction. Migration `0012_service_failure_diagnostics.sql` retains seven days of evidence
+after successful alert delivery. New alerts include an `sf-<window-ms>-<route>-<status>` reference
+and one operation/code/reason/field example. Retrieve the bounded record using the same protected
+`REPORT_PICKUP_TOKEN` used for report pickup:
+
+```sh
+node scripts/inspect-service-failure.mjs sf-1793214420000-push-400
+# Optional: compare a known host ID locally; the ID is not sent to the service.
+node scripts/inspect-service-failure.mjs sf-1793214420000-push-400 --host-id '<local-host-id>'
+```
+
+The underlying route is `GET /v1/developer/service-failures/<reference>`. It returns exact count,
+first/last timestamps, expiry, at most eight examples and `omittedCount`. Each example includes
+a server-generated request ID (also returned as `X-Threading-Request-ID` to the failing client),
+operation, server error code, typed validation reason/field and available authenticated principal
+pseudonyms. `matchesHost` is true/false/null when the CLI compares a host; null means the request
+failed before authenticated attribution. Raw identities, bodies, keys, tokens and error messages
+are never retained. This lookup does not need Cloudflare's Observability permission or log sampling.
+An old or expired reference returns 404; old aggregate counts cannot recover missing evidence.
+
+Deploy the backwards-compatible alert receiver **first**, then run the guarded control-plane
+deployment, which applies migration 0012. `/ready` probes the new table. A pre-migration outbox
+row continues to send its old summary without claiming a diagnostic exists.
+
 ## Guest invitation links
 
 `GET /join` offers **Continue in browser** and **Open in Threading**. Invitations are carried

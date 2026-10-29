@@ -2872,34 +2872,36 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
 
-            switch commands.moveRemoteSession(
-                sessionID,
-                to: AccountHandle(storedName: choice.accountID)
-            ) {
-            case .success:
-                self.services.eventLog.recordRemoteEvent("Session account changed remotely", [
-                    .session: sessionID.uuidString,
-                    .account: choice.accountID,
-                    .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
-                ])
-                self.respondWithCatalogue(for: authorization, request: request, respond: respond)
-            case .failure(.sessionNotFound):
-                respond(.respond(RemoteRouter.error(404, "Not Found")))
-            case .failure(.accountNotFound), .failure(.unsupportedRuntime):
-                respond(.respond(RemoteRouter.error(
-                    422,
-                    "Unsupported Account",
-                    code: .unsupportedAccount
-                )))
-            case .failure(.appUnavailable):
-                respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
-            case let .failure(.moveRefused(refusal)):
-                respond(.respond(RemoteRouter.error(
-                    409,
-                    "Account move refused",
-                    code: .accountMoveRefused,
-                    detail: refusal.rawValue
-                )))
+            Task {
+                switch await commands.moveRemoteSession(
+                    sessionID,
+                    to: AccountHandle(storedName: choice.accountID)
+                ) {
+                case .success:
+                    self.services.eventLog.recordRemoteEvent("Session account changed remotely", [
+                        .session: sessionID.uuidString,
+                        .account: choice.accountID,
+                        .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                    ])
+                    self.respondWithCatalogue(for: authorization, request: request, respond: respond)
+                case .failure(.sessionNotFound):
+                    respond(.respond(RemoteRouter.error(404, "Not Found")))
+                case .failure(.accountNotFound), .failure(.unsupportedRuntime):
+                    respond(.respond(RemoteRouter.error(
+                        422,
+                        "Unsupported Account",
+                        code: .unsupportedAccount
+                    )))
+                case .failure(.appUnavailable):
+                    respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
+                case let .failure(.moveRefused(refusal)):
+                    respond(.respond(RemoteRouter.error(
+                        409,
+                        "Account move refused",
+                        code: .accountMoveRefused,
+                        detail: refusal.rawValue
+                    )))
+                }
             }
         }
     }

@@ -767,13 +767,6 @@ final class BrowserViewController: NSViewController {
         observeWebView()
     }
 
-    override func viewDidAppear() {
-        super.viewDidAppear()
-        if webView.url == nil {
-            view.window?.makeFirstResponder(addressField)
-        }
-    }
-
     override func viewDidLayout() {
         super.viewDidLayout()
         chromeBar.updateResponsiveLayout()
@@ -1202,6 +1195,8 @@ final class BrowserViewController: NSViewController {
         load(url, waitUntil: .load) { _, _ in }
     }
 
+    /// Explicit user intent only. Appearing can also mean an agent opened or revealed this tab
+    /// while the user is typing in the composer, which must retain keyboard ownership.
     func focusAddress() {
         _ = view
         view.window?.makeFirstResponder(addressField)
@@ -1711,7 +1706,7 @@ final class BrowserViewController: NSViewController {
         // Raw DOM queries also inspect loading/restoring documents. They must not depend on
         // a paint callback; semantic inspection and captures synchronize rendering separately.
         let page = webView
-        return try await withCheckedThrowingContinuation { continuation in
+        let payload: BrowserBridgePayload<Any?> = try await withCheckedThrowingContinuation { continuation in
             let completion = BrowserBridgeCallCompletion<Any?>(continuation, onLateCompletion: nil)
             page.evaluateJavaScript(javascript) { value, error in
                 if let error {
@@ -1728,6 +1723,7 @@ final class BrowserViewController: NSViewController {
                 ))
             }
         }
+        return payload.value
     }
 
     /// The page's semantic state, with stable references the next action can target.
@@ -2417,7 +2413,7 @@ final class BrowserViewController: NSViewController {
         if preparesRendering { try await prepareBackgroundRendering() }
         let startedAt = Date()
         let phase = preparesRendering ? "javascript.dispatch" : "rendering.resume"
-        let result: String? = try await withCheckedThrowingContinuation { continuation in
+        let payload: BrowserBridgePayload<String?> = try await withCheckedThrowingContinuation { continuation in
             let completion = BrowserBridgeCallCompletion(
                 continuation,
                 onLateCompletion: onLateCompletion
@@ -2467,6 +2463,7 @@ final class BrowserViewController: NSViewController {
                 }
             }
         }
+        let result = payload.value
         guard let json = result, let data = json.data(using: .utf8) else {
             recordAgentBridgePhase(
                 "javascript.decode",
@@ -3381,11 +3378,14 @@ final class BrowserViewController: NSViewController {
                 if self.annotationAnchorRefreshPending { self.refreshAnnotationAnchors() }
             }
             guard self.agentPageIdentity == identity else { return }
+            // Geometry reads work in an occluded renderer. A paint-readiness wait here can
+            // stall forever when WebKit suspends animation frames.
             let positions: [BrowserAnnotationAnchorPosition]? = try? await self.callAgentScript(
                 BrowserAgentScripts.annotationAnchorPositions,
                 arguments: self.pointArguments(x: 0, y: 0).merging([
                     "tokens": tokens, "releasedTokens": released
-                ]) { _, new in new }
+                ]) { _, new in new },
+                preparesRendering: false
             )
             guard self.agentPageIdentity == identity, let positions else { return }
             self.capturedAnnotationAnchorTokens[identity.webView]?.subtract(released)
@@ -5077,14 +5077,20 @@ private enum BrowserConsoleLevel {
     }
 }
 
+/// WebKit's JavaScript values stay on the main actor, including after the continuation resumes.
+/// They are not statically Sendable because the bridge can return arbitrary Foundation objects.
+private struct BrowserBridgePayload<Value>: @unchecked Sendable {
+    let value: Value
+}
+
 @MainActor
 private final class BrowserBridgeCallCompletion<Value> {
-    private var continuation: CheckedContinuation<Value, Error>?
+    private var continuation: CheckedContinuation<BrowserBridgePayload<Value>, Error>?
     private var timedOut = false
     private var onLateCompletion: (@MainActor () -> Void)?
 
     init(
-        _ continuation: CheckedContinuation<Value, Error>,
+        _ continuation: CheckedContinuation<BrowserBridgePayload<Value>, Error>,
         onLateCompletion: (@MainActor () -> Void)?
     ) {
         self.continuation = continuation
@@ -5103,7 +5109,7 @@ private final class BrowserBridgeCallCompletion<Value> {
         }
         self.continuation = nil
         onLateCompletion = nil
-        continuation.resume(with: result)
+        continuation.resume(with: result.map { BrowserBridgePayload(value: $0) })
         return true
     }
 

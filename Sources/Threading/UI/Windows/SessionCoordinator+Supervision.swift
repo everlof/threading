@@ -118,7 +118,7 @@ extension SessionCoordinator {
         _ sessionID: SessionID,
         to account: AgentAccount,
         managerID: SessionID
-    ) -> Result<String, SupervisionActionFailure> {
+    ) async -> Result<String, SupervisionActionFailure> {
         guard let session = environment.projectStore.session(withID: sessionID) else {
             return .failure(.init(L10n.string("The child session is no longer available.")))
         }
@@ -126,7 +126,7 @@ extension SessionCoordinator {
             for: session.kind,
             handle: session.accountHandle
         )
-        guard moveSessionWithoutConfirmation(sessionID, to: account) else {
+        guard await moveSessionWithoutConfirmation(sessionID, to: account) else {
             return .failure(.init(L10n.string("The conversation could not be moved.")))
         }
 

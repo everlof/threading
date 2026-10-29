@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingExtensionKit
 
 /// The app owns capture authority and lifecycle; the C worker owns forwarding and payloads.
 /// Four processes and four queued calls per owner bound memory and blocking worker threads.
@@ -46,6 +47,7 @@ final class ProxyCaptureService {
             }
         }
         observations.observe(SessionProjectDidChange.self) { [weak self] in self?.release($0.sessionID) }
+        observations.observe(ExtensionsDidChange.self) { [weak self] _ in self?.releaseChangedMockCaptures() }
     }
 
     func call(_ request: TrafficRequest, for sessionID: SessionID) async -> MCPToolResult {
@@ -56,16 +58,28 @@ final class ProxyCaptureService {
             if case .start(let arguments) = request {
                 guard !revokingClientAccess else { return .failure("Client access is being revoked. Retry after it finishes.") }
                 let scope = try ProxyLaunchScope(arguments)
+                let mockRules: [ExtensionTrafficMock]
+                if let identifier = scope.mockExtension {
+                    guard let declared = ExtensionManager.shared.trafficMocks(for: identifier) else {
+                        return .failure("mock_extension must name an enabled extension with declared response fixtures.")
+                    }
+                    mockRules = declared
+                } else {
+                    mockRules = []
+                }
                 if let existing = workers[sessionID] {
                     guard existing.scope == scope else {
                         return .failure("A capture with a different scope is retained in this session. Call traffic_stop with release=true before creating a new scope; retained exchanges are not silently discarded.")
+                    }
+                    guard existing.mockRules == mockRules else {
+                        return .failure("This extension's response fixtures changed. Release this capture and start it again.")
                     }
                     worker = existing
                 } else {
                     guard workers.count + draining.count < 4 else { return .failure("Four sessions already own captures. Release one capture with traffic_stop(release=true).") }
                     let lease = UUID()
                     clientLeases[sessionID] = lease
-                    worker = ProxyProcess(scope: scope, configuration: configuration) { [weak self] requests in
+                    worker = ProxyProcess(scope: scope, configuration: configuration, mockRules: mockRules) { [weak self] requests in
                         Task { @MainActor in self?.receiveClients(requests, owner: sessionID, lease: lease) }
                     }
                     workers[sessionID] = worker
@@ -100,6 +114,17 @@ final class ProxyCaptureService {
         worker.cancel { [weak self] in
             Task { @MainActor in self?.draining.removeValue(forKey: identity) }
         }
+    }
+
+    private func releaseChangedMockCaptures() {
+        let affected = workers.compactMap { sessionID, worker -> SessionID? in
+            guard let identifier = worker.scope.mockExtension,
+                  ExtensionManager.shared.trafficMocks(for: identifier) != worker.mockRules else {
+                return nil
+            }
+            return sessionID
+        }
+        for sessionID in affected { release(sessionID) }
     }
 
     private func receiveClients(_ snapshot: ProxyClientSnapshot, owner: SessionID, lease: UUID) {

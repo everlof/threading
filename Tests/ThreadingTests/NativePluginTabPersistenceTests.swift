@@ -116,7 +116,7 @@ final class NativePluginTabPersistenceTests: HostedStoreTestCase {
             sections: [
                 .init(identifier: "notes", title: "Notes", command: nil),
                 .init(identifier: "history", title: "History", command: nil)
-            ], verifiedInstalledIdentity: nil
+            ], routes: [], verifiedInstalledIdentity: nil
         )
         CommandRegistry.shared.replaceNativePluginBundles([bundle], paneDescriptors: [descriptor])
         var saved = route()
@@ -165,6 +165,7 @@ final class NativePluginTabPersistenceTests: HostedStoreTestCase {
         let descriptor = NativePluginPaneDescriptor(
             bundleURL: bundle, pluginIdentifier: "example.delayed",
             sections: [.init(identifier: "history", title: "History", command: nil)],
+            routes: [],
             verifiedInstalledIdentity: nil
         )
         CommandRegistry.shared.replaceNativePluginBundles([bundle], paneDescriptors: [descriptor])

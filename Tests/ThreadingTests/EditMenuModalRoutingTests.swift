@@ -15,7 +15,7 @@ final class EditMenuModalRoutingTests: XCTestCase {
 
     private enum Fixture {
         static let text = "ANDROIDNETWORK"
-        /// Borderless and parked off every display, so the modal session orders a real window
+        /// Parked off every display, so the modal session orders a real, keyable window
         /// front without anything appearing on screen and the class stays in `fast`.
         static let parkedFrame = NSRect(x: -10_000, y: -10_000, width: 320, height: 80)
         static let fieldFrame = NSRect(x: 10, y: 10, width: 240, height: 24)
@@ -84,7 +84,7 @@ final class EditMenuModalRoutingTests: XCTestCase {
         let menu = try installShippingMenu()
         let panel = NSPanel(
             contentRect: Fixture.parkedFrame,
-            styleMask: [.borderless],
+            styleMask: [.titled],
             backing: .buffered,
             defer: false
         )

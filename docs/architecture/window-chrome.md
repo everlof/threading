@@ -178,6 +178,11 @@ The window uses `.fullSizeContentView` with a transparent, hidden title bar, so 
 runs the full height and the traffic lights float over it. The window title stays `Threading`,
 since it is only surfaced where macOS names the window (Mission Control, the Window menu).
 
+`TitlebarActionWindow` inherits `BrowserHostingWindow`, also used directly by detached pane
+windows. Its first-responder boundary keeps agent-driven WebKit DOM focus from taking the
+keyboard from the composer; ordinary user dispatch and explicit password handoff still work.
+The page-scoped lifetime and bounded lookup are documented in [agent-browser.md](agent-browser.md).
+
 The outer split owns the project sidebar and the docking workspace. Inside that workspace,
 `contentSplitController` owns stable conversation and display branches, so the existing panel
 toggle, width persistence and collapse gesture still operate on the whole right-hand branch.
@@ -1225,7 +1230,9 @@ branches. It also interprets a full-width or leading-tab shape, authored tab wid
 ordered visible-button set. `leading` keeps Aqua's complete traffic-light cluster at the start;
 `split` gives Close its classic-Mac leading exception; `bookends`
 instead preserves authored order by leading with the first visible operation and trailing the
-rest. A leading tab owns a fixed-width layout guide: title and buttons
+rest. Within either cluster Close takes the outer edge — first when leading, last when trailing —
+because the default list is Windows order and a leading cluster kept it put Close third
+(`ButtonPlacement.clusters(of:)`; see themes.md, 2026-10-28). A leading tab owns a fixed-width layout guide: title and buttons
 centre within the yellow tab while its remaining top shoulder stays transparent. The frame
 draws the rectangular application body below it, and `WindowChromeCoordinator` makes the
 window backing nonopaque only for that shape so the system shadow follows the silhouette.

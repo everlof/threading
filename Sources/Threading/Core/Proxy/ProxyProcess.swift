@@ -2,6 +2,7 @@ import Foundation
 import Security
 import CryptoKit
 import Darwin
+import ThreadingExtensionKit
 
 struct ProxyLaunchScope: Equatable, Sendable {
     let hosts: [String]
@@ -10,6 +11,7 @@ struct ProxyLaunchScope: Equatable, Sendable {
     let listenAddress: String
     let clientAddress: String
     let asksClients: Bool
+    let mockExtension: String?
 
     init(_ arguments: TrafficStartArguments) throws {
         guard let hosts = arguments.hosts, hosts.count <= 16, Set(hosts).count == hosts.count else {
@@ -30,6 +32,10 @@ struct ProxyLaunchScope: Equatable, Sendable {
         guard arguments.clientAddress == nil || arguments.listenAddress != nil else {
             throw ProxyProcess.Failure.message("Supply listen_address (Mac IPv4) for device capture with connection approval, or omit both addresses for local capture.")
         }
+        if let mockExtension = arguments.mockExtension,
+           !ExtensionIdentifierRules.isReverseDNSIdentifier(mockExtension) {
+            throw ProxyProcess.Failure.message("mock_extension must be an exact extension identifier.")
+        }
         let listener = arguments.listenAddress ?? "127.0.0.1"
         let client = arguments.clientAddress ?? "127.0.0.1"
         guard Self.isLocalIPv4(listener), Self.isLocalIPv4(client) else {
@@ -41,6 +47,7 @@ struct ProxyLaunchScope: Equatable, Sendable {
         listenAddress = listener
         clientAddress = client
         asksClients = arguments.listenAddress != nil && arguments.clientAddress == nil
+        mockExtension = arguments.mockExtension
     }
 
     static func isLocalIPv4(_ address: String) -> Bool {
@@ -104,6 +111,7 @@ final class ProxyProcess: @unchecked Sendable {
         }
     }
     let scope: ProxyLaunchScope
+    let mockRules: [ExtensionTrafficMock]
     private let configuration: Configuration
     private let queue = DispatchQueue(label: "codes.threading.proxy.process", qos: .utility)
     private let cancellation = NSLock()
@@ -124,9 +132,11 @@ final class ProxyProcess: @unchecked Sendable {
     private var clientRevision: UInt64 = 0
     private let clientsChanged: @Sendable (ProxyClientSnapshot) -> Void
 
-    init(scope: ProxyLaunchScope, configuration: Configuration, clientsChanged: @escaping @Sendable (ProxyClientSnapshot) -> Void = { _ in }) {
+    init(scope: ProxyLaunchScope, configuration: Configuration, mockRules: [ExtensionTrafficMock] = [],
+         clientsChanged: @escaping @Sendable (ProxyClientSnapshot) -> Void = { _ in }) {
         self.scope = scope
         self.configuration = configuration
+        self.mockRules = mockRules
         setupScript = configuration.setupScript
         self.clientsChanged = clientsChanged
     }
@@ -276,6 +286,18 @@ final class ProxyProcess: @unchecked Sendable {
             throw Failure.message("Proxy MCP initialization failed.")
         }
         try send(["jsonrpc": "2.0", "method": "notifications/initialized"], deadline: .now() + 5)
+        if !mockRules.isEmpty {
+            let encoded = try JSONEncoder().encode(mockRules)
+            guard encoded.count <= 48 * 1_024,
+                  let rules = try JSONSerialization.jsonObject(with: encoded) as? [[String: Any]] else {
+                throw Failure.message("The extension's mock responses exceed the proxy limit.")
+            }
+            let response = try rpc("threading/setMocks", params: ["rules": rules])
+            guard let result = response["result"] as? [String: Any],
+                  result["count"] as? Int == mockRules.count else {
+                throw Failure.message("The proxy rejected this extension's mock responses.")
+            }
+        }
         if publicCertificate != nil {
             let response = try rpc("tools/call", params: ["name": "traffic_certificate", "arguments": [:]])
             guard let result = response["result"] as? [String: Any], let items = result["content"] as? [[String: Any]],
@@ -319,6 +341,8 @@ final class ProxyProcess: @unchecked Sendable {
         data["listen_address"] = scope.listenAddress
         data["client_address"] = scope.asksClients ? NSNull() : scope.clientAddress as Any
         data["client_admission"] = scope.asksClients ? "ask" : "fixed"
+        data["mock_extension"] = scope.mockExtension.map { $0 as Any } ?? NSNull()
+        data["mock_count"] = mockRules.count
         let localOnly = scope.listenAddress.hasPrefix("127.")
         data["routing"] = localOnly ? "loopback" : "device"
         if !localOnly, let port = data["port"] as? Int, port > 0 {

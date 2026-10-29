@@ -328,6 +328,78 @@ final class AppIconRenderTests: XCTestCase {
         )
     }
 
+    /// A 256-pixel logo used to stand at its own size — a quarter of the canvas, under half the
+    /// box it was given — because a mark was never enlarged. The canvas is never presented above
+    /// `largestPresentedTile`, so filling the box costs nothing anyone can see.
+    func testASmallMarkFillsTheBoxItIsGiven() throws {
+        let theme = AppThemeStyles.cyberpunk
+        let appearance = try XCTUnwrap(theme.mode.appearance)
+        let recipe = try XCTUnwrap(GeneratedAppIcon.Recipe(theme: theme, appearance: appearance))
+        let mark = try XCTUnwrap(bitmapMark(side: 256, colour: .white, disk: false))
+        let image = try XCTUnwrap(GeneratedAppIcon.image(for: theme, appearance: appearance, mark: mark))
+        let raster = try XCTUnwrap(rasterize(image, side: Render.sheetSide))
+
+        // Nine tenths of the way to the safe area's edge: the mark's ink once it fills its box,
+        // the plate while it stood at 256 pixels (an eighth of the canvas from the centre).
+        let reach = GeneratedAppIcon.Layout.contributedMarkSafeSide / GeneratedAppIcon.canvasSide / 2 * 0.9
+        XCTAssertGreaterThan(reach, 256 / GeneratedAppIcon.canvasSide / 2, "the sample must lie beyond the old extent")
+        let inside = try XCTUnwrap(sample(raster, at: CGPoint(x: 0.5 + reach, y: 0.5)))
+        XCTAssertGreaterThan(difference(inside, recipe.ground), 0.5, "the mark stopped short of its box")
+    }
+
+    /// The reviewed theme's dark Dock tile was a brown mark on a brown-black plate. A mark that
+    /// disappears into its plate is identity art lost, so the host rims it in the label.
+    func testAMarkThatVanishesIntoItsPlateIsRimmedInTheLabel() throws {
+        let theme = try XCTUnwrap(AppThemeStyles.all.first { theme in
+            guard let dark = AppTheme.VariantKind.dark.appearance else { return false }
+            return theme.availableVariants.contains(.dark) && theme.material(for: dark).glow == nil
+        }, "a dark stock style without a glow, so no shadow tints the rim")
+        let appearance = try XCTUnwrap(AppTheme.VariantKind.dark.appearance)
+        let recipe = try XCTUnwrap(GeneratedAppIcon.Recipe(theme: theme, appearance: appearance))
+        let side: CGFloat = 512
+        let mark = try XCTUnwrap(bitmapMark(side: Int(side), colour: recipe.ground, disk: true))
+        let image = try XCTUnwrap(GeneratedAppIcon.image(for: theme, appearance: appearance, mark: mark))
+        let raster = try XCTUnwrap(rasterize(image, side: Int(GeneratedAppIcon.canvasSide)))
+
+        // Where the rim lands: the disk's edge plus half the rim. The mark is rimmed at the
+        // pixels it fills at the tile's largest presentation, then fitted into the safe area.
+        let working = min(side, GeneratedAppIcon.Layout.minimumSharpMarkPixels)
+        let rim = (working * ThemeArtSeparation.rimWidthRatio).rounded(.up)
+        let scale = min(
+            GeneratedAppIcon.Layout.contributedMarkSafeSide / (working + rim * 2),
+            GeneratedAppIcon.Layout.maximumMarkEnlargement
+        )
+        let middleOfRim = (working * Self.diskRadiusRatio + rim / 2) * scale
+        let inRim = try XCTUnwrap(sample(raster, at: CGPoint(x: 0.5 + middleOfRim / GeneratedAppIcon.canvasSide, y: 0.5)))
+        XCTAssertLessThan(difference(inRim, recipe.label), 0.1, "\(theme.name)'s vanishing mark was not rimmed")
+    }
+
+    private static let diskRadiusRatio: CGFloat = 0.4
+
+    /// A bitmap mark with real pixels — a filled square, or a disk on transparency — so its
+    /// pixel size is what the renderer measures.
+    private func bitmapMark(side: Int, colour: NSColor, disk: Bool) -> NSImage? {
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil,
+                width: side,
+                height: side,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+        context.setFillColor((colour.usingColorSpace(.sRGB) ?? colour).cgColor)
+        let bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        if disk {
+            let radius = CGFloat(side) * Self.diskRadiusRatio
+            context.fillEllipse(in: bounds.insetBy(dx: bounds.midX - radius, dy: bounds.midY - radius))
+        } else {
+            context.fill(bounds)
+        }
+        return context.makeImage().map { NSImage(cgImage: $0, size: NSSize(width: side, height: side)) }
+    }
+
     /// A filled square in a colour no stock theme states, so it cannot be confused with a
     /// plate or an accent when the pixels are classified.
     private func squareMark(side: CGFloat = 512) -> NSImage {

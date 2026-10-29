@@ -1,5 +1,6 @@
 import AppKit
 import ThreadingDesignKit
+import ThreadingPluginKit
 
 /// Two independent captures inside the session's one Device Logs workspace. A tab is a view
 /// choice, not a capture lifetime: only hiding the whole workspace stops the opened readers.
@@ -9,6 +10,7 @@ final class DeviceLogWorkspaceViewController: NSViewController {
 
     private let sessionID: String?
     private let toolPath: String?
+    private let deviceServices: (any PluginDeviceServices)?
     /// The session's checkout, for the Bluetooth tab's `.threading/bluetooth.yaml`.
     private let checkoutPath: String?
     private var preferredMachineID: String?
@@ -47,12 +49,18 @@ final class DeviceLogWorkspaceViewController: NSViewController {
     var discover: ((@escaping ([DeviceLogSourceOption]) -> Void) -> Void)?
     var sourceFactory: ((DeviceLogSourceOption, DeviceLogSourceOption.Route, String?) -> DeviceLogRowSource?)?
 
+    var regularPaneForTools: DeviceLogPaneViewController { panes[.regular] ?? makePane(.regular) }
+
     var selectedPane: DeviceLogPaneViewController? { panes[selectedStream] }
 
-    init(sessionID: String?, toolPath: String?, preferredMachineID: String?, checkoutPath: String? = nil) {
+    init(
+        sessionID: String?, toolPath: String?, preferredMachineID: String?,
+        checkoutPath: String? = nil, deviceServices: (any PluginDeviceServices)? = nil
+    ) {
         self.sessionID = sessionID
         self.checkoutPath = checkoutPath
         self.toolPath = toolPath
+        self.deviceServices = deviceServices
         self.preferredMachineID = preferredMachineID
         super.init(nibName: nil, bundle: nil)
     }
@@ -140,6 +148,7 @@ final class DeviceLogWorkspaceViewController: NSViewController {
         let pane = DeviceLogPaneViewController(
             owningSessionID: sessionID,
             preferredPymobiledevice3Path: toolPath,
+            deviceServices: deviceServices,
             preferredMachineID: selectedPane?.selectedDeviceID ?? preferredMachineID,
             stream: stream,
             definitionsCheckout: checkoutPath
@@ -147,6 +156,7 @@ final class DeviceLogWorkspaceViewController: NSViewController {
         pane.captureManagedByWorkspace = true
         pane.sourceFactory = sourceFactory
         pane.requestDiscovery = { [weak self] in self?.reloadSources() }
+        pane.requestSourceRefresh = { [weak self] in self?.reloadSources(force: true) }
         pane.onRowSelected = { [weak self] row in self?.revealLinked(to: row, from: stream) }
         panes[stream] = pane
         addChild(pane)
@@ -187,18 +197,25 @@ final class DeviceLogWorkspaceViewController: NSViewController {
         return linked.row
     }
 
-    private func reloadSources() {
-        guard isPresented else { return }
+    private func reloadSources(force: Bool = false) {
+        guard isPresented || force else { return }
+        panes.values.forEach { $0.beginSourceDiscovery() }
         discoveryGeneration += 1
         let generation = discoveryGeneration
         let completion: @Sendable ([DeviceLogSourceOption]) -> Void = { [weak self] sources in
             MainActor.assumeIsolated {
-                guard let self, self.isPresented, self.discoveryGeneration == generation else { return }
+                guard let self, self.isPresented || force, self.discoveryGeneration == generation else { return }
                 self.discoveredSources = sources
                 self.panes.values.forEach { $0.acceptSources(sources) }
             }
         }
         if let discover { discover(completion) }
-        else { DeviceLogSourceCatalog.discover(preferredPymobiledevice3Path: toolPath, completion: completion) }
+        else {
+            DeviceLogSourceCatalog.discover(
+                preferredPymobiledevice3Path: toolPath,
+                deviceServices: deviceServices,
+                completion: completion
+            )
+        }
     }
 }

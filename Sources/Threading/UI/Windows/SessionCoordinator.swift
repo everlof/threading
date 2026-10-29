@@ -42,6 +42,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     let sidebar: ProjectSidebarViewController
     let container: TerminalContainerViewController
     let environment: AppEnvironment
+    let checkoutCoordinator: SessionCheckoutCoordinator
+    let executionLocusTracker: SessionExecutionLocusTracker
     let onPresentationChanged: () -> Void
     private let archiveStateSetter: ArchiveStateSetter
     /// Window composition routes sidebar receipts through the swappable navigator shell. Tests
@@ -74,6 +76,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         container: TerminalContainerViewController,
         environment: AppEnvironment,
         onPresentationChanged: @escaping () -> Void,
+        checkoutCoordinator: SessionCheckoutCoordinator = .shared,
+        executionLocusTracker: SessionExecutionLocusTracker = .shared,
         archiveStateSetter: @escaping ArchiveStateSetter = { archived, sessionID, completion in
             ProviderArchiveSync.shared.setArchived(
                 archived,
@@ -86,6 +90,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         self.sidebar = sidebar
         self.container = container
         self.environment = environment
+        self.checkoutCoordinator = checkoutCoordinator
+        self.executionLocusTracker = executionLocusTracker
         self.onPresentationChanged = onPresentationChanged
         self.archiveStateSetter = archiveStateSetter
         self.toastPresenter = toastPresenter ?? { sidebar.presentToast($0) }
@@ -109,7 +115,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // policy decision with a confirmation and a receipt attached, so it is decided here.
         // See `reconcileObservedExecutionDrift(_:)`.
         appEvents.observe(SessionExecutionDriftDidChange.self) { [weak self] event in
-            self?.reconcileObservedExecutionDrift(event.sessionID, phase: event.phase)
+            self?.reconcileObservedExecutionDrift(event)
         }
         appEvents.observe(SessionCheckoutDidMove.self) { [weak self] event in
             guard event.authorityBasis == .observedExecution,
@@ -259,8 +265,11 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// Ends a session's agent and releases its terminal, keeping the row in the sidebar to be
     /// resumed. Cmd+W and the row's `⋯` menu both land here so they cannot drift — the menu
     /// used to discard the process directly, skipping the confirmation Cmd+W asked for.
-    func closeSession(_ sessionID: SessionID) {
-        guard confirmCloseIfRunning(sessionID: sessionID) else { return }
+    ///
+    /// `confirming: false` is the sidebar menu's Option alternate, "Close Session Without
+    /// Asking": the held key and the title it produced stand in for the question.
+    func closeSession(_ sessionID: SessionID, confirming: Bool = true) {
+        guard !confirming || confirmCloseIfRunning(sessionID: sessionID) else { return }
 
         container.closeTerminal(for: sessionID)
         sidebar.refreshRows()
@@ -907,7 +916,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// which read as the move having done nothing.
     func moveSession(_ sessionID: SessionID, to account: AgentAccount) {
         guard confirmMoveIfRunning(sessionID: sessionID, to: account) else { return }
-        moveSessionWithoutConfirmation(sessionID, to: account)
+        Task { await moveSessionWithoutConfirmation(sessionID, to: account) }
     }
 
     /// The same move, for a caller whose own control already named the whole action.
@@ -927,15 +936,17 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         _ sessionID: SessionID,
         to account: AgentAccount,
         alertingOnFailure: Bool = true
-    ) -> Bool {
-        switch SessionMigration.move(sessionID: sessionID, to: account) {
+    ) async -> Bool {
+        switch await SessionMigration.move(sessionID: sessionID, to: account) {
         case .success:
             container.reopenIfShowing(sessionID: sessionID)
             sidebar.reload()
             onPresentationChanged()
             return true
         case .failure(let error):
-            container.reopenIfShowing(sessionID: sessionID)
+            if !environment.agentRuntime.isRunning(sessionID: sessionID) {
+                container.reopenIfShowing(sessionID: sessionID)
+            }
             guard alertingOnFailure else { return false }
             let alert = ThemedAlert()
             alert.messageText = L10n.string("Couldn't move the conversation")

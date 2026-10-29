@@ -17,14 +17,14 @@ open class NSEvent {
     public enum EventType: Int, Sendable {
         case leftMouseDown, leftMouseUp, leftMouseDragged, mouseMoved, rightMouseDown, keyDown
         case otherMouseDown
-        case mouseEntered, mouseExited, scrollWheel
+        case mouseEntered, mouseExited, scrollWheel, flagsChanged
 
         var mask: EventTypeMask { EventTypeMask(rawValue: 1 << rawValue) }
         var carriesPointer: Bool {
             switch self {
             case .leftMouseDown, .leftMouseUp, .leftMouseDragged, .mouseMoved,
                  .rightMouseDown, .otherMouseDown, .mouseEntered, .mouseExited, .scrollWheel: true
-            case .keyDown: false
+            case .keyDown, .flagsChanged: false
             }
         }
     }
@@ -39,6 +39,7 @@ open class NSEvent {
         public static let rightMouseDown = EventTypeMask(rawValue: 1 << EventType.rightMouseDown.rawValue)
         public static let otherMouseDown = EventTypeMask(rawValue: 1 << EventType.otherMouseDown.rawValue)
         public static let keyDown = EventTypeMask(rawValue: 1 << EventType.keyDown.rawValue)
+        public static let flagsChanged = EventTypeMask(rawValue: 1 << EventType.flagsChanged.rawValue)
         public static let scrollWheel = EventTypeMask(rawValue: 1 << EventType.scrollWheel.rawValue)
     }
 
@@ -65,6 +66,7 @@ open class NSEvent {
     }
     private static var monitors: [Monitor] = []
     private static var nextMonitorID = 0
+    public private(set) static var modifierFlags: ModifierFlags = []
 
     private nonisolated let storedType: EventType
     private weak var storedWindow: NSWindow?
@@ -164,6 +166,7 @@ open class NSEvent {
     /// A handler may remove itself or a later monitor. The snapshot preserves order; membership
     /// is checked before each call so removed monitors are not invoked later in the same event.
     public static func dispatchLocalMonitors(_ event: NSEvent) -> NSEvent? {
+        modifierFlags = event.modifierFlags
         var current: NSEvent? = event
         let snapshot = monitors
         for monitor in snapshot {

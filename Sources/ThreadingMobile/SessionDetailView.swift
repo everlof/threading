@@ -1411,6 +1411,7 @@ struct TerminalRemoteView: View {
     @State private var showsDirectAttachmentNotice = false
     @State private var directAttachmentPhotoItems: [PhotosPickerItem] = []
     @State private var isPickingDirectAttachmentPhotos = false
+    @State private var isTakingDirectAttachmentPhoto = false
     @State private var isImportingDirectAttachmentFiles = false
     @State private var isChoosingDirectAttachmentSource = false
     @State private var pendingDirectAttachmentSource: DirectAttachmentSource?
@@ -1655,6 +1656,7 @@ struct TerminalRemoteView: View {
             guard !isPresented, let source = pendingDirectAttachmentSource else { return }
             pendingDirectAttachmentSource = nil
             switch source {
+            case .camera: isTakingDirectAttachmentPhoto = true
             case .photos: isPickingDirectAttachmentPhotos = true
             case .files: isImportingDirectAttachmentFiles = true
             case .clipboard: pasteClipboardIntoTerminal()
@@ -1671,6 +1673,7 @@ struct TerminalRemoteView: View {
                 },
             ]
         )
+        .mobileCameraCapture(isPresented: $isTakingDirectAttachmentPhoto, tray: directAttachmentTray)
         .photosPicker(
             isPresented: $isPickingDirectAttachmentPhotos,
             selection: $directAttachmentPhotoItems,
@@ -1979,6 +1982,9 @@ struct TerminalRemoteView: View {
                 pendingDirectAttachmentSource = .clipboard
             })
         }
+        actions.append(ThemedDialogAction("Take Photo") {
+            pendingDirectAttachmentSource = .camera
+        })
         actions.append(ThemedDialogAction("Photo Library") {
             pendingDirectAttachmentSource = .photos
         })
@@ -2175,6 +2181,7 @@ struct TerminalRemoteView: View {
 }
 
 private enum DirectAttachmentSource {
+    case camera
     case photos
     case files
     case clipboard
@@ -2250,11 +2257,11 @@ struct TerminalLineComposer: View {
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var attachmentPicksInFlight = 0
     @State private var isPickingPhotos = false
+    @State private var isTakingPhoto = false
     @State private var isImportingFiles = false
-    /// Whether the clipboard is holding a file worth offering. A `Menu` has no moment of
-    /// opening to hang the question on, so it is answered when this composer appears and again
-    /// whenever the pasteboard could have changed — rather than on every body evaluation, which
-    /// a live terminal performs constantly.
+    @State private var isChoosingAttachmentSource = false
+    @State private var pendingAttachmentSource: DirectAttachmentSource?
+    /// Read only when the source chooser opens, before any clipboard bytes are requested.
     @State private var clipboardOffersFiles = false
     /// The editor is UIKit-owned, so first-responder truth comes back through a plain binding.
     @State private var draftIsFocused = false
@@ -2333,21 +2340,23 @@ struct TerminalLineComposer: View {
         .onChange(of: draftIsFocused) { _, focused in
             if focused { bridge.noteKeyboardWanted() }
         }
-        .onAppear(perform: refreshClipboardOffer)
-        // A pasteboard written in another app raises no notification here, so returning to the
-        // foreground is the moment that has to ask again; the local notification covers a copy
-        // made inside this app without waiting for a trip through the switcher.
-        .onReceive(
-            NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)
-        ) { _ in refreshClipboardOffer() }
-        .onReceive(
-            NotificationCenter.default.publisher(
-                for: UIApplication.didBecomeActiveNotification
-            )
-        ) { _ in refreshClipboardOffer() }
+        .onChange(of: isChoosingAttachmentSource) { _, isPresented in
+            guard !isPresented, let source = pendingAttachmentSource else { return }
+            pendingAttachmentSource = nil
+            switch source {
+            case .camera: isTakingPhoto = true
+            case .photos: isPickingPhotos = true
+            case .files: isImportingFiles = true
+            case .clipboard:
+                if !stageClipboardFiles() {
+                    submissionNotice = MobileL10n.string("There’s nothing on the clipboard to attach.")
+                }
+            }
+        }
         .onChange(of: photoItems) { _, items in
             Task { await loadPhotos(items) }
         }
+        .mobileCameraCapture(isPresented: $isTakingPhoto, tray: attachmentTray)
         .photosPicker(
             isPresented: $isPickingPhotos,
             selection: $photoItems,
@@ -2373,36 +2382,13 @@ struct TerminalLineComposer: View {
     }
 
     private var attachmentMenu: some View {
-        Menu {
-            // Text pastes into the draft itself, at the insertion point, the way the system has
-            // always done it. This entry is for what that cannot carry: a picture has no text to
-            // insert, and a copied one is in neither picker.
-            if clipboardOffersFiles {
-                Button {
-                    guard canAddAttachments else { return }
-                    if !stageClipboardFiles() {
-                        refreshClipboardOffer()
-                        submissionNotice = MobileL10n.string("There’s nothing on the clipboard to attach.")
-                    }
-                } label: {
-                    Label(
-                        MobileL10n.string("From Clipboard"),
-                        systemImage: "doc.on.clipboard"
-                    )
-                }
-            }
-            // A PhotosPicker inside a Menu is torn down with the menu before its sheet can
-            // present; the item requests presentation and .photosPicker below shows it.
-            Button {
-                isPickingPhotos = true
-            } label: {
-                Label(MobileL10n.string("Photo Library"), systemImage: "photo.on.rectangle")
-            }
-            Button {
-                isImportingFiles = true
-            } label: {
-                Label("Files", systemImage: "folder")
-            }
+        Button {
+            guard canAddAttachments else { return }
+            clipboardOffersFiles = clipboard.hasFiles
+            // A context menu can retain its old anchor while the editor's keyboard returns,
+            // leaving its choices underneath the keyboard. Hand focus to the source chooser.
+            draftIsFocused = false
+            isChoosingAttachmentSource = true
         } label: {
             Image(systemName: "paperclip")
                 .font(.headline)
@@ -2411,8 +2397,34 @@ struct TerminalLineComposer: View {
                     height: MobileDesign.Size.minimumTapTarget
                 )
         }
+        .buttonStyle(.plain)
         .disabled(!canAddAttachments)
         .accessibilityLabel(MobileL10n.string("Attachments"))
+        .themedConfirmationDialog(
+            "Attachments",
+            isPresented: $isChoosingAttachmentSource,
+            actions: attachmentSourceActions
+        )
+    }
+
+    private var attachmentSourceActions: [ThemedDialogAction] {
+        var actions: [ThemedDialogAction] = []
+        if clipboardOffersFiles {
+            actions.append(ThemedDialogAction("From Clipboard") {
+                pendingAttachmentSource = .clipboard
+            })
+        }
+        actions.append(ThemedDialogAction("Take Photo") {
+            pendingAttachmentSource = .camera
+        })
+        actions.append(ThemedDialogAction("Photo Library") {
+            pendingAttachmentSource = .photos
+        })
+        actions.append(ThemedDialogAction("Files") {
+            pendingAttachmentSource = .files
+        })
+        actions.append(ThemedDialogAction("Cancel", role: .cancel))
+        return actions
     }
 
     private var canAddAttachments: Bool {
@@ -2491,10 +2503,6 @@ struct TerminalLineComposer: View {
             submissionNotice = tray.notice
         }
         attachmentTray = tray
-    }
-
-    private func refreshClipboardOffer() {
-        clipboardOffersFiles = clipboard.hasFiles
     }
 
     /// The edit menu, keyboard Paste command and paperclip all stage through the same tray.

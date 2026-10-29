@@ -651,12 +651,25 @@ menu of what the project can start: **New Chat…** or **New Terminal**. (Clicki
 row itself opens the chat composer directly, so a new chat never needs the menu.) The **⋯**
 opens the project's actions, also available on **right-click**:
 - Rename Project…
-- Reveal in Finder
+- Reveal in Finder — hold **Option (⌥)** and it becomes **Copy Path**
 - Project Icon — see [Project icons](#project-icons)
 - Group Sessions by Branch (checked when on)
 - Headings for Lone Branches (shown while grouping is on)
 - Remove Project — deletes the project and every chat in it from Threading, after asking. Each
-  agent's own transcript stays on disk, so a chat can be imported again
+  agent's own transcript stays on disk, so a chat can be imported again. Hold **Option (⌥)** and
+  it becomes **Remove Project Without Asking**
+
+**Option alternates.** Holding **⌥** while a project or session menu is open renames some rows to a
+faster act, the way Finder's menus do: the row says exactly what pressing it will do, and letting
+go of the key puts it back. It works when ⌥ is already held as you right-click, with **Return**
+while the key is down, and from VoiceOver as an action on the row. The alternates are:
+
+| Row | With ⌥ held |
+|---|---|
+| Reveal in Finder (project) | Copy Path |
+| Remove Project | Remove Project Without Asking |
+| Close Session | Close Session Without Asking |
+| Delete Session | Delete Session Without Asking |
 
 Click the disclosure triangle to collapse a project. Expansion state is remembered, and a
 collapsed project shows how many chats and terminals it is hiding as a count at its trailing edge.
@@ -1578,6 +1591,8 @@ editor configured on that host.
 - Right-click > **Close Session**: ends the agent, leaving the session dormant and resumable
 - Right-click > **Delete Session**: removes it from the sidebar entirely, after asking — the
   agent's own transcript stays on disk and can be imported again, which is what the sheet says
+- Hold **⌥** with either menu open for **Close Session Without Asking** or **Delete Session
+  Without Asking** — see [Option alternates](#managing)
 
 ### Confirmations
 When a prompt is open, clicking its parent window brings Threading and the prompt forward,
@@ -1635,7 +1650,9 @@ Nothing else offers the checkbox. Anything that deletes for good — removing a 
 **deleting a session**, deleting an archived session or a theme, reclaiming build directories,
 clearing website data, running an extension command marked destructive, ending a Threading that
 has stopped responding or the agent processes a crashed one left behind — asks every time, and
-puts **Return** on Cancel rather than on the action. So does anything that grants access outside Threading: a
+puts **Return** on Cancel rather than on the action. The one way past it is deliberate: holding
+**⌥** in the sidebar's project or session menu turns Remove Project and Delete Session into
+**…Without Asking** rows, whose names already say what they skip. So does anything that grants access outside Threading: a
 website for the browser, a tool call, an unreviewed extension, or a shared chat link. Those
 prompts have their own narrower memory instead — "Always Allow This Host" is one host,
 "Allow for This Session" is one tool in one chat, and both are revocable in Settings.
@@ -1659,6 +1676,8 @@ first-prompt names.
 
 Rename with **Project > Rename Session…** (**Cmd+R**), via right-click in the sidebar, or by
 right-clicking inside the terminal and choosing **Rename Session…**.
+The current name opens selected: press **Cmd+C** to copy it or start typing to replace it.
+Clearing the field shows the **Name** placeholder; confirming an empty field removes your custom name.
 
 **Terminals name themselves after where they are and what they are doing.** A standalone
 terminal's row, and each shell tab in the drawer, shows the command currently running in it —
@@ -1721,8 +1740,8 @@ Asking an agent for a worktree goes through `create_session_worktree(branch, aut
 reason)`, which makes the checkout **and** moves the chat into it in one call. The branch may
 already exist or be new, and Threading chooses where the worktree lives so a repository's
 worktrees stay together on disk. This is the atomic route, not a requirement: a worktree made with
-ordinary Git is detected when the chat starts executing there and is then adopted into the
-sidebar in exactly the same way.
+ordinary Git is detected when a tool starts executing there. Select **Move Chat**, or ask the
+agent to call `set_session_checkout`, to adopt it into the sidebar.
 
 ### When a chat wanders
 
@@ -1737,14 +1756,16 @@ The hover card gains a **Working in** line, directly under the branch, whenever 
 That line appears for any disagreement, including one that can never be resolved by moving, such
 as an agent working in a different repository altogether.
 
-When the agent executes in one unambiguous checkout of the **same** repository, Threading waits for
-the active turn's final Git checkpoint. It shows one pending receipt, moves the chat, restarts the
-same conversation there, and replaces that receipt with a completion result. Repeated process
-samples do not create more receipts or change the pending destination. The checkout appears in
-the sidebar even when it was created with raw Git;
-an already-open Review or Overview tab is rebound to it too. **Always Ask** changes this into a
-band with a **Move Chat** button. **Same Repository** also permits moves proposed by the agent;
-the default still asks about those proposals while following work Threading directly observed.
+A tool process working in another checkout offers a **Move Chat** button. It never moves the
+parent chat automatically: a reviewer may inspect another agent's worktree, and a command may
+visit an old checkout temporarily. This holds under every Project authority setting. Selecting
+the button is an explicit move request and waits for the turn and background work to settle.
+
+A change reported by the parent runtime itself can still follow the Project authority policy.
+Threading waits for the final Git checkpoint, shows a pending receipt, moves the chat, and
+restarts the same conversation there. **Always Ask** requires the Move Chat button for this
+case too. Returning home cancels a deferred automatic move. Review and Overview tabs rebind to
+the destination after a committed move.
 
 ### Copying identifiers and paths
 Everything about a chat that is needed *elsewhere* sits in the right-click menu's **Copy ▸**
@@ -2449,16 +2470,19 @@ Choosing a login is when the number actually changes a decision — an account a
 week is a poor place to start a long task — so the composer shows it twice over:
 
 - **In the identity chip's menu**, the logins are filed under a heading per agent — the same
-  login name often exists on two of them — and each row's reading is laid out in **columns**
-  rather than written as a line. Every window gets its own column with a small bar and its
-  value, so one login's `7d` sits directly under the next one's and the accounts compare at a
-  glance instead of by reading. A plan with only a weekly window leaves the `5h` column empty,
-  which is how the shape itself tells you which windows a plan has. The plan name sits quietly
-  after the login's name, the reset countdown has the last column to itself, and a window a
-  single model meters separately (`7d Fable 89%`) goes on a second line, only on the rows that
-  have one. Everything stays monochrome while usage is comfortable; a bar and its value turn
+  login name often exists on two of them — and each row shows its windows as **two stacked
+  meters** at the right: `5h` beside the login's name, `7d` directly under it, on every row and
+  at the same spot, so the accounts compare at a glance down one column of bars. Each meter is a
+  bar for how much of the window is used, a thin **tick for how much of the window's time has
+  passed**, the percentage, and when that window resets (`13m`, `4d 2h`). Fill short of the tick
+  means you are using the window more slowly than time passes; fill past it means faster. A plan
+  with only a weekly window leaves the `5h` line empty, which is how the shape itself tells you
+  which windows a plan has. The plan name sits quietly after the login's name, and a window a
+  single model meters separately (`7d Fable 89%`) is written under the name, only on the rows
+  that have one. Everything stays monochrome while usage is comfortable; a bar and its value turn
   amber past 75% of their window and red past 92% — the same colours the toolbar pill uses, and
-  the numbers say the same thing in any ink. Point at a row for the whole reading in words.
+  the numbers say the same thing in any ink. A red window's reset time turns red too, since that
+  is when the login comes back. Point at a row for the whole reading in words.
 - **In the model chip's menu**, the account's own windows are stated once, in a header naming
   the login they belong to — they are the same under every model. Each model row then carries
   only a window the plan meters for *it* separately (`7d Fable 89% · resets in 15h`), with a
@@ -2990,7 +3014,7 @@ control does not produce a false confirmation. Photo, file and other system shee
 own feedback.
 
 **Attaching a photo or file from the phone.** The paperclip beside the plus attaches from your
-clipboard, photo library or Files — up to eight per message, images, MOV/MP4/M4V movies, PDFs,
+clipboard, camera, photo library or Files — up to eight per message, images, MOV/MP4/M4V movies, PDFs,
 HTML, archives and the common document formats. You can also paste a copied picture directly into
 the text area. Each
 one starts travelling to your Mac the moment you pick it, so the wait
@@ -3001,6 +3025,11 @@ a movie can play before it is sent. Send stays held
 until every attachment has arrived. Large photos are re-encoded smaller before sending, since an
 agent reading a screenshot or a photo of a screen gains nothing from a 12-megapixel original.
 A picture on its own is a valid message — you do not have to type anything with it.
+
+Choose **Take Photo** to photograph a device, screen or other debugging context. iOS asks for
+camera access when needed and lets you retake or accept the photo. Accepting stages it with your
+other attachments; it does not save a copy to Photos or send the message. Cancel leaves the draft
+unchanged. If access is denied, **Open Settings** takes you to the app's camera permission.
 
 Attachments arrive on the Mac exactly as they would if you had dropped them on its own composer:
 the agent gets the file's path in the prompt, and the file appears in the session's **Attachments**
@@ -3260,8 +3289,10 @@ these owner settings. Both apps need a version that supports the controls.
 
 While a capable Mac is working, choose **After this task** to queue a follow-up or **Send now**
 to join the current task when the provider supports it. The delivery row shows **Queued**,
-**Delivered to agent**, or **Working on this**, using the Mac's actual receipts. Tap the row to
-see the full list. Older Macs retain their ordinary send behavior.
+**Delivered to agent**, or **Working on this**, using the Mac's actual receipts. Its compact
+panel shows one preview line and a count of additional messages. Tap the arrow or anywhere in
+the panel to see the complete delivery summaries and list. Older Macs retain their ordinary send
+behavior.
 
 Tap the microphone in an empty composer to dictate a draft, or choose **Dictate message** from
 the attachment menu to add speech to existing text. Tap Stop, edit the words, then Send. Tapping
@@ -3396,8 +3427,8 @@ shows "Resuming on your Mac…" for as long as that takes. The New Session navig
 title above the connected Mac and state, matching the two-row chat navigation title.
 
 The prompt is a native iOS text area: touch and hold to use **Paste** at the insertion point.
-Its paperclip adds **From Clipboard** when the clipboard holds a picture or file, plus **Photo
-Library** and **Files**. You can attach up to eight items, each up to 24 MB; their strip shows
+Its paperclip adds **From Clipboard** when the clipboard holds a picture or file, plus **Take
+Photo**, **Photo Library** and **Files**. You can attach up to eight items, each up to 24 MB; their strip shows
 upload progress and Start waits until every item is ready. The Mac takes the complete set into
 the first prompt when the session starts, or leaves the draft and its attachments in place if
 creation is refused.
@@ -3656,7 +3687,10 @@ in this gallery, streamed from the Mac in small authenticated pieces, so even a 
 than the ordinary attachment download limit remains visible without loading the whole file. Tap
 the Share button to send or save the attachment currently on screen through the standard iOS share
 sheet; large movies are prepared from the same bounded stream, and the temporary phone copy is
-removed when the sheet closes. If an agent opens a
+removed when the sheet closes. Long-press an image for **Copy Image**, **Share…**, or **Save to
+Photos**. Copy keeps the original image data; Save to Photos asks for permission to add pictures
+only when you choose it. **Save to Files** is available in the share sheet. VoiceOver exposes
+the same image actions. If an agent opens a
 page, Threading does not pull you away from the chat. The account
 disc takes one quiet breath and keeps a small dot until you open Browser. Browser is a
 full-screen, full-width read-only follow view of the Mac tab. Close returns to Workspace. It
@@ -4339,17 +4373,49 @@ so the pane, its recorded history and the reader stay much lighter. Choose **All
 Debug too; the reader restarts at the new level and keeps the rows already on screen. Debug rows from
 before that choice were never read, so the recorded history does not contain them.
 
-To read an app's own logs in full, as Xcode's console shows them, choose **‹App› — full app logs
-(restarts the app)** in the same source menu. It is listed for each app you build and install
-yourself. Threading relaunches the app the way Xcode's Run does, so every `os_log` and `Logger` line
-the app writes arrives readable, with its `subsystem / category`, instead of as `<private>`.
+To watch one app, select its installed app in the source menu, or select its exact executable name in
+**All processes** (for example, **Ananke**). An app's **System** route observes its unified logs
+without relaunching it; **Console** can relaunch the app and may merge stdout and stderr;
+**App log** reads its saved log file. A system stream does not automatically contain ordinary
+`print()` output. The source's availability and capture status say what it can currently supply.
+An app can be listed before it emits a line; the process menu also includes processes observed
+in received rows. When available, rows retain the PID, bundle, subsystem, category and original
+line separately. Missing metadata stays missing.
 
-To watch one app, select its exact name in **All processes** (for example, **Ananke**).
-This scopes new buffered and recorded rows to that process, including when other system services
-mention the app in their messages. Changing process starts a new live buffer. **Matches only** is
-the default for text and level filtering: unrelated rows and fold markers are not shown.
-Choose **Show context** when you want neighbouring rows and expandable folds within that scope.
-The process menu is populated from observed logs, so an app appears after it emits a log line.
+Device, app/process, text, literal/regular-expression mode, level, subsystem and category choices
+form one shared panel filter. **Matches only** is the default: unrelated rows and fold markers
+are hidden. Choose **Show context** to include neighbouring rows and expandable folds within the
+selected app/process scope. Follow keeps the newest matching rows in view; pausing capture and
+stopping follow are separate choices. A source change can replace the live buffer, and the panel
+reports retained rows and dropped history rather than implying a complete recording.
+
+Literal text matches message, process, subsystem or category with ASCII letter case ignored;
+non-ASCII bytes compare exactly. Regular expressions use ICU case-insensitive matching. To keep
+the live stream responsive, regex examines only the first 4,096 characters of each field and
+stops cooperatively after 2 milliseconds per field, so later or expensive matches can be missed.
+The panel's regex projection also has a cooperative 250 millisecond aggregate budget. The
+returned state marks incomplete projections with `projection_limited`; contextual reads mark
+them with `output_truncated` too. Patterns are limited to 512 UTF-8 bytes. Different filter fields combine with AND; selected
+levels combine with OR. Reads include the context rows and expanded folds currently shown when
+**Show context** is active, with the scope stated in the returned panel state.
+
+Agents use that same panel through `plugin__devicelogs__state`, `configure`, `read`, `wait` and
+`reveal` (each has the `plugin__devicelogs__` prefix). An agent can select the exact device and app,
+set a filter once, read structured matching entries, wait for new matches, then highlight the
+exact rows it cites. The visible controls move with agent changes. Your manual edits are
+immediately authoritative; an agent using an old revision gets a refusal instead of overwriting
+them. Reads and waits leave the scroll position alone; reveal deliberately selects and scrolls
+to stable row identities. These tools use **Device Logs**, even if the separate Bluetooth tab
+was last selected. An agent can request **Rescan** through `state` with `refresh: true` after
+connecting a device or installing/restarting an app, then inspect catalog freshness while discovery
+finishes. See the [tool contract](docs/device-log-tools.md) for arguments and examples.
+
+`device_log_prepare` reveals the pane and can prepare a stdout/stderr tap. It explains the selected
+route's limitations; opening the pane alone does not prove that capture is connected. Preparing
+the tap builds a library, so you must apply its build/launch setting and rebuild/reinstall or
+relaunch the app before future output appears. Existing apps do not acquire a new tap merely by
+calling prepare. Current taps label stdout and stderr separately; older taps can provide merged
+console output. Linking the tap into a device app requires your consent.
 
 Threading does not bundle `pymobiledevice3`; installation is an explicit download into Threading's
 data folder and updates occur only when you press **Update**. If it is absent, too old, or the
@@ -4482,10 +4548,16 @@ Even without a file, the link's own events read as words under subsystem **Link*
 The format reference is
 [`docs/bluetooth-packet-definitions.md`](docs/bluetooth-packet-definitions.md).
 
-Agents can select it with `plugin__devicelogs__bluetooth` using the exact iPhone hardware UDID,
-which opens the Bluetooth tab if it is not already open, then read it with the existing `visible`, `search` and `time_range` tools; `linked` finds the
-packet an app log line is about, or the reverse. Hiding the pane stops
-capture. To keep a full raw capture for PacketLogger or Wireshark, use the external tool separately:
+Agents use `plugin__devicelogs__bluetooth_state`, `bluetooth_configure`, `bluetooth_read`,
+`bluetooth_wait` and `bluetooth_reveal` to control the same Bluetooth panel you see. These names
+target Bluetooth explicitly, including after a tab switch. Configuration selects an exact phone,
+text and packet filters; state reports the capture and project-definition status. Reads preserve
+your scroll position; reveal selects an exact returned packet. Your manual filter changes are
+reported to the agent on its next read. The older `plugin__devicelogs__bluetooth` capture shortcut
+still accepts the exact hardware UDID; `visible`, `search` and `time_range` operate on the selected
+stream, and `linked` finds a packet's related app log line or the reverse.
+An active Bluetooth capture keeps recording while hidden; closing its tab or session stops it.
+To keep a full raw capture for PacketLogger or Wireshark, use the external tool separately:
 `idevicebtlogger -u <UDID> -x -f pcap capture.pcap` (add `-n` for Wi-Fi).
 
 ### Overview
@@ -4877,6 +4949,10 @@ over deliberately rather than detected.
 **View ▸ Browser** (Cmd+Shift+B) opens a real browser tab belonging to the current session.
 You can also ask the agent to browse a site before opening the tab yourself; its first navigation
 creates the tab.
+
+You can keep typing in chat while the agent opens tabs, clicks or fills in the browser. These
+actions keep keyboard focus in your draft. Opening a browser yourself still focuses its address
+bar; an explicit password handoff brings the browser forward for your private input.
 
 Agents use the current pane or window size for browsing and ordinary screenshots, keeping any
 viewport you selected. They change dimensions when you ask or for a specific responsive or visual
@@ -5874,7 +5950,10 @@ A theme can have a **character**, too — ask your agent for one and it can give
   phone, never on a guest's; lines showing an extension's report stay on the Mac). The screen's
   own hint stays beneath it. An agent can see a theme's welcome before applying it: the theme
   preview draws it under each window.
-- **A Dock icon** made from the theme's logo, drawn on the theme's own plate.
+- **A Dock icon** made from the theme's logo, drawn on the theme's own plate and filling it. If
+  the logo would disappear into the plate — a dark logo on a dark theme — Threading draws a thin
+  rim around it in the theme's text colour so the app stays easy to find. The logo at the top of
+  the sidebar gets the same rim when it would vanish into the header.
 - **Pictures pinned to an edge.** A sidebar or pane picture can stand on the bottom edge (or
   any edge or corner) at any window size, rather than always being centred.
 
@@ -6003,7 +6082,8 @@ terminal marks the cell you are on. Everything still works the way a window does
 double-click it for your System Settings titlebar action, resize from any edge, minimize to the
 Dock, and enter full screen as usual. Switching back to System restores the native frame exactly
 as you left it. Custom themes can opt into every one of these frame and scrollbar vocabularies
-through the theme tools.
+through the theme tools. Whichever side a theme puts its window buttons on, the close button sits
+at the outer corner, where your hand expects it.
 
 **Threading's own theme keeps the native macOS window.** AppKit owns its title bar, traffic
 lights, dragging, resizing, full screen, and the user's configured title-bar double-click action;
@@ -6035,7 +6115,8 @@ immediately. The iPhone app has one fixed icon; iOS does not allow an app to dra
 
 An extension's theme can bring its own icon *mark* — its glyph replaces the chevron, but the
 tile behind it is still drawn from the theme's own background, so an extension can never make
-Threading's icon look like a different app. A contributed theme without a mark gets the same
+Threading's icon look like a different app. A mark that would disappear into that background gets
+the same thin rim a custom theme's logo does. A contributed theme without a mark gets the same
 generated icon every built-in style does.
 
 An installed extension can offer app themes of its own. They appear in the picker under a

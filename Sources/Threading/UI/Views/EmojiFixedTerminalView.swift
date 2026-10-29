@@ -828,8 +828,8 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
             title: L10n.string("Rename Session"),
             confirmTitle: L10n.string("Rename"),
             clearTitle: hasCustomTitle ? L10n.string("Use Agent's Name") : nil,
-            current: session?.customTitle ?? "",
-            placeholder: session?.displayTitle ?? "",
+            current: session?.displayTitle ?? "",
+            placeholder: L10n.string("Name"),
             // An empty value clears the custom name rather than being rejected.
             allowsEmpty: true,
             fieldSize: NSSize(

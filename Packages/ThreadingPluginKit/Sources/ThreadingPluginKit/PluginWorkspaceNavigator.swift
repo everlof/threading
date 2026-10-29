@@ -446,6 +446,12 @@ public enum PluginBundleMetadata {
     public static let paneSectionsVersion = 1
     public static let schemaVersion = "schemaVersion"
     public static let sections = "sections"
+    /// Optional contextual pane routes. The host owns the invoking control and placement.
+    public static let routes = "routes"
+    public static let section = "section"
+    public static let placement = "placement"
+    public static let context = "context"
+    public static let selectedDeviceContext = "selected-device"
     public static let command = "command"
     public static let symbol = "symbol"
     public static let detail = "detail"

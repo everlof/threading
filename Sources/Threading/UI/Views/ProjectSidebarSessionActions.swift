@@ -775,6 +775,10 @@ extension ProjectSidebarViewController {
         configuration.actions.unsnooze = { SessionSnoozeCenter.shared.unsnooze(sessionID) }
         configuration.actions.archive = { [weak self] in self?.archiveClicked() }
         configuration.actions.close = { [weak self] in self?.closeSessionClicked() }
+        configuration.actions.closeWithoutAsking = { [weak self] in
+            guard let self else { return }
+            delegate?.projectSidebar(self, closeSession: sessionID, confirming: false)
+        }
         configuration.actions.rename = { [weak self] in self?.renameSessionClicked() }
 
         if !session.usesNativeUI, session.kind.supports(.terminalUI) {
@@ -854,7 +858,12 @@ extension ProjectSidebarViewController {
         ) { [weak self] in self?.toggleManagerRoleClicked() })
 
         configuration.sections.destructive.append(action(
-            L10n.string("Delete Session"), symbol: "trash") { [weak self] in
+            L10n.string("Delete Session"), symbol: "trash",
+            alternate: ThemedMenuAlternate(
+                title: L10n.string("Delete Session Without Asking")
+            ) { [weak self] in
+                self?.removeSession(sessionID, confirming: false)
+            }) { [weak self] in
             self?.deleteSessionClicked()
         })
 
@@ -1010,14 +1019,17 @@ extension ProjectSidebarViewController {
         _ title: String,
         symbol: String? = nil,
         shortcut: KeyboardShortcut? = nil,
+        alternate: ThemedMenuAlternate? = nil,
         _ body: @escaping () -> Void
     ) -> ThemedMenuEntry {
-        .item(ThemedMenuItem(
+        var item = ThemedMenuItem(
             title: title,
             shortcut: shortcut,
             image: symbol.flatMap(ThemedMenuIcon.symbol),
             onChoose: body
-        ))
+        )
+        item.alternate = alternate
+        return .item(item)
     }
 
     /// Snooze sits beside Pin and Archive because all three change how a row is found, while
@@ -1750,7 +1762,7 @@ extension ProjectSidebarViewController {
     /// confirmation instead of skipping it.
     @objc private func closeSessionClicked() {
         guard let sessionID = actionSessionID else { return }
-        delegate?.projectSidebar(self, closeSession: sessionID)
+        delegate?.projectSidebar(self, closeSession: sessionID, confirming: true)
     }
 
     /// Hands the naming back to the one thing that already knows what this chat is about.
@@ -1777,10 +1789,13 @@ extension ProjectSidebarViewController {
     func promptToRenameSession(_ sessionID: SessionID) {
         guard let session = projectStore.session(withID: sessionID) else { return }
 
-        promptRename(
+        promptForText(
             title: L10n.string("Rename Session"),
-            current: session.customTitle ?? "",
-            placeholder: session.displayTitle,
+            confirmTitle: L10n.string("Rename"),
+            clearTitle: session.customTitle?.isEmpty == false
+                ? L10n.string("Use Agent's Name") : nil,
+            current: session.displayTitle,
+            placeholder: L10n.string("Name"),
             allowsEmpty: true
         ) { newTitle in
             guard self.projectStore.renameSession(id: sessionID, to: newTitle).succeeded else {

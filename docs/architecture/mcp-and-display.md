@@ -239,8 +239,10 @@ unchanged.
 **The other two transports carry the same two shapes.** Codex's `mcp_servers` table takes either
 a `url` or a `command` plus `args`; they are alternatives, so the stdio form writes
 `mcp_servers.threading.command` and `mcp_servers.threading.args` and **no** `url` — a table
-carrying both would be asking Codex which of two places this server is. `enabled_tools` and the
-per-tool `approval_mode` overrides use the same provider-lifetime ceiling either way, and the
+carrying both would be asking Codex which of two places this server is. Normal Codex launches
+omit `enabled_tools`: its process-lifetime allowlist cannot represent a plugin loaded later.
+The server's session-scoped catalog and dispatch remain authoritative. Known tools still receive
+per-tool `approval_mode` overrides from the provider-lifetime preapproval set either way, and the
 settings-research one-shot (below) takes the same binding rather than a URL, so its scoped line is
 pinned word-for-word in both forms. ACP's `McpServer` union tags only the extra transports: the
 HTTP entry keeps its
@@ -343,8 +345,9 @@ Three deliberate choices in the launch line:
   `tools/list`: it contains the globally enabled catalogue plus the closed Supervision identities
   whose grant and group switch may change live. That does not expose or authorize them;
   session-filtered `tools/list` and dispatch both read the current grant and Settings state.
-  Without the ceiling, Codex's fixed `enabled_tools` filter permanently hid Manager tools from a
-  chat promoted after launch.
+  Normal Codex sessions have no fixed `enabled_tools` filter, so newly loaded plugin tools can
+  also appear. They retain the provider's default approval policy unless individually preapproved;
+  the server still checks their live group and session routing on every call.
   Threading's permission broker independently auto-allows only closed built-ins admitted by
   `MCPBuiltInToolRegistry`; unadvertised lookalikes and open-world extension tools still ask.
 - **No `--strict-mcp-config`**, which would suppress the user's own MCP servers for every
@@ -447,6 +450,18 @@ built-in command whose group is disabled still decodes for diagnostics, but
 `MCPToolCatalog.admits` refuses it before the application handler runs. External extension tools
 use a separate open-world path and are omitted when their names are blank, duplicate another
 enabled external tool, or collide with a built-in.
+
+Native plugin registration/removal and tool-group setting changes announce
+`notifications/tools/list_changed` to every connected event stream; grant changes remain scoped
+to their session. The announcement carries no tool or session data. The client reads the fresh
+session-scoped catalog. Do not turn its initial snapshot into Codex's fixed `enabled_tools`
+filter: opening a Bluetooth pane after launch otherwise leaves every plugin tool invisible for
+that process. Restricted settings-research launches still use their exact allowlist. Processes
+started with the former normal-launch filter need one resume after updating; the host cannot
+rewrite an existing provider process's arguments. `NativePluginToolRoutingTests` exercises
+connection first, plugin load second, notification, relisting and live group removal over HTTP.
+The SSE handshake includes an initial comment so streaming HTTP clients finish opening the
+channel before the first notification; it carries no JSON-RPC message.
 
 `MCPToolCall` remains only as a compatibility alias at the transport boundary.
 `AgentToolCoordinator` implements the narrow typed execution protocol and common observation

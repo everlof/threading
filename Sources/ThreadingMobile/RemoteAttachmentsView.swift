@@ -363,6 +363,8 @@ struct RemoteAttachmentPreviewContent: View {
     /// same file twice. The gallery retains one `Data` value, never a cache proportional to the
     /// attachment list.
     private let onLoadedData: ((Data) -> Void)?
+    private let onImageAction: ((RemoteAttachmentImageAction, Data) -> Void)?
+    private let imageActionsEnabled: Bool
     /// Bytes the gallery already holds for other attachments — a demo's fixtures — which a
     /// comparison reads its two pictures from before asking the Mac.
     private let siblingData: [String: Data]
@@ -381,7 +383,9 @@ struct RemoteAttachmentPreviewContent: View {
         isCurrentPage: Bool = true,
         siblingData: [String: Data] = [:],
         onDecodedImageSize: ((CGSize) -> Void)? = nil,
-        onLoadedData: ((Data) -> Void)? = nil
+        onLoadedData: ((Data) -> Void)? = nil,
+        imageActionsEnabled: Bool = true,
+        onImageAction: ((RemoteAttachmentImageAction, Data) -> Void)? = nil
     ) {
         self.sessionID = sessionID
         self.attachment = attachment
@@ -392,6 +396,8 @@ struct RemoteAttachmentPreviewContent: View {
         self.siblingData = siblingData
         self.onDecodedImageSize = onDecodedImageSize
         self.onLoadedData = onLoadedData
+        self.imageActionsEnabled = imageActionsEnabled
+        self.onImageAction = onImageAction
         _data = State(initialValue: initialData)
     }
 
@@ -464,6 +470,12 @@ struct RemoteAttachmentPreviewContent: View {
                     }
                 } else if let image = UIImage(data: data) {
                     RemoteZoomableImageView(image: image, backgroundColor: theme.uiGround)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(MobileL10n.string("Image preview"))
+                        .accessibilityValue(attachment.name)
+                        .accessibilityAddTraits(.isImage)
+                        .contextMenu { imageActions(data: data) }
+                        .accessibilityActions { imageActions(data: data) }
                 } else {
                     unavailable("The image could not be decoded.")
                 }
@@ -495,6 +507,20 @@ struct RemoteAttachmentPreviewContent: View {
             width: image.size.width * image.scale,
             height: image.size.height * image.scale
         ))
+    }
+
+    @ViewBuilder
+    private func imageActions(data: Data) -> some View {
+        if let onImageAction, attachment.kind == .image {
+            ForEach(RemoteAttachmentImageAction.allCases) { action in
+                Button {
+                    onImageAction(action, data)
+                } label: {
+                    Label(action.title, systemImage: action.symbol)
+                }
+                .disabled(!imageActionsEnabled)
+            }
+        }
     }
 
     @ViewBuilder

@@ -83,6 +83,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival, reading-source wording, and the keychain **Allow…** offer with the prompt it starts | Implemented |
 | All-account usage fleet | — | host-only | discovery/refresh pacing, current-account identity, migration eligibility/action, keychain grant offer/action, bounded scrolling and popover lifecycle | Host-only |
+| Composer identity menu usage meters | — | host-only | account routing and eligibility, usage truth (the provider's percentage, the window clock's tick and each window's reset), the menu-wide line plan that keeps every `5h` and `7d` in one place, keyboard navigation and the spoken reading; themes style the shared menu row | Host-only |
 | Usage analytics section switch | — | host-only | selected native analysis, retained chart state, keyboard and accessibility navigation | Host-only |
 | Banked usage reset actions | — | host-only | exact account and credit identity, fresh confirmation, provider idempotency, authoritative post-read, owed-continuation release | Host-only |
 | Curfew surfaces (draft moon button and chip, chat chip, sidebar Curfew fold, strip source, Settings section) | — | host-only | the deadline and its instance identity, hold admission, the wind-down record, interrupt/stop decisions and their receipts, the watched-turn rule, Lift | Host-only |
@@ -680,8 +681,9 @@ able to turn into unbounded process work as the user installs more extensions. S
 The iPhone attachment gallery and the draft's local Quick View do not add another extension
 surface. They are mirrors of the existing host-owned fallback: `attachments.preview@1` continues
 to customize the Mac preview body only. Threading retains remote authorization and range bounds,
-gallery selection, navigation, playback transport, Share staging and cleanup, and visibility
-teardown; iOS owns the native share destinations and chrome. Letting an extension replace any of
+gallery selection, navigation, playback transport, image-copy identity, add-only Photos consent,
+Share staging and cleanup, and visibility teardown; iOS owns the native image menu, Photos
+permission prompt, share destinations and chrome. Letting an extension replace any of
 those would either grant file authority the preview contract does not carry or put high-frequency
 playback across the extension boundary.
 
@@ -698,20 +700,48 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+**Shared Device Logs controls and agent reads** extend the existing approved native plugin pane.
+The plugin owns the single capture buffer, filter engine, revisioned configuration and exact-row
+selection used by its controls and tools. Themes style the existing DesignKit controls; this adds
+no safe-extension presentation slot. Threading keeps session routing, plugin trust, pane placement,
+device-service execution and app log-tap consent host-owned. A read does not move the user's
+viewport; the explicit reveal command owns that navigation. Selecting an app does not grant
+permission to install a tap or silently relaunch the app.
+
+The explicit Bluetooth counterparts reuse that host/plugin boundary. Phone-wide packet capture,
+packet-mode and text predicates, the definitions report and stable-row reveal remain owned by
+the existing pane. Neither a tool-discovery announcement nor a tab reveal grants new device or
+plugin execution authority.
+
+**The iPhone composer's Take Photo source** extends the existing host-only attachment workflow
+for the selected session or new-session draft. Threading owns camera consent, capacity, image
+preparation, upload custody, cancellation and explicit chat submission; iOS owns the native camera
+controls. Themes supply the shared refusal-dialog material. No extension may capture an image,
+read it before attachment, replace the permission prompt or submit it on the user's behalf.
+
 **Restored native plugin tabs** extend the existing signed native pane surface into dock groups
 and the drawer. The plugin still owns only the view inside its rectangle. Threading owns the tab
 shell, placement, active selection, persisted identifier, bounded route validation, current code
 signature and approval, and the refusal when a bundle is missing or changed. A saved tab does not
 grant execution authority, and this adds no safe-extension presentation slot.
 
-**Declared first-party pane sections** extend that same native pane surface. A managed offer
-declares stable section identifiers and localized title keys; plugin code supplies the interior
+**Declared native pane sections and contextual routes** extend that same native pane surface.
+Signed plugin metadata declares stable section identifiers, titles, commands and optional
+selected-device routes; plugin code supplies the interior
 view for each identifier. Threading owns section chrome, placement across panel, dock and drawer,
 visibility, saved-mode validation, tool reveal routing and the user commands that open a section.
 Command IDs stay stable for keyboard overrides and remain available before installation. The
-first-party offer may also declare a contextual panel or drawer route. The window owns reuse,
+first-party offer retains matching declarations to show installation before its bundle exists.
+The window owns reuse,
 movement and selection when that route is invoked. The registration gives no new
 capability to safe extensions and grants no execution authority from a saved route.
+
+**Simulator Snapshots in the Devices native plugin** is a separate read-only pane, not a
+replacement for the host's interactive Simulator workspace. Its public PluginKit broker lists
+already running iOS Simulators with a 64-device presentation cap and captures one bounded PNG
+after host identity revalidation. Threading owns CoreSimulator commands, the exact-device
+transaction gate, boot leases, input consent and direct-helper admission. An approved external
+native plugin receives the same snapshot broker; a safe extension receives no new device power.
 
 **Paged Settings navigation for large extension catalogues** extends the existing host-owned
 Settings shell. Extensions still contribute pages and fields through their existing semantic
@@ -759,10 +789,12 @@ or agent input authority is added.
 style its source menu and virtual table. Exact phone identity, profile/tooling setup truth,
 capture lifetime, packet parsing limits, local history and agent source selection stay owned by
 Threading and its bundled plugin. This adds no safe-extension presentation slot or data authority.
-Its profile setup and dedicated Apple sign-in view are host-only too: the host retains the
-official download origin, isolated remembered authentication state and its Forget Sign-In control,
-screen-bounded sign-in presentation (including at most two Apple-requested child windows),
-exact-phone install action, file and process bounds, iOS consent handoff and cleanup.
+Its profile setup and dedicated Apple sign-in view remain Threading-owned: Device Logs presents
+the official download origin, isolated remembered authentication state and its Forget Sign-In
+control, and screen-bounded sign-in presentation (including at most two Apple-requested child
+windows). The public PluginKit device service handles the exact-phone install request, file and
+process bounds, iOS consent handoff and cleanup in the host. An approved external native plugin
+can request the same bounded operation.
 Themes style controls; agents receive no profile
 installation action or access to this authentication browser.
 The Regular Logs/Bluetooth tab choice is host-owned as well: the workspace owns the two-reader
@@ -803,6 +835,11 @@ grants, persisted exact-IP scope, expiry, dismissal and revocation. Extensions c
 Moving the signed portable helper and setup script into first-party `ProxyPlugin.bundle` changes
 installation and code delivery only. The existing host owns the commands, Tools settings,
 certificate authority and consent; no public extension can claim the proxy helper or its powers.
+The additive `traffic.mock-responses` data contribution lets an explicitly selected enabled
+extension provide exact test fixtures for one capture. Threading keeps listener and client
+approval, TLS host scope and CA custody, rule validation, connection lifetime, response framing,
+capture provenance and revocation host-owned. No request callback or proxy socket is handed to
+the extension process.
 
 The iPhone conversation's pinned composer dock and model, effort, permission and speed controls
 are host-only. Themes supply the existing ground, control material, ink and border. Threading
@@ -878,6 +915,9 @@ log sources, reader lifetime, filters and history once revealed. An absent on-de
 its signed install path. An invalid or disconnected UDID remains a pending selection for the next
 source rescan, and a
 repeated press reuses the existing pane. No extension receives new device data or authority.
+The same control's context menu lists signed native plugins that declare a `selected-device` route;
+the host supplies only the selected ID and routes through the same verified pane path. Plugin
+metadata cannot replace the primary Device Logs action or the host's device-control chrome.
 
 The browser origin prompt's chat-wide grant is host-only authorization UI. Its entity is the
 calling chat, and Threading owns the origin check, exact choice, durable scope, deletion cleanup

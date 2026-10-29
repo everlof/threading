@@ -557,11 +557,9 @@ final class AgentLaunchQuotingTests: XCTestCase {
     /// just gain a `--`.
     // MARK: - Settings research one-shots
 
-    /// `enabled_tools` is fixed for the life of a Codex process, while Manager is a role the
-    /// user can confer after launch. The provider ceiling therefore keeps the exact supervision
-    /// identities even when both the current session grant and the group switch hide them from
-    /// `tools/list`; Threading remains the authority that makes them visible and admits calls.
-    func testCodexLaunchCeilingKeepsToolsNeededByALaterManagerGrant() throws {
+    /// Plugin tools and Manager grants can arrive after launch. A fixed provider filter would
+    /// hide them for the entire process; live server admission still enforces the current grant.
+    func testCodexLaunchDoesNotFreezeTheCatalogueBeforePluginsOrManagerGrantsArrive() throws {
         let settings = AppSettings.shared
         let supervisionWasEnabled = settings.isToolGroupEnabled(MCPToolCatalog.supervision.id)
         settings.setToolGroup(MCPToolCatalog.supervision.id, enabled: false)
@@ -593,17 +591,9 @@ final class AgentLaunchQuotingTests: XCTestCase {
             )
         )
         let words = try Self.tokenizing("'cd' '/tmp' && 'exec' \(command.source)")
-        let prefix = "mcp_servers.threading.enabled_tools="
-        let override = try XCTUnwrap(words.first { $0.hasPrefix(prefix) })
-        let array = Data(override.dropFirst(prefix.count).utf8)
-        let launchNames = try XCTUnwrap(
-            try JSONSerialization.jsonObject(with: array) as? [String]
-        )
-
-        XCTAssertEqual(
-            Set(launchNames).intersection(supervisionNames),
-            supervisionNames,
-            "the fixed provider filter would prevent a live Manager promotion"
+        XCTAssertFalse(
+            words.contains { $0.hasPrefix("mcp_servers.threading.enabled_tools=") },
+            "a startup allowlist would hide plugins loaded after launch"
         )
         XCTAssertTrue(words.contains(
             "mcp_servers.threading.tools.spawn_session.approval_mode=\"approve\""

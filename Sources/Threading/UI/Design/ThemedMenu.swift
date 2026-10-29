@@ -198,6 +198,7 @@ private final class ThemedMenuSession: NSObject {
     private weak var previousInitialFirstResponder: NSView?
     private var focusRunLoopObserver: CFRunLoopObserver?
     private var keyEventMonitor: Any?
+    private var modifierMonitor: Any?
     private var heldPressMonitor: Any?
     /// Where the press that opened this menu went down, in window coordinates — what a release
     /// is measured against to tell a sweep from a click. Nil for a menu no press opened.
@@ -290,6 +291,7 @@ private final class ThemedMenuSession: NSObject {
         overlay.animateIn()
         installFocusRunLoopObserver()
         installKeyEventMonitor()
+        installModifierMonitor()
         installHeldPressMonitor(opening: NSApp.currentEvent)
 
         // `willClose` joined the list when the roster became the session's owner: a session
@@ -384,6 +386,30 @@ private final class ThemedMenuSession: NSObject {
         guard let keyEventMonitor else { return }
         NSEvent.removeMonitor(keyEventMonitor)
         self.keyEventMonitor = nil
+    }
+
+    /// The held modifiers, for the rows that read differently under them (`ThemedMenuAlternate`).
+    ///
+    /// Read once at open as well as watched, because the key is often already down: a person
+    /// who wants the fast path holds Option and *then* right-clicks, and a menu that waited for
+    /// the next change would open showing the act they were deliberately avoiding. A monitor for
+    /// the same reason the key-down route is one — a first responder borrowed by a field editor
+    /// would otherwise take the change — and it passes every event on, since a modifier's state
+    /// belongs to the whole window rather than to the menu.
+    private func installModifierMonitor() {
+        overlay.modifiersChanged(NSEvent.modifierFlags)
+        modifierMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) {
+            [weak self, weak window] event in
+            guard let self, !self.isClosed, event.window === window else { return event }
+            self.overlay.modifiersChanged(event.modifierFlags)
+            return event
+        }
+    }
+
+    private func removeModifierMonitor() {
+        guard let modifierMonitor else { return }
+        NSEvent.removeMonitor(modifierMonitor)
+        self.modifierMonitor = nil
     }
 
     /// The press that opened this menu, for as long as it is held.
@@ -535,6 +561,7 @@ private final class ThemedMenuSession: NSObject {
             Self.open.remove(self)
             removeFocusRunLoopObserver()
             removeKeyEventMonitor()
+            removeModifierMonitor()
             removeHeldPressMonitor()
             NotificationCenter.default.removeObserver(self)
             if let window, window.initialFirstResponder === overlay {
@@ -630,6 +657,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
     private var travelApex: NSPoint?
     private var travelDeadline: TimeInterval = 0
     private var pointerTrackingArea: NSTrackingArea?
+    private var heldModifiers: NSEvent.ModifierFlags = []
 
     /// What has been typed since the menu opened. Letters filter: matching rows keep their
     /// ink, the rest dim, and the highlight lands on the first match — the menu keeps its
@@ -718,6 +746,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
             self?.pointerHighlighted(columnIndex: index, entryIndex: entryIndex)
         }
         surface.onPressBegan = { [weak self] event in self?.onPressBegan?(event) }
+        surface.showAlternates(holding: heldModifiers)
         // A submenu is anchored to where its parent row was at open; a parent that scrolls
         // under it would leave the panel beside the wrong row, so scrolling closes deeper.
         surface.onScrolled = { [weak self] in
@@ -1034,6 +1063,19 @@ private final class ThemedMenuOverlayView: ThemedControl {
             } else {
                 super.keyDown(with: event)
             }
+        }
+    }
+
+    /// The held modifiers changed: every open panel re-reads its alternates. A typed filter is
+    /// asked again of the deepest panel, since the titles it matched against just changed.
+    func modifiersChanged(_ flags: NSEvent.ModifierFlags) {
+        guard !isTearingDown else { return }
+        heldModifiers = flags
+        for column in columns {
+            column.surface.showAlternates(holding: flags)
+        }
+        if !filterQuery.isEmpty, let column = columns.last {
+            column.surface.applyFilter(filterQuery)
         }
     }
 
@@ -1508,6 +1550,7 @@ public enum ThemedMenuReferenceFixture {
         size: NSSize,
         selectedEntryIndex: Int? = nil,
         highlightedEntryIndex: Int? = nil,
+        heldModifiers: NSEvent.ModifierFlags = [],
         onChoose: ((Int) -> Void)? = nil
     ) -> NSView {
         let surface = ThemedMenuSurfaceView(
@@ -1518,6 +1561,7 @@ public enum ThemedMenuReferenceFixture {
         if let onChoose {
             surface.onChoose = { index, _ in onChoose(index) }
         }
+        surface.showAlternates(holding: heldModifiers)
         surface.highlight(highlightedEntryIndex, scrollIntoView: false)
         surface.layoutSubtreeIfNeeded()
         surface.needsDisplay = true
@@ -1539,6 +1583,20 @@ public enum ThemedMenuReferenceFixture {
               row.item.accessory != nil
         else { return nil }
         return row.convert(row.accessoryHitRect, to: view)
+    }
+
+    /// Where an entry's meters are drawn, line by line, in `view`'s own coordinates — asked of
+    /// the row for the reason `accessoryHitRect` is. Empty for an entry with no meter.
+    public static func meterLines(in view: NSView, entryIndex: Int) -> [ThemedMenuMeterLine] {
+        guard let row = surface(in: view)?.row(at: entryIndex) else { return [] }
+        return row.meterLines.map { line in
+            ThemedMenuMeterLine(
+                label: line.metric.label,
+                barRect: row.convert(line.barRect, to: view),
+                tickRect: line.tickRect.map { row.convert($0, to: view) },
+                valueRect: row.convert(line.valueRect, to: view)
+            )
+        }
     }
 
     /// The two states only a pointer produces: the accessory lit under it, and held down.

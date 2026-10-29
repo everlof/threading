@@ -132,7 +132,7 @@ with log_path.open('w+') as log:
             return pane if pane.get_child_at_index(0).get_accessible_id() == 'linux.composer.greeting' else None
         idle = eventually(mounted_idle, 'idle right-pane accessibility panel')
         assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == [
-            'list', 'panel', 'push button', 'push button']
+            'list', 'panel', 'push button', 'push button', 'push button']
         composer_roles = [idle.get_child_at_index(i).get_role_name()
                           for i in range(idle.get_child_count())]
         assert composer_roles == [
@@ -297,7 +297,7 @@ with log_path.open('w+') as log:
         assert idle_action.get_n_actions() == 0
         eventually(lambda: terminal.get_name().endswith('A11Y TERMINAL READY'),
                    'accessible terminal title')
-        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'push button', 'terminal', 'push button', 'push button']
+        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'push button', 'terminal', 'push button', 'push button', 'push button']
         page_title = frame.get_child_at_index(1)
         assert page_title.get_accessible_id() == 'linux.page-title'
         eventually(lambda: page_title.get_name() == 'python3', 'saved terminal page title')
@@ -318,6 +318,7 @@ with log_path.open('w+') as log:
         assert page_title.get_state_set().contains(Atspi.StateType.FOCUSABLE)
         assert frame.get_child_at_index(3).get_accessible_id() == 'linux.actions'
         assert frame.get_child_at_index(4).get_accessible_id() == 'linux.add-project'
+        assert frame.get_child_at_index(5).get_accessible_id() == 'sidebar.settings'
         assert content(app).get_role_name() == 'list'
         assert listed.get_state_set().contains(Atspi.StateType.SHOWING)
         assert terminal.get_state_set().contains(Atspi.StateType.SHOWING)
@@ -441,10 +442,11 @@ with log_path.open('w+') as log:
                    (240, 41, 1040, 559) else None, 'resized terminal component')
         assert rect(frame_component) == (0, 0, 1280, 600)
         assert rect(list_component) == (0, 41, 240, 559)
-        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'push button', 'terminal', 'push button', 'push button']
+        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'push button', 'terminal', 'push button', 'push button', 'push button']
         assert frame.get_child_at_index(1).get_accessible_id() == 'linux.page-title'
         assert frame.get_child_at_index(3).get_accessible_id() == 'linux.actions'
         assert frame.get_child_at_index(4).get_accessible_id() == 'linux.add-project'
+        assert frame.get_child_at_index(5).get_accessible_id() == 'sidebar.settings'
         resized_text = screen_text()
         assert 'UPDATED VISIBLE' in resized_text
         subprocess.run(['import', '-window', window_id,
@@ -480,10 +482,11 @@ with log_path.open('w+') as log:
                    .get_state_set().contains(Atspi.StateType.FOCUSED)
                    and not terminal.get_state_set().contains(Atspi.StateType.FOCUSED),
                    'sidebar focus while terminal remains mounted')
-        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'push button', 'terminal', 'push button', 'push button']
+        assert [frame.get_child_at_index(i).get_role_name() for i in range(frame.get_child_count())] == ['list', 'push button', 'terminal', 'push button', 'push button', 'push button']
         assert frame.get_child_at_index(1).get_accessible_id() == 'linux.page-title'
         assert frame.get_child_at_index(3).get_accessible_id() == 'linux.actions'
         assert frame.get_child_at_index(4).get_accessible_id() == 'linux.add-project'
+        assert frame.get_child_at_index(5).get_accessible_id() == 'sidebar.settings'
         assert content(app, 'terminal').get_state_set().contains(Atspi.StateType.SHOWING)
         assert rect(terminal_component) == (240, 41, 1040, 559)
         assert screen_text() == resized_text

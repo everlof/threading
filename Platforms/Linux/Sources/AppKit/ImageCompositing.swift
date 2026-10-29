@@ -47,6 +47,17 @@ extension Bitmap {
                 pixels[offset + 2] = channel(color.2, pixels[offset + 2])
                 pixels[offset + 3] = UInt8(max(0, min(255, (outputAlpha * 255).rounded())))
             }
+        case .clear:
+            withMutablePixels { pixels in
+                let offset = (y * width + x) * 4
+                let retained = CGFloat(pixels[offset + 3]) / 255 * (1 - amount)
+                pixels[offset + 3] = UInt8(max(0, min(255, (retained * 255).rounded())))
+                if pixels[offset + 3] == 0 {
+                    pixels[offset] = 0
+                    pixels[offset + 1] = 0
+                    pixels[offset + 2] = 0
+                }
+            }
         case .plusLighter:
             preconditionFailure("image compositing does not support plusLighter")
         }

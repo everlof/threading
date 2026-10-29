@@ -60,7 +60,9 @@ final class PanelCommandTests: HostedStoreTestCase {
                     ["id": "history", "title": "History", "command": [
                         "title": "Note history", "symbol": "clock"
                     ]]
-                ]
+                ],
+                "routes": [["id": "from-device", "section": "notes",
+                            "placement": "panel", "context": "selected-device"]]
             ]
         ]
         let pane = try XCTUnwrap(NativePluginPaneDiscovery.descriptor(
@@ -68,6 +70,9 @@ final class PanelCommandTests: HostedStoreTestCase {
         ))
         let registry = CommandRegistry()
         registry.replaceNativePluginBundles([bundle], paneDescriptors: [pane])
+        XCTAssertEqual(registry.nativePluginRoutes(context: .selectedDevice).count, 1)
+        XCTAssertEqual(registry.nativePluginRoutes(context: .selectedDevice).first?.pane.pluginIdentifier,
+                       identifier)
         let notes = try XCTUnwrap(registry.command(id: PanelCommands.nativePluginSectionID(
             identifier: identifier, section: "notes"
         )))
@@ -76,6 +81,9 @@ final class PanelCommandTests: HostedStoreTestCase {
         XCTAssertEqual(notes.panelTarget, .nativePluginSection(identifier: identifier, section: "notes"))
         XCTAssertNil(registry.command(id: PanelCommands.nativePluginID(bundle)))
         XCTAssertTrue(pane.contains("history"))
+        XCTAssertEqual(pane.route("from-device")?.section, "notes")
+        XCTAssertEqual(pane.route("from-device")?.placement, .panel)
+        XCTAssertEqual(pane.route("from-device")?.context, .selectedDevice)
         registry.replaceNativePluginBundles([])
         XCTAssertNil(registry.command(id: notes.id))
     }
@@ -96,6 +104,32 @@ final class PanelCommandTests: HostedStoreTestCase {
         ))
     }
 
+    func testPaneRouteRejectsUnknownContextAndUndeclaredSection() {
+        let bundle = URL(fileURLWithPath: "/tmp/IndependentNotes.bundle")
+        let section = ["id": "notes", "title": "Notes"]
+        let base: [String: Any] = ["CFBundleIdentifier": "example.notes"]
+        func descriptor(_ route: [String: String]) -> NativePluginPaneDescriptor? {
+            var plist = base
+            plist["ThreadingPaneSections"] = ["schemaVersion": 1,
+                                               "sections": [section], "routes": [route]]
+            return NativePluginPaneDiscovery.descriptor(
+                in: plist, bundleURL: bundle, verifiedInstalledIdentity: nil
+            )
+        }
+        let valid = ["id": "from-device", "section": "notes",
+                     "placement": "drawer", "context": "selected-device"]
+        XCTAssertEqual(descriptor(valid)?.route("from-device")?.placement, .drawer)
+        var unknown = valid
+        unknown["context"] = "arbitrary-host-state"
+        XCTAssertNil(descriptor(unknown))
+        var missing = valid
+        missing["section"] = "undeclared"
+        XCTAssertNil(descriptor(missing))
+        var invalidPlacement = valid
+        invalidPlacement["placement"] = "window"
+        XCTAssertNil(descriptor(invalidPlacement))
+    }
+
     func testBuiltDeviceLogsDeclaresItsManagedSections() throws {
         let plugins = try XCTUnwrap(Bundle.main.builtInPlugInsURL)
         let bundle = plugins.appendingPathComponent("DeviceLogsPlugin.bundle")
@@ -105,6 +139,8 @@ final class PanelCommandTests: HostedStoreTestCase {
         XCTAssertEqual(pane.pluginIdentifier, NativePluginManagedOffer.deviceLogs.identifier)
         XCTAssertEqual(pane.sections.map(\.identifier), ["regular", "bluetooth"])
         XCTAssertEqual(pane.sections.compactMap(\.command).count, 2)
+        XCTAssertEqual(pane.route("from-device")?.section, "regular")
+        XCTAssertEqual(pane.route("from-device")?.placement, .drawer)
     }
 
     func testNavigatorOnlyPluginDoesNotOfferAnEmptyPaneCommand() {

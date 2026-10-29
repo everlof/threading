@@ -661,6 +661,16 @@ final class ExtensionManager:
         registrations[identifier]
     }
 
+    /// Manifest-only response fixtures. No extension process or package I/O is reached on the
+    /// capture path; the enabled package was validated during inspection.
+    func trafficMocks(for identifier: String) -> [ExtensionTrafficMock]? {
+        guard enabledIdentifiers.contains(identifier),
+              let bundle = packages[identifier]?.bundle,
+              bundle.manifest.capabilities.contains(.trafficMockResponses),
+              !bundle.manifest.trafficMocks.isEmpty else { return nil }
+        return bundle.manifest.trafficMocks
+    }
+
     func isServiceAvailable(_ dependency: ExtensionServiceDependency) -> Bool {
         guard sessions[dependency.providerIdentifier] != nil else { return false }
         return registrations[dependency.providerIdentifier]?.services.contains {

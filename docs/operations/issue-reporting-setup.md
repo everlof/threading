@@ -106,3 +106,34 @@ receiver. The quarter-hour schedule sends completed windows and retries receiver
 `service_http_failure`, `issue_report_validation_failed`, `service_failure_recording_failed` and
 `service_failure_alert_delivery_failed` when investigating delivery. These counters cover Worker
 responses, not Cloudflare edge or client networking failures.
+
+Migration `0012_service_failure_diagnostics.sql` adds seven-day diagnostic evidence independent
+of the alert outbox. Deploy the backwards-compatible `ThreadingReportAlerts` receiver first,
+then use the guarded control-plane deploy. Readiness checks the new table. Alerts contain an
+`sf-…` reference and one operation/code/reason/field example; the protected pickup route returns
+the exact count and at most eight examples, with omitted examples counted explicitly.
+
+For an alert from any user, load the existing `REPORT_PICKUP_TOKEN` from operator secret storage
+and run `node scripts/inspect-service-failure.mjs <sf-reference>` in
+`Service/ThreadingControlPlane`. Optional `--host-id <known-host-id>` compares identity locally;
+it does not send that identifier. Different account/host pseudonyms distinguish installations;
+an absent pseudonym means authentication had not succeeded. Request IDs match the failing
+client's `X-Threading-Request-ID` response header. No submitted value or error message is retained.
+This route does not require Cloudflare Observability access. A reference predating migration 0012
+has no evidence to retrieve: restoring log access is the only remaining server-side route for
+the original incident, and a sampled log might not exist.
+
+If the pickup secret is unavailable locally, an operator with production D1 access can read the
+same evidence through Wrangler. Obtain the database ID from `tofu -chdir=infra output -raw
+d1_database_id` with the state credentials loaded, then use that **ID**, not the checked-in
+placeholder binding, and explicitly select the production login profile:
+
+```sh
+npx wrangler d1 execute '<production-database-id>' --remote --profile '<production-profile>' \
+  --command "SELECT count, first_seen, last_seen, samples FROM service_failure_diagnostics WHERE window_start = 1793214420000 AND route = 'push' AND status = 400"
+```
+
+Only use the numeric window, fixed route and status from the diagnostic reference in this query.
+This is the operator fallback when Cloudflare Observability is forbidden; no new pickup secret or
+log permission is needed. Do not query account credentials or customer report bodies for an HTTP
+failure diagnosis.

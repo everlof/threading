@@ -48,7 +48,9 @@ struct HTTPResponse: Sendable {
             status: 200,
             reason: "OK",
             contentType: "text/event-stream",
-            body: Data(),
+            // Flush a valid SSE comment with the headers so streaming HTTP clients finish
+            // opening the channel before the first tool change. Comments carry no MCP event.
+            body: Data(": connected\n\n".utf8),
             extraHeaders: ["Cache-Control": "no-cache"],
             opensEventStream: true
         )

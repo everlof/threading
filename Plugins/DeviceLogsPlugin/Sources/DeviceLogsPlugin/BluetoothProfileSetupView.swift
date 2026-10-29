@@ -1,5 +1,6 @@
 import AppKit
 import ThreadingDesignKit
+import ThreadingPluginKit
 import UniformTypeIdentifiers
 import WebKit
 
@@ -13,6 +14,7 @@ final class BluetoothProfileSetupView: NSView {
     }
 
     private let preferredToolPath: String?
+    private let deviceServices: (any PluginDeviceServices)?
     private var target: Target?
     private var sendingTo: Target?
     private var completion: (Target, String)?
@@ -28,8 +30,9 @@ final class BluetoothProfileSetupView: NSView {
         title: L10n.string("Send certificate to this iPhone"), target: self, action: #selector(chooseProfile)
     )
 
-    init(preferredToolPath: String?) {
+    init(preferredToolPath: String?, deviceServices: (any PluginDeviceServices)? = nil) {
         self.preferredToolPath = preferredToolPath
+        self.deviceServices = deviceServices
         super.init(frame: .zero)
         explanation.stringValue = L10n.string("Send Apple's downloaded Bluetooth logging profile to this iPhone, or sign in to download it from Apple. Approve the installation prompt on your iPhone, then restart it before capturing.")
         for label in [explanation, status] {
@@ -186,13 +189,15 @@ final class BluetoothProfileSetupView: NSView {
         sendingTo = target
         refresh()
         let preferredToolPath = preferredToolPath
+        let deviceServices = deviceServices
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
                 defer {
                     if removeDownload { try? FileManager.default.removeItem(at: profileURL.deletingLastPathComponent()) }
                 }
                 return BluetoothProfileInstaller.install(
-                    profileURL: profileURL, deviceID: target.deviceID, preferredToolPath: preferredToolPath
+                    profileURL: profileURL, deviceID: target.deviceID,
+                    preferredToolPath: preferredToolPath, deviceServices: deviceServices
                 )
             }.value
             guard let self else { return }

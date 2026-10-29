@@ -207,11 +207,33 @@ final class MCPServer: @unchecked Sendable {
                 self?.sendToolsListChanged(to: event.sessionID)
             }
         }
+        externalToolsObserver = NotificationCenter.default.addObserver(
+            forName: MCPExternalToolsDidChange.name, object: nil, queue: nil
+        ) { [weak self] _ in
+            self?.queue.async { [weak self] in
+                self?.sendToolsListChanged()
+            }
+        }
+        toolSettingsObserver = NotificationCenter.default.addObserver(
+            forName: AppSettingsDidChange.name, object: nil, queue: nil
+        ) { [weak self] notification in
+            guard let event = notification.object as? AppSettingsDidChange,
+                  event.affects(AppSettingIdentity.disabledToolGroupIDs.rawValue) else { return }
+            self?.queue.async { [weak self] in
+                self?.sendToolsListChanged()
+            }
+        }
     }
 
     deinit {
         if let grantObserver {
             NotificationCenter.default.removeObserver(grantObserver)
+        }
+        if let externalToolsObserver {
+            NotificationCenter.default.removeObserver(externalToolsObserver)
+        }
+        if let toolSettingsObserver {
+            NotificationCenter.default.removeObserver(toolSettingsObserver)
         }
     }
 
@@ -258,6 +280,8 @@ final class MCPServer: @unchecked Sendable {
     private var connectionsByID: [ObjectIdentifier: MCPConnection] = [:]
     private var eventStreamSessionByConnection: [ObjectIdentifier: SessionID] = [:]
     private var grantObserver: NSObjectProtocol? = nil
+    private var externalToolsObserver: NSObjectProtocol? = nil
+    private var toolSettingsObserver: NSObjectProtocol? = nil
 
     private let queue = DispatchQueue(label: "codes.threading.mcp", qos: .userInitiated)
 
@@ -580,8 +604,8 @@ final class MCPServer: @unchecked Sendable {
         }
     }
 
-    private func sendToolsListChanged(to sessionID: SessionID) {
-        for (identifier, owner) in eventStreamSessionByConnection where owner == sessionID {
+    private func sendToolsListChanged(to sessionID: SessionID? = nil) {
+        for (identifier, owner) in eventStreamSessionByConnection where sessionID == nil || owner == sessionID {
             connectionsByID[identifier]?.sendServerEvent(Self.toolsListChangedEvent)
         }
     }

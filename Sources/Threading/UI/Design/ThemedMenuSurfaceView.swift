@@ -176,6 +176,13 @@ final class ThemedMenuSurfaceView: ThemedMenuPanelView {
         }
     }
 
+    /// Refresh the visible action for each row when the held modifier chord changes.
+    func showAlternates(holding modifiers: NSEvent.ModifierFlags) {
+        for row in rows.values {
+            row.showAlternate(holding: modifiers)
+        }
+    }
+
     // MARK: - Filtering
 
     func applyFilter(_ query: String) {

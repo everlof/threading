@@ -458,6 +458,18 @@ Changing pages cancels the preparation, and the temporary directory is removed w
 sheet closes. Threading owns authorization, staging, selection identity and cleanup; iOS owns the
 share destinations and system chrome.
 
+An image page also exposes a native long-press menu and the same VoiceOver actions: Copy Image,
+Share…, and Save to Photos. The pressed page supplies its original bytes and identity; these
+actions never copy a thumbnail, screenshot, or remote URL. Copy publishes the encoded image's
+ImageIO type on the pasteboard; Photos receives the original resource and filename after an
+explicit add-only permission request. Refusal uses the themed alert and a successful save is
+acknowledged. Page/route changes and disappearance cancel pending preparation, including a save
+waiting for permission; a Photos transaction already submitted to the system cannot be withdrawn.
+The menu is three fixed rows, with one admitted operation and at most the ordinary 24 MB image
+bound. Metadata inspection runs on a cancellable worker without bitmap decoding or re-encoding;
+no extra images, network requests, or filesystem work are created by opening the menu. The
+existing staged Share path and cleanup are shared by the toolbar and long-press action.
+
 ### The attachment handle's scope
 
 `ExtensionMediaSource.sessionAttachment` resolves only for the attachment currently on screen, in

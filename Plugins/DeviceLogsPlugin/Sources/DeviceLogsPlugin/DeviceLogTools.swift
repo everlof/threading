@@ -7,6 +7,11 @@ import Foundation
 /// is left is what a person looking over its shoulder sees too — the pane's own controls move, so
 /// the user can see what was asked for and undo it.
 public enum DeviceLogToolNames {
+    public static let state = "state"
+    public static let configure = "configure"
+    public static let read = "read"
+    public static let wait = "wait"
+    public static let reveal = "reveal"
     public static let search = "search"
     public static let focus = "focus"
     public static let clearFocus = "clear_focus"

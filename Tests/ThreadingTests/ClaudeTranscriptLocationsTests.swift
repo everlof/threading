@@ -161,7 +161,7 @@ final class ClaudeTranscriptLocationsTests: HostedStoreTestCase {
         XCTAssertNil(request.resolve(effort: .known))
     }
 
-    func testMigrationInstallsTheCompleteLiveTranscriptAtTheDestinationLaunchPath() throws {
+    func testMigrationInstallsTheCompleteLiveTranscriptAtTheDestinationLaunchPath() async throws {
         let root = try temporaryDirectory()
         let session = session()
         let account = AgentAccount(provider: .claude, handle: .standard, configPath: root.path)
@@ -175,9 +175,9 @@ final class ClaudeTranscriptLocationsTests: HostedStoreTestCase {
         let source = root.appendingPathComponent("source.jsonl")
         let complete = "earlier work\nwork after checkout move\nusage refusal\n"
         try complete.write(to: source, atomically: true, encoding: .utf8)
-        _ = try TranscriptCopyTransaction.install(
+        _ = try await TranscriptMigrationWorker.shared.install(
             source: source, destination: destination,
-            recoveryJournalURL: root.appendingPathComponent("recovery.json")
+            includesSubagents: true, journalURL: root.appendingPathComponent("recovery.json")
         ) { true }
         XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), complete)
     }

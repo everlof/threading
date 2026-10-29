@@ -102,12 +102,44 @@ Unknown fields remain safely droppable for old clients; deployment probes requir
 
 The control plane records handled 400, 409, 413, 415, 429 and 5xx failures for its six API route
 families in D1, grouped into 15-minute windows. Expected 401/403/404 responses and validation
-probes do not page. Rows carry only route family, HTTP status and count; console diagnostics add
-server-owned error codes and validation reasons, never submitted values. Closed windows are
+probes do not page. Closed windows are
 forwarded through the existing owned receiver to Pushover on the quarter-hour cron. Successful
 alerts remove only the exact observed count; concurrent increments survive for another alert.
 Failed alert delivery retains the row for retry, with seven-day bounded retention and at most
 64 rows processed per run. Monitoring failure never replaces the original HTTP response.
+
+Migration `0012_service_failure_diagnostics.sql` retains evidence independently of that outbox.
+Each bucket has an exact count, first/last timestamps and at most eight first examples. An atomic
+D1 batch increments both counters and conditionally appends an example, so concurrent admission
+cannot lose increments or exceed the cap. A successful alert never deletes evidence. Pickup hides
+expired buckets immediately; the cron removes them after seven days. Unknown error codes become
+`other`; unclassified errors keep their server code without copying the error's message.
+
+The triage questions are **which push operation failed, which validation rule/field rejected it,
+and did it come from the same authenticated installation?** Push send, registration and retraction
+record distinct operations. JSON and push validators attach typed reason/field tokens to
+`HttpError`; an unknown submitted key records only its owning object, never the submitted key.
+The three push handlers attach their verified principal before parsing. Evidence derives
+namespace-separated 96-bit SHA-256 account/host/device pseudonyms from that principal, never
+from payload identifiers, a bearer, an IP, or an unverified header. Device attribution is available
+for a device-authenticated registration; a send/retraction validation failure identifies the host,
+not an inferred recipient. Before authentication, attribution is absent. These server-owned
+operational fields are separate from the app's opt-in report journal vocabulary.
+
+Every monitored error returns a server-generated `X-Threading-Request-ID`, also recorded in its
+example and structured log. Alert text includes one example and an `sf-…` bucket reference.
+`GET /v1/developer/service-failures/<reference>` uses the existing protected developer pickup
+credential and returns the bounded examples plus an explicit `omittedCount`. It never accepts an
+app credential. The operator CLI can compare a known host ID locally to answer “was this mine?”
+without sending that ID to the service. Prior alerts cannot be reconstructed from their counts.
+
+This is an operator-only surface: authentication, diagnostic vocabulary, pseudonymisation,
+retention and capacity are host-owned, with no extension presentation or policy override.
+Scaling contract: normal traffic is a handful of errors per window; stress admission is concurrent
+failures against the same bucket. Each write touches two indexed rows and at most eight examples.
+The fixed six routes, nine statuses and 96 windows/day bound seven days to 36,288 rows per table;
+pickup reads one indexed row. Tests exercise concurrent admission, lossless counts, the sample
+cap, successful-page retention, expiry, credential rejection and the shipping push-to-pickup path.
 
 This covers requests reaching our Worker. Cloudflare edge rejections, offline/TLS failures and
 third-party APIs are outside that counter; they require edge or client-side monitoring. A

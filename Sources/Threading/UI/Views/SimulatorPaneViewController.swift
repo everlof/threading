@@ -202,6 +202,7 @@ final class SimulatorPaneViewController: NSViewController {
     }
     var workspaceHeaderShowsLayout = false
     var onOpenDeviceLogs: ((SimulatorDeviceID) -> Void)?
+    var onDevicePluginRoutes: ((SimulatorDeviceID) -> [ThemedMenuEntry])?
 
     private lazy var deviceChip: ChipView = {
         let chip = ChipView()
@@ -236,10 +237,22 @@ final class SimulatorPaneViewController: NSViewController {
             target: .inline,
             inkSource: .chrome
         )
-        button.toolTip = L10n.string("Open Device Logs in Bottom Pane")
+        button.toolTip = L10n.string("Open Device Logs in Bottom Pane (right-click for plugin actions)")
         button.onPress = { [weak self] in
             guard let self, let deviceID = self.selectedDeviceID else { return }
             self.onOpenDeviceLogs?(deviceID)
+        }
+        button.onContextMenu = { [weak self] anchor in
+            guard let self, let deviceID = self.selectedDeviceID,
+                  let entries = self.onDevicePluginRoutes?(deviceID), !entries.isEmpty
+            else { return false }
+            self.deviceRouteMenuSession = ThemedMenuPresenter.present(
+                ThemedMenuPresentation(entries: entries, minimumWidth: Self.menuWidth),
+                from: self.logsButton, anchor: anchor, selectedEntryIndex: nil,
+                onChoose: { _, item in item.onChoose?() },
+                onDismiss: { [weak self] in self?.deviceRouteMenuSession = nil }
+            )
+            return self.deviceRouteMenuSession != nil
         }
         button.setAccessibilityIdentifier("simulator.logs")
         return button
@@ -326,6 +339,7 @@ final class SimulatorPaneViewController: NSViewController {
     private var captureCopiesSnapshot = false
 
     private var captureMenuSession: AnyObject?
+    private var deviceRouteMenuSession: AnyObject?
 
     /// Recording has a button of its own. It shared the screenshot button's right-click menu,
     /// which left starting one undiscoverable and a running one visible only as that button's

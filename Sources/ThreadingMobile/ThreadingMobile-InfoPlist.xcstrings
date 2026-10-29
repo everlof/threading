@@ -44,13 +44,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Scan a private Threading pairing code shown on your Mac."
+            "value" : "Scan a private Threading pairing code or take a photo to attach to a message."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Skanna en privat Threading-parkopplingskod som visas på din Mac."
+            "value" : "Skanna en privat Threading-parkopplingskod eller ta en bild att bifoga till ett meddelande."
           }
         }
       }
@@ -104,6 +104,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använd mikrofonen för att diktera ett chattmeddelande som du kan redigera."
+          }
+        }
+      }
+    },
+    "NSPhotoLibraryAddUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save images you choose from chat attachments to your photo library."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spara bilder som du väljer från chattbilagor i ditt bildbibliotek."
           }
         }
       }

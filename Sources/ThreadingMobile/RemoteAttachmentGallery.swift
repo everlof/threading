@@ -51,8 +51,11 @@ struct RemoteAttachmentGallery: View {
     @State private var shareRequest: RemoteAttachmentShareRequest?
     @State private var sharePayload: MobileSharePayload?
     @State private var stagedShareDirectory: URL?
-    @State private var shareErrorMessage: String?
+    @State private var actionErrorMessage: String?
     @State private var isPreparingShare = false
+    @State private var imageActionRequest: RemoteAttachmentImageActionRequest?
+    @State private var actionErrorTitle = "Couldn’t share attachment"
+    @State private var didSaveImage = false
     private let initialData: [String: Data]
     private let loadsRemotely: Bool
     private let offersVideoStreaming: Bool
@@ -96,6 +99,10 @@ struct RemoteAttachmentGallery: View {
         attachments.firstIndex { $0.id == current?.id } ?? 0
     }
 
+    private var isPreparingAttachment: Bool {
+        isPreparingShare || imageActionRequest != nil
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             pages
@@ -115,12 +122,14 @@ struct RemoteAttachmentGallery: View {
             thumbnails.adopt(client: client)
             shareRequest = nil
             isPreparingShare = false
+            imageActionRequest = nil
         }
         .onChange(of: currentID) { _, _ in
             cachedShareAttachmentID = nil
             cachedShareData = nil
             shareRequest = nil
             isPreparingShare = false
+            imageActionRequest = nil
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -143,7 +152,7 @@ struct RemoteAttachmentGallery: View {
                     guard let current else { return }
                     prepareToShare(current)
                 } label: {
-                    if isPreparingShare {
+                    if isPreparingAttachment {
                         ProgressView()
                             .controlSize(.small)
                     } else {
@@ -152,9 +161,9 @@ struct RemoteAttachmentGallery: View {
                 }
                 // A comparison's own bytes are only the record naming its two pictures, which is
                 // nothing to send anyone; each picture shares from its own page.
-                .disabled(current == nil || isPreparingShare || current?.kind == .comparison)
+                .disabled(current == nil || isPreparingAttachment || current?.kind == .comparison)
                 .accessibilityLabel(MobileL10n.string(
-                    isPreparingShare ? "Preparing attachment" : "Share"
+                    isPreparingAttachment ? "Preparing attachment" : "Share"
                 ))
             }
         }
@@ -162,16 +171,26 @@ struct RemoteAttachmentGallery: View {
             guard let shareRequest else { return }
             await prepareShare(shareRequest)
         }
+        .task(id: imageActionRequest?.id) {
+            guard let imageActionRequest else { return }
+            await performImageAction(imageActionRequest)
+        }
         .sheet(item: $sharePayload, onDismiss: clearStagedShare) { payload in
             MobileSystemShareSheet(items: payload.items)
         }
         .themedAlert(
-            "Couldn’t share attachment",
-            message: shareErrorMessage ?? "",
+            actionErrorTitle,
+            message: actionErrorMessage ?? "",
             isPresented: Binding(
-                get: { shareErrorMessage != nil },
-                set: { if !$0 { shareErrorMessage = nil } }
+                get: { actionErrorMessage != nil },
+                set: { if !$0 { actionErrorMessage = nil } }
             ),
+            actions: [ThemedDialogAction("OK")]
+        )
+        .themedAlert(
+            "Saved to Photos",
+            message: "The image was added to your photo library.",
+            isPresented: $didSaveImage,
             actions: [ThemedDialogAction("OK")]
         )
     }
@@ -203,6 +222,10 @@ struct RemoteAttachmentGallery: View {
                             guard attachment.id == current?.id else { return }
                             cachedShareAttachmentID = attachment.id
                             cachedShareData = data
+                        },
+                        imageActionsEnabled: !isPreparingAttachment,
+                        onImageAction: { action, data in
+                            performImageAction(action, attachment: attachment, data: data)
                         }
                     )
                     // A page is the scroller's whole viewport, both ways: a preview sized to
@@ -274,9 +297,11 @@ struct RemoteAttachmentGallery: View {
         .accessibilityLabel(MobileL10n.string("Attachments"))
     }
 
-    private func prepareToShare(_ attachment: RemoteAttachmentDTO) {
-        let cachedData = cachedShareAttachmentID == attachment.id ? cachedShareData : nil
-        shareErrorMessage = nil
+    private func prepareToShare(_ attachment: RemoteAttachmentDTO, data: Data? = nil) {
+        guard !isPreparingAttachment else { return }
+        let cachedData = data ?? (cachedShareAttachmentID == attachment.id ? cachedShareData : nil)
+        actionErrorTitle = "Couldn’t share attachment"
+        actionErrorMessage = nil
         isPreparingShare = true
         shareRequest = RemoteAttachmentShareRequest(
             sessionID: sessionID,
@@ -288,11 +313,65 @@ struct RemoteAttachmentGallery: View {
         )
     }
 
+    private func performImageAction(
+        _ action: RemoteAttachmentImageAction,
+        attachment: RemoteAttachmentDTO,
+        data: Data
+    ) {
+        guard attachment.id == current?.id, !isPreparingAttachment else { return }
+        if action == .share {
+            prepareToShare(attachment, data: data)
+            return
+        }
+        actionErrorMessage = nil
+        actionErrorTitle = action == .copy ? "Couldn’t copy image" : "Couldn’t save image"
+        imageActionRequest = RemoteAttachmentImageActionRequest(
+            action: action, data: data, name: attachment.name
+        )
+    }
+
+    @MainActor
+    private func performImageAction(_ request: RemoteAttachmentImageActionRequest) async {
+        do {
+            let image = try await RemoteAttachmentImageExport.prepare(
+                data: request.data, name: request.name
+            )
+            try Task.checkCancellation()
+            guard imageActionRequest?.id == request.id else { return }
+            switch request.action {
+            case .copy:
+                image.copy(to: .general)
+                UIAccessibility.post(
+                    notification: .announcement,
+                    argument: MobileL10n.string("Image copied")
+                )
+            case .saveToPhotos:
+                try await image.saveToPhotos()
+                try Task.checkCancellation()
+                guard imageActionRequest?.id == request.id else { return }
+                didSaveImage = true
+            case .share:
+                break // Share uses the gallery's existing staged-file lifecycle.
+            }
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch is CancellationError {
+            // A page or route change withdraws preparation, including a pending permission prompt.
+        } catch {
+            guard imageActionRequest?.id == request.id else { return }
+            actionErrorMessage = error.localizedDescription
+        }
+        guard imageActionRequest?.id == request.id else { return }
+        imageActionRequest = nil
+    }
+
     @MainActor
     private func prepareShare(_ request: RemoteAttachmentShareRequest) async {
         do {
             let staged = try await request.prepare(using: shareStager)
-            try Task.checkCancellation()
+            if Task.isCancelled {
+                await removeStagedDirectory(staged.directoryURL)
+                throw CancellationError()
+            }
             guard shareRequest?.id == request.id else {
                 await removeStagedDirectory(staged.directoryURL)
                 return
@@ -303,7 +382,7 @@ struct RemoteAttachmentGallery: View {
             // Swiping to another attachment or leaving the gallery withdraws this action.
         } catch {
             guard shareRequest?.id == request.id else { return }
-            shareErrorMessage = error.localizedDescription
+            actionErrorMessage = error.localizedDescription
         }
         guard shareRequest?.id == request.id else { return }
         shareRequest = nil

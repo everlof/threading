@@ -149,6 +149,9 @@ python3 "${repository_directory}/scripts/tests/test_bundle_size.py"
 say "Testing that the proxy helper's source is published beside it"
 python3 "${repository_directory}/scripts/tests/test_proxy_source_distribution.py"
 
+say "Testing the portable native plugin SDK source"
+python3 "${repository_directory}/scripts/tests/test_plugin_sdk_export.py"
+
 say "Testing agent feedback audit"
 python3 "${repository_directory}/scripts/tests/test_agent_feedback_audit.py"
 

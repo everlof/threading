@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 @testable import DeviceLogsPlugin
 
 /// Focus is what an agent drives when it says "this is what matters" — so what it folds, what it
@@ -97,18 +98,26 @@ final class LogFocusTests: XCTestCase {
     /// bound below is set for Debug, where the suite runs, and is still tight enough to catch the
     /// regression that matters. Two other spellings of the same search were tried: `lowercased()` per field cost
     /// 57 ms and `range(of:options:.caseInsensitive)` cost 158 ms, so a return to either fails
-    /// here rather than quietly making focus unusable while a device is talking.
+    /// here rather than quietly making focus unusable while a device is talking. Measure this
+    /// synchronous scan's thread CPU time so unrelated Xcode builds cannot turn scheduler delay
+    /// into an apparent algorithm regression.
     func testProjectingAFullRingRemainsBounded() {
         let full = rows(DeviceLogLimits.ringCapacity)
         let focus = LogFocus(pattern: "failed", context: 2)
         var slowest = 0.0
         for _ in 0..<5 {
-            let started = DispatchTime.now().uptimeNanoseconds
+            let started = threadCPUTimeNanoseconds()
             _ = LogFocusLayout.entries(rows: full, focus: focus)
-            slowest = max(slowest, Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000)
+            slowest = max(slowest, Double(threadCPUTimeNanoseconds() - started) / 1_000_000)
         }
-        print(String(format: "FOCUS layout of %d rows: %.1f ms worst of 5", full.count, slowest))
+        print(String(format: "FOCUS layout of %d rows: %.1f ms CPU worst of 5", full.count, slowest))
         XCTAssertLessThan(slowest, 120, "the background projection must keep up with capture")
+    }
+
+    private func threadCPUTimeNanoseconds() -> UInt64 {
+        var time = timespec()
+        XCTAssertEqual(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time), 0)
+        return UInt64(time.tv_sec) * 1_000_000_000 + UInt64(time.tv_nsec)
     }
 
     func testSubsystemIsAnExactMatchAndActivatesTheFocus() {

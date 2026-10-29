@@ -1,4 +1,5 @@
 import type { Env } from "./environment";
+import { setFailurePrincipal } from "./service-failure-context";
 import { HttpError } from "./environment";
 import { randomToken, sha256Hex } from "./crypto";
 import { authorizeRendezvousCredential } from "./enrollment";
@@ -36,6 +37,7 @@ export async function registerPushRecipient(request: Request, env: Env): Promise
   if (principal.kind !== "device") {
     throw new HttpError(403, "forbidden", "Device credential required");
   }
+  setFailurePrincipal(request, principal);
   const body = await readJSON(request, 4 * 1024);
   assertExactKeys(body, registrationRequestKeys);
   const deviceToken = normalizedDeviceToken(body.deviceToken);
@@ -91,7 +93,7 @@ export async function registeredPushRecipient(
   environment: "sandbox" | "production";
 }> {
   if (typeof registrationID !== "string" || !registrationIDPattern.test(registrationID)) {
-    throw new HttpError(400, "invalidRequest", "Push registration is invalid");
+    throw new HttpError(400, "invalidRequest", "Push registration is invalid", { reason: "invalidValue", field: "registrationID" });
   }
   const now = Math.floor(Date.now() / 1000);
   const row = await env.DB.prepare(
@@ -143,19 +145,19 @@ export function validatePushTokenEncryptionConfiguration(env: Env): void {
 }
 
 function normalizedDeviceToken(value: unknown): string {
-  if (typeof value !== "string") invalid("deviceToken is invalid");
+  if (typeof value !== "string") invalid("deviceToken");
   const normalized = value.toLowerCase();
   if (normalized.length < 32 || normalized.length > 512
     || normalized.length % 2 !== 0
     || !deviceTokenPattern.test(normalized)) {
-    invalid("deviceToken is invalid");
+    invalid("deviceToken");
   }
   return normalized;
 }
 
 function normalizedEnvironment(value: unknown): "sandbox" | "production" {
   if (typeof value !== "string" || !environments.has(value)) {
-    invalid("environment is invalid");
+    invalid("environment");
   }
   return value as "sandbox" | "production";
 }
@@ -245,8 +247,8 @@ function configuredEncryptionSecret(env: Env): string {
   return value;
 }
 
-function invalid(message: string): never {
-  throw new HttpError(400, "invalidRequest", message);
+function invalid(field: "deviceToken" | "environment"): never {
+  throw new HttpError(400, "invalidRequest", `${field} is invalid`, { reason: "invalidValue", field });
 }
 
 function storedTokenError(): never {

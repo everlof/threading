@@ -450,22 +450,9 @@ final class WindowTitleBandView: NSView, ThemedComponent {
             }
         }
 
-        let leading: [WindowChromeButton]
-        let trailing: [WindowChromeButton]
-        switch placement {
-        case .trailing:
-            leading = []
-            trailing = visible.compactMap(shown)
-        case .leading:
-            leading = visible.compactMap(shown)
-            trailing = []
-        case .split:
-            leading = shown(.close).map { [$0] } ?? []
-            trailing = visible.filter { $0 != .close }.compactMap(shown)
-        case .bookends:
-            leading = visible.first.flatMap(shown).map { [$0] } ?? []
-            trailing = visible.dropFirst().compactMap(shown)
-        }
+        let clusters = placement.clusters(of: visible)
+        let leading = clusters.leading.compactMap(shown)
+        let trailing = clusters.trailing.compactMap(shown)
 
         let currentLeading = leadingButtonStack.arrangedSubviews.compactMap {
             $0 as? WindowChromeButton

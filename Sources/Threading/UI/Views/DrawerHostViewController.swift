@@ -499,14 +499,22 @@ final class DrawerHostViewController: NSViewController {
                 title: L10n.string("Browser"),
                 image: ThemedMenuIcon.symbol("globe"),
                 onChoose: { [weak self] in
-                    if self?.addBrowserTab(for: sessionID) == nil { SystemAlert.refuse() }
+                    guard let browser = self?.addBrowserTab(for: sessionID) else {
+                        SystemAlert.refuse()
+                        return
+                    }
+                    browser.focusAddress()
                 }
             )),
             .item(ThemedMenuItem(
                 title: L10n.string("Private Browser"),
                 image: ThemedMenuIcon.symbol("hand.raised.fill"),
                 onChoose: { [weak self] in
-                    if self?.addBrowserTab(for: sessionID, contextKind: .private) == nil { SystemAlert.refuse() }
+                    guard let browser = self?.addBrowserTab(for: sessionID, contextKind: .private) else {
+                        SystemAlert.refuse()
+                        return
+                    }
+                    browser.focusAddress()
                 }
             ))
         ]

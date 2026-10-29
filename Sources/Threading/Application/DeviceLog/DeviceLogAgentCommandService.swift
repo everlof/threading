@@ -47,13 +47,16 @@ enum DeviceLogAgentCommandService {
             """
     }
 
-    /// The pane still works without the tap; only the app's own printed output is missing. Saying
-    /// so keeps a refusal from reading as a broken feature, and names the one way back.
+    /// Consent concerns the user's product. The pane's actual capture status is a separate fact.
     static func refusedResult() -> MCPToolResult {
         .failure("""
             The user did not allow the log tap to be linked into their app.
 
-            The Device logs pane is still open and streaming, so the system's account of the app is             visible; what the app itself prints is not, because printed output never reaches the             unified log on its own. Do not build with the tap. The user can allow it later if they             want that output.
+            Device Logs is revealed. Use plugin__devicelogs__state to inspect its selected source \
+            and capture status. System-log capture can read available unified logs, subject to \
+            privacy redaction, but it does not capture ordinary stdout/stderr automatically. A \
+            separate app-console route may provide merged console output and may relaunch the app. \
+            Do not link the tap. The user can allow it later.
             """)
     }
 
@@ -71,13 +74,28 @@ enum DeviceLogAgentCommandService {
 
     static func preparationResult(for built: DeviceLogTap.Built) -> MCPToolResult {
         .success("""
-            The Device logs pane is open in this session's right panel and lists every booted \
-            simulator and paired iPhone.
+            Device Logs is revealed for this session. Follow any installation or setup status \
+            in the pane; revealing it does not prove a reader is connected or that output arrived.
+
+            Use plugin__devicelogs__state to inspect the actual device/source, process choices, \
+            current filter and capture availability. Change that same visible panel with \
+            plugin__devicelogs__configure, then use plugin__devicelogs__read or \
+            plugin__devicelogs__wait without repeating filters. Pass returned stable row IDs to \
+            plugin__devicelogs__reveal to highlight the exact evidence for the user.
+
+            System logs include available os_log/Logger entries and may redact private values; \
+            ordinary print()/stdout/stderr do not automatically reach the unified log. An app's \
+            console route can provide merged console output and may relaunch it. A saved app-log \
+            route contains only what the app wrote to that file. State reports the selected \
+            route's availability instead of assuming all three channels are present.
 
             \(guidance(for: built))
 
-            Without the tap the pane still shows the system's account of the app, but nothing the \
-            app itself printed: `print()` never reaches the unified log.
+            Preparing the tap only builds its library. Apply the setting and rebuild/reinstall \
+            the device app, or inject it when launching the simulator/macOS app, to capture future \
+            output. Existing linked or running apps do not upgrade automatically. The current tap \
+            labels stdout and stderr separately; older taps may report merged console output. \
+            Confirm received entries and capture status with read/state before claiming coverage.
             """)
     }
 }

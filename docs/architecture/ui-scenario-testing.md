@@ -51,6 +51,10 @@ A second copy of ExtensionKit or PTYClient creates distinct Swift error metadata
 `ExtensionValidationError` thrown by the host failed the test's cast, and a client error thrown
 by a fixture reached the host as `link.unknown`. Keep those implementations in the host; only
 the dynamic PluginKit contract, Sentry and Cocoa belong in the test bundle's Frameworks phase.
+`ThreadingMobileTests` follows the same hosted contract: RemoteKit, ExtensionKit and their
+transitive Domain implementation come from `ThreadingMobile` through `BUNDLE_LOADER`, with only
+Sentry's dynamic product declared by the test target. Declaring those static products again makes
+Xcode reject the test build for duplicate linkage before any tests can run.
 
 `ThreadingUITests` is a real UI-testing bundle with its own `ThreadingUI` scheme and
 `Threading-UI.xctestplan`. Both it and `ThreadingTests` use Xcode filesystem-synchronized groups,

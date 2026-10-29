@@ -8,7 +8,7 @@ enum SidebarBrandLayout {
     /// came out barely a point wide — thin enough that the whole thing read as soft even
     /// once it was rasterising at the right scale. Four points is the difference between
     /// a logo and a smudge, and the band has the room.
-    static let logoSide: CGFloat = 24
+    static let logoSide = SidebarDefaults.brandLogoSide
 }
 
 /// One brand row arrangement for both hosts. Theme-specific artwork is supplied as optional

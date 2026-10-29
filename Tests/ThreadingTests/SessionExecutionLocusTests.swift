@@ -175,8 +175,8 @@ final class SessionExecutionLocusTests: XCTestCase {
             checkoutPath: sibling.root,
             repositoryIdentity: sibling.repositoryIdentity,
             worktreeIdentity: sibling.worktreeIdentity,
-            authorityBasis: .observedExecution,
-            reason: "observed there",
+            authorityBasis: .explicitUserRequest,
+            reason: "the user asked",
             requestedAt: Date()
         ), forSessionID: session.id))
 

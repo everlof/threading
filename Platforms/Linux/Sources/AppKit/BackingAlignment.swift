@@ -5,6 +5,7 @@ public struct NSAlignmentOptions: OptionSet, Sendable {
     public let rawValue: UInt
     public init(rawValue: UInt) { self.rawValue = rawValue }
     public static let alignAllEdgesInward = NSAlignmentOptions(rawValue: 1)
+    public static let alignAllEdgesNearest = NSAlignmentOptions(rawValue: 2)
 }
 
 extension NSView {
@@ -14,7 +15,8 @@ extension NSView {
     /// draws axis-aligned views; a rotated/sheared transform cannot be represented by an aligned
     /// local NSRect and is returned unchanged.
     public func backingAlignedRect(_ rect: NSRect, options: NSAlignmentOptions) -> NSRect {
-        precondition(options == .alignAllEdgesInward, "unsupported backing alignment option")
+        precondition(options == .alignAllEdgesInward || options == .alignAllEdgesNearest,
+                     "unsupported backing alignment option")
         guard rect.width > 0, rect.height > 0 else { return rect }
         let transform: CGAffineTransform
         if let context = NSGraphicsContext.current {
@@ -44,8 +46,21 @@ extension NSView {
             return (min(a, b), max(a, b))
         }
 
-        let x = inward(rect.minX, rect.maxX, scale: transform.a, offset: transform.tx)
-        let y = inward(rect.minY, rect.maxY, scale: transform.d, offset: transform.ty)
+        func nearest(_ lower: CGFloat, _ upper: CGFloat, scale: CGFloat, offset: CGFloat)
+            -> (CGFloat, CGFloat) {
+            let first = (lower * scale + offset).rounded()
+            let second = (upper * scale + offset).rounded()
+            let a = (first - offset) / scale
+            let b = (second - offset) / scale
+            return (min(a, b), max(a, b))
+        }
+
+        let x = options == .alignAllEdgesNearest
+            ? nearest(rect.minX, rect.maxX, scale: transform.a, offset: transform.tx)
+            : inward(rect.minX, rect.maxX, scale: transform.a, offset: transform.tx)
+        let y = options == .alignAllEdgesNearest
+            ? nearest(rect.minY, rect.maxY, scale: transform.d, offset: transform.ty)
+            : inward(rect.minY, rect.maxY, scale: transform.d, offset: transform.ty)
         return NSRect(x: x.0, y: y.0, width: x.1 - x.0, height: y.1 - y.0)
     }
 }

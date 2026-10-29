@@ -36,7 +36,7 @@ public struct ThemedMenuSubtitleSegment {
     }
 }
 
-/// One reading a row states as a *column* rather than as words inside its line.
+/// One reading a row states as a *meter line* rather than as words inside its subtitle.
 ///
 /// The account rows are why this exists. A subtitle can hold `5h 27% · 7d 81% · 7d resets in
 /// 19h 36m`, and for one row it reads fine — but the menu's job is comparing several, and a
@@ -44,37 +44,107 @@ public struct ThemedMenuSubtitleSegment {
 /// logins therefore put their three 5-hour numbers at three different x positions, and the
 /// comparison the menu exists for becomes a search.
 ///
-/// A metric names its column (`label`) instead of its place, so the row can stack every login's
-/// same-named window in one column with tabular digits under it. `fraction` is the same reading
-/// again as a length, which is what makes the ranking pre-attentive; nil draws the track alone,
-/// for a window whose number is not knowable rather than one that is empty. `tone` is semantic
-/// for the same reason `ThemedMenuSubtitleSegment.Tone` is — the row owns the palette, and a
-/// classic selection band flattens both text and bar to its own authored ink.
+/// A metric names its line (`label`) instead of its place, so every row puts its same-named
+/// reading on the same line at the same x — every login's `5h` beside its name, every `7d`
+/// directly under it. `fraction` is the reading again as a length, which is what makes the
+/// ranking pre-attentive; nil draws the track alone, for a window whose number is not knowable
+/// rather than one that is empty. `timeMark` puts the clock on the same bar, so spend is read
+/// against time rather than against nothing. `tone` is semantic for the same reason
+/// `ThemedMenuSubtitleSegment.Tone` is — the row owns the palette, and a classic selection band
+/// flattens text, bar and tick to its own authored ink.
 public struct ThemedMenuMetric {
 
-    /// The column this reading belongs in, and its written name — `5h`, `7d`. Rows sharing a
-    /// label share a column; a row with no metric for a column leaves it empty, which is how
-    /// a plan metering one window says so beside a plan metering two.
+    /// The line this reading belongs on, and its written name — `5h`, `7d`. Rows sharing a
+    /// label share a line; a row with no metric for a line leaves it empty, which is how a plan
+    /// metering one window says so beside a plan metering two.
     public let label: String
-    /// The precise answer, in the column's own digits — `27%`, or `—` where the window's number
+    /// The precise answer, in the line's own digits — `27%`, or `—` where the window's number
     /// would be a leftover from the window before it.
     public let value: String
     /// The same answer as a length, 0…1. Nil draws the empty track: no bar at all would read as
-    /// a missing column, and a full-length one as a spent window.
+    /// a missing line, and a full-length one as a spent window.
     public let fraction: Double?
     public let tone: ThemedMenuSubtitleSegment.Tone
+    /// How far through its period the reading's clock stands, 0…1, drawn as a tick across the
+    /// bar. Fill short of the tick is spending slower than time passes; fill past it is spending
+    /// faster — the one thing a percentage on its own cannot say. Nil draws no tick, for a period
+    /// whose length or position is not known.
+    public let timeMark: Double?
+    /// The line's last word, right-aligned in a column of its own — the account rows' reset
+    /// countdown, `13m` or `4d 2h`. Nil leaves the cell empty.
+    public let detail: String?
+    /// What `detail` says in words, for the two consumers that see neither its column nor the
+    /// line it ends — the tooltip and VoiceOver: `resets in 13m` for `13m`.
+    public let spokenDetail: String?
+    public let detailTone: ThemedMenuSubtitleSegment.Tone
 
     public init(
         label: String,
         value: String,
         fraction: Double?,
-        tone: ThemedMenuSubtitleSegment.Tone = .standard
+        tone: ThemedMenuSubtitleSegment.Tone = .standard,
+        timeMark: Double? = nil,
+        detail: String? = nil,
+        spokenDetail: String? = nil,
+        detailTone: ThemedMenuSubtitleSegment.Tone = .muted
     ) {
         self.label = label
         self.value = value
         self.fraction = fraction
         self.tone = tone
+        self.timeMark = timeMark
+        self.detail = detail
+        self.spokenDetail = spokenDetail ?? detail
+        self.detailTone = detailTone
     }
+
+    /// `5h 46% resets in 13m` — the line as a reader who cannot see it is told it.
+    public var spokenReading: String {
+        guard let spokenDetail, !spokenDetail.isEmpty else { return "\(label) \(value)" }
+        return "\(label) \(value) \(spokenDetail)"
+    }
+}
+
+/// The meter block every row of one menu shares: which label takes which line, and the width of
+/// each of a line's four cells — name, bar, value, detail.
+///
+/// One value, measured once per menu by `ThemedMenuMetrics.metricPlan` and handed to every row,
+/// so the rows cannot each decide where their bars start. That is what lets a column of bars be
+/// compared by length and a column of values be scanned without reading.
+public struct ThemedMenuMetricPlan: Equatable, Sendable {
+    /// One label per line, top down — `["5h", "7d"]`. Empty when no row has a reading.
+    public let lines: [String]
+    public let labelWidth: CGFloat
+    public let barWidth: CGFloat
+    public let valueWidth: CGFloat
+    /// Zero when no row's metric carries a detail, which closes the column and its gap.
+    public let detailWidth: CGFloat
+    public let innerGap: CGFloat
+    public let detailGap: CGFloat
+
+    public static let empty = ThemedMenuMetricPlan(
+        lines: [], labelWidth: 0, barWidth: 0, valueWidth: 0, detailWidth: 0,
+        innerGap: 0, detailGap: 0
+    )
+
+    public var isEmpty: Bool { lines.isEmpty }
+
+    /// From a line's name to the end of its detail.
+    public var width: CGFloat {
+        guard !isEmpty else { return 0 }
+        return labelWidth + innerGap + barWidth + innerGap + valueWidth
+            + (detailWidth > 0 ? detailGap + detailWidth : 0)
+    }
+}
+
+/// Where one meter line of a menu row was drawn, as `ThemedMenuReferenceFixture.meterLines`
+/// reports it: enough for a test to check that lines stack and align across rows, and that the
+/// clock's tick is drawn where the reading says.
+public struct ThemedMenuMeterLine: Equatable {
+    public let label: String
+    public let barRect: NSRect
+    public let tickRect: NSRect?
+    public let valueRect: NSRect
 }
 
 public struct ThemedMenuItem {
@@ -110,15 +180,10 @@ public struct ThemedMenuItem {
     /// every run, deliberately: tones change ink only, so the plain string measures exactly
     /// what the styled line draws.
     public private(set) var subtitleSegments: [ThemedMenuSubtitleSegment]?
-    /// Readings this row states in shared columns beside its title, aligned with every other
+    /// Readings this row states as meter lines at its trailing edge, aligned with every other
     /// row's. See `ThemedMenuMetric`. Empty on a row that has none — a menu whose rows all have
-    /// none reserves no columns at all.
+    /// none reserves no meter block at all.
     public var metrics: [ThemedMenuMetric] = []
-    /// The one fact that follows the columns, right-aligned in a column of its own: the account
-    /// rows' reset countdown. Separated from the metrics because it is not a reading of a
-    /// window, and separated from the subtitle because it is the fact that must never be the
-    /// thing an over-long line truncates.
-    public var trailingDetail: String?
     /// A quiet qualifier drawn immediately after the title, in the same line — the account
     /// rows' plan name. It belongs to the title rather than to the subtitle: it identifies the
     /// row, and demoting it to a second line gives a subtitle-height row to every login whose
@@ -131,6 +196,11 @@ public struct ThemedMenuItem {
     /// because it is a property of the *list* a row was put in — one caller builds the row and
     /// the list's owner decides that its rows can be auditioned.
     public var accessory: ThemedMenuAccessory?
+    /// What this row becomes while a modifier is held — the platform's alternate menu item.
+    /// See `ThemedMenuAlternate`. Set after construction like the accessory, and ignored on a
+    /// row that opens a submenu: a parent turning into an action under its own open panel would
+    /// leave that panel hanging off a row that no longer owns it.
+    public var alternate: ThemedMenuAlternate?
     public var representedValue: Any?
     public var isSelected: Bool
     public var isEnabled: Bool
@@ -265,6 +335,42 @@ public struct ThemedMenuItem {
         shortcut ?? keyEquivalent.map { KeyboardShortcut(key: $0, modifiers: .command) }
     }
 
+    /// The row as it reads while `modifiers` are held: its alternate when they name it exactly,
+    /// otherwise itself.
+    ///
+    /// Only the act changes. The name, the mark and the help are the alternate's, and the action
+    /// is its alone — a row that drew "Remove Without Asking" and then ran the asking remove would
+    /// be the one outcome worse than no alternate at all. Everything describing the *subject*
+    /// rather than the act — subtitle, readings, selection, enablement — stays the row's, so the
+    /// columns the panel reserved from the authored rows still line up. The shortcut goes: it is
+    /// the chord for the row's own action, and printing it beside a different one would be a lie.
+    public func resolved(holding modifiers: NSEvent.ModifierFlags) -> ThemedMenuItem {
+        guard showsAlternate(holding: modifiers), let alternate else { return self }
+        var shown = ThemedMenuItem(
+            title: alternate.title,
+            help: alternate.help,
+            subtitle: subtitle,
+            shortcut: nil,
+            keyEquivalent: nil,
+            image: alternate.image ?? image,
+            preview: preview,
+            representedValue: nil,
+            isSelected: isSelected,
+            isEnabled: isEnabled,
+            destination: .action(alternate.action)
+        )
+        if let subtitleSegments { shown.setSubtitle(subtitleSegments) }
+        shown.metrics = metrics
+        shown.titleDetail = titleDetail
+        shown.accessory = accessory
+        return shown
+    }
+
+    /// Whether `modifiers` turn this row into its alternate.
+    public func showsAlternate(holding modifiers: NSEvent.ModifierFlags) -> Bool {
+        submenu == nil && alternate?.isTriggered(by: modifiers) == true
+    }
+
     /// Sets both halves of a styled subtitle at once: the runs the row draws, and the plain
     /// join every non-drawing consumer keeps — the tooltip, the filter, the measured width.
     /// One entry point rather than two properties, because the two drifting apart is a row
@@ -276,10 +382,10 @@ public struct ThemedMenuItem {
 
     /// Everything the row says, as one sentence — for the tooltip and for VoiceOver.
     ///
-    /// Columns are a picture, and a picture is exactly what neither of those consumers gets.
+    /// Meters are a picture, and a picture is exactly what neither of those consumers gets.
     /// Announcing `item.title` alone was survivable while the reading lived in the subtitle the
-    /// tooltip already carried; once it moved into aligned columns and a drawn bar, a row
-    /// announced by its name alone would be a login with no reading at all.
+    /// tooltip already carried; once it moved into aligned meters with a drawn bar and tick, a
+    /// row announced by its name alone would be a login with no reading at all.
     public var spokenSummary: String {
         var parts: [String] = []
         // Every part is admitted only when it has something in it, the title included: a row
@@ -287,8 +393,7 @@ public struct ThemedMenuItem {
         // borrows this — otherwise opens with the separator and reads as a dropped word.
         if !title.isEmpty { parts.append(title) }
         if let titleDetail, !titleDetail.isEmpty { parts.append(titleDetail) }
-        parts += metrics.map { "\($0.label) \($0.value)" }
-        if let trailingDetail, !trailingDetail.isEmpty { parts.append(trailingDetail) }
+        parts += metrics.map(\.spokenReading)
         if let subtitle, !subtitle.isEmpty { parts.append(subtitle) }
         return parts.joined(separator: ThemedMenuItemDefaults.spokenSeparator)
     }
@@ -373,6 +478,57 @@ public struct ThemedMenuAccessory {
         self.symbolName = symbolName
         self.title = title
         self.action = action
+    }
+}
+
+/// The act a row offers instead while a modifier is held: the Option key's "Delete
+/// Immediately" under Finder's "Move to Trash".
+///
+/// It exists for the fast path a person already knows they want — removing without the
+/// confirmation, copying the path instead of revealing the folder — and costs nothing to anyone
+/// who does not: no row is added, and the panel looks exactly as it did until the key goes down.
+/// While it is held the row *says* the other act, so the press is never a surprise: the name a
+/// person reads is always the action they get.
+///
+/// Three rules, all of them the platform's:
+///
+/// - **The chord is exact.** ⌥ alone reveals an Option alternate; ⌥⇧ does not, so a menu can one
+///   day carry two without the larger chord also triggering the smaller one.
+/// - **The panel is measured for both titles**, so pressing the key never resizes the menu under
+///   the pointer.
+/// - **The keyboard and VoiceOver reach it too.** Holding the key while pressing Return chooses
+///   it, and the row offers it as an accessibility action, because a capability that needs a
+///   held key and a pointer together would be one most people could not use.
+public struct ThemedMenuAlternate {
+    /// The four keys a person chords with. Caps Lock, Fn and the numeric-pad bit ride along in
+    /// `modifierFlags` without anyone meaning them, so an exact comparison ignores them.
+    private static let chordModifiers: NSEvent.ModifierFlags = [.option, .shift, .control, .command]
+
+    public let title: String
+    public let modifiers: NSEvent.ModifierFlags
+    /// Nil keeps the row's own mark, which is usually right: the alternate acts on the same thing.
+    public var image: NSImage?
+    public var help: String?
+    public let action: () -> Void
+
+    public init(
+        title: String,
+        modifiers: NSEvent.ModifierFlags = .option,
+        image: NSImage? = nil,
+        help: String? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.modifiers = modifiers.intersection(Self.chordModifiers)
+        self.image = image
+        self.help = help
+        self.action = action
+    }
+
+    /// Whether `flags` are exactly this alternate's chord. An alternate with no modifier is never
+    /// shown: it would replace its row permanently, which is a different title, not an alternate.
+    public func isTriggered(by flags: NSEvent.ModifierFlags) -> Bool {
+        !modifiers.isEmpty && flags.intersection(Self.chordModifiers) == modifiers
     }
 }
 

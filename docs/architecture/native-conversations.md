@@ -1469,6 +1469,18 @@ that render may not reapply `isEditable`: a held system Backspace is a sequence 
 keyboard's repeat. Threading does not implement its own deletion timer or string indexing; UIKit
 continues to own marked text and composed-character deletion.
 
+The SwiftUI new-session prompt also defers **changed** editability and first-responder requests
+until its representable update has returned. Disabling a focused `UITextView` resigns first
+responder synchronously; UIKit's keyboard tracking can then lay out the SwiftUI host inside the
+AttributeGraph transaction already updating that editor. The physical-iPhone watchdog report on
+2026-10-23 captured exactly that nested stack in `SessionDraftPromptEditor.updateUIView`.
+Its coordinator refreshes the current bindings and coalesces input requests into one main-actor
+task. The task reads the latest focus and enabled state, dismisses before disabling, and never
+focuses disabled or detached input. Dismantling cancels the task and disconnects delegate callbacks
+without publishing during SwiftUI teardown. Keyboard ownership remains host-owned; themes still
+only supply the editor's material. `ComposerTextViewPasteTests` covers deferred dismissal,
+superseded requests, dismantling and Start through the shipping draft screen.
+
 Phone terminal keys and native-conversation buttons share one `MobileButtonFeedback`: a light
 `UIImpactFeedbackGenerator` impact at intensity 0.85. The UIKit adapter prepares that one generator
 on touch-down and fires only on the control's successful semantic activation—touch-up-inside for
@@ -1595,6 +1607,19 @@ settings controls consume optional `RemoteConversationConfigurationDTO` metadata
 caches that catalogue by configuration/default readings, transport availability and model-catalogue
 revision; unchanged streaming frames reuse it and omit it from deltas. A settings-only update
 notifies the composer without remounting timeline rows. Older hosts omit the capability.
+
+The delivery receipt is a compact outlined panel with a status heading, one truncated preview
+line and a disclosure arrow. Its two explicit labels own their line limits: assigning a
+multiline prompt to a configured button's title lets UIKit reflow the complete prompt into the
+pinned area despite an earlier `titleLabel.numberOfLines` assignment. The preview scans at most
+160 Unicode scalars before normalizing whitespace; one receipt represents the first message and
+the remaining count, even at the protocol's 20-message bound. Full summaries are mounted only
+when the existing delivery sheet opens. Updates retain the same labels and outline, and an
+empty receipt collapses completely. This remains host-only delivery chrome: themes supply the
+panel, border and typography, while lifecycle truth, queue/steer authority and details navigation
+remain owned by Threading. The shipping-controller regression covers 320/402-point widths,
+multiline summaries, a full queue, sheet opening and removal; the `chat-delivery-long` iOS
+evidence fixtures cover the product shell, themes, keyboard and accessibility text size.
 
 Settings are owner-device operations, admitted against current authorization, exact socket
 attachment, visible session and Focused input authority. The host validates the selected value

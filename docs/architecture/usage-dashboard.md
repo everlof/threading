@@ -206,9 +206,12 @@ work for the 280-point / 118-reset envelope. The chart is an equatable child, so
 other dashboard changes do not rebuild unchanged history; theme dependencies still refresh it.
 Projection dashes, reset/expiry rules, peak columns and the existing VoiceOver summary remain.
 
-Changing periods keeps the last same-account/window snapshot mounted, with a pending indicator
-over the chart until its replacement arrives. A failure leaves that snapshot and scroll extent
-in place and reports the error. Request generations own result, error and loading publication,
+Changing periods, windows or logins keeps the last snapshot mounted, with a pending indicator
+over the chart until its replacement arrives. A snapshot of another window is dimmed with its
+readings, hidden from VoiceOver, and its banked-reset button disabled, so it holds the scroll
+extent without being read or redeemed as the selected window's. Dropping it while waiting is
+what sent the reader back to the top of the sheet. A failure leaves that snapshot and scroll
+extent in place and reports the error. Request generations own result, error and loading publication,
 including a return to the already displayed period while another request is pending. The history
 heading and card form one stable lazy-stack child. This remains a host-only mobile surface:
 Threading owns account/window identity, period selection, data truth, request authority and scroll

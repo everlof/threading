@@ -9,7 +9,7 @@ import Foundation
 /// leaking into its siblings, and getting it wrong would show up as a picture, not an error.
 public final class NSGraphicsContext {
 
-    public enum CompositingOperation: Sendable { case sourceOver, sourceIn, copy, plusLighter }
+    public enum CompositingOperation: Sendable { case sourceOver, sourceIn, copy, clear, plusLighter }
 
     private struct State {
         var fillColor: NSColor
@@ -280,7 +280,8 @@ public final class NSGraphicsContext {
             if let tile = layer.tiles[key] { destination = tile }
             else {
                 // Transparent source-over/source-in cannot create coverage in an empty tile.
-                guard color.3 > 0, compositingOperation != .sourceIn else { return }
+                guard color.3 > 0, compositingOperation != .sourceIn,
+                      compositingOperation != .clear else { return }
                 precondition(allocatedLayerPixels <= Self.maximumLayerPixels - side * side,
                              "transparency group exceeds the bounded image leaf")
                 destination = Bitmap(width: side, height: side)
@@ -459,9 +460,14 @@ extension NSGraphicsContext {
     public var cgContext: CGContextShim { CGContextShim(owner: self) }
 }
 
+public enum CGBlendMode: Sendable { case clear }
+
 public struct CGContextShim {
     let owner: NSGraphicsContext
     public func translateBy(x: CGFloat, y: CGFloat) { owner.translateBy(x: x, y: y) }
+    public func setBlendMode(_ mode: CGBlendMode) {
+        switch mode { case .clear: owner.compositingOperation = .clear }
+    }
     public func setAlpha(_ value: CGFloat) {
         precondition(value.isFinite, "non-finite graphics alpha")
         owner.alpha = min(1, max(0, value))

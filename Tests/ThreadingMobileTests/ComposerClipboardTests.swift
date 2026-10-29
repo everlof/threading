@@ -244,6 +244,162 @@ final class ComposerTextViewPasteTests: XCTestCase {
         )
     }
 
+    func testNewSessionDraftDefersSubmissionKeyboardDismissalUntilAfterRendering() async throws {
+        try await assertDraftKeyboardDismissal(isEnabled: false)
+    }
+
+    func testNewSessionDraftDefersFocusOnlyDismissalUntilAfterRendering() async throws {
+        try await assertDraftKeyboardDismissal(isEnabled: true)
+    }
+
+    func testNewSessionDraftUsesLatestInputStateAcrossRapidUpdates() async {
+        let input = DraftInputState()
+        let editor = input.editor(isEnabled: true)
+        let coordinator = editor.makeCoordinator()
+        let view = IntrinsicTextView()
+        view.delegate = coordinator
+        let controller = UIViewController()
+        controller.view.addSubview(view)
+        let window = makeWindow(rootViewController: controller, size: CGSize(width: 390, height: 844))
+        defer { window.isHidden = true }
+
+        for index in 0..<1_000 {
+            input.isFocused = index.isMultiple(of: 2)
+            coordinator.updateInputState(for: view, editor: input.editor(isEnabled: true))
+        }
+        // A stale focus request must not reopen the keyboard once submission disables input,
+        // even if a chooser left the focus binding set.
+        input.isFocused = true
+        coordinator.updateInputState(for: view, editor: input.editor(isEnabled: false))
+        XCTAssertTrue(view.isEditable)
+        let settled = await draftInputSettled { !view.isEditable }
+        XCTAssertTrue(settled)
+        XCTAssertFalse(view.isFirstResponder)
+        XCTAssertTrue(input.focusPublications.isEmpty)
+    }
+
+    func testDismantlingNewSessionDraftCancelsPendingInputChanges() async throws {
+        let input = DraftInputState()
+        let editor = input.editor(isEnabled: false)
+        let coordinator = editor.makeCoordinator()
+        let view = IntrinsicTextView()
+        view.delegate = coordinator
+        coordinator.updateInputState(for: view, editor: editor)
+
+        SessionDraftPromptEditor.dismantleUIView(view, coordinator: coordinator)
+        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertTrue(view.isEditable, "a dismantled editor must not apply a queued input change")
+        XCTAssertNil(view.delegate)
+        XCTAssertTrue(input.focusPublications.isEmpty)
+    }
+
+    func testStartingSessionFromShippingDraftDismissesKeyboardAndOpensChat() async throws {
+        let restoreAccessibility = try MobileAccessibilityTestRuntime.enableAutomation()
+        defer { restoreAccessibility() }
+        let suite = "DraftKeyboardSubmissionTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let continuity = MobileSessionContinuityStore(defaults: defaults)
+        let model = RemoteAppModel(continuity: continuity)
+        model.startDemo()
+        let draft = MobileSessionDraft()
+        let screen = NavigationStack {
+            SessionDraftView(draft: draft)
+        }
+        .environmentObject(model)
+        .environmentObject(continuity)
+        .environmentObject(MobileTerminalKeyboardStore())
+        .environmentObject(RemoteNotificationManager())
+        .mobileTheme(RemoteThemePalette(nil))
+        let window = makeWindow(
+            hosting: UIHostingController(rootView: screen),
+            size: CGSize(width: 390, height: 844)
+        )
+        defer { window.isHidden = true }
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        XCTAssertTrue(textView.becomeFirstResponder())
+        textView.insertText(Fixture.existingDraft)
+        let ready = await draftInputSettled {
+            MobileAccessibilityTestRuntime.element(
+                labelled: MobileL10n.string("Start session"), in: window
+            ).map { !$0.accessibilityTraits.contains(.notEnabled) } == true
+        }
+        XCTAssertTrue(ready)
+        XCTAssertTrue(textView.isFirstResponder)
+        let start = try XCTUnwrap(MobileAccessibilityTestRuntime.element(
+            labelled: MobileL10n.string("Start session"), in: window
+        ))
+        XCTAssertTrue(start.accessibilityActivate())
+
+        let opened = await draftInputSettled {
+            model.sessionID(for: .draft(draft)) != nil && !textView.isFirstResponder
+        }
+        XCTAssertTrue(opened, "Start must finish its keyboard transition and open the created chat")
+    }
+
+    private func assertDraftKeyboardDismissal(isEnabled: Bool) async throws {
+        let input = DraftInputState()
+        let host = UIHostingController(rootView: input.editor(isEnabled: true))
+        let window = makeWindow(hosting: host, size: CGSize(width: 390, height: 844))
+        defer { window.isHidden = true }
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        XCTAssertTrue(textView.becomeFirstResponder())
+        XCTAssertTrue(textView.isFirstResponder)
+
+        // This is Start's state change, delivered through the shipping representable. Layout
+        // must finish before UIKit dismisses the keyboard and lays out the SwiftUI host again.
+        input.isFocused = false
+        host.rootView = input.editor(isEnabled: isEnabled)
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        XCTAssertTrue(descendants(of: IntrinsicTextView.self, in: window).first === textView)
+        XCTAssertTrue(textView.isFirstResponder, "keyboard dismissal re-entered SwiftUI rendering")
+        XCTAssertTrue(textView.isEditable, "editability changed inside SwiftUI rendering")
+
+        let settled = await draftInputSettled {
+            !textView.isFirstResponder && textView.isEditable == isEnabled
+        }
+        XCTAssertTrue(settled)
+        XCTAssertFalse(input.isFocused)
+        XCTAssertEqual(textView.text, Fixture.existingDraft)
+    }
+
+    private func draftInputSettled(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
+    @MainActor
+    private final class DraftInputState {
+        var text = Fixture.existingDraft
+        var isFocused = false
+        var isOverflowing = false
+        var focusPublications: [Bool] = []
+
+        func editor(isEnabled: Bool) -> SessionDraftPromptEditor {
+            SessionDraftPromptEditor(
+                text: Binding(get: { self.text }, set: { self.text = $0 }),
+                isFocused: Binding(get: { self.isFocused }, set: {
+                    self.isFocused = $0
+                    self.focusPublications.append($0)
+                }),
+                isOverflowing: Binding(get: { self.isOverflowing }, set: { self.isOverflowing = $0 }),
+                isEnabled: isEnabled,
+                theme: RemoteThemePalette(nil),
+                offersFiles: { false },
+                pasteFiles: { false },
+                firstLineLeadingAccessoryWidth: 0,
+                firstLineTrailingAccessoryWidth: 0,
+                firstLineAccessoryHeight: 0,
+                firstLineAccessoriesInline: true
+            )
+        }
+    }
+
     func testCatchUpHeaderStaysBelowNavigationAndOpensReadingActions() throws {
         let fixture = try showCatchUp(themeID: nil, lastSeenRowID: "seen")
         defer { fixture.window.isHidden = true }
@@ -301,6 +457,90 @@ final class ComposerTextViewPasteTests: XCTestCase {
             XCTAssertTrue(fixture.button.isHidden)
             XCTAssertEqual(try XCTUnwrap(fixture.button.superview).bounds.height, 0,
                            "a floating strip's margins must not outlive the strip")
+        }
+    }
+
+    func testDeliveryPreviewKeepsLongMultilinePromptsOutOfThePinnedLayout() throws {
+        for width in [CGFloat(320), 402] {
+            let short = RemoteConversationDeliveryDTO.Message(id: "working", summary: "Run the daily review", state: .working)
+            let fixture = try showCatchUp(
+                themeID: nil, lastSeenRowID: nil,
+                delivery: .init(canQueue: true, canSteer: true, messages: [short]),
+                size: CGSize(width: width, height: 874)
+            )
+            defer { fixture.window.isHidden = true }
+            let button = try XCTUnwrap(descendants(of: UIButton.self, in: fixture.window).first {
+                $0.accessibilityIdentifier == "conversation.queued-messages"
+            })
+            let shortHeight = button.bounds.height
+            XCTAssertGreaterThanOrEqual(shortHeight, MobileDesign.Size.minimumTapTarget)
+            XCTAssertLessThan(shortHeight, 80)
+
+            let long = RemoteConversationDeliveryDTO.Message(
+                id: short.id, summary: "Run the daily review\n" + String(repeating: "Permissions and workspace details.\n", count: 30),
+                state: .working
+            )
+            let messages = [long] + (1..<20).map {
+                RemoteConversationDeliveryDTO.Message(id: "queued-\($0)", summary: "Next task \($0)", state: .queued)
+            }
+            let rows = fixture.connection.conversationStore.state.rows
+            _ = fixture.connection.conversationStore.replace(with: .init(
+                rows: rows, canSend: false, revision: 2,
+                delivery: .init(canQueue: true, canSteer: true, messages: messages)
+            ))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            fixture.window.layoutIfNeeded()
+
+            XCTAssertEqual(button.bounds.height, shortHeight, accuracy: 1,
+                           "neither the multiline prompt nor the maximum queue may enlarge the pinned receipt")
+            let labels = descendants(of: UILabel.self, in: button).filter { $0.text?.isEmpty == false }
+            XCTAssertEqual(labels.count, 2)
+            XCTAssertTrue(labels.allSatisfy { $0.numberOfLines == 1 && $0.text?.contains("\n") == false })
+            XCTAssertLessThanOrEqual(try XCTUnwrap(button.accessibilityValue).unicodeScalars.count, 170)
+            XCTAssertEqual(button.accessibilityLabel, MobileL10n.string("Working on this"))
+            XCTAssertTrue(button.accessibilityTraits.contains(.button))
+            XCTAssertEqual(fixture.connection.conversationStore.state.delivery?.messages.first?.summary, long.summary)
+
+            button.sendActions(for: .touchUpInside)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            XCTAssertNotNil(fixture.controller.presentedViewController, "the compact receipt still opens the delivery sheet")
+            fixture.controller.dismiss(animated: false)
+
+            _ = fixture.connection.conversationStore.replace(with: .init(rows: rows, canSend: true, revision: 3))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            fixture.window.layoutIfNeeded()
+            XCTAssertTrue(button.isHidden)
+            XCTAssertEqual(button.bounds.height, 0, accuracy: 1, "an empty receipt must return its space to the chat")
+        }
+    }
+
+    func testDeliveryPreviewFollowsLiveThemeChangesWithoutReplacingItsContent() throws {
+        let message = RemoteConversationDeliveryDTO.Message(id: "working", summary: "Review the changes", state: .working)
+        let fixture = try showCatchUp(
+            themeID: nil, lastSeenRowID: nil,
+            delivery: .init(canQueue: true, canSteer: true, messages: [message])
+        )
+        defer { fixture.window.isHidden = true }
+        let button = try XCTUnwrap(descendants(of: UIButton.self, in: fixture.window).first {
+            $0.accessibilityIdentifier == "conversation.queued-messages"
+        })
+        let labels = descendants(of: UILabel.self, in: button).filter { $0.text?.isEmpty == false }
+        let outline = try XCTUnwrap(descendants(of: MobileThemeOutlineView.self, in: button).first)
+        let plate = try XCTUnwrap(outline.superview)
+        let square = try XCTUnwrap(RemoteAppModel.demoCatalogThemes.first { $0.id == "swiss-minimalist" })
+        for source in [RemoteAppModel.demoLightTheme, square, RemoteAppModel.demoSystemRemoteTheme] {
+            let theme = RemoteThemePalette(source)
+            let update = RemoteThemeUpdateDTO(theme: source, terminalTheme: RemoteAppModel.demoTerminalTheme)
+            fixture.connection.receiveServerTextForTesting(String(decoding: try JSONEncoder().encode(update), as: UTF8.self))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            fixture.window.layoutIfNeeded()
+
+            XCTAssertEqual(plate.backgroundColor, theme.uiConversationPanel)
+            XCTAssertEqual(plate.layer.cornerRadius, theme.panelRadius)
+            XCTAssertEqual(labels.first?.textColor, theme.uiAccent)
+            XCTAssertEqual(labels.last?.textColor, theme.uiSecondaryLabel)
+            XCTAssertEqual(descendants(of: MobileThemeOutlineView.self, in: button), [outline])
+            XCTAssertEqual(descendants(of: UILabel.self, in: button).filter { $0.text?.isEmpty == false }, labels)
         }
     }
 
@@ -616,12 +856,16 @@ final class ComposerTextViewPasteTests: XCTestCase {
     private struct CatchUpFixture {
         let window: UIWindow
         let controller: RemoteConversationViewController
+        let connection: RemoteSessionConnection
         let button: UIButton
     }
 
     /// A demo conversation with one row read and one not, under a demo catalogue theme
     /// (`nil` keeps the demo default), pushed under a navigation bar on an iPhone 17 Pro.
-    private func showCatchUp(themeID: String?, lastSeenRowID: String?) throws -> CatchUpFixture {
+    private func showCatchUp(
+        themeID: String?, lastSeenRowID: String?, delivery: RemoteConversationDeliveryDTO? = nil,
+        size: CGSize = CGSize(width: 402, height: 874)
+    ) throws -> CatchUpFixture {
         let themeKey = "THREADING_MOBILE_THEME"
         let previousTheme = ProcessInfo.processInfo.environment[themeKey]
         if let themeID { setenv(themeKey, themeID, 1) } else { unsetenv(themeKey) }
@@ -634,7 +878,7 @@ final class ComposerTextViewPasteTests: XCTestCase {
         _ = connection.conversationStore.replace(with: .init(rows: [
             .init(id: "seen", kind: .user, text: "Check the change"),
             .init(id: "new", kind: .assistant, text: "Ready to review"),
-        ], canSend: true))
+        ], canSend: delivery == nil, delivery: delivery))
         let suite = UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
@@ -649,11 +893,11 @@ final class ComposerTextViewPasteTests: XCTestCase {
             notifications: RemoteNotificationManager(), inheritedTheme: RemoteThemePalette(nil)
         )
         let navigation = UINavigationController(rootViewController: controller)
-        let window = makeWindow(rootViewController: navigation, size: CGSize(width: 402, height: 874))
+        let window = makeWindow(rootViewController: navigation, size: size)
         let button = try XCTUnwrap(descendants(of: UIButton.self, in: window).first {
             $0.accessibilityIdentifier == "conversation.catch-up"
         })
-        return CatchUpFixture(window: window, controller: controller, button: button)
+        return CatchUpFixture(window: window, controller: controller, connection: connection, button: button)
     }
 
     private func render(_ window: UIWindow) -> UIImage {

@@ -179,6 +179,22 @@ app target no longer embeds a second copy. Its managed install offer uses the sa
 and Settings path as Device Logs and T3. The host verifies the exact managed build and nested
 helper, then launches the resolved version rather than a replaceable symlink. The device panes,
 Android backend and physical-iPhone code still live in the host and remain to be moved.
+The first public-API Simulator slice adds a read-only Snapshots pane to that same Devices bundle.
+It uses `PluginContext.simulatorServices` for bounded running-device discovery and exact-device
+PNG capture; approved external native plugins receive the same service. The broker enters the
+existing device transaction gate before `simctl` capture, so a plugin cannot wedge a live
+workspace by racing its private stream. This makes a usable external example, but does not yet
+remove the interactive workspace or backend from the app binary. Those are still the
+size-bearing Devices move.
+An unpublished Developer ID archive/export on 2026-10-23 passed deep signature and helper
+entitlement checks. The dry-run export retains all four bundles and measured **104.70 MB on disk /
+42.90 MB compressed**; its size ratchet failed because the reviewed baseline predates the new
+embedded Proxy bundle. A copy pruned with `native_plugin_staging.py` against the export's exact
+staged bundle set was re-signed, passed deep signature verification and the size ratchet, and
+measured **100.32 MB / 41.27 MB**. It was not notarized or published, and the 2026-10-23 source is
+not a matched comparison with the earlier 99.95 MB / 41.11 MB probe. The separately built Devices
+bundle from the public SDK recipe also loaded through the native pane host; live PNG capture on a
+booted Simulator was not verified because CoreSimulator discovery did not answer during the probe.
 
 The network proxy's portable helper and certificate setup script now build into
 `ProxyPlugin.bundle`. The app's direct copies are removed. The host verifies the signed managed
@@ -208,20 +224,28 @@ broker requests rather than a private host object or executable path.
 
 A native plugin can contribute today: a restorable pane tab in panel, dock or drawer, pane
 sections, the workspace navigator, `apply(theme:)`, and MCP tools that are offered only while
-that chat has the pane open; its context is four strings
-(`sessionID`, `projectID`, `projectName`, `checkoutPath`). A tool can now declare a host-registered
+that chat has the pane open; its base context is four strings
+(`sessionID`, `projectID`, `projectName`, `checkoutPath`). A selected-device route also supplies
+the host-chosen `deviceID`. A tool can now declare a host-registered
 pane section to reveal before invocation, instead of the MCP router recognizing a particular
 Device Logs tool name. The drawer can retain a verified plugin pane and rebind its callbacks after
 a move. Installed section registration and panel commands now come from versioned plugin metadata
 for both first-party and external bundles. Before installation, Device Logs' stable command
-aliases still come from its managed offer. Contextual panel/drawer routes remain in that offer.
-The device button names
-the Device Logs route and passes its selected device ID; `device_log_prepare` and that button still
+aliases still come from its managed offer. Contextual panel/drawer routes come from installed
+plugin metadata, with the managed offer retaining a matching pre-install declaration. The device
+button names the Device Logs route and passes its selected device ID; `device_log_prepare` and that button still
 have feature-specific entry points.
 
-That is not full parity yet. External plugins can declare separate tabs and commands through
-`ThreadingPaneSections`, and Device Logs is the first bundled consumer. Contextual routes and
-Device Logs' direct host-selected iPhone tool path remain private seams. Threading owns tab
+That is not full parity yet. External plugins can declare separate tabs, commands and
+`selected-device` contextual routes through `ThreadingPaneSections`. Device Logs uses that same
+declaration; the device controls list installed routes on right-click while primary click keeps
+opening Device Logs. Its structured-log stream and Bluetooth-profile transfer now use the same
+public `PluginContext.deviceServices` as any approved native plugin; no private executable path
+is passed. `ThreadingPluginSDK-<version>.zip` now has a release path that includes DesignKit,
+its dependencies and Device Logs with DesignKit's app-source links materialized. An isolated copy
+compiled and ran the Device Logs broker test; the host parity test built and loaded it from a
+locally generated SDK zip. The asset has not yet been uploaded or loaded from a real release.
+Threading owns tab
 placement, command identity/conflicts, restore validation and invocation. The first-party offer
 retains the information needed to show an install action **before its bundle exists**; the
 installed declaration must agree with it.

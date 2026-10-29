@@ -427,6 +427,11 @@ items.
   credential itself and the response reports which tier answered — the extension never
   receives a token. Do not combine a credentialed grant with a companion holding
   `network.client`; inspection refuses the pairing.
+- Declare `traffic.mock-responses` and `trafficMocks` to offer exact HTTP test responses. The
+  host reads these static fixtures from the manifest; your process receives no captured
+  request, CA key or proxy socket. A capture applies them only when its `traffic_start` call
+  explicitly names your enabled extension as `mock_extension`. Disabling the extension or
+  changing its fixtures stops captures using the old fixtures.
 - Do not declare `network.client` for a safe WebAssembly v1 extension. It is reserved in the
   legacy native vocabulary; brokered fetches replace it.
 - Unknown capabilities are not permission.
@@ -1197,6 +1202,35 @@ approved host, method, and no-port/no-user-info shape. A redirect outside that a
 its original 3xx and `Location`; submit the target as a new brokered request so its grant is
 checked independently. `response.finalURL` names the URL that actually answered after any
 same-host redirects (and is optional when decoding a response from an older host).
+
+### Mocking HTTP responses in a capture
+
+Declare `traffic.mock-responses` with at most eight exact fixtures in the manifest:
+
+```json
+"capabilities": ["traffic.mock-responses"],
+"trafficMocks": [{
+  "host": "api.example.test", "port": 443, "method": "GET", "path": "/v1/items?case=empty",
+  "status": 200, "headers": {"Content-Type": "application/json"}, "body": "{\"items\":[]}"
+}]
+```
+
+The person or agent starts the host-owned proxy with `traffic_start` and
+`mock_extension: "<your extension identifier>"`; HTTPS also needs that exact hostname in
+`hosts` and the ordinary explicit certificate-trust setup. The fixture matches method, host,
+port and path including the query byte for byte. It does not match CONNECT tunnels or traffic
+outside the proxy. Unmatched requests are forwarded. Threading waits for the request body,
+then sends the declared status, headers and UTF-8 body with host-owned `Content-Length` and
+`Connection` framing. The response is captured with `mocked: true`; the origin never receives
+the matched HTTP request. An HTTPS origin connection may be established for TLS verification
+before the inner request is seen.
+
+Each body is at most 4,096 UTF-8 bytes, each path at most 4,096 ASCII bytes, each rule at most
+16 headers / 2,048 header bytes, and the entire encoded fixture list at most 48 KiB. Statuses
+must be final and body-capable; HEAD has no body. Hop and framing headers are host-owned, and
+header values cannot contain line breaks. These are small deterministic test fixtures; use a
+local test server for large or streaming responses. The extension process has no per-request
+callback and cannot silently switch a running capture's rules.
 
 ### Reading host snapshots and events
 

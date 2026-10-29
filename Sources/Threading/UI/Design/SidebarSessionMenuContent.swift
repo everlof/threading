@@ -12,6 +12,7 @@ enum SidebarSessionMenuContent {
         var unsnooze: (() -> Void)? = nil
         var archive: (() -> Void)? = nil
         var close: (() -> Void)? = nil
+        var closeWithoutAsking: (() -> Void)? = nil
         var rename: (() -> Void)? = nil
         var copyAgentID: (() -> Void)? = nil
         var copyThreadingID: (() -> Void)? = nil
@@ -61,8 +62,12 @@ enum SidebarSessionMenuContent {
             item("Archive", symbol: "archivebox", command: "archive", onChoose: actions.archive)
         ]
         if configuration.isRunning {
+            let alternate = actions.closeWithoutAsking.map { action in
+                ThemedMenuAlternate(title: L10n.string("Close Session Without Asking"), action: action)
+            }
             rows.append(item("Close Session", symbol: "stop.circle", command: "close",
-                             shortcut: configuration.closeShortcut, onChoose: actions.close))
+                             shortcut: configuration.closeShortcut, alternate: alternate,
+                             onChoose: actions.close))
         }
         rows.append(contentsOf: configuration.sections.beforeGroups)
         appendGroup(configuration.sections.sideChats, to: &rows)
@@ -146,10 +151,13 @@ enum SidebarSessionMenuContent {
 
     private static func item(_ title: String, symbol: String, command: String,
                              shortcut: KeyboardShortcut? = nil,
+                             alternate: ThemedMenuAlternate? = nil,
                              onChoose: (() -> Void)?) -> ThemedMenuEntry {
-        .item(ThemedMenuItem(title: L10n.string(title), shortcut: shortcut,
-                             image: ThemedMenuIcon.symbol(symbol),
-                             representedValue: command, onChoose: onChoose))
+        var row = ThemedMenuItem(title: L10n.string(title), shortcut: shortcut,
+                                 image: ThemedMenuIcon.symbol(symbol),
+                                 representedValue: command, onChoose: onChoose)
+        row.alternate = alternate
+        return .item(row)
     }
 
     private static func appendGroup(_ group: [ThemedMenuEntry], to rows: inout [ThemedMenuEntry]) {

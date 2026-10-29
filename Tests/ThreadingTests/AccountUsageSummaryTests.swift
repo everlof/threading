@@ -162,9 +162,9 @@ final class AccountUsageSummaryTests: XCTestCase {
 
     // MARK: - Account Menu
 
-    /// The line under each login where an account is picked. It carries the plan, every window
-    /// metering the model that would run, and when the tight one comes back — because that is
-    /// the moment the numbers change a decision, and the toolbar only speaks afterwards.
+    /// The row under each login where an account is picked. It carries the plan, a meter line per
+    /// account window with that window's own reset, and — when a scoped window is what binds the
+    /// model that would run — when that one comes back, because the meters say only their own.
     @MainActor
     func testAccountMenuLineNamesPlanWindowsAndTheBindingReset() {
         var usage = AccountUsage(
@@ -184,19 +184,21 @@ final class AccountUsageSummaryTests: XCTestCase {
         XCTAssertEqual(item.titleDetail, "Max")
         XCTAssertEqual(item.metrics.map(\.label), ["5h", "7d"])
         XCTAssertEqual(item.metrics.map(\.value), ["7%", "56%"])
-        // The scoped window is the one thing a shared column cannot hold, so it — and only it —
-        // takes the row's second line.
-        XCTAssertEqual(item.subtitle, "7d Fable 89%")
-        XCTAssertEqual(item.trailingDetail, "7d Fable · 15h")
+        // Each meter line ends in its own window's reset, so none of them needs naming.
+        XCTAssertEqual(item.metrics.map(\.detail), ["1h", "15h"])
+        // The scoped window is the one thing a shared line cannot hold, so it — and only it —
+        // is written into the subtitle, and as the window binding a Fable session it brings its
+        // reset with it.
+        XCTAssertEqual(item.subtitle, "7d Fable 89% · resets in 15h")
         // The same row without a name in front of it — what a surface that has already said
         // whose account this is puts in a tooltip.
         XCTAssertEqual(
             AccountUsageMenu.summary(for: usage, metering: "claude-fable-5[1m]", at: now),
-            "Max, 5h 7%, 7d 56%, 7d Fable · 15h, 7d Fable 89%"
+            "Max, 5h 7% resets in 1h, 7d 56% resets in 15h, 7d Fable 89% · resets in 15h"
         )
         XCTAssertEqual(
             item.spokenSummary,
-            "Everlof, Max, 5h 7%, 7d 56%, 7d Fable · 15h, 7d Fable 89%"
+            "Everlof, Max, 5h 7% resets in 1h, 7d 56% resets in 15h, 7d Fable 89% · resets in 15h"
         )
     }
 
@@ -216,13 +218,13 @@ final class AccountUsageSummaryTests: XCTestCase {
         )
         usage.modelWindows = [scopedWindow(model: "Fable", fraction: 0.89, resetsIn: 54_000)]
 
-        // Metering Opus: Fable is named, but 7d is still what binds — and what the reset column
-        // and the ring both answer for.
+        // Metering Opus: Fable is named, but 7d is still what binds — so its reset stays on the
+        // 7d meter line and the subtitle names the scoped window alone.
         var item = ThemedMenuItem(title: "Everlof")
         AccountUsageMenu.apply(usage, to: &item, metering: "opus[1m]", at: now)
 
         XCTAssertEqual(item.subtitle, "7d Fable 89%")
-        XCTAssertEqual(item.trailingDetail, "7d · 15h")
+        XCTAssertEqual(item.metrics.map(\.detail), ["1h", "15h"])
         XCTAssertEqual(usage.bindingWindow(at: now, metering: "opus[1m]")?.id, "7d")
     }
 
@@ -365,7 +367,7 @@ final class AccountUsageSummaryTests: XCTestCase {
     }
 
     /// A row states only what it has. No plan means no qualifier after the name; no windows
-    /// means no columns and no reset — and, crucially, no subtitle either, so the row keeps the
+    /// means no meters and no reset — and, crucially, no subtitle either, so the row keeps the
     /// single-line height rather than reserving a second line for nothing.
     @MainActor
     func testAccountRowOmitsWhatItCannotSay() {
@@ -377,13 +379,12 @@ final class AccountUsageSummaryTests: XCTestCase {
         )
         XCTAssertNil(item.titleDetail)
         XCTAssertEqual(item.metrics.map(\.label), ["7d"])
-        XCTAssertEqual(item.trailingDetail, "7d · 15h")
+        XCTAssertEqual(item.metrics.map(\.detail), ["15h"])
         XCTAssertNil(item.subtitle)
 
         var empty = ThemedMenuItem(title: "Everlof")
         AccountUsageMenu.apply(makeUsage(windows: []), to: &empty, at: now)
         XCTAssertTrue(empty.metrics.isEmpty)
-        XCTAssertNil(empty.trailingDetail)
         XCTAssertNil(empty.subtitle)
         XCTAssertEqual(empty.spokenSummary, "Everlof")
     }
@@ -488,15 +489,16 @@ final class AccountUsageSummaryTests: XCTestCase {
         XCTAssertEqual(tone(of: "7d Fable ", in: item.subtitleSegments ?? []), .muted)
     }
 
-    /// A column's bar and the number beside it come from one reading, so they cannot disagree
+    /// A line's bar and the number beside it come from one reading, so they cannot disagree
     /// about whether there is anything to report. An expired window prints `—` and draws an
     /// empty track — never a full one, which is what a fraction carried over from the *previous*
-    /// window would have drawn.
+    /// window would have drawn — and it draws no clock either: neither a tick nor a countdown
+    /// belongs to a window that has already ended.
     @MainActor
-    func testAColumnsBarAndItsNumberAgreeAboutAnExpiredWindow() throws {
+    func testALinesBarAndItsNumberAgreeAboutAnExpiredWindow() throws {
         let usage = makeUsage(windows: [
-            window(id: "5h", fraction: 0.9, resetsIn: -60),
-            window(id: "7d", fraction: 0.37, resetsIn: 54_000)
+            window(id: "5h", fraction: 0.9, resetsIn: -60, duration: UsageDefaults.fiveHourSeconds),
+            window(id: "7d", fraction: 0.37, resetsIn: 54_000, duration: UsageDefaults.sevenDaySeconds)
         ])
 
         var item = ThemedMenuItem(title: "Keller Ines")
@@ -506,11 +508,15 @@ final class AccountUsageSummaryTests: XCTestCase {
         XCTAssertEqual(expired.value, UsageDefaults.unknownValue)
         XCTAssertNil(expired.fraction)
         XCTAssertEqual(expired.tone, .standard)
+        XCTAssertNil(expired.timeMark)
+        XCTAssertNil(expired.detail)
 
-        XCTAssertEqual(item.metrics.last?.value, "37%")
-        XCTAssertEqual(item.metrics.last?.fraction, 0.37)
-        // The expired window is not what binds, so the reset column answers for the live one.
-        XCTAssertEqual(item.trailingDetail, "7d · 15h")
+        let live = try XCTUnwrap(item.metrics.last)
+        XCTAssertEqual(live.value, "37%")
+        XCTAssertEqual(live.fraction, 0.37)
+        XCTAssertEqual(live.detail, "15h")
+        // 15h before the end of a 168h window: the clock stands 153/168 of the way through it.
+        XCTAssertEqual(try XCTUnwrap(live.timeMark), 153.0 / 168.0, accuracy: 0.0001)
     }
 
     /// The plain line a tooltip and VoiceOver get is the row's own parts joined, so the two
@@ -524,12 +530,12 @@ final class AccountUsageSummaryTests: XCTestCase {
         var item = ThemedMenuItem(title: "Everlof")
         AccountUsageMenu.apply(usage, to: &item, at: now)
 
-        XCTAssertEqual(item.spokenSummary, "Everlof, 7d 56%, 7d · 15h, 7d Fable —")
+        XCTAssertEqual(item.spokenSummary, "Everlof, 7d 56% resets in 15h, 7d Fable —")
         // `summary` is that same assembly with no name in front of it, rather than a second
         // derivation of the same facts that could drift from what the row draws.
         XCTAssertEqual(
             AccountUsageMenu.summary(for: usage, metering: nil, at: now),
-            "7d 56%, 7d · 15h, 7d Fable —"
+            "7d 56% resets in 15h, 7d Fable —"
         )
         XCTAssertEqual(
             AccountUsageMenu.modelSummarySegments(for: usage, running: "fable", at: now).map(\.text).joined(),

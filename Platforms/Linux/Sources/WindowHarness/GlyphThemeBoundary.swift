@@ -99,6 +99,10 @@ public enum Design {
         public static let small: CGFloat = 6
         public static let inset: CGFloat = 12
     }
+    /// The Mac theme's usage-gauge geometry needed by the shared menu meter.
+    public enum UsageBar {
+        public static let timeMarkWidth: CGFloat = 2
+    }
     public enum Motion {
         public static let quick: TimeInterval = 0.15
         public static var reducesMotion: Bool { ProcessInfo.processInfo.environment["THREADING_LINUX_REDUCE_MOTION"] == "1" }

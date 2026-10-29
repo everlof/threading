@@ -12,15 +12,18 @@ struct NativePluginManagedOffer: Sendable {
         static let fromDevice = "from-device"
     }
 
-    enum PanePlacement: Sendable, Equatable {
+    enum PanePlacement: String, Sendable, Equatable {
         case panel
         case drawer
     }
+
+    enum PaneContext: String, Sendable { case selectedDevice = "selected-device" }
 
     struct PaneRoute: Sendable {
         let identifier: String
         let section: String
         let placement: PanePlacement
+        let context: PaneContext
     }
 
     struct PaneSection: Sendable {
@@ -94,7 +97,8 @@ struct NativePluginManagedOffer: Sendable {
         ],
         paneRoutes: [
             .init(identifier: DeviceLogsRoute.fromDevice,
-                section: DeviceLogsSection.regular, placement: .drawer)
+                section: DeviceLogsSection.regular, placement: .drawer,
+                context: .selectedDevice)
         ]
     )
 
@@ -102,11 +106,18 @@ struct NativePluginManagedOffer: Sendable {
         identifier: "codes.threading.plugin.devices",
         bundleName: "DevicesPlugin.bundle",
         nameKey: "Devices",
-        summaryKey: "iOS Simulator live control",
+        summaryKey: "iOS Simulator control and snapshots",
         approximateDownloadSize: "0.3 MB",
         showsGenericPaneCommand: false,
-        paneSections: [],
-        paneRoutes: []
+        paneSections: [
+            .init(identifier: "snapshots", titleKey: "Simulator Snapshots",
+                command: .init(id: "panel.simulatorSnapshots", titleKey: "Simulator snapshots",
+                    symbol: "camera.viewfinder"))
+        ],
+        paneRoutes: [
+            .init(identifier: "from-device", section: "snapshots", placement: .panel,
+                context: .selectedDevice)
+        ]
     )
 
     static let t3Navigator = Self(

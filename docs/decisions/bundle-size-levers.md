@@ -101,6 +101,15 @@ in the exported bundle passed arm64, Developer ID, hardened-runtime and secure-t
 The framework is an 11.22 MB fixed cost; a new bundled plugin adds its own code rather than a
 second design-system copy.
 
+**Clean `v0.10.0` export measured 2026-10-26.** The signed, arm64-thinned Developer ID
+export at `b891b88b2` is 100.46 MB on disk / 41.33 MB compressed. The host executable is
+54.58 / 23.22 MB, up 0.57 / 0.26 MB from the 2026-10-20 baseline; this small growth is
+accepted with the release's shared Device Logs and Bluetooth tools. The complete app is
+1.18 MB smaller compressed, and the former `DeviceLogsPlugin.bundle` and
+`threading-proxyd` components are absent. This is the first clean export after the prior
+baseline, which was measured from an uncommitted shared-runtime checkout; the new
+per-component baseline records the delivered layout and locks in the net saving.
+
 **Stripping is already complete.** `STRIP_INSTALLED_PRODUCT=YES`, `STRIP_STYLE=all`,
 `STRIP_SWIFT_SYMBOLS=YES`, dead-stripping and whole-module `-O` are all in effect for the
 archive; the shipped main binary has 3.4k symbols left (the exports dyld needs) and a 1.1 MB

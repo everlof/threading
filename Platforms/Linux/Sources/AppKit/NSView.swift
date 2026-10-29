@@ -996,7 +996,7 @@ public struct NSUserInterfaceItemIdentifier: RawRepresentable, Hashable, Sendabl
 }
 
 public enum NSAccessibility {
-    public enum Notification: Sendable { case valueChanged, layoutChanged, created }
+    public enum Notification: Sendable { case valueChanged, layoutChanged, titleChanged, created }
     @MainActor public static var notificationHandler: ((NSView, Notification) -> Void)?
 
     @MainActor public static func post(element: NSView, notification: Notification) {

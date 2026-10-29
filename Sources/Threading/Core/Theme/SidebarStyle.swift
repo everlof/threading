@@ -458,6 +458,19 @@ extension SidebarStyle.Brand.Logo: Codable {
 /// store enforces on the bytes behind it. Stated here beside the model so a limit and the
 /// field it limits travel together.
 public enum SidebarStyleLimits {
+    /// The brand slot's side in points: the square a theme's logo is aspect-fitted into.
+    ///
+    /// 24 rather than 20: the mark is six strands and a hexagonal rim inside its own box, so it
+    /// carries more detail per point than an SF Symbol does, and at 20 its strokes came out
+    /// barely a point wide — thin enough that the whole thing read as soft even once it was
+    /// rasterising at the right scale. Four points is the difference between a logo and a
+    /// smudge, and the band has the room.
+    public static let logoSide = SidebarDefaults.brandLogoSide
+    /// The most pixels a host-rimmed logo is drawn at on its longer side (`ThemeArtSeparation`):
+    /// the slot at 2× backing, doubled for a motion beat's scale. Measured cold in a Debug build,
+    /// that rim costs 2.2 ms on the main actor; rimming the stored 512 instead cost 46 ms, for
+    /// detail the slot cannot show.
+    public static let rimmedLogoPixels = Int(logoSide * 4)
     /// Two paints a wash; past eight the stops stop being a design and start being a bitmap.
     /// Shared with the material's backdrop — one grammar, one bound.
     public static let maximumGradientStops = ThemeBackdropLimits.maximumGradientStops

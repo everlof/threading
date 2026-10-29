@@ -662,6 +662,32 @@ repository, never from the bundle. `scripts/tests/test_proxy_source_distribution
 `ci.sh`, archives `HEAD` and a stub that fails provenance, and checks that every publisher
 attaches the archive and that the notice names it.
 
+### Native plugin SDK source
+
+Every release build also prepares `ThreadingPluginSDK-<version>.zip` beside the app zip. It carries
+the public `ThreadingPluginKit` contract, `ThreadingDesignKit`, their source dependencies and the
+Device Logs plugin as a worked example. `scripts/export_plugin_sdk.py` resolves DesignKit's
+in-repository symlinks into ordinary files, excludes build output, and records the PluginKit API
+generation and source revision in `SDK_VERSION.json`. `scripts/archive_plugin_sdk.py` checks the
+zip's required members before replacing an earlier attempt. Stable, beta and nightly publishers
+attach that same archive to the release page; it is not in the app bundle or Sparkle feed.
+
+The snapshot's relative SwiftPM paths let `swift test --package-path Plugins/DeviceLogsPlugin`
+run from the extracted directory without the Threading checkout. CI checks that no symlink or
+local dependency escapes it. The opt-in `NativePluginParityTests` also extracts a locally generated
+SDK zip, builds Device Logs from it, and checks that the host loads it with the shipped plugin's
+tools. A private draft staging asset was downloaded and host-loaded on 2026-10-23; the public
+tagged-release asset and its provenance remain unverified until a real release.
+The source retains the repository's GPL-3.0 license and each vendored library's own license files.
+
+After publishing, check out that exact tag with a clean worktree and run
+`scripts/verify_published_plugin_sdk.sh v<version> <version>` (or `nightly <version>` on the
+matching nightly commit). It downloads the public GitHub asset, checks the zip's members, source
+revision and API generation, compares every source file with a fresh export of that checkout, then
+builds Device Logs from the downloaded archive and requires both host parity cases to pass without
+skips. This command is intentionally after publication: the locally generated zip above cannot
+prove that users can download the promised artifact.
+
 ## Apple silicon only
 
 **The CI runner has to be Apple silicon too, and this cost the project every green build it never

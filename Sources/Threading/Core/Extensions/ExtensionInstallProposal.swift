@@ -58,6 +58,7 @@ struct ExtensionInstallProposal: Equatable {
     let navigatorIntents: [ExtensionNavigatorIntentDisclosure]
     let mcpTools: [ExtensionMCPTool]
     let networkGrants: [ExtensionNetworkGrant]
+    let trafficMocks: [ExtensionTrafficMock]
     let companions: [ExtensionCompanion]
     let includesSource: Bool
     let themeNames: [String]
@@ -84,6 +85,7 @@ struct ExtensionInstallProposal: Equatable {
         )
         mcpTools = manifest.mcpTools.sorted { $0.id < $1.id }
         networkGrants = manifest.networkGrants.sorted { $0.host < $1.host }
+        trafficMocks = manifest.trafficMocks
         companions = manifest.companions.sorted { $0.id < $1.id }
         includesSource = bundle.sourceURL != nil
         themeNames = bundle.themes.map(\.theme.name).sorted()
@@ -160,6 +162,20 @@ struct ExtensionInstallProposal: Equatable {
                 "It may ask Threading to fetch from:\n" + lines.joined(separator: "\n")
                     + "\nThreading performs those fetches itself; the extension never receives "
                     + "a credential and cannot reach any other host."
+            )
+        }
+        if !trafficMocks.isEmpty {
+            let matches = trafficMocks.map { rule in
+                let path = rule.path.count > 120 ? String(rule.path.prefix(120)) + "…" : rule.path
+                return "  • \(rule.method) \(rule.host):\(rule.port)\(path) → \(rule.status)"
+            }
+            paragraphs.append(
+                "When a traffic capture explicitly selects this extension, it can replace "
+                    + "matching HTTP responses before the client sees the origin. Its exact "
+                    + "response fixtures are part of the installed manifest:\n"
+                    + matches.joined(separator: "\n")
+                    + "\nOther requests continue to the origin. Disabling the extension "
+                    + "or changing its fixtures stops captures using them."
             )
         }
         if capabilities.contains(ExtensionCapability.customMetalSurfaces.rawValue) {

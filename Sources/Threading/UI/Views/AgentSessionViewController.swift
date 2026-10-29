@@ -469,7 +469,8 @@ final class AgentSessionViewController: NSViewController {
     /// one check suppressed; every store and filesystem preflight is intentionally asked again
     /// because the process-table read crossed an executor boundary.
     private func continueLaunch(initialPrompt: String?, checksExternalOwner: Bool) {
-        guard !isRunning, !SessionTerminalRestart.shared.contains(sessionID) else { return }
+        guard !isRunning, !SessionTerminalRestart.shared.contains(sessionID),
+              !SessionMigration.isMoving(sessionID) else { return }
 
         // The last line before a PTY exists, which is where recovery's refusal has to be. The
         // pane refuses earlier and more visibly, but this is the one every path crosses — a
@@ -969,7 +970,8 @@ final class AgentSessionViewController: NSViewController {
 
     private func startIfTerminalIsSized() {
         guard var plan = pendingLaunchPlan,
-              !SessionTerminalRestart.shared.contains(sessionID) else { return }
+              !SessionTerminalRestart.shared.contains(sessionID),
+              !SessionMigration.isMoving(sessionID) else { return }
 
         let dimensions = session.terminalView.terminalDimensions
         guard dimensions.cols > 0, dimensions.rows > 0 else {

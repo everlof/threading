@@ -3231,16 +3231,15 @@ final class ThemedControlTests: HostedStoreTestCase {
         AppThemePalette.set(.system)
     }
 
-    /// Every row's `7d` lands in the same column, including on rows that have no `5h`.
+    /// Every row's `7d` lands on the same line, including on rows that have no `5h`.
     ///
     /// The whole argument for `ThemedMenuMetric` is that a value inside a sentence is positioned
-    /// by the name in front of it, so a plan metering one window must not slide its `7d` under
-    /// the heading of a plan metering two. The plan is a union in first-seen order, and the
-    /// column width is one measurement across the menu rather than per row — unequal columns
-    /// would move the second column's bar on rows whose first is absent, and a bar that moves
-    /// sideways between rows cannot be compared by length.
+    /// by the name in front of it, so a plan metering one window must not slide its `7d` up beside
+    /// the name where a plan metering two keeps its `5h`. The widths are one measurement across the
+    /// menu rather than per row — per-row widths would start the next row's bar at a different x,
+    /// and a bar that moves sideways between rows cannot be compared by length.
     @MainActor
-    func testEveryRowsWindowLandsInTheSameColumn() {
+    func testEveryRowsWindowLandsOnTheSameLine() {
         AppThemePalette.set(.system)
         var twoWindows = ThemedMenuItem(title: "Everlof")
         twoWindows.metrics = [
@@ -3249,36 +3248,84 @@ final class ThemedControlTests: HostedStoreTestCase {
         ]
         var oneWindow = ThemedMenuItem(title: "David")
         oneWindow.metrics = [
-            ThemedMenuMetric(label: "7d", value: "6%", fraction: 0.06)
+            ThemedMenuMetric(label: "7d", value: "100%", fraction: 1, tone: .critical)
         ]
         let entries: [ThemedMenuEntry] = [.item(twoWindows), .item(oneWindow)]
 
-        XCTAssertEqual(ThemedMenuMetrics.metricColumns(entries), ["5h", "7d"])
+        XCTAssertEqual(ThemedMenuMetrics.metricLines(entries), ["5h", "7d"])
 
         // One width across the menu, measured from the widest value *anywhere* in it: the row
-        // with the shortest number must still leave room for the longest, or the two rows'
-        // columns start at different places and the stack stops being a stack.
-        let narrow = ThemedMenuMetrics.metricColumnWidth([.item(oneWindow)])
-        let shared = ThemedMenuMetrics.metricColumnWidth(entries)
+        // with the shortest number must still leave room for the longest, or the rows' bars start
+        // at different places and the stack stops being a stack.
+        let narrow = ThemedMenuMetrics.metricPlan([.item(twoWindows)])
+        let shared = ThemedMenuMetrics.metricPlan(entries)
         XCTAssertGreaterThan(
-            shared, narrow,
-            "adding a row whose value is wider must widen the column for every row"
+            shared.valueWidth, narrow.valueWidth,
+            "adding a row whose value is wider must widen the value cell for every row"
         )
-        XCTAssertGreaterThan(shared, ThemedMenuMetrics.metricBarWidth)
+        XCTAssertGreaterThan(shared.width, ThemedMenuMetrics.metricBarWidth)
 
-        // Two columns of that width, their gap, and nothing else claimed for a menu with no
-        // trailing detail on any row.
+        // One meter wide however many lines it stacks, plus the air before it — and nothing else
+        // claimed for a menu whose metrics carry no detail.
+        XCTAssertEqual(shared.detailWidth, 0)
         XCTAssertEqual(
             ThemedMenuMetrics.metricReservation(entries),
-            shared * 2 + ThemedMenuMetrics.metricColumnGap * 2,
+            shared.width + ThemedMenuMetrics.metricBlockGap,
             accuracy: 0.5
+        )
+
+        // The weekly-only row reads on the *second* line, so it needs one even with no subtitle —
+        // and rows stacked against it take the same height.
+        XCTAssertEqual(
+            ThemedMenuMetrics.heights(for: [.item(oneWindow)] + [.item(twoWindows)]),
+            [ThemedMenuMetrics.subtitleRowHeight, ThemedMenuMetrics.subtitleRowHeight]
+        )
+        // A menu whose only window is one line asks for no second line at all.
+        XCTAssertEqual(
+            ThemedMenuMetrics.heights(for: [.item(oneWindow)]),
+            [ThemedMenuMetrics.rowHeight]
         )
     }
 
-    /// A union across provider rows is still external cardinality. The fixed-width menu admits
-    /// a constant comparison plan, and an excluded provider value cannot widen that plan.
+    /// The line plan is an *ordered* union. A login reporting only its weekly window listed
+    /// ahead of one reporting both must not put `7d` on the top line for the whole menu — that
+    /// is the same window landing in different places, which is the defect the plan exists for.
     @MainActor
-    func testProviderSizedMetricColumnsStayInsideTheMenuContract() {
+    func testALateLabelStillTakesTheLineItsRowPutsItOn() {
+        AppThemePalette.set(.system)
+        var weeklyOnly = ThemedMenuItem(title: "rinda01")
+        weeklyOnly.metrics = [ThemedMenuMetric(label: "7d", value: "13%", fraction: 0.13)]
+        var both = ThemedMenuItem(title: "rinda02")
+        both.metrics = [
+            ThemedMenuMetric(label: "5h", value: "46%", fraction: 0.46),
+            ThemedMenuMetric(label: "7d", value: "35%", fraction: 0.35)
+        ]
+        var monthly = ThemedMenuItem(title: "Personal")
+        monthly.metrics = [ThemedMenuMetric(label: "30d", value: "42%", fraction: 0.42)]
+
+        XCTAssertEqual(
+            ThemedMenuMetrics.metricLabels([.item(weeklyOnly), .item(both), .item(monthly)]),
+            ["5h", "7d", "30d"]
+        )
+        XCTAssertEqual(
+            ThemedMenuMetrics.metricLines([.item(weeklyOnly), .item(both), .item(monthly)]),
+            ["5h", "7d"]
+        )
+
+        // The third label has no line of its own, so the row stating it writes it into its
+        // subtitle — and the rows with meters keep them.
+        let fitted = ThemedMenuMetrics.entries(
+            [.item(weeklyOnly), .item(both), .item(monthly)],
+            fitting: ThemedMenuLayout.maximumWidth
+        ).compactMap(\.item)
+        XCTAssertEqual(fitted.map { $0.metrics.map(\.label) }, [["7d"], ["5h", "7d"], []])
+        XCTAssertEqual(fitted.last?.subtitle, "30d 42%")
+    }
+
+    /// A union across provider rows is still external cardinality. The fixed-width menu admits
+    /// a constant line plan, and an excluded provider value cannot widen that plan.
+    @MainActor
+    func testProviderSizedMetricLinesStayInsideTheMenuContract() {
         AppThemePalette.set(.system)
         let entries: [ThemedMenuEntry] = (0..<2_000).map { index in
             var item = ThemedMenuItem(title: "Account \(index)")
@@ -3290,18 +3337,19 @@ final class ThemedControlTests: HostedStoreTestCase {
             return .item(item)
         }
 
+        XCTAssertEqual(ThemedMenuMetrics.metricLines(entries), ["W0", "W1"])
         XCTAssertEqual(
-            ThemedMenuMetrics.metricColumns(entries),
-            ["W0", "W1", "W2"]
+            ThemedMenuMetrics.metricLabels(entries).count,
+            ThemedMenuMetrics.maximumMetricLabels
         )
         XCTAssertLessThan(
-            ThemedMenuMetrics.metricColumnWidth(entries),
+            ThemedMenuMetrics.metricPlan(entries).width,
             ThemedMenuLayout.maximumWidth / 2,
             "an excluded metric still widened every menu row"
         )
     }
 
-    /// The columns come out of the *title's* width, so a menu at its cap truncates the name and
+    /// The meters come out of the *title's* width, so a menu at its cap truncates the name and
     /// never a number.
     ///
     /// This is the inversion the redesign exists for. The line it replaced put the reading in a
@@ -3309,7 +3357,7 @@ final class ThemedControlTests: HostedStoreTestCase {
     /// leaving `7d resets in 5d 1…`, a sentence claiming to be complete. A name is the one thing
     /// on the row still recognisable from its first half.
     @MainActor
-    func testTheColumnsTakeTheirWidthFromTheNameNotThePanel() {
+    func testTheMetersTakeTheirWidthFromTheNameNotThePanel() {
         AppThemePalette.set(.system)
         // The repeat count exists to clear `ThemedMenuLayout.maximumWidth`, not for its own sake:
         // both assertions below are about what happens to a panel *already at its cap*, so a name
@@ -3321,27 +3369,78 @@ final class ThemedControlTests: HostedStoreTestCase {
         bare.metrics = []
         var measured = ThemedMenuItem(title: name)
         measured.metrics = [
-            ThemedMenuMetric(label: "5h", value: "27%", fraction: 0.27),
-            ThemedMenuMetric(label: "7d", value: "81%", fraction: 0.81)
+            ThemedMenuMetric(
+                label: "5h", value: "27%", fraction: 0.27, timeMark: 0.4, detail: "3h"
+            ),
+            ThemedMenuMetric(
+                label: "7d", value: "81%", fraction: 0.81, timeMark: 0.9, detail: "19h 36m"
+            )
         ]
-        measured.trailingDetail = "7d · 19h 36m"
 
-        let withColumns = ThemedMenuMetrics.width(for: [.item(measured)], minimum: 0)
+        let withMeters = ThemedMenuMetrics.width(for: [.item(measured)], minimum: 0)
         XCTAssertEqual(
-            withColumns,
+            withMeters,
             ThemedMenuLayout.maximumWidth,
             "a name this long must drive the panel to its cap either way"
         )
         XCTAssertEqual(
             ThemedMenuMetrics.width(for: [.item(bare)], minimum: 0),
-            withColumns,
-            "the columns must not widen a panel already at its cap — they take the name's room"
+            withMeters,
+            "the meters must not widen a panel already at its cap — they take the name's room"
         )
-        XCTAssertGreaterThan(
+        let plan = ThemedMenuMetrics.metricPlan([.item(measured)])
+        XCTAssertGreaterThan(plan.detailWidth, 0, "the countdown has a cell of its own")
+        XCTAssertEqual(
             ThemedMenuMetrics.metricReservation([.item(measured)]),
-            ThemedMenuMetrics.metricBarWidth * 2,
-            "the reservation covers both columns, their gaps and the trailing detail"
+            plan.labelWidth + plan.barWidth + plan.valueWidth + plan.detailWidth
+                + ThemedMenuMetrics.metricInnerGap * 2 + ThemedMenuMetrics.metricDetailGap
+                + ThemedMenuMetrics.metricBlockGap,
+            accuracy: 0.5,
+            "the reservation is one line's cells and gaps, whatever the number of lines"
         )
+        // And at the cap the block fits beside a readable name, so neither window is pushed into
+        // the subtitle — the regression this layout replaced, where `7d` fell under the name.
+        let fitted = ThemedMenuMetrics.entries([.item(measured)], fitting: withMeters)
+        XCTAssertEqual(fitted.first?.item?.metrics.map(\.label), ["5h", "7d"])
+        XCTAssertNil(fitted.first?.item?.subtitle)
+    }
+
+    /// A menu of short names keeps the meters it was sized for.
+    ///
+    /// `width(for:)` measures the panel as its widest text plus the meter block, so the fitting
+    /// pass must not then ask the names for more room than that text. A fixed 96pt floor did:
+    /// it judged the meters not to fit a panel measured to hold them, and wrote `7d` under every
+    /// name in a menu of short logins — the report this layout answers.
+    @MainActor
+    func testAMenuOfShortNamesKeepsTheMetersItWasSizedFor() {
+        AppThemePalette.set(.system)
+        let entries: [ThemedMenuEntry] = ["rinda01", "rinda02"].map { name in
+            var item = ThemedMenuItem(title: name)
+            item.metrics = [
+                ThemedMenuMetric(
+                    label: "5h", value: "46%", fraction: 0.46, timeMark: 0.95, detail: "13m"
+                ),
+                ThemedMenuMetric(
+                    label: "7d", value: "35%", fraction: 0.35, timeMark: 0.4, detail: "4d 2h"
+                )
+            ]
+            return .item(item)
+        }
+        for textSize in [AppTextSize.standard, .extraLarge] {
+            DesignSettings.withSettings(StubDesignSettings(appTextSize: textSize)) {
+                let width = ThemedMenuMetrics.width(for: entries, minimum: 0)
+                XCTAssertLessThan(
+                    width, ThemedMenuLayout.maximumWidth,
+                    "\(textSize): the panel must be sized by its content for this to test anything"
+                )
+                let fitted = ThemedMenuMetrics.entries(entries, fitting: width).compactMap(\.item)
+                XCTAssertEqual(
+                    fitted.map { $0.metrics.map(\.label) }, [["5h", "7d"], ["5h", "7d"]],
+                    "\(textSize): a reading was written into the subtitle of a panel sized for it"
+                )
+                XCTAssertEqual(fitted.map(\.subtitle), [nil, nil])
+            }
+        }
     }
 
     /// A section head names the rows under it and chooses nothing: it takes no keyboard
@@ -3461,21 +3560,24 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
     }
 
-    /// Neither of the two consumers that cannot see a column — the tooltip and VoiceOver — is
-    /// left with only the row's name.
+    /// Neither of the two consumers that cannot see a meter — the tooltip and VoiceOver — is
+    /// left with only the row's name, and a line's detail is told in words rather than as the
+    /// bare digits its column can afford.
     @MainActor
-    func testARowSpeaksItsColumnsForTheConsumersThatCannotSeeThem() {
+    func testARowSpeaksItsMetersForTheConsumersThatCannotSeeThem() {
         var item = ThemedMenuItem(title: "Everlof")
         item.titleDetail = "Max"
         item.metrics = [
             ThemedMenuMetric(label: "5h", value: "27%", fraction: 0.27),
-            ThemedMenuMetric(label: "7d", value: "81%", fraction: 0.81, tone: .warning)
+            ThemedMenuMetric(
+                label: "7d", value: "81%", fraction: 0.81, tone: .warning, timeMark: 0.88,
+                detail: "19h 36m", spokenDetail: "resets in 19h 36m"
+            )
         ]
-        item.trailingDetail = "7d · 19h 36m"
 
         XCTAssertEqual(
             item.spokenSummary,
-            "Everlof, Max, 5h 27%, 7d 81%, 7d · 19h 36m"
+            "Everlof, Max, 5h 27%, 7d 81% resets in 19h 36m"
         )
     }
 
@@ -8148,8 +8250,12 @@ final class ThemedControlTests: HostedStoreTestCase {
         // overlay for an app event and owns only the cooldown (ThemeCharacterTests).
         // The audio viewport observer owns only clip notifications, not pixels; the spectrum
         // story shows its consumer and AudioSpectrumPresentationTests covers clipping demand.
+        // The browser window gates focus, and the background host transports existing views
+        // through an invisible panel. Browser focus and off-screen capture tests cover them.
         let nonvisualModels: Set<String> = [
             "AudioSpectrumViewportObserver",
+            "BackgroundRenderingHost",
+            "BrowserHostingWindow",
             "SimulatorTouchOverlayModel",
             "ThemeParticleHold",
             "ThemeTransitionPresenter",
@@ -8162,14 +8268,44 @@ final class ThemedControlTests: HostedStoreTestCase {
         // mounts and captures it in its shipping shell. Keep the textual scan's platform scope
         // explicit rather than claiming that this view is nonvisual or has a Mac story.
         let linuxOnlyComponents: Set<String> = ["ComposerWelcomeView"]
+        // Shared shell pieces are mounted by their owning shipping surfaces rather than as
+        // independent gallery controls. Name the evidence entry for each group, and fail if
+        // that entry disappears so this exception cannot silently outlive its visual proof.
+        let shippingSurfaceComponentsByEvidence: [String: Set<String>] = [
+            "brand-interactions": ["SidebarBrandContentView"],
+            "sidebar-session-rows": ["SidebarNavigatorContentView", "SidebarSessionRowAssembly",
+                                     "SidebarSessionTrailingSlot", "SidebarTerminalRowAssembly"],
+            "session-menu": ["ThemedMenuPanelView", "ThemedMenuDocumentView",
+                             "ThemedMenuSeparatorView", "SessionInfoCardView"],
+            "account-token-prompt": ["ThemedAlertContentView", "ThemedAlertBodyView"],
+            "settings-shared-canvas": ["SettingsCard", "SettingsFlippedView",
+                                       "SettingsPageView", "SettingsAdaptiveControlRow"],
+            "curfew-menu": ["ScheduleMomentPickerView"],
+            "session-composer-layout": ["OpeningComposerContentView", "OpeningComposerActionRowView",
+                                        "ComposerWelcomeStackView", "PromptContentView",
+                                        "PromptAttachmentStripView", "PromptAttachmentThumbnail"],
+            "conversation-pane-width": ["ConversationPaneContentView"],
+            "attachment-subagents": ["SessionAttachmentsContentView", "SessionAttachmentListView",
+                                     "SessionAttachmentRowView", "SessionAttachmentHeaderRow",
+                                     "SessionAttachmentTurnHeaderView"]
+        ]
+        let coverageURL = root.appendingPathComponent("Tests/UIEvidence/coverage.json")
+        let coverage = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: coverageURL)) as? [String: Any]
+        )
+        let coverageEntries = try XCTUnwrap(coverage["entries"] as? [[String: Any]])
+        let coveredIDs = Set(coverageEntries.compactMap { $0["id"] as? String })
+        XCTAssertTrue(Set(shippingSurfaceComponentsByEvidence.keys).isSubset(of: coveredIDs))
+        let shippingSurfaceComponents = Set(shippingSurfaceComponentsByEvidence.values.flatMap { $0 })
         let missing = declaredComponents.subtracting(nonvisualModels)
             .subtracting(linuxOnlyComponents)
+            .subtracting(shippingSurfaceComponents)
             .subtracting(ComponentGalleryViewController.componentNames)
 
         XCTAssertEqual(
             missing,
             Set<String>(),
-            "new public design components need an interactive Component Gallery story"
+            "new design components need a gallery story or explicit shipping surface coverage"
         )
     }
 

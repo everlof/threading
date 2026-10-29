@@ -18,6 +18,9 @@ public enum SidebarDefaults {
     public static let maxWidth: CGFloat = 400
     public static let defaultWidth: CGFloat = 240
 
+    /// Shared brand slot for the Mac theme art and Linux sidebar mark.
+    public static let brandLogoSide: CGFloat = 24
+
     public static let rowHeight: CGFloat = 28
     /// Every sidebar dropdown's floor, so the short menus read as the same control as the
     /// long ones.

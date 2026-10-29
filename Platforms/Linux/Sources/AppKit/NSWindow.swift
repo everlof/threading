@@ -234,7 +234,7 @@ public final class NSWindow: NSResponder {
             if root?.performKeyEquivalent(with: delivered) != true {
                 (firstResponder ?? self).keyDown(with: delivered)
             }
-        case .mouseMoved, .mouseEntered, .mouseExited:
+        case .mouseMoved, .mouseEntered, .mouseExited, .flagsChanged:
             break
         }
         return nil

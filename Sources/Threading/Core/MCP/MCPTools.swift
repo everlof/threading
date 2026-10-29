@@ -6668,7 +6668,7 @@ enum MCPTools {
         openWorldHint: false
       ),
       title: "Prepare Device Logs",
-      detail: "Reveal this session's live log pane and build the tap an app links to be readable.",
+      detail: "Reveal this session's shared log panel and explain capture routes and optional tap setup.",
       symbol: "list.bullet.rectangle",
       decodeArguments: { container in
         try container.decodeIfPresent(DeviceLogPrepareArguments.self, forKey: .arguments)
@@ -6679,11 +6679,16 @@ enum MCPTools {
         handler.deviceLogPrepare(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Reveal this session's Device logs pane and return the exact build setting that makes an \
-        app's own output readable in it. Call this before building an app whose `print()` output \
-        the user wants to see: printed output never reaches the unified log, so without the tap \
-        the pane shows only framework noise and nothing the app itself wrote. The returned value \
-        is added to your own xcodebuild invocation; Threading does not build the project for you.
+        Reveal this session's shared Device Logs panel and return truthful capture availability \
+        guidance plus the optional stdout/stderr tap's build or launch setting. Use the plugin's \
+        state/configure/read/wait/reveal tools to work with the same panel filter the user sees. \
+        Unified logs, app-console output and saved app logs are distinct sources; ordinary print() \
+        does not reach unified logs automatically. Preparing the tap alone does not instrument or \
+        relaunch an app. Apply the returned setting to your own build/launch, then verify received \
+        output in the panel. Linking the tap into a device app requires the user's consent.
+        This also loads the plugin's Bluetooth packet tools: discover bluetooth_state, \
+        bluetooth_configure, bluetooth_read, bluetooth_wait and bluetooth_reveal afterward. \
+        Bluetooth HCI capture does not use the app stdout tap.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -8725,15 +8730,23 @@ enum MCPTools {
         Task { @MainActor in completion(await handler.createAppTheme(arguments)) }
       },
       description: """
-        Decide how far the theme goes: palette, material, chrome, character. For an unspecified
-        theme, ask the person how far to go. State both halves in every variant: roles and terminal_colors.
-        Create an editable theme from a base (default: current); omitted fields inherit.
-        Set roles AND terminal_colors in each variant for a coherent palette. Use material
-        for shapes/backdrops, chrome for a window frame, sidebar for a mascot/logo, and
-        words/title_morph/moments/welcome (the ⌘N composer) for character. One variant is
-        fixed; adaptive needs both.
+        Decide how far the theme goes: palette, material, chrome, character. A request that
+        names a world or a subject — a game, a film, a place, an era, a mood, a thing — wants
+        the whole look, built without asking: palette; material with a backdrop; chrome (its
+        own title band, buttons and frame); and character — an image logo with logo_in_dock as
+        the Dock icon, a mascot with poses, sprites, words, a welcome, moments and a
+        transition. Colours alone read as the same app recoloured. A request about colours
+        wants the palette. Only when it says no more than "a theme",
+        ask the person how far to go, and recommend all four.
+        State both halves in every variant: roles and terminal_colors. Give each appearance
+        pictures drawn for its own ground. Create an editable theme from a base (default:
+        current); omitted fields inherit. Use material for shapes/backdrops, chrome for a
+        window frame, sidebar for a mascot/logo, and words/title_morph/moments/welcome (the ⌘N
+        composer) for character. One variant is fixed; adaptive needs both.
         For every block's fields, limits and examples call get_app_theme(section: path),
-        starting with section: "schema" (e.g. terminal_colors.glow). Applied by default; inspect with preview_app_theme.
+        starting with section: "schema" (e.g. terminal_colors.glow). Applied by default. The
+        result names the layers, what a whole look still lacks and any art that disappears
+        into its ground; inspect with preview_app_theme, which also draws the Dock tile.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -8868,7 +8881,8 @@ enum MCPTools {
         duplicate_app_theme first. An active theme repaints live; apply opts in an inactive
         theme. Adaptive requires both variants. Read block fields, removal flags and limits
         with get_app_theme(section: path), e.g. material.backdrop or terminal_colors.glow.
-        The result reports all four layers. Use preview_app_theme to inspect the result.
+        The result reports all four layers, what a whole look still lacks and any art that
+        disappears into its ground. Use preview_app_theme to inspect the result.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -8948,7 +8962,9 @@ enum MCPTools {
         backdrop, mark at its size, greeting and caption, scrims and a sample prompt box, \
         with one line picked by a fixed seed and its tokens rendered at a fixed moment from \
         sample values (project "threading", user "Ada", 2 working, 1 waiting); the result's \
-        text quotes the words drawn. Works for any theme, applied or not, and in both \
+        text quotes the words drawn. The image ends with the theme's Dock tile per \
+        appearance at 128, 64, 32 and 16 points on that appearance's Dock shelf — the icon \
+        people find the app by. Works for any theme, applied or not, and in both \
         appearances of an adaptive one. Sample rows stand in for the user's projects, so \
         nothing of theirs is captured. Motion is shown as a still frame of where particles \
         would be. Use it after create_app_theme or update_app_theme and before telling the \
@@ -9003,7 +9019,8 @@ enum MCPTools {
         sidebar.title.font_family for the wordmark, material.font_family or \
         heading_style.font_family for prose. At most 4 fonts per theme, 16 MB each. \
         replace_existing: true removes the theme's current fonts first (and alone, with no \
-        source, just removes them).
+        source, just removes them). A face that ships with macOS needs no file — name its \
+        family directly — so a file holding only such faces is refused.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -10607,8 +10624,9 @@ enum MCPTools {
           "celebrating" (for ~3 s after a turn comes back). "idle" is required; a mood \
           without its own pose borrows idle's (attention borrows working's first), and \
           without a celebrating pose there is no celebration. Pictures are stored at up to \
-          256 pixels; transparent PNGs whose feet touch the bottom edge stand best. Rows \
-          scroll over the mascot and the list keeps its foot clear. Fields merge.
+          256 pixels; transparent PNGs whose feet touch the bottom edge stand best. Draw each \
+          appearance's poses for its own sidebar: a dark outline vanishes on a dark column. \
+          Rows scroll over the mascot and the list keeps its foot clear. Fields merge.
           """,
         properties: [
           "size": MCPPropertySchema(
@@ -10640,8 +10658,10 @@ enum MCPTools {
       ),
       "logo_in_dock": MCPPropertySchema(
         type: .boolean,
-        description: "True also draws the theme's logo image on the Dock tile, on the theme's "
-          + "own plate, instead of the Threading mark. Needs an image logo; false returns the mark."
+        description: "True also draws the theme's logo image on the Dock tile — the icon people "
+          + "find the app by — on a plate in the theme's ground, instead of the Threading mark. "
+          + "Needs an image logo, best 512 px; a logo whose edge disappears into the plate is "
+          + "rimmed in the label colour. preview_app_theme draws the tile. False returns the mark."
       ),
       "analyzer": MCPPropertySchema(
         type: .string,
@@ -10654,7 +10674,10 @@ enum MCPTools {
         description: """
           What sits in the brand slot: "mark" (the Threading mark, drawn in the \
           theme's ink), "hidden" (wordmark alone), or an object {path} or {base64} \
-          supplying the theme's own logo image (drawn in a 24-point square, aspect-fit).
+          supplying the theme's own logo image (drawn in a 24-point square, aspect-fit). Make \
+          it a square transparent PNG, 512 px, the mark filling most of it and readable at \
+          16 points, drawn for this appearance's ground: a logo whose edge disappears into the \
+          header is rimmed in the header's ink.
           """,
         properties: imageSource
       ),
@@ -11602,7 +11625,8 @@ enum MCPTools {
               + "the cluster at the start (Aqua traffic lights); \"split\" puts "
               + "Close at the leading edge and minimize/zoom at the trailing edge; "
               + "\"bookends\" puts the first visible operation at the leading edge and "
-              + "the remaining operations at the trailing edge."
+              + "the remaining operations at the trailing edge. Close always takes its "
+              + "cluster's outer edge."
           ),
           "shows_app_icon": MCPPropertySchema(
             type: .boolean,
@@ -11643,7 +11667,9 @@ enum MCPTools {
           "visible_buttons": MCPPropertySchema(
             type: .array,
             description: "One or more unique operations from window_menu, close, "
-              + "minimize, zoom, and depth. Depth sends the window behind its peers.",
+              + "minimize, zoom, and depth. Depth sends the window behind its peers. Drawn "
+              + "in the order listed, except Close, which takes its cluster's outer edge — "
+              + "first on the leading side, last on the trailing.",
             items: MCPArrayItemSchema(
               type: .string,
               description: "A semantic window operation."

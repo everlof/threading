@@ -23,6 +23,7 @@ struct px_mcp {
     px_config config;
     px_output *output;
     px_proxy *proxy;
+    px_mock_rules *mocks;
     bool initialized, ready, running;
     uint64_t sequence;
     uint64_t client_generation;
@@ -66,6 +67,7 @@ static cJSON *record_json(const px_record *record) {
     cJSON_AddNumberToObject(result, "status", flow->status);
     cJSON_AddBoolToObject(result, "tunnel", flow->tunnel);
     cJSON_AddBoolToObject(result, "tls_inspected", flow->tls_inspected);
+    cJSON_AddBoolToObject(result, "mocked", flow->mocked);
     cJSON_AddStringToObject(result, "upstream_tls_version", record->tls_version);
     integer(result, "client_wire_bytes", flow->client_bytes);
     integer(result, "upstream_wire_bytes", flow->upstream_bytes);
@@ -159,6 +161,7 @@ static cJSON *status_json(px_mcp *mcp) {
     cJSON_AddNumberToObject(result, "retained_flows", (double)mcp->count);
     cJSON_AddNumberToObject(result, "history_limit", HISTORY_LIMIT);
     cJSON_AddNumberToObject(result, "body_limit", (double)mcp->config.body_limit);
+    cJSON_AddNumberToObject(result, "mock_count", mcp->mocks ? (double)mcp->mocks->count : 0);
     cJSON_AddNumberToObject(result, "retained_capture_bytes", (double)mcp->capture_budget.used);
     cJSON_AddNumberToObject(result, "history_byte_limit", PX_CAPTURE_BUDGET);
     cJSON *hosts = cJSON_AddArrayToObject(result, "tls_hosts");
@@ -215,6 +218,118 @@ static bool arguments_valid(const cJSON *arguments, const char *allowed) {
         if (!strstr(allowed, key)) return false;
     }
     return true;
+}
+
+static bool mock_host(const char *text) {
+    size_t length = strlen(text);
+    if (!length || length > PX_HOST_LIMIT || text[0] == '.' || text[length - 1] == '.' || strstr(text, "..")) return false;
+    for (size_t i = 0; i < length; ++i) {
+        unsigned char c = (unsigned char)text[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '.')) return false;
+    }
+    return true;
+}
+
+static bool mock_token(const char *text, size_t maximum, bool method) {
+    size_t length = strlen(text);
+    if (!length || length > maximum) return false;
+    for (size_t i = 0; i < length; ++i) {
+        unsigned char c = (unsigned char)text[i];
+        if (method ? (c < 'A' || c > 'Z') : !((c >= 'A' && c <= 'Z') ||
+            (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return false;
+    }
+    return true;
+}
+
+static bool mock_headers(const cJSON *object, px_mock_rule *rule) {
+    if (!cJSON_IsObject(object)) return false;
+    size_t source_bytes = 0;
+    unsigned count = 0;
+    for (const cJSON *item = object->child; item; item = item->next) {
+        if (++count > 16) return false;
+        const char *name = item->string, *value = string(item);
+        if (!name || !value || !mock_token(name, 64, false)) return false;
+        static const char *const forbidden[] = {"connection", "content-length", "transfer-encoding",
+            "trailer", "upgrade", "proxy-connection"};
+        for (size_t i = 0; i < sizeof(forbidden) / sizeof(forbidden[0]); ++i) {
+            size_t j = 0;
+            while (name[j] && forbidden[i][j] &&
+                (name[j] == forbidden[i][j] || name[j] == forbidden[i][j] - 32)) ++j;
+            if (!name[j] && !forbidden[i][j]) return false;
+        }
+        size_t name_length = strlen(name), value_length = strlen(value);
+        if (source_bytes + name_length + value_length > PX_MOCK_HEADER_LIMIT) return false;
+        source_bytes += name_length + value_length;
+        for (size_t i = 0; i < value_length; ++i) {
+            unsigned char c = (unsigned char)value[i];
+            if ((c < 32 && c != '\t') || c == 127) return false;
+        }
+        int written = snprintf(rule->headers + rule->headers_length,
+            sizeof(rule->headers) - rule->headers_length, "%s: %s\r\n", name, value);
+        if (written < 0 || (size_t)written >= sizeof(rule->headers) - rule->headers_length) return false;
+        rule->headers_length += (size_t)written;
+    }
+    return true;
+}
+
+static bool parse_mock(const cJSON *item, px_mock_rule *rule) {
+    if (!arguments_valid(item, "|host||port||method||path||status||headers||body|")) return false;
+    const char *host = string(field(item, "host")), *method = string(field(item, "method"));
+    const char *path = string(field(item, "path")), *body = string(field(item, "body"));
+    const cJSON *port = field(item, "port"), *status = field(item, "status"), *headers = field(item, "headers");
+    if (!host || !method || !path || !body || !cJSON_IsNumber(port) || !cJSON_IsNumber(status) ||
+        !mock_host(host) || !mock_token(method, 16, true) || strcmp(method, "CONNECT") == 0 ||
+        port->valuedouble < 1 || port->valuedouble > 65535 || floor(port->valuedouble) != port->valuedouble ||
+        status->valuedouble < 200 || status->valuedouble > 599 || floor(status->valuedouble) != status->valuedouble ||
+        status->valueint == 204 || status->valueint == 205 || status->valueint == 304) return false;
+    size_t path_length = strlen(path), body_length = strlen(body);
+    if (!path_length || path[0] != '/' || path_length > 4096 || body_length > PX_MOCK_BODY_LIMIT ||
+        (strcmp(method, "HEAD") == 0 && body_length)) return false;
+    for (size_t i = 0; i < path_length; ++i) {
+        unsigned char c = (unsigned char)path[i];
+        if (c <= 32 || c >= 127 || c == '#' || c == '\\') return false;
+    }
+    if (!mock_headers(headers, rule)) return false;
+    snprintf(rule->host, sizeof(rule->host), "%s", host);
+    snprintf(rule->method, sizeof(rule->method), "%s", method);
+    snprintf(rule->path, sizeof(rule->path), "%s", path);
+    rule->port = (unsigned)port->valueint;
+    rule->status = (unsigned)status->valueint;
+    memcpy(rule->body, body, body_length);
+    rule->body_length = body_length;
+    return true;
+}
+
+static bool set_mocks(px_mcp *mcp, const cJSON *id, const cJSON *params) {
+    if (mcp->proxy || mcp->mocks || !arguments_valid(params, "|rules|")) {
+        return send_result(mcp, id, NULL, -32602, "Mock fixtures are immutable after capture setup");
+    }
+    const cJSON *rules = field(params, "rules");
+    if (!cJSON_IsArray(rules) || cJSON_GetArraySize(rules) > PX_MOCK_LIMIT) {
+        return send_result(mcp, id, NULL, -32602, "Expected at most eight mock rules");
+    }
+    px_mock_rules *parsed = calloc(1, sizeof(*parsed));
+    if (!parsed) return send_result(mcp, id, NULL, -32000, "Could not allocate mock rules");
+    bool valid = true;
+    for (const cJSON *item = rules->child; item && valid; item = item->next) {
+        px_mock_rule *rule = &parsed->rules[parsed->count];
+        valid = parse_mock(item, rule);
+        for (size_t i = 0; i < parsed->count && valid; ++i) {
+            const px_mock_rule *other = &parsed->rules[i];
+            if (rule->port == other->port && !strcmp(rule->host, other->host) &&
+                !strcmp(rule->method, other->method) && !strcmp(rule->path, other->path)) valid = false;
+        }
+        if (valid) ++parsed->count;
+    }
+    if (!valid) {
+        free(parsed);
+        return send_result(mcp, id, NULL, -32602, "Invalid or duplicate mock rule");
+    }
+    mcp->mocks = parsed;
+    mcp->config.mocks = parsed;
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddNumberToObject(result, "count", (double)parsed->count);
+    return send_result(mcp, id, result, 0, NULL);
 }
 
 static bool page_number(const cJSON *arguments, const char *name, size_t maximum, size_t fallback, size_t *result) {
@@ -411,6 +526,7 @@ static bool dispatch(px_mcp *mcp, const cJSON *request) {
     }
     if (!mcp->ready) return send_result(mcp, id, NULL, -32000, "Initialize this MCP session first");
     if (strcmp(method, "threading/clients") == 0 || strcmp(method, "threading/decideClient") == 0) return client_control(mcp, id, method, params);
+    if (strcmp(method, "threading/setMocks") == 0) return set_mocks(mcp, id, params);
     if (strcmp(method, "tools/list") == 0) return send_result(mcp, id, tools_json(), 0, NULL);
     if (strcmp(method, "tools/call") == 0) return call_tool(mcp, id, params);
     return send_result(mcp, id, NULL, -32601, "Method not found");
@@ -466,6 +582,7 @@ void px_mcp_stop(px_mcp *mcp) {
 void px_mcp_destroy(px_mcp *mcp) {
     if (!mcp) return;
     px_proxy_destroy(mcp->proxy);
+    free(mcp->mocks);
     while (mcp->count) evict_oldest(mcp);
     free(mcp);
 }

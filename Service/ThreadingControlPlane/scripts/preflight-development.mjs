@@ -97,7 +97,7 @@ const migrations = (await readdir(new URL("migrations/", serviceRoot)))
   .sort();
 if (!migrations.includes("0008_development_auth_and_push_registrations.sql")
   || !migrations.includes("0010_anonymous_host_identities.sql")
-  || migrations.at(-1) !== "0011_pilot_admission_and_turn_budget.sql") {
+  || migrations.at(-1) !== "0012_service_failure_diagnostics.sql") {
   failures.push("development requires auth/push registration and the current shared migration set");
 }
 

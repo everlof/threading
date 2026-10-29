@@ -70,6 +70,75 @@ class MCP(Proxy):
 
 
 class MCPIntegration(unittest.TestCase):
+    def test_exact_mock_response_without_upstream_and_passthrough(self):
+        reached = threading.Event()
+        def reply(connection):
+            reached.set()
+            read_headers(connection)
+            respond(connection, b"real")
+        with origin(reply) as port, MCP() as mcp:
+            rule = {"host": "127.0.0.1", "port": port, "method": "POST", "path": "/fixture?case=1",
+                    "status": 201, "headers": {"Content-Type": "application/json"},
+                    "body": '{"source":"extension"}'}
+            self.assertEqual(mcp.rpc("threading/setMocks", {"rules": [rule]})["result"]["count"], 1)
+            self.assertEqual(mcp.start()["mock_count"], 1)
+            with mcp.socket() as client:
+                client.sendall((f"POST http://127.0.0.1:{port}/fixture?case=1 HTTP/1.1\r\n"
+                                f"Host: 127.0.0.1:{port}\r\nContent-Length: 4\r\n\r\ntest").encode())
+                response = read_all(client)
+            self.assertIn(b"201 Mock", response)
+            self.assertTrue(response.endswith(b'{"source":"extension"}'))
+            self.assertFalse(reached.is_set(), "Mocked request must not reach the origin")
+            with mcp.socket() as client:
+                client.sendall(f"GET http://127.0.0.1:{port}/other HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+                self.assertTrue(read_all(client).endswith(b"real"))
+            self.assertTrue(reached.is_set())
+            flows = mcp.tool("traffic_list")["flows"]
+            self.assertEqual([flow["mocked"] for flow in flows], [True, False])
+            self.assertEqual(flows[0]["result"], "mocked")
+            self.assertEqual(mcp.tool("traffic_body", {"id": flows[0]["id"], "side": "response"})["data"],
+                             '{"source":"extension"}')
+
+    def test_mock_rule_validation_rejects_response_splitting(self):
+        with MCP() as mcp:
+            rule = {"host": "example.com", "port": 80, "method": "GET", "path": "/",
+                    "status": 200, "headers": {"Content-Length": "9000"}, "body": "test"}
+            self.assertIn("error", mcp.rpc("threading/setMocks", {"rules": [rule]}))
+            rule["headers"] = {"X-Test": "ok\r\nInjected: yes"}
+            self.assertIn("error", mcp.rpc("threading/setMocks", {"rules": [rule]}))
+            self.assertEqual(mcp.start()["mock_count"], 0)
+
+    @unittest.skipUnless(shutil.which("openssl"), "OpenSSL fixture generator is required")
+    def test_mocked_inspected_tls_response(self):
+        certificates = Certificates()
+        received = threading.Event()
+        try:
+            def reply(connection):
+                try:
+                    read_headers(connection)
+                    received.set()
+                except EOFError:
+                    pass
+            with tls_origin(certificates, reply) as port, MCP(*certificates.options()) as mcp:
+                rule = {"host": "127.0.0.1", "port": port, "method": "GET", "path": "/tls-fixture",
+                        "status": 202, "headers": {"Content-Type": "text/plain"}, "body": "mocked tls"}
+                self.assertEqual(mcp.rpc("threading/setMocks", {"rules": [rule]})["result"]["count"], 1)
+                mcp.start()
+                plain = socket.create_connection(("127.0.0.1", mcp.port), timeout=5)
+                plain.sendall(f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+                self.assertIn(b"200", read_headers(plain))
+                with certificates.client().wrap_socket(plain, server_hostname="127.0.0.1") as client:
+                    client.sendall(f"GET /tls-fixture HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+                    response = read_all(client)
+                self.assertIn(b"202 Mock", response)
+                self.assertTrue(response.endswith(b"mocked tls"))
+                self.assertFalse(received.is_set())
+                flow = mcp.tool("traffic_list")["flows"][0]
+                self.assertTrue(flow["tls_inspected"])
+                self.assertTrue(flow["mocked"])
+        finally:
+            certificates.temporary.cleanup()
+
     def test_listener_scope_rejects_incomplete_or_ambiguous_addresses(self):
         invalid = [
             ["--listen-address", "127.0.0.1"], ["--client-address", "127.0.0.1"],

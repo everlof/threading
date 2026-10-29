@@ -469,22 +469,26 @@ This mirrors the logic in `~/repo/claudex` (`CredentialStore`, `HandoffLauncher`
 client-side file the CLI replays each turn, not server state bound to the originating account.
 *Verified empirically*: a Claude transcript copied into another account's config dir resumed
 with full context under that account. So a move is: copy the transcript into the target
-account's directory and re-point `accountHandle`. The destination is the source path with its
-**account-directory prefix swapped** — the layout under a config dir (`projects/<slug>/` for
-Claude, dated `sessions/` for Codex) is identical between accounts, so one prefix swap serves
-both agents. It is **non-destructive** (the original stays, so a move reverses), stops any live
-process first (it belongs to the old account and is still writing the file), and Threading never
-touches a token — the official CLI authenticates under whichever account, so this is
-portability, not credential reuse.
+account's directory and re-point `accountHandle`. Claude's destination uses the checkout where
+the session will resume; Codex keeps its
+account-relative global layout. A Claude move includes the parent JSONL and its adjacent
+`<session-id>/subagents` directory, so a resumed panel agent can find its own history after an
+account switch. Source child histories take precedence, while target-only histories survive a
+return to a previously used account. Originals remain in place.
 
-Replacing a transcript that already exists in the target account is crash-recoverable. Before
-the first same-volume rename, `TranscriptCopyTransaction` writes one private recovery record under
-Threading's Application Support containing the exact destination, candidate and previous-copy
-paths. The next launch reads that one record before any conversation can start: an absent target
-with a surviving previous copy is restored, a record left before the first rename is cleared, and
-an already promoted copy with ambiguous store-commit state is preserved and reported rather than
-guessed at. There is deliberately one fixed record instead of a scan through provider transcript
-trees, so launch work is constant and a later move cannot overwrite unresolved recovery evidence.
+`TranscriptMigrationWorker` admits one copy at a time. Copying, history merging and recursive
+cleanup run on its serial actor; only the account-row commit returns to the main actor. The
+session is fenced against input and relaunch until completion, and an overlapping checkout move
+is refused. For a live local terminal, the worker waits up to five seconds for its outgoing PID to
+exit before reading history; a writer that remains alive refuses the copy. Mac, phone, manager and usage-limit actions await this same transaction before
+resuming or reporting success.
+
+Parent and child candidates are prepared before either destination changes. One private recovery
+record contains the exact two destinations, candidates and previous-copy paths before promotion;
+version 1 records remain readable. A refused account-row commit restores both previous copies.
+Launch recovery restores a partially promoted version-2 bundle as one generation. If the whole
+bundle was promoted and the store commit is ambiguous, recovery preserves both generations and
+reports the condition instead of guessing. Recovery never scans account transcript trees.
 
 The paired iPhone does not implement a second migration. Its owner-only Chat Settings route sends
 one catalog account handle to the Mac, and the application composition root invokes this same
@@ -1089,55 +1093,82 @@ resolutions:
   5. **The meter could only ever be a hue.** 14×2pt under the mark: 27% and 37% draw the same
      length, so it repeated the tint the value already carried and added no second reading.
 
-  Each window is now a `ThemedMenuMetric` — a named column, a bar, and the number — and the menu
-  measures one column plan across every row (`ThemedMenuMetrics.metricColumns`), so every row's
-  `7d` is stacked under every other row's. A plan metering one window leaves the `5h` cell
-  **empty rather than closed up**: closing it would slide the remaining readings under a
-  different heading, which is the one thing a column must never do, and the gap itself says that
-  plan has one window. The bar is 32pt, wide enough that ten points of difference is visible —
-  which is what makes the ranking pre-attentive and retires the argument for the meter under the
-  mark. The numbers stay beside it: the bar is the glance, the number is the precise answer.
+  Each window is now a `ThemedMenuMetric` — a name, a bar, the number and its countdown — and the
+  menu measures one plan across every row, so every row's `7d` is in the same place as every other
+  row's. A plan metering one window leaves the `5h` slot **empty rather than closed up**: closing
+  it would move the remaining reading to where the other logins keep a different window, and the
+  gap itself says that plan has one window. The numbers stay beside the bars: the bar is the
+  glance, the number is the precise answer.
 
-  **What paid for the columns was the section head.** The rows are filed under one head per
+  **Fifth design (2026-10-29): the windows stack, and the bar carries the clock.** The fourth put
+  the windows side by side as columns on the title's line, and the fitting pass judged that two
+  bars, two values, a rule and a countdown did not fit beside a readable name — and the judgement
+  was wrong. The panel is sized to its widest text plus the readings, and the pass then asked a
+  fixed 96pt of names that needed less, so readings measured to fit were found not to. (The
+  reported panel was below the width cap, and at a content-sized width that is the only way the
+  check can fail.) It dropped the second column into the subtitle, and on a real menu every row read
+  `5h ▬ 46%` at the right and `7d 35%` under the name — one window in two places, and the
+  comparison by length gone for the weekly window entirely. The name's floor is now never more
+  than the widest text (`ThemedMenuMetrics.entries(_:fitting:)`), and each row's two lines carry
+  one meter each: `5h` on the title's line, `7d` directly under it, on every row, at one x
+  (`ThemedMenuMetrics.metricLines` / `ThemedMenuMetricPlan`; see
+  [`design-system.md`](design-system.md)). A weekly-only plan leaves
+  the top line empty and keeps its `7d` on the second; the plan is an ordered union, so a
+  weekly-only login listed first does not move `7d` to the top for everyone. Stacked, the block
+  is one meter wide, which is what lets it fit — and the room that frees went into what a glance
+  needs:
+
+  - **A 64pt bar** instead of 28pt.
+  - **The clock's tick** (`ThemedMenuMetric.timeMark` = `Window.elapsedFraction`), the same
+    linear mark the pill's popover and the phone's picker draw: fill short of the tick is spending
+    slower than time passes, fill past it faster — the one thing a percentage cannot say, and the
+    difference between `46%` that resets in 13 minutes and `46%` with four hours to run.
+  - **Each window's own countdown** at the end of its line (`13m`, `4d 2h`). The fourth design
+    showed one countdown, the binding window's, prefixed with its window name so it could not be
+    misattributed; on its own line a countdown is attributed by position, so every window gets
+    one and none needs a name. It takes the critical ink with its window — on a spent week, when
+    it comes back is the number that matters.
+
+  A window whose reset has passed draws `—`, an empty track, **no tick and no countdown**: its
+  number belonged to the window before, and so would any position in it. When the window that
+  binds the model this session would run is a *scoped* one, its reset follows it into the
+  subtitle (`7d Fable 89% · resets in 15h`), since the meter lines carry only their own windows'.
+  When even the stacked block cannot fit beside a name — a narrow screen, the largest text size —
+  every reading is written into the subtitle at once, never one window as a meter and the other
+  as words.
+
+  **What paid for the grouping was the section head.** The rows are filed under one head per
   runtime, so `Claude Code · ` — the longest segment on the line — comes off every row and is
   said once. This costs no navigation: a header is not a submenu, so reaching another runtime's
   login is still the one press it became when this stopped being two sections. A runtime with no
   login to offer keeps its bare row and gets *no* head, because a heading over a single row
   repeating its own name is furniture.
 
-  The rest of the line redistributes by what it is. The **plan** joins the title's line
-  (`titleDetail`), quieter than the name — demoting it to a second line would give a
-  subtitle-height row to every login whose provider happens to report one. The **countdown** gets
-  a right-aligned column of its own (`7d · 19h 36m`), which is what makes fault 4 structurally
-  impossible: the columns are fixed and the *name* is elastic, so a menu at its width cap
-  truncates the name — the one thing still recognisable from its first half — and never a number.
-  The name has a 96-point floor, scaled with chrome text. The shared menu admits columns against
-  its actual available width before constructing rows or measuring their heights. A third window
-  such as `30d` must not consume the entire name slot beside `5h`, `7d`, and a reset countdown:
-  overflow readings move to the second line, with the countdown following when it cannot fit
-  either. That line can use the row's full text width; complete readings remain in hover and
-  accessibility text. Plain runtime/action rows reserve no usage columns.
-  This remains host-owned menu layout: destination eligibility, account routing, usage truth,
-  keyboard navigation and accessibility stay Threading's responsibility.
-  `resets in` is dropped, since a column of countdowns states what it is by being one, but the
-  countdown still **names its window**: it is not always the last column, and a bare one at the
-  end of a row is read as belonging to whichever is. The **scoped model windows** are the one
-  thing a shared column cannot hold — a scoped window's name is its length *and* its model
-  (`7d Fable`), so a column per model would be a column almost every row leaves empty — and they
-  take the row's second line, present on the few logins that have one.
+  The **plan** joins the title's line (`titleDetail`), quieter than the name — demoting it to a
+  second line would compete with the weekly meter. The meters are fixed and the *name* is
+  elastic, so a menu at its width cap truncates the name — the one thing still recognisable from
+  its first half — and never a number. The name has a 96-point floor, scaled with chrome text.
+  Plain runtime/action rows reserve no meter block. This remains host-owned menu layout:
+  destination eligibility, account routing, usage truth, keyboard navigation and accessibility
+  stay Threading's responsibility. The **scoped model windows** are the one thing a shared line
+  cannot hold — a scoped window's name is its length *and* its model (`7d Fable`), so a line per
+  model would be a meter almost every row leaves empty — and they are written into the left half
+  of the row's second line, present on the few logins that have one.
 
   **Which image the row carries still depends on whether it has to name its runtime.** A menu row
   has exactly one image slot. Where the runtime is a foregone conclusion it holds
   `UsageRingImage`, as it always did. In the composer's identity menu it holds `AccountMarkImage`
   — but the **plain** mark now, not the metered one. Its 2pt underline existed only because a
-  14pt slot was the only room a reading had; the columns carry the length now, so the mark goes
+  14pt slot was the only room a reading had; the meters carry the length now, so the mark goes
   back to being identity alone. (Composing mark and ring — the mark drawn *inside* the ring — was
   tried in the metered era and rejected on the render: at 14pt the enclosed mark is a coloured
   smudge that identifies nothing, which was the one job it was added for.)
 
-  Tones are unchanged and still semantic: window names, separators and the countdown at the muted
-  tier, values in the row's own ink until their window passes the warning threshold and in its
-  severity colour after — the pill's grammar, which the model rows also keep. The tint remains a
+  Tones are unchanged and still semantic: window names, separators and countdowns at the muted
+  tier — except a critical window's countdown, which takes the window's red — values in the row's
+  own ink until their window passes the warning threshold and in its severity colour after — the
+  pill's grammar, which the model rows also keep. The tick is in the label's ink on every row: it
+  is chronology, not a reading, and it carries no tone of its own. The tint remains a
   second signal, never the only one; the numbers say the same thing in any ink, and a classic
   selection band flattens every tone — text *and* bar — to its own authored pair.
   `AccountUsage.readings` is the shared structured source, and it now carries `fraction` beside
@@ -1148,7 +1179,7 @@ resolutions:
   `AccountUsageMenu.apply` is the seam: the reading half of `decorate` with the account lookup
   taken out, so a test and the dropdown render sweep both build the row the composer assembles
   rather than re-deriving it. `ThemedMenuItem.spokenSummary` is that row joined into one line —
-  what the tooltip and VoiceOver get, since neither of them can see a column or a bar, and a row
+  what the tooltip and VoiceOver get, since neither of them can see a meter or a tick, and a row
   announced by its name alone would be a login with no reading at all.
 - The composer's own reading is **one line inside the prompt box**, on the row that carries
   what the session will run with. It is `AccountUsage.compactSummary` metered by the model the

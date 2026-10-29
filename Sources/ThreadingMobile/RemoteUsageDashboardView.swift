@@ -1460,9 +1460,16 @@ struct RemoteUsageDashboardView: View {
                                 .foregroundStyle(theme.secondaryLabel)
                         }
                         .frame(maxWidth: .infinity, minHeight: MobileDesign.Chart.limitHeight)
-                    } else if let detail = selectedLimit {
+                    } else if let detail = model.limit {
+                        // A new window or period replaces this snapshot atomically. Removing it
+                        // while waiting shrinks the scroll extent and makes UIKit clamp the
+                        // reader back to the top of the sheet, so it stays mounted, dimmed —
+                        // and another window's readings and reset button stay out of reach.
+                        let showsSelectedWindow = detail.series.id == model.selectedLimitID
+                        let isPending = !showsSelectedWindow || detail.days != limitDays
                         MobileUsageLimitChart(detail: detail).equatable()
-                            .opacity(detail.days == limitDays ? 1 : MobileDesign.Chart.pendingSnapshotOpacity)
+                            .opacity(isPending ? MobileDesign.Chart.pendingSnapshotOpacity : 1)
+                            .accessibilityHidden(!showsSelectedWindow)
                             .overlay {
                                 if let message = model.limitErrorMessage {
                                     Text(message)
@@ -1470,7 +1477,7 @@ struct RemoteUsageDashboardView: View {
                                         .foregroundStyle(theme.secondaryLabel)
                                         .padding(MobileDesign.Spacing.medium)
                                         .background(theme.ground)
-                                } else if detail.days != limitDays || model.isLoadingLimit {
+                                } else if isPending || model.isLoadingLimit {
                                     ProgressView("Preparing selected history…")
                                         .tint(theme.accent)
                                         .padding(MobileDesign.Spacing.medium)
@@ -1479,9 +1486,12 @@ struct RemoteUsageDashboardView: View {
                             }
                         Divider().overlay(theme.divider)
                         limitSummaryRows(detail)
+                            .opacity(showsSelectedWindow ? 1 : MobileDesign.Chart.pendingSnapshotOpacity)
+                            .accessibilityHidden(!showsSelectedWindow)
                         if detail.series.canRedeemBankedReset == true {
                             Divider().overlay(theme.divider)
                             bankedResetButton(detail.series)
+                                .disabled(!showsSelectedWindow)
                         }
                         if let status = model.bankedResetStatusMessage {
                             Text(status)
@@ -1519,13 +1529,6 @@ struct RemoteUsageDashboardView: View {
                 .frame(minHeight: MobileDesign.Size.minimumTapTarget)
             }
         }
-    }
-
-    private var selectedLimit: RemoteUsageLimitDTO? {
-        // A new period replaces this snapshot atomically. Removing it while waiting shrinks
-        // the scroll extent and makes UIKit clamp the reader back to the top of the sheet.
-        guard model.limit?.series.id == model.selectedLimitID else { return nil }
-        return model.limit
     }
 
     private func bankedResetButton(

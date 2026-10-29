@@ -331,17 +331,18 @@ final class PluginContractTests: XCTestCase {
         )
     }
 
-    /// V5 adds the bounded change-request summary and visibility-interest callback. A new host can
-    /// still run a v3 pane plugin, while an older host's exact generation check refuses newer code
-    /// before selector dispatch.
+    /// V7 adds callable Simulator services. A new host can still run a v3 pane plugin, while an
+    /// older host refuses a newer plugin before it calls a service the host does not have.
     func testTheAPIVersionCompatibilityWindowPreservesV3PanePlugins() {
-        XCTAssertEqual(ThreadingPluginAPI.version, 5)
+        XCTAssertEqual(ThreadingPluginAPI.version, 7)
         XCTAssertEqual(ThreadingPluginAPI.minimumSupportedVersion, 3)
         XCTAssertFalse(ThreadingPluginAPI.supports(2))
         XCTAssertTrue(ThreadingPluginAPI.supports(3))
         XCTAssertTrue(ThreadingPluginAPI.supports(4))
         XCTAssertTrue(ThreadingPluginAPI.supports(5))
-        XCTAssertFalse(ThreadingPluginAPI.supports(6))
+        XCTAssertTrue(ThreadingPluginAPI.supports(6))
+        XCTAssertTrue(ThreadingPluginAPI.supports(7))
+        XCTAssertFalse(ThreadingPluginAPI.supports(8))
     }
 
     /// Version 2 added `encodedTheme`, which is how a plugin linking `ThreadingDesignKit` gets the

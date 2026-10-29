@@ -17,7 +17,7 @@
 
 static os_log_t tap_log;
 
-typedef struct { int source; int passthrough; } tap_channel;
+typedef struct { int source; int passthrough; int target; } tap_channel;
 
 static void *tap_pump(void *ctx) {
     tap_channel *channel = (tap_channel *)ctx;
@@ -33,7 +33,10 @@ static void *tap_pump(void *ctx) {
         char *start = buf, *nl;
         while ((nl = memchr(start, '\n', used - (size_t)(start - buf)))) {
             *nl = '\0';
-            if (*start) os_log(tap_log, "[stdio] %{public}s", start);
+            if (*start) {
+                if (channel->target == STDOUT_FILENO) os_log(tap_log, "[stdout] %{public}s", start);
+                else os_log(tap_log, "[stderr] %{public}s", start);
+            }
             start = nl + 1;
         }
         used -= (size_t)(start - buf);
@@ -56,6 +59,7 @@ static void tap_capture(int target_fd) {
     if (!channel) { close(original); close(p[0]); return; }
     channel->source = p[0];
     channel->passthrough = original;
+    channel->target = target_fd;
     pthread_t thread;
     if (pthread_create(&thread, NULL, tap_pump, channel) != 0) { free(channel); return; }
     pthread_detach(thread);

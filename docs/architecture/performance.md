@@ -4,6 +4,31 @@ Self-profiling, command-line captures, and repeatable regression workloads.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
+## iOS draft keyboard re-entrancy — 2026-10-23
+
+A physical iPhone report captured `SessionDraftPromptEditor.updateUIView` changing `isEditable`
+while its text view was first responder. UIKit synchronously resigned input, updated keyboard
+tracking and laid out the SwiftUI host, re-entering AttributeGraph before the original view update
+returned. The reported termination was `0x8BADF00D`, `process-exit`, after the five-second graceful
+exit deadline. This is an observed blocked stack, not a measurement of the whole preceding hang.
+
+The editor coordinator now owns deferred focus and editability reconciliation. The normal case is
+one editor with occasional focus/availability changes amid frequent text and keyboard renders;
+the regression stress case submits 1,000 input-state updates before the next main-actor turn.
+Request handling is O(1), retains one current state and at most one pending task, and does no
+text scan, file work or additional layout. Dismantling cancels the task. Exact current focus,
+disabled-input behavior and the draft text remain the correctness boundaries.
+
+`ComposerTextViewPasteTests` covers the shipping representable's render boundary, superseded input
+requests and cancellation, plus Start through `SessionDraftView` with a focused editor. These
+tests isolate the unsafe synchronous transition; they do not establish a physical-device latency
+improvement or reproduce every condition of the iOS 27 watchdog report.
+
+The ordinary arm64 iOS Simulator `build-for-testing` and mobile-theme/main-actor-latency checks
+passed. Runtime tests and rendered keyboard evidence remain unverified: the existing simulator
+test lane stalled on application launch, and a fresh disposable device then stalled in system
+data migration before the test host could run. The fix has not been installed on the iPhone.
+
 ## Standard Xcode cache discovery — 2026-10-14
 
 The previous storage scan did not visit the standard DerivedData location. Its expected input
@@ -1387,6 +1412,26 @@ THREADING_AUTOMATION_STRESS=1 scripts/test.sh fast \
   -only-testing:ThreadingTests/AutomationShellRenderTests/testRendersAutomationsInShippingWindow
 ```
 
+## iPhone camera attachment admission
+
+Camera capture is one user-confirmed image at a time, normally about 12 MP; the opt-in
+`MobileCameraCaptureTests.testCameraPreparationStress` also exercises a 48 MP source three times
+with `THREADING_CAMERA_STRESS=1`. Fixture manufacture is outside its reported worker duration.
+The composer reserves a slot synchronously before yielding, with the existing eight-file cap
+bounding pending items and preparation owners. The main actor installs only the placeholder,
+finished thumbnail and upload state; orientation normalization, raster reduction and JPEG
+encoding run in a detached worker. The output uses the existing 2,048-pixel longest-edge bound
+and per-file byte limit. Removal cancels the owner and late preparation cannot restore the item.
+No transcript-sized work or repeated capture polling is added. Device capture latency is a
+separate hardware check; simulator image preparation does not measure the camera itself.
+
+The October 24 Debug run on an iPhone 17 Pro simulator (iOS 26.5) measured 57.3 ms median /
+63.3 ms maximum for a 4,032 × 3,024 source and 120.0 / 126.8 ms for 8,064 × 6,048, three
+preparations each. These are background preparation times for generated two-color fixtures,
+not capture, upload or physical-device timings. The same focused run passed all 28 camera,
+clipboard, payload, strip and terminal-editor tests, including eight-slot admission, rotated
+and mirrored JPEGs and removal while preparation is pending.
+
 ## Implementation-time scaling gate
 
 Settings sidebar pages can come from installed extensions: 256 packages with eight pages each
@@ -1569,6 +1614,40 @@ THREADING_DEVICE_LOG_RENDER_STRESS=1 swift test --package-path Plugins/DeviceLog
 # Xcode test plans sanitize arbitrary environment variables.
 # THREADING_TAB_DRAG_STRESS=1 … -XCTest ThreadingTests.ThemedTabStripViewTests/testDragStressKeepsChipsAndCommitsOnlyOnce
 ```
+
+The 2026-10-25 shared Device Logs tools use that same pane, ring and immutable matcher; they do
+not open a second reader or build a second table. Expected traffic and the 5,800-row/s stress
+contract above remain unchanged. The ring now also has a conservative 128 MiB retained-byte
+ceiling, and each 20,000-row reader handoff has a 16 MiB ceiling. Evictions and handoff losses
+are counted and returned with capture history; source replacement and reconnect have distinct
+generation/revision semantics. Rows remain value models with viewport-owned cells. Reads never
+move the user's viewport; only explicit reveal changes selection and scrolling.
+
+Sparse queries bound examined work as well as output: one worker read at a time scans at most
+10,000 literal rows or 2,048 regex rows within a cooperative 50 ms slice. Its cursor advances
+over examined nonmatches. The plugin exports at most 50 rows using an estimated 128 KiB row
+payload budget, with 8,192-byte message/raw-line prefixes and explicit truncation; the bounded
+state catalog and JSON escaping add serialization overhead. Regex patterns have
+512-byte, 4,096-character field-prefix and cooperative 2 ms per-field limits; the pane and
+tools share those matching rules. Regex projection has a 250 ms aggregate budget and reports
+partial evaluation. Context reads reuse the pane's completed projection, returning pending
+when a new filter has not completed, rather than synchronously projecting the full ring.
+Waits reuse these bounded reads and cap their requested duration at 30 seconds.
+
+`DeviceLogSharedPanelTests.testFullRingSparseReadStress` builds 50,000 rows outside the timing
+window, then configures a filter and reads all six sparse matches with two-row pages. Run with
+`THREADING_DEVICE_LOG_SHARED_STRESS=1 swift test --package-path Plugins/DeviceLogsPlugin --filter DeviceLogSharedPanelTests`.
+Three serial Debug runs without concurrent task-owned builds completed in 186.806, 183.125 and
+193.277 ms (median 186.806 ms, maximum 193.277 ms), each using five bounded pages. The existing
+50,000-row focus gate's worst-of-five results were 82.4, 99.3 and 98.3 ms (maximum 99.3 ms,
+below its unchanged 120 ms ceiling). There was no previous shared-tool query path for a matched
+before measurement. An earlier full-suite run during Xcode compilation exceeded that focus
+ceiling; repeated idle runs passed without changing the algorithm or threshold. Artifacts:
+`.build/device-log-shared-idle-{1,2,3}.log` and `.build/device-log-shared-final.log`.
+The focused lifecycle fixtures also use adversarial regex input to verify finite wait deadlines
+and disclosed partial results. These are Debug worker/model checks, not physical-device capture
+or Release frame-rate measurements; the existing rendered streaming and cell-count gates above
+continue to own viewport performance.
 
 Device Logs' Regular Logs and Bluetooth tabs admit at most two readers per visible workspace.
 Each keeps the existing 20,000-row handoff, 50,000-row ring and 500,000-row history; histories
@@ -7331,3 +7410,55 @@ becomes key. The radial gradient has no intermediate bitmap and visits only the 
 transformed bounding rectangle intersected with the destination bitmap. Palette tinting is
 bounded by the existing image dimension limit. These are correctness and work-shape contracts,
 not end-to-end Linux picker latency measurements.
+
+## Theme identity-art rim (2026-10-28)
+
+The brand logo and the theme's Dock mark are host-rimmed when their edge would vanish into their
+ground (`ThemeArtSeparation`, see [`themes.md`](themes.md)). The rim runs on the main actor,
+where both pictures are resolved, so its contract is stated at the placement: one rim per
+picture, ground, ink and size, cached by the source image's identity; cardinality is at most two
+variants × two places. A measure draws one 64-pixel thumbnail regardless of the source.
+
+The rim draws the picture 37 times into a canvas of its own size plus the rim, so its cost grows
+with the square of the side. The first version rimmed at the stored size. Measured cold (a fresh
+`NSImage` each sample, so the cache never hits), a 512-pixel source with a dark ground, Debug,
+M-series, median of 11:
+
+| Rimmed at | Main-actor cost |
+|---|---|
+| 512 px (stored size, first version) | 46.1 ms |
+| 256 px (Dock tile's largest presentation, whole canvas) | 14.5 ms |
+| 141 px (`GeneratedAppIcon.Layout.minimumSharpMarkPixels`, the mark's box at 256) | 4.8 ms |
+| 96 px (`SidebarStyleLimits.rimmedLogoPixels`, the 24-pt slot at 2× doubled for a motion beat) | 2.2 ms |
+| cached read | ~0.007 ms |
+
+The fix removes work rather than moving it: nothing presents either picture larger than its cap,
+so the pixels above it were never shown. `ThemeArtSeparationTests` holds the bound —
+`testTheRimIsDrawnNoLargerThanItsPlaceCanShow` fails if a rim comes back larger than its place.
+The probe that took these numbers was temporary; to repeat them, time `ThemeArtSeparation.legible`
+on a fresh `NSImage` per sample at each `maximumPixels`. Release numbers were not taken.
+
+## Account conversation-history copying
+
+Account migration retains one admitted operation and uses `TranscriptMigrationWorker`'s serial
+actor for all transcript bytes, child-history merging and recursive cleanup. Expected input is
+one parent transcript plus tens of child histories; the opt-in stress fixture uses 64 child
+transcripts totalling 16 MiB. Work is O(source bytes + target child entries + retained target bytes), with one
+fixed-size bundle journal and at most two promoted items. During copying, the main actor only
+fences the session, commits its account row and reconciles presentation; a terminal writer's exit is awaited on the
+worker with a five-second bound. Checkout observation callbacks retain their fixed eight-process
+sample and O(1) event admission; descendant evidence cannot initiate an ownership copy.
+
+Run the real worker fixture with:
+
+```bash
+TEST_RUNNER_THREADING_TRANSCRIPT_MIGRATION_STRESS=1 scripts/test.sh fast \
+  -only-testing:ThreadingTests/SessionMigrationTransactionTests
+```
+
+It verifies all 64 copied histories and that a main-actor heartbeat runs before the store commit. This is an
+I/O isolation contract, not a claim about provider resume time.
+
+The 64-history Debug fixture completed copying and commit in 7.43 ms on 2026-10-29, with the
+main-actor heartbeat observed before commit and all histories present. This is one warm local
+filesystem run, not a cold-disk or provider-launch latency bound.
