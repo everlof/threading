@@ -407,3 +407,28 @@ enum HelpPopoverMetrics {
     /// The panel body, for a test that has to find it.
     static let contentIdentifier = "help-popover.content"
 }
+
+/// The panel body used by a host that draws a popover inside its own window. AppKit's
+/// `ThemedPopover` owns its panel; the Linux SDL host mounts this same content with a themed
+/// surface and the panel's content inset before placing it in window coordinates.
+@MainActor
+enum HelpPopoverPanelStructure {
+    static func make(content: NSView) -> NSView {
+        let surface = ThemedSurfaceView()
+        surface.applySurface(fill: Design.Surface.panel, radius: .panel,
+                             border: Design.Surface.border, glow: true)
+        surface.addSubview(content)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: surface.topAnchor,
+                                         constant: Design.Spacing.inset),
+            content.bottomAnchor.constraint(equalTo: surface.bottomAnchor,
+                                            constant: -Design.Spacing.inset),
+            content.leadingAnchor.constraint(equalTo: surface.leadingAnchor,
+                                             constant: Design.Spacing.inset),
+            content.trailingAnchor.constraint(equalTo: surface.trailingAnchor,
+                                              constant: -Design.Spacing.inset)
+        ])
+        return surface
+    }
+}

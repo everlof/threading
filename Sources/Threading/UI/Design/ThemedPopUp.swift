@@ -191,7 +191,7 @@ public final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
 
     public override var intrinsicContentSize: NSSize {
         var width = contentInset * 2
-        if let image = displayedItem?.image, !image.size.equalTo(.zero) {
+        if let image = displayedItem?.image, image.size != .zero {
             width += imageSize + Layout.gap
         }
         if let title = displayedItem?.title, !title.isEmpty {

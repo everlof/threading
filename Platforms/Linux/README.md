@@ -2,7 +2,7 @@
 
 > **Maintained Linux platform code for an Ubuntu arm64 preview, not a release app.** No Xcode
 > target references this directory. Shared portable changes live in the product's `Sources/`
-> and `Tests/`, or in local packages; the core slice copies its selected app sources byte-for-byte.
+> and `Tests/`, or in local packages; the core slice links its selected app sources directly.
 > `docs/feature-drafts/linux-host-runtime.md` records the original architecture and measurements.
 > This directory owns the Linux host, compatibility layer, packaging, tests and ongoing findings.
 
@@ -28,9 +28,9 @@ This per-file report is a candidate-gap map: methods supplied by another Design 
 `NSTextField.applyFont`, also appear missing until those files are compiled together. Missing
 app-owned types can also prevent Swift from inferring an enum member, hiding a genuine shim gap.
 
-`./vendor.sh` copies real Threading sources in; `./vendor.sh --verify` proves they are
-byte-identical to the repository. That check is the whole difference between a measurement and a
-flattering one, and it is why the vendored file is copied rather than adapted.
+`./vendor.sh` links real Threading sources in; `./vendor.sh --verify` checks every link target.
+The shim fixture and macOS therefore compile the same source file, while Linux-specific behavior
+lives in the AppKit compatibility module.
 
 `./shim-smoke.sh` builds and runs `Harness` on Linux, checks every layout correctness case and
 three rendered PNG specimens, then injects a layout failure to verify that the executable exits
@@ -83,26 +83,38 @@ checks the default 41-point band, title compression, optical margins, unchanged 
 targets, separator and bounded constraints through a wide/narrow/wide resize. Its five
 rendered states and geometry are written to `out/pane-header-{linux,mac}/`. The native
 window now mounts that same header with its retained title and `+`/`⋯` controls, and publishes
-their actual laid-out bounds to native input and AT-SPI. The native command menus also mount
-the production `ThemedMenuRowView` through its shared measurement plan. The installed shell
+their actual laid-out bounds to native input and AT-SPI. The native command menus mount
+the production `ThemedMenuSurfaceView`. The installed shell
 uses a source-derived light/dark snapshot of `AppThemeStyles.threading`. Ctrl+Shift+T switches the
 appearance in the same window, invalidating the retained sidebar, idle pane, terminal header,
 open menu and visible terminal grid. `scripts/export_theme_snapshot.py` regenerates the resource;
 `LinuxThemeSnapshotTests` compares its values with production theme resolution on macOS. The
-Linux AppKit shim only resolves the selected named colors. Full theme configuration and complete
-navigator/menu presentation remain open.
+Linux AppKit shim only resolves the selected named colors. Full theme configuration and the
+Mac presenter's complete menu interaction model remain open.
 `tests/page_title/run.sh` links the production `PageTitleView` with a Linux Pango label adapter
 for its Apple-only title animation. The native workspace now links the production
 `MorphingTitleLabel` wrapper too; only its glyph renderer is Pango-backed on Linux. The
 workspace mounts that title in a separate
 41-point right-pane header. Its press reveals the active project or saved runtime in the
-navigator. Saved agent pages now show its production Actions control and a retained overlay
-of production `ThemedMenuRowView` rows. The scoped Linux menu copies the saved session ID or
-owning project path; the host revalidates the active page and project before each command.
-Its menu rows, the opening and conversation choice menus, and the navigator's Actions and account
-menus now use the production `ThemedMenuDocumentView`. The floating session menu and Add Project
-menu also use its shared separator. `ThemedMenuPanelView` owns the menu surface and historical
-frame artwork on both platforms; the current Linux theme snapshot selects its automatic appearance.
+navigator. Saved agent pages now show its production Actions control. That button opens the
+same `SidebarSessionMenu` as the saved row, anchored at the header control; the host revalidates
+the active page, session and project before each command. `ThemedMenuPanelView` owns menu
+artwork on both platforms; the current Linux theme snapshot selects its automatic appearance.
+The pane-header session menu and Open In chooser, the sidebar session and terminal menus,
+the navigator Actions and account menus, the opening-composer choice menus,
+and the bounded native-conversation configuration and Speed menus now mount the exact
+`ThemedMenuSurfaceView` extracted from the macOS presenter. That view owns the panel, document,
+scrolling and highlight; the Linux hosts supply SDL viewports and publish only fully
+visible rows to AT-SPI. The sidebar session menu caps external apps at 64 before constructing
+the surface.
+`SidebarSessionMenuContent` now composes the standing Pin, Snooze, Archive, Close, Rename and
+Copy rows for both desktop hosts, including group boundaries, the Copy fold and the wall-clock
+Snooze choices. `SnoozeWallClockMoments.presentations` gives these choices the same labels as
+scheduled-message presets. The Mac host supplies its additional services; Linux supplies bounded
+submenu pages and routes commands
+after checking the saved session identity. The pane header and row now use the same Linux
+menu state, shared composition and command router. `SidebarTerminalMenuContent` does the same for
+terminal row commands. Linux's symbol shim renders the shared Copy and identifier marks.
 Linux supplies the SDL overlay lifecycle; `ThemedMenuLayout` places the navigator Actions,
 account, composer, conversation, session, and pane-header menus from their host anchors.
 The shared panel and document lay out their surface and rows. The Linux host still routes
@@ -117,17 +129,50 @@ The current shared-view audit distinguishes reused components from reused page c
 
 | Surface | Shared UI mounted by Linux | Remaining host boundary |
 | --- | --- | --- |
-| Navigator rows and menus | `SidebarNavigatorContentView` mounts the header, outline, empty state and footer with shared constraints; `SidebarFooterControls` configures the same Settings button for the production `PaneFooterView` on both hosts | Linux keeps an outer `Specimen.Window` for SDL layers and diagnostic modes; macOS still supplies its additional footer actions, extension backdrop and mascot around the shared core |
+| Navigator rows and menus | `SidebarNavigatorContentView` mounts the header, outline, empty state and footer with shared constraints; `SidebarFooterControls` configures the same Settings button for the production `PaneFooterView` on both hosts; terminal cells mount the exact `ProjectTerminalRowView` around the shared content, action and status slot; `SidebarSessionMenuContent` and `SidebarTerminalMenuContent` give the standing row menus one composition on the shared `ThemedMenuSurfaceView` | Linux keeps an outer `Specimen.Window` for SDL layers and diagnostic modes; macOS still supplies its additional footer actions, extension backdrop and mascot around the shared core; Mac-only session and terminal services remain parity work |
 | Opening composer | `OpeningComposerContentView` owns the choice row, column, and hero region; `OpeningComposerActionRowView` places Start and optional import/time actions; `ComposerWelcomeStackView` assembles the mark, greeting and optional caption; prompt, chips, choice panels and menu rows are shared | Linux still supplies fewer action controls and its house-theme greeting; macOS owns its theme backdrop and extension plane |
 | Native conversation | `ConversationPaneContentView` mounts transcript, status and composer with the same constraints and `ConversationPaneLayout` owns the width cap and stated-width priority; transcript rows, prompt, chips and menu panels are shared | `WorkspaceConversationPane` still supplies a reduced control set and lifecycle; the Mac controller owns its additional rails and overlays |
-| General Settings | Page canvas, confirmation card, toggles and constraints | `WorkspaceSettingsPane` includes fewer sections than `GeneralPreferencesViewController` |
+| Menus | Pane-header and sidebar session actions use the same `SidebarSessionMenuContent` composition and Linux command router; terminal actions use `SidebarTerminalMenuContent`; those menus, Open In, navigator Actions and accounts, opening-composer choices, and native-conversation model, mode, effort and Speed mount the same `ThemedMenuSurfaceView` as macOS | Linux hosts still own bounded visible pages, SDL transport and native AT-SPI publication; the Mac presenter has submenu and dismissal behavior not yet shared by the Linux host. The opening model/effort grid is a distinct shared `ModelEffortPickerContentView` mounted in a shared panel |
+| General Settings | Page canvas, confirmation card, toggles and constraints; the exact production `ThemedPopUp` and `ThemedMenuSurfaceView` render and accept pointer and keyboard input in the Linux Settings shell; the shared page structure now exposes backed launch-restore and idle-agent choices | `WorkspaceSettingsPane` includes fewer sections than `GeneralPreferencesViewController`; other settings services still need host shims |
+| Chats Settings | `ChatsSettingsPageStructure` builds the section hierarchy and help from one source on both hosts; `NewChatsSettingsStructure`, `OpeningMessageSettingsStructure`, `AttachmentSettingsStructure` and `ScratchpadSettingsStructure` build the shared rows and copy within shared Settings page/card controls; the unchanged `HelpPopoverButton` serves their section help through an SDL popover shim; Linux persists new-chat defaults, Opening Message, per-agent attachment detection and outside-project scope, applying them to fresh launches and both native and terminal scanners; the Scratchpad row can relocate its durable project and return it to the default folder; visible controls and menu choices project from that mounted tree to AT-SPI | Linux still needs browser-capture behavior before that Mac control can appear, plus the attachment panel, remaining Mac Settings pages, and AT-SPI editable-text operations beyond focus and keyboard input |
 | Welcome and sidebar artwork | Both hosts mount `ComposerWelcomeStackView` with the same centering and compact-height constraints; `SidebarBackdropView`, `SidebarBrandView` and `ThreadingMarkView` now share their view classes, brand constraints and mark shape layers | Linux still supplies the house-theme gradient, fixed brand and greeting; custom theme artwork, analyzers and mark particle motion remain unported |
-| Navigator activity and schedule picker | Shared `SessionStatusIndicator`, spinner, warning mark, session row content, picker policy and `ThemedTableRowView` selection | Linux still supplies runtime activity facts and rasterizes the retained status subtree into the SDL sidebar |
+| Navigator activity and schedule picker | Shared `SessionStatusIndicator`, `AgentActivityBeamView`, spinner, warning mark, session row content, picker policy and `ThemedTableRowView` selection | Linux supplies native runtime activity facts from its cached session and rasterizes the retained status subtree into the SDL sidebar; the selected house theme hides the beam on both platforms, while the Linux System-theme beam renderer remains a static shim |
+| Attachments pane | `SessionAttachmentsContentView` owns the header/list/fold/preview/footer/scope layout; `SessionAttachmentListView` owns the virtualized table, column and scroll viewport; `SessionAttachmentHeaderRow`, `SessionAttachmentTurnHeaderView` and `SessionAttachmentRowView` own the count/filter, disclosure and file rows. The header uses the same `ThemedSegmentedControl` and `AttachmentFilter` on both desktops. Turn sectioning, checkpoint identity, store, outside-project custody/read gate and document codec are shared Core values. Linux's selected sessions load and save through a bounded SQLite worker; completed native assistant output and live PTY logical rows use the shared detector and prepared-row path. A native X11 fixture renders that exact view tree, including the shared `PaneFoldDivider`, in a third retained workspace region beside sidebar and terminal. SDL pane-local pointer dispatch drives the shared filter and fold in that fixture | Linux still needs terminal-turn transcript observation, a production list/preview host, production pane mounting and pointer dispatch, keyboard and AT-SPI routing for the third region; Mac retains its renderer and extension preview offer |
+
+The attachment detector, file-kind enum, media probe, extension registration, store, persisted
+document and terminal observers link from the same Core sources as macOS. The CoreSlice harness
+checks real files, bounded scanning, observer deduplication, custody, scope changes, reload and
+pruning. SwiftTerm now gives the Apple view and Linux emulator one bounded logical-row reader.
+The Linux window connects the shared store to the durable attachment row in its SQLite
+database. A serial worker checks and decodes the saved document against the saved session's
+execution root before selected agent sessions are exposed, and encodes writes after the loaded
+rows are installed. A future or corrupt document cannot be overwritten by a newly detected file.
+Completed native assistant output and live agent PTY rows use the same bounded Core detector,
+inside-project row preparation and outside-project custody as macOS. The Linux PTY host coalesces
+output notifications and reads SwiftTerm's 256 KiB logical suffix on a utility lane. Chats
+mounts the shared Attachments card for backed per-agent detection and outside-project scope
+toggles. Terminal-turn transcript recovery and the production pane host remain.
 
 The shared-view source check prevents new duplicate classes, Linux-only view leaves in shared
-sources, and manual menu row/panel frames; no Linux-only shared-source view leaves remain.
+sources, manual menu row/panel frames, new host menu panels/documents and duplicate
+`Design` shim token values across boundary files;
+it verifies the production menu-surface links. No Linux-only shared-source view leaves remain.
 It does not make separate page controllers equivalent; the remaining page composition work is
 tracked here explicitly.
+The selected dormant agent pane mounts the same `SessionPlaceholderView` and now obtains its
+title, recovery claim and action label from `DormantSessionPlaceholderContent` on both hosts.
+The close-session question and snooze detail likewise come from shared copy values; the source
+checker rejects host-local copies of those claims.
+
+The next parity work should keep this source boundary: make missing AppKit and service APIs
+available to the production General Settings and conversation controllers through Linux shims,
+then mount those controllers instead of filling out the two Linux page assemblers. Terminal-row
+foreground status reaches `ProjectTerminalRowView` and its `SidebarTerminalRowAssembly` from
+daemon process-group frames. Its shared action button routes Rename, Copy and Close through an
+identity-checked menu; Theme, Sounds and conditional Share still need their service boundaries.
+Theme-specific
+artwork and the System beam need their package renderers or matching renderer shims behind the
+existing shared view classes. Each step needs a real-window capture and an AT-SPI action journey.
 
 The window host also links the production backdrop overlay, text field, clip view, scroll view,
 table view, its default row view, and activity beam wrapper. `scripts/check_linux_shared_views.py`
@@ -137,6 +182,40 @@ build their confirmation card with the same Design
 component and the byte-verified `ConfirmationPrompt` register. The Linux pane still assembles fewer
 sections than the macOS General controller, and the native conversation pane still needs the complete production controller;
 those page-level compositions remain parity work.
+The General page's section order, row copy and six groups now come from one
+`GeneralSettingsPageStructure` source linked by both hosts. macOS supplies all six groups;
+Linux supplies Startup, Idle Agents and Confirmations through host adapters. Software Updates,
+Agent Tools and Machine still need Linux services before their groups can appear.
+The sidebar's workload value, sidebar layout constants and generated project icon defaults now
+link their exact production sources. The shared-view check verifies those links, so the earlier
+Linux copies cannot silently return. `SessionRestorePolicy` and its defaults are now one CoreSlice
+source for both hosts. The production `StartupSessionRelaunch.plan` and outcome values now compile
+from one CoreSlice-linked source on both hosts. Linux checks the same bounded choices and
+daemon-held identity exclusion. The Linux window consumes the exact quit record, starts the
+chosen agents one second apart on bounded workers, and exposes the policy through the same
+General page row and themed popup as macOS.
+On clean close, a worker now records the store's live agent identities from one daemon survey,
+augmented by the bounded in-memory runtime set. A fast open/close with no live agents preserves
+an unconsumed prior record.
+The wider type audit found three separate `ChatNameMorphStyle` declarations and two
+`ControlPermissionDecision` declarations. Both now have one production enum, reached through
+module aliases or CoreSlice links. `ThemedMenuAnchor` and its presentation observer likewise
+come from one Design source in the app, design package and Linux host. The shared-source check
+guards these links and model declarations. The theme refresh hook and accessibility-display
+event also compile from one source in each host. The production `ThemedTextField` now states its
+editability explicitly, allowing the same two-page conversation question card to accept free
+text through Linux's AppKit shim.
+The checker also inventories top-level type names on both hosts. Its 22 reviewed collisions are
+host theme, service or diagnostic fixture shims. A new collision fails until its contract is
+shared or its host role is reviewed. This is a source boundary check, not a claim that the General
+and conversation pages have reached 1:1 parity.
+The theme-boundary marker and system-chrome exception protocols, optical-inset protocol, and
+backdrop-change event now compile from production sources in both desktop hosts. The diagnostic
+icon, subagent, pane-header and page-title targets link those same contracts.
+The portable `CoreSlice` and shim fixture also resolve their manifest entries through source
+links (171 core files and 19 fixture contract links). `vendor-core.sh --verify` and `vendor.sh --verify`
+check the targets and reject unrecorded files; the shared-view check rejects any new Linux Swift
+file whose body is an exact copy of a production source.
 Pointer, keyboard and AT-SPI actions reach the same menu and clipboard path. Terminal
 paint, PTY grid size, pointer input, IME caret and AT-SPI text geometry share the resulting
 41-point content inset (41 pixels at 1×, 82 at 2×). The right header is retained separately from terminal frames, so PTY
@@ -172,9 +251,10 @@ production layout. The Linux host retains project identity, selection, menu admi
 ownership. The shim clips nested views to their bounds and preserves subview ordering so the
 count sits behind hover controls. A project with saved runtimes now exposes an inline disclosure
 in the same bounded list. Its visible agent rows mount the production
-`ThemedSessionRowContentView` used by Mac session cells. Visible saved terminals now mount the
-same `ThemedTerminalRowContentView` icon/title subtree as the Mac terminal cell, with a bounded
-Linux terminal symbol. Project selection, runtime activation, attention, retained state,
+`ThemedSessionRowContentView` used by Mac session cells. Visible saved terminals mount the
+production `ProjectTerminalRowView`, including its `ThemedTerminalRowContentView` icon/title
+subtree, action and status slots, with a bounded Linux terminal symbol. Project selection,
+runtime activation, attention, retained state,
 selection-ground measurement and AT-SPI identities stay host-owned. Shared glyphs measure against
 the actual painted row, and session/terminal title ink resolves from that same face. The
 provider-mark journey checks selected glyphs and all row titles in light and dark appearances
@@ -206,9 +286,13 @@ a child’s parent. The navigator restores each project's persisted `isExpanded`
 empty projects, and inherits the shared expanded default for new projects. Pointer, keyboard and
 page-reveal expansion save the same exact project row on a worker. A refused write restores the
 previous disclosure state. Initial restoration applies all branches in one outline projection;
-it does not replay gestures or write the store. Restoring a selected live runtime then reveals
+it does not replay gestures or write the store. Restoring a selected saved runtime then reveals
 its parent and selects that exact child in the ordinary outline, including an identity outside
-the recent page. Only a folded parent needs an expansion write. Agent and terminal catalogs stay
+the recent page. An agent whose daemon child is gone resumes through its recorded provider
+identity on that selected page. A daemon-held CLI agent reattaches to its PTY; a native ACP
+session stops its previous pipe child, then resumes from the provider transcript in the same
+selected conversation view. Only a
+folded parent needs an expansion write. Agent and terminal catalogs stay
 available as explicit project-menu commands; startup no longer replaces the sidebar with one.
 The table and outline shims now mount each visible cell inside a reusable `NSTableRowView`,
 with row-view delegate hooks and selection state tied to stable row identity. The focused
@@ -339,8 +423,10 @@ encrypted secret envelopes and compressed Unicode ZIP/gzip with independent read
 These contracts run in the canonical bundle build lane. Swift Crypto 5.0.0 supplies the Linux
 cryptography implementation; its license, notice and pinned BoringSSL license ship in the bundle.
 Saved sessions now retain their `usesNativeUI` choice. Native records open a conversation pane in
-the ordinary workspace; terminal records keep the emulator. Both use the same pane chrome and
-share the eight-runtime limit. The native host prepares account routing, history and child launch
+the ordinary workspace; terminal records keep the emulator. Both use the same pane chrome.
+Manual CLI terminal admission still has an eight-runtime limit; native agent residency follows
+the shared idle-process retention policy instead. Startup restoration follows its separately
+bounded shared policy. The native host prepares account routing, history and child launch
 on a serial worker, then mounts the shared production rows and prompt editor. Codex and Claude
 launch plans are available, and the ordinary journey is verified for both against deterministic
 peers speaking each provider's production wire.
@@ -549,7 +635,7 @@ same record and a new PID, live reuse, stored-directory fallback, exact argv/ini
 attach-only startup. Controlled peers cover definitive refusal, lost spawn replies and unavailable
 ownership. The installed Release package runs these same fixtures in `./bundle-smoke.sh`.
 Native AT-SPI coverage also checks immediate saved-row admission and project/saved-picker runtime
-reuse without duplicate records or terminal counts, the 512-row/eight-runtime limits, and counts
+reuse without duplicate records or terminal counts, the 512-row/eight-terminal-runtime limits, and counts
 after folder import.
 The directory fixtures exercise plain bash without OSC 7, Unicode paths, same-ID restart,
 live reattachment, original project ownership and deleted-directory fallback. Controlled peers
@@ -705,6 +791,33 @@ now uses the shared 24-point Threading mark geometry and 13-point wordmark in bo
 brand hover/launch motion and theme-supplied brand variants remain unsupported on Linux.
 `tests/sidebar_footer_smoke.py` captures the native 2× footer and General page, then opens
 Settings through AT-SPI and pointer input with the same mounted button.
+General's Startup section now mounts the shared page's “Reopen the last session at launch” row.
+The Linux host reads and writes the Mac setting's shared key and default, and suppresses
+automatic selection of a saved live agent or terminal when the switch is off. Preference
+synchronization runs on a utility queue and a normal window close waits for it before exit.
+`tests/settings_startup_restore_smoke.py` turns the switch off and on in the real Settings
+page, relaunches between changes, and confirms the existing terminal child is reattached
+without a second start. The host now consumes the shared last-quit plan after its first frame,
+starts eligible agents one second apart, keeps native streams without mounting hidden panes,
+and carries unfinished launch intent through a quick quit. The “Bring back at launch” policy
+row now uses the shared General page structure and the production themed popup. Its choice
+survives a restart, and nine background agents can cross the manual eight-terminal-runtime limit
+without stranding a consumed plan. The same General page now shows the two shared Idle Agents
+choices through Linux popup shims. A real six-agent restore keeps four idle native processes and
+retires two without mounting hidden conversation panes. Per-session restoration explanations
+now use the shared session hover-card body and launch ledger. Linux supplies facts from its
+already loaded sidebar catalogue and live runtime; the card is built only after the shared
+hover dwell and closes when the pointer leaves. Its SDL overlay passes row input through.
+The real X11 journey renders the dormant reason, saved branch, linked worktree name and
+cross-runtime handoff, selects the row with a click while the card is visible, then opens
+it with Return. Saved session facts come from the bounded navigation snapshot;
+new-session receipts carry their captured branch without a UI-thread store read. The
+linked worktree name is calculated on the checkout-discovery worker and cached by the navigator.
+Roles, observed execution drift, custom sound, conduct and remote execution host facts,
+extension-authored content, theme-specific popover chrome and symbols, and manual CLI
+terminal admission still differ from macOS.
+Settings controls are rendered in the SDL pane but are not yet published individually
+through the AT-SPI bridge.
 The project outline uses the Mac's full-width row silhouette, inset content and disclosure
 slots, depth steps and four-point breathing below the header. Its disclosure hit target follows
 the mounted chevron, and accessibility describes the complete row at every depth. The inset
@@ -740,6 +853,10 @@ production shortcut cue, and is disabled for an empty or provisional IME draft. 
 presents project and provider choices in bounded, visible
 production menu rows; project and provider identities, availability, and launch remain host-owned.
 The prompt footer now exposes permissions through the shared hand-mark chip and mode labels.
+Opening and reply permission menus on both desktops get their six rows, inherited/last-used
+qualifiers, explanations and chip title from the same `PermissionModeMenuContent` source. Linux
+passes resolved account and conversation facts through its menu adapters; it does not define a
+second permission row policy.
 It starts with the session mode unset and displays the account's configured mode when known.
 Terminal launches emit no permission override; the native Codex app-server keeps the Mac's
 fixed `--sandbox workspace-write` when no mode is selected. Where a configured mode is known,
@@ -769,6 +886,10 @@ its PTY launch. `tests/composer_surface_smoke.py` checks the accessible menu, sa
 provider turn and rendered pane. The Speed chip appears for a Codex model with a Fast tier or
 Claude Opus. It saves an optional per-conversation override: Standard explicitly disables an
 inherited Fast setting, and Fast selects the model's service tier or Claude's fast-mode flag.
+Opening and reply speed menus use the same `ConversationSpeedMenuContent` source as macOS for
+their three rows, descriptions, selection, chip symbol and Follow General Setting label.
+The Linux Native reply's AT-SPI rows take their titles and descriptions from the mounted
+shared menu; the C bridge keeps only accessibility identity, bounds and selection.
 The opening composer restores the last model and effort accepted for that exact login after a
 new chat. Choices persist only after the session record commits; choosing Auto for both clears
 an older explicit one. A bounded catalogue rejects withdrawn or hidden saved models, and
@@ -776,17 +897,43 @@ switching accounts restores each account's own choice. The host owns this accoun
 preference on its serial catalogue worker, with at most 128 account entries and no file work in
 chip or paint callbacks. The existing model picker remains the presentation component; this
 adds no extension surface.
-Terminal and native launches carry that choice, and resumed sessions retain it. Follow Agent
-Setting leaves provider configuration in charge. Linux has no app-wide Settings ▸ Chats speed
-preference yet, so that Mac inheritance layer remains parity work alongside attachments,
-and full popover chrome. The native reply now mounts the same
+Terminal and native launches carry that choice, and resumed sessions retain it. Settings ▸ Chats
+now offers the default agent, permission posture, and Claude and Codex startup speed through
+the same New Chats row and permission-choice structure as macOS. The composer opens on the
+configured agent when it is installed and remembers the chosen agent after a new session
+commits. An unset chat permission mode follows the app default on terminal and native launches,
+including resume; the record remains unset so a later default can take effect. Native permission
+brokering keeps the mode the running process actually started with until its mode changes live
+or it starts again.
+A chat's explicit choice wins; Follow General Setting uses the saved startup choice; Agent's
+Setting leaves provider configuration in charge. Attachments, Scratchpad and
+full popover chrome remain parity work. The native reply now mounts the same
 themed Speed chip and a bounded three-row menu. Standard and Fast save the conversation override;
 Claude also applies a live `apply_flag_settings` request, while Codex sends the selected service
 tier on its next `turn/start`. Following the agent's setting records inheritance for the next
 launch, since the live transports have no generic provider-setting reset. AT-SPI exposes the
 mounted chip and rows with the active session identity, and
 `tests/composer_surface_smoke.py ... codex|claude speed-live` verifies persistence and a second
-provider turn.
+provider turn. `tests/composer_surface_smoke.py ... codex|claude speed-general` verifies the
+Settings choice, opening chip, explicit launch override and inherited session record.
+`tests/settings_startup_speed_smoke.py` verifies all four New Chats choices across a restart,
+then checks that a fresh composer uses the saved agent and permission default.
+`tests/composer_surface_smoke.py ... codex|claude permission-general[-native]` verifies Plan
+on the real terminal and Native launch lines while the chat record stays inherited.
+Opening Message uses the same four Settings rows and the same prefix/task/suffix composer as
+macOS. Linux saves both standing fields under the shared preference keys. Fresh Terminal and
+Native chats receive them once around the user's task; a later turn or a resumed chat does not.
+The session title comes from the task alone through the shared `SessionPromptTitle` rule.
+`tests/composer_surface_smoke.py ... codex|claude opening-terminal|opening-native` exercises
+real text-field input, a compact Settings viewport, the launch or first provider turn, the
+task-only title and a second native turn without the standing text.
+The Scratchpad row uses the same shared row source and path rules on both hosts. Linux moves an
+existing Scratchpad through its off-UI database helper, retains the project identity and user
+files, and saves the new location before reporting success. `tests/scratchpad_settings_smoke.py`
+exercises the real folder picker, move, restart and Use Default return. Chats also mounts the
+unchanged shared `HelpPopoverButton` for its New Chats rows, Opening Message caption and
+Scratchpad row. Linux's popover shim places the shared explanation inside the SDL window and
+returns focus when Escape closes it.
 The native reply also exposes Model, Mode and Effort chips in the Mac footer order. Model
 choices come from the same bounded account catalogue as the opening composer, respect hidden
 models, and mount at most six themed menu rows at once. Codex saves model and effort for its next
@@ -800,7 +947,8 @@ inherited title resolves Claude's layered settings or Codex's approval, sandbox 
 configuration; Claude's newest transcript can qualify a menu row as `(last used)` without
 changing the inherited chip or the next launch. While Claude is running, its own transcript can
 name the live posture in the reply chip when no configured or selected mode outranks it; the
-reader coalesces stream events onto a bounded file worker. Linux has no app-wide Chats default yet.
+reader coalesces stream events onto a bounded file worker. The app default takes precedence over
+provider configuration when the chat has no explicit mode.
 AT-SPI publishes only mounted rows with the active session identity, including the disabled timing note.
 `tests/composer_surface_smoke.py ... codex|claude configuration-live` checks these choices,
 the durable record and the next provider turn in the real X11 shell.
@@ -911,6 +1059,12 @@ columns, which took the production document page from 4.17 to 0.48 seconds (§17
 Portable `Sources/` and `Tests/` changes are ordinary macOS product changes and must pass their
 Mac checks. The Linux host and shim live here; the package's production-source copies are checked
 against the repository by `./vendor.sh --verify`.
+
+For a parity change, link the production view source unchanged and implement the missing AppKit
+contract in `Sources/AppKit/` or a narrowly named platform service adapter. The SDL host supplies
+window transport, durable identity and commands; it does not build a second version of the view.
+Check the complete mounted page, since sharing a control inside a separately assembled page is
+still a composition gap.
 
 `./refresh.sh` re-vendors, rebuilds, re-sweeps, and reports per-file changes against
 `baseline/sweep.tsv`. It does not change Git history. Run it after product UI changes that could
@@ -1190,15 +1344,17 @@ at most 256; traces contain timing and numeric state, without user text. Runner 
 The tests identify their own application/window process, and wait for GTK dialogs to become
 visible before attempting focus.
 
-This host-only diagnostic mode retains at most eight runtimes total across fresh and restored
-terminals and agents, and requests frames only for the visible terminal. It saves each new
+This host-only diagnostic mode admits at most eight manually opened runtimes across terminals
+and agents; the separately bounded startup plan may retain more. It requests frames only for
+the visible terminal. It saves each new
 terminal through the production store before spawning through the production PTY client. The
 fixed initial snapshot projects at most 512 agents and 512 terminals per project
 into their pickers and constructs only viewport rows. New agents created by this window join
 its in-memory catalogue after persistence; creation asks for zero standing session payloads and
-checks the new UUID by indexed lookup. Both normal and project-targeted launches attempt
-attach-only restoration of the saved agent or standalone-terminal selection in the chosen
-project. Opening either persists its selection and clears the other in one transaction on a
+checks the new UUID by indexed lookup. Both normal and project-targeted launches restore the
+saved agent or standalone-terminal selection in the chosen project. A live CLI agent reattaches;
+a missing selected agent resumes visibly, and a held native pipe child stops before its provider
+transcript resumes. Opening either persists its selection and clears the other in one transaction on a
 worker before entering its terminal. The generic `--app` mode follows the saved runtime's project;
 an explicit different project wins. An absent or exited standalone child returns to projects.
 `--attach` and `--attach-agent` remain available below.
@@ -1234,6 +1390,11 @@ stop it and retains the saved session for a later resume. The selected row remai
 the pane mounts the shared, constraint-laid-out dormant placeholder below its page header.
 Its action starts the saved session again. `tests/session_actions_smoke.py` checks the
 installed confirmation, daemon exit, retained database row, dormant pane and restart action.
+The dormant title, recovery explanation and button label come from the shared
+`DormantSessionPlaceholderContent`; the close warning comes from
+`CloseRunningSessionConfirmationCopy`. AT-SPI tracks the right-pane Settings panel separately
+from the persistent sidebar Settings button, so the mounted terminal remains visible to
+accessibility clients when Settings is closed.
 The row menu checks the daemon on a worker when its session is not mounted locally, so a
 running detached child can also be closed without first opening its terminal.
 `tests/session_close_unmounted_smoke.py` covers that installed path.

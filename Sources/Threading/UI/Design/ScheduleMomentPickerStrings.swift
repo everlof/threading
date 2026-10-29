@@ -6,6 +6,9 @@ enum ScheduleMomentPickerStrings {
     static var dayCaption: String { L10n.string("Day") }
     static var timeCaption: String { L10n.string("Time") }
     static var nothingToSchedule: String { L10n.string("No time left today.") }
+    static var sessionSnoozeDetail: String {
+        L10n.string("The session keeps running while snoozed.")
+    }
 
     /// The time zone, then what the caller wanted said. Two facts on one line: a scheduled time
     /// with no zone beside it is ambiguous, and a Mac that is asleep at nine is not a server.

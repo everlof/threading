@@ -2088,10 +2088,8 @@ final class ProjectStore {
     private func noteWork(sessionID: SessionID, kind: SessionWorkDidChange.Kind, at date: Date) {
         guard let location = locate(sessionID: sessionID),
               stateWritePolicy.allowsWrites else { return }
-        if kind == .turnStarted {
-            projects[location.projectIndex].sessions[location.sessionIndex].lastTurnAt = date
-        }
-        projects[location.projectIndex].sessions[location.sessionIndex].lastWorkAt = date
+        projects[location.projectIndex].sessions[location.sessionIndex].noteWork(
+            at: date, startsTurn: kind == .turnStarted)
         noteProjectInteraction(projectID: projects[location.projectIndex].id, at: date)
         scheduleSessionSave(sessionID)
         NotificationCenter.default.post(SessionWorkDidChange(sessionID: sessionID, kind: kind))

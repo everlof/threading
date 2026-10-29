@@ -79,6 +79,10 @@ final class WorkspacePlaceholderPane {
     private var onShowHiddenModels: (() -> Void)?
     private let permissionChip = ChipView()
     private let choiceSurface = ThemedMenuPanelView(frame: .zero)
+    private var choiceMenu: ThemedMenuSurfaceView?
+    private var choiceMenuFrame = NSRect.zero
+    private var choiceMenuKey: [String] = []
+    private var choiceHighlightedIndex: Int?
     private enum ChoiceKind: Int { case project = 1, identity = 2, permission = 3, model = 4, surface = 5, speed = 6 }
     private struct ChoiceOption {
         let id: String
@@ -102,7 +106,7 @@ final class WorkspacePlaceholderPane {
     private var surfaceOptions: [ChoiceOption] = []
     private var speedOptions: [ChoiceOption] = []
     private var selectedSpeedID = "inherit"
-    private var selectedSpeedTitle = "Agent's Setting"
+    private var selectedSpeedTitle = ConversationSpeedMenuContent.chip(effective: nil).title
     private var onSpeedChoice: ((Bool?) -> Void)?
     private var selectedSurfaceID = "terminal"
     private var selectedSurfaceTitle = ""
@@ -196,7 +200,8 @@ final class WorkspacePlaceholderPane {
         speedChip.choicePresentationProvider = { [weak self] _, didDismiss in
             self?.openChoice(.speed, didDismiss: didDismiss)
         }
-        speedChip.configure(symbolName: "gauge", title: selectedSpeedTitle)
+        speedChip.configure(symbolName: ConversationSpeedMenuContent.ordinarySymbol,
+            title: selectedSpeedTitle)
         speedChip.isHidden = true
         surfaceChip.choicePresentationProvider = { [weak self] _, didDismiss in
             self?.openChoice(.surface, didDismiss: didDismiss)
@@ -234,8 +239,9 @@ final class WorkspacePlaceholderPane {
     func setThemeAppearance() {
         composerRoot.appearance = LinuxTheme.appearance
         choiceSurface.appearance = LinuxTheme.appearance
+        choiceMenu?.appearance = LinuxTheme.appearance
         refreshComposerSurface()
-        if choiceKind != nil { rebuildChoiceRows() }
+        if choiceKind != nil { layoutChoiceSurface(in: composerRoot.bounds.size) }
         needsPresentation = true
     }
 
@@ -346,20 +352,26 @@ final class WorkspacePlaceholderPane {
         needsPresentation = true
     }
 
-    func configureSpeedChoice(available: Bool, title: String, fastMode: Bool?,
+    func configureSpeedChoice(available: Bool,
+                              chip: ConversationSpeedMenuContent.ChipContent, fastMode: Bool?,
                               onChoose: @escaping (Bool?) -> Void) {
         selectedSpeedID = fastMode.map { $0 ? "fast" : "standard" } ?? "inherit"
-        selectedSpeedTitle = title
+        selectedSpeedTitle = chip.title
         onSpeedChoice = onChoose
-        speedOptions = available ? [
-            ChoiceOption(id: "inherit", name: "Follow Agent Setting", icon: nil,
-                         detail: "Uses the speed configured for this agent."),
-            ChoiceOption(id: "standard", name: "Standard", icon: nil,
-                         detail: "Normal speed and usage"),
-            ChoiceOption(id: "fast", name: "Fast", icon: nil,
-                         detail: "1.5× speed, increased usage")
-        ] : []
-        speedChip.configure(symbolName: title == "Fast" ? "bolt.fill" : "gauge", title: title)
+        let rows = ConversationSpeedMenuContent.rows(selected: fastMode,
+            inheritTitle: ConversationSpeedMenuContent.followGeneralTitle,
+            inheritDetail: ConversationSpeedMenuContent.followGeneralDetail)
+        speedOptions = available ? rows.compactMap { entry in
+            guard case .item(let item) = entry,
+                  let choice = item.representedValue as? ConversationSpeedChoice else { return nil }
+            let id: String = switch choice {
+            case .followGeneral: "inherit"
+            case .standard: "standard"
+            case .fast: "fast"
+            }
+            return ChoiceOption(id: id, name: item.title, icon: nil, detail: item.subtitle)
+        } : []
+        speedChip.configure(symbolName: chip.symbolName, title: chip.title)
         speedChip.isHidden = !available
         speedChip.isEnabled = available
         if choiceKind == .speed, !available { dismissChoice() }
@@ -471,6 +483,10 @@ final class WorkspacePlaceholderPane {
     }
 
     var hasOpenComposerChoice: Bool { choiceKind != nil }
+
+    private var activeChoiceFrame: NSRect {
+        choiceKind == .model ? choiceSurface.frame : choiceMenuFrame
+    }
 
     @discardableResult
     func pressComposerChoice(kind: Int, identity: String) -> Bool {
@@ -608,16 +624,17 @@ final class WorkspacePlaceholderPane {
         choiceSelected = options.firstIndex(where: { $0.id == selectedID }) ?? 0
         choiceFirst = 0
         choiceScrollRemainder = 0
-        let entries = options.map { ThemedMenuEntry.item(ThemedMenuItem(title: $0.name, subtitle: $0.detail)) }
+        let entries = options.map { option in
+            ThemedMenuEntry.item(ThemedMenuItem(title: option.name, subtitle: option.detail,
+                image: option.icon, isSelected: option.id == selectedID))
+        }
         choiceRowHeight = ThemedMenuMetrics.heights(for: entries).max() ?? 26
         choiceWidth = kind == .project || kind == .permission || kind == .surface || kind == .speed
-            ? ThemedMenuMetrics.width(for: entries, minimum: 180, selectedEntryIndex: choiceSelected)
+            ? ThemedMenuMetrics.width(for: entries, minimum: 180, selectedEntryIndex: nil)
             : 180
         let session = ComposerChipChoiceSession(didDismiss: didDismiss)
         choiceSession = session
         layoutChoiceSurface(in: composerRoot.bounds.size)
-        rebuildChoiceRows()
-        choiceSurface.isHidden = false
         needsPresentation = true
         return session
     }
@@ -630,7 +647,10 @@ final class WorkspacePlaceholderPane {
         modelShowHiddenButton = nil
         modelMenuToken = ""
         choiceOptions.removeAll(keepingCapacity: true)
-        choiceSurface.setRows([], heights: [])
+        choiceMenu?.removeFromSuperview()
+        choiceMenu = nil
+        choiceMenuKey = []
+        choiceHighlightedIndex = nil
         choiceRows.removeAll(keepingCapacity: true)
         choiceSurface.isHidden = true
         let session = choiceSession
@@ -660,54 +680,76 @@ final class WorkspacePlaceholderPane {
             in: composerRoot.bounds, flipped: composerRoot.isFlipped)
         let rowCapacity = max(1, Int((placement.height - outerInset) / rowHeight))
         choiceVisibleCount = min(6, choiceOptions.count, rowCapacity)
-        choiceSurface.frame = ThemedMenuLayout.frame(anchor: sourceFrame,
-            desiredSize: NSSize(width: width,
-                height: CGFloat(choiceVisibleCount) * rowHeight + outerInset),
-            in: composerRoot.bounds, flipped: composerRoot.isFlipped)
-    }
-
-    private func rebuildChoiceRows() {
-        guard let choiceKind, choiceKind != .model, choiceVisibleCount > 0 else { return }
         choiceFirst = min(max(0, choiceFirst), max(0, choiceOptions.count - choiceVisibleCount))
         if choiceSelected < choiceFirst { choiceFirst = choiceSelected }
         if choiceSelected >= choiceFirst + choiceVisibleCount {
             choiceFirst = choiceSelected - choiceVisibleCount + 1
         }
-        choiceRows.removeAll(keepingCapacity: true)
-        let visible = Array(choiceOptions[choiceFirst..<min(choiceOptions.count,
-                                                           choiceFirst + choiceVisibleCount)])
+        let end = min(choiceOptions.count, choiceFirst + choiceVisibleCount)
+        let visible = Array(choiceOptions[choiceFirst..<end])
         let selectedID = selectedID(for: choiceKind)
         let entries = visible.map { option in
             ThemedMenuEntry.item(ThemedMenuItem(title: option.name, subtitle: option.detail,
                 image: option.icon, representedValue: option.id,
                 isSelected: option.id == selectedID))
         }
-        let plan = ThemedMenuRowPlan(entries: entries)
-        for slot in visible.indices {
-            guard let row = plan.row(at: slot) else { continue }
-            let index = choiceFirst + slot
-            row.onChoose = { [weak self] _, _ in self?.chooseChoice(index) }
-            row.onHighlight = { [weak self] _ in self?.highlightChoice(index) }
-            choiceRows.append(row)
+        choiceMenuFrame = ThemedMenuLayout.frame(anchor: sourceFrame,
+            desiredSize: NSSize(width: width, height: ThemedMenuMetrics.height(for: entries)),
+            in: composerRoot.bounds, flipped: composerRoot.isFlipped)
+        mountChoiceMenu(entries: entries, visible: visible)
+    }
+
+    private func mountChoiceMenu(entries: [ThemedMenuEntry], visible: [ChoiceOption]) {
+        guard let choiceKind else { return }
+        let selectedID = selectedID(for: choiceKind)
+        let key = [String(choiceKind.rawValue), String(choiceFirst),
+            String(describing: choiceMenuFrame.width)] + visible.map { option in
+                "\(option.id):\(option.name):\(option.detail ?? ""):" +
+                    "\(option.id == selectedID)"
+            }
+        let selectedEntry = choiceSelected - choiceFirst
+        if choiceMenuKey != key || choiceMenu == nil {
+            choiceMenu?.removeFromSuperview()
+            let surface = ThemedMenuSurfaceView(
+                frame: NSRect(origin: .zero, size: choiceMenuFrame.size), entries: entries,
+                selectedEntryIndex: nil)
+            surface.appearance = LinuxTheme.appearance
+            surface.onChoose = { [weak self] entry, _ in
+                guard let self else { return }
+                self.chooseChoice(self.choiceFirst + entry)
+            }
+            surface.onHighlight = { [weak self] entry in
+                guard let self else { return }
+                self.highlightChoice(self.choiceFirst + entry)
+            }
+            surface.onScrolled = { [weak self] in self?.needsPresentation = true }
+            choiceMenu = surface
+            choiceMenuKey = key
+            choiceHighlightedIndex = nil
+            composerRoot.addSubview(surface)
+            needsPresentation = true
         }
-        choiceSurface.setRows(
-            choiceRows, heights: Array(repeating: choiceRowHeight, count: choiceRows.count)
-        )
-        for (slot, row) in choiceRows.enumerated() {
-            row.isKeyboardHighlighted = choiceFirst + slot == choiceSelected
+        if let surface = choiceMenu {
+            if surface.frame != choiceMenuFrame { needsPresentation = true }
+            surface.frame = choiceMenuFrame
+            surface.appearance = LinuxTheme.appearance
+            if choiceHighlightedIndex != selectedEntry {
+                surface.highlight(selectedEntry)
+                choiceHighlightedIndex = selectedEntry
+            }
+            choiceRows = entries.indices.compactMap { surface.row(at: $0) }
         }
-        needsPresentation = true
     }
 
     private func highlightChoice(_ index: Int) {
         guard choiceOptions.indices.contains(index), choiceSelected != index else { return }
         choiceSelected = index
         if index < choiceFirst || index >= choiceFirst + choiceRows.count {
-            rebuildChoiceRows()
+            layoutChoiceSurface(in: composerRoot.bounds.size)
         } else {
-            for (slot, row) in choiceRows.enumerated() {
-                row.isKeyboardHighlighted = choiceFirst + slot == index
-            }
+            let selectedEntry = index - choiceFirst
+            choiceMenu?.highlight(selectedEntry)
+            choiceHighlightedIndex = selectedEntry
         }
         needsPresentation = true
     }
@@ -728,7 +770,6 @@ final class WorkspacePlaceholderPane {
             choiceSelected = choiceOptions.firstIndex(where: { $0.id == selectedID(for: .project) }) ?? 0
             choiceFirst = 0
             layoutChoiceSurface(in: composerRoot.bounds.size)
-            rebuildChoiceRows()
             return
         }
         let wasNavigating = showingProjectNavigation
@@ -945,14 +986,14 @@ final class WorkspacePlaceholderPane {
         }
         let point = NSPoint(x: CGFloat(input.x) / WorkspaceDisplay.scale,
                             y: root.bounds.height - CGFloat(input.y) / WorkspaceDisplay.scale)
-        if input.action == 7, choiceKind == .model, choiceSurface.frame.contains(point) {
+        if input.action == 7, choiceKind == .model, activeChoiceFrame.contains(point) {
             modelContent?.scrollView.scrollWheel(with: NSEvent(type: .scrollWheel,
                 locationInWindow: point, scrollingDeltaX: CGFloat(input.scrollingDeltaX),
                 scrollingDeltaY: CGFloat(input.scrollingDeltaY)))
             needsPresentation = true
             return
         }
-        if input.action == 7, choiceKind != nil, choiceSurface.frame.contains(point) {
+        if input.action == 7, choiceKind != nil, activeChoiceFrame.contains(point) {
             let delta = CGFloat(input.scrollingDeltaY)
             guard delta.isFinite else { return }
             let limit = CGFloat(choiceOptions.count)
@@ -962,7 +1003,7 @@ final class WorkspacePlaceholderPane {
             if step != 0 { moveChoice(by: step) }
             return
         }
-        if input.action == 1, let choiceKind, !choiceSurface.frame.contains(point) {
+        if input.action == 1, let choiceKind, !activeChoiceFrame.contains(point) {
             let source = chip(for: choiceKind)
             let clickedSource = source.convert(source.bounds, to: composerRoot).contains(point)
             dismissChoice()
@@ -1021,12 +1062,7 @@ final class WorkspacePlaceholderPane {
             composerHero.isHidden = composerHero.exceedsHeroRegion(
                 height: composerRoot.heroRegion.frame.height)
             if choiceKind != nil {
-                let oldFrame = choiceSurface.frame
-                let oldCount = choiceVisibleCount
                 layoutChoiceSurface(in: size)
-                if oldFrame != choiceSurface.frame || oldCount != choiceVisibleCount {
-                    rebuildChoiceRows()
-                }
             }
         }
         window.layoutIfNeeded()
@@ -1173,7 +1209,7 @@ final class WorkspacePlaceholderPane {
             return
         }
         let kind = Int32(choiceKind.rawValue)
-        let frame = pixels(choiceSurface)
+        let frame = pixels(choiceKind == .model ? choiceSurface : choiceMenu ?? choiceSurface)
         identity.withCString { token in
             tw_accessibility_composer_menu_begin(nativeWindow, token, kind, frame.x, frame.y,
                                                  frame.width, frame.height)

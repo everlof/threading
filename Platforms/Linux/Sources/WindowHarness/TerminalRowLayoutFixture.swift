@@ -14,6 +14,7 @@ enum TerminalRowLayoutFixture {
                                              weight: .regular)
         else { preconditionFailure("terminal identity glyph is unavailable") }
         var retainedRow: Specimen.Row?
+        var retainedTerminalRow: ProjectTerminalRowView?
         var retainedContent: ThemedTerminalRowContentView?
         var retainedAction: ThemedIconButton?
         var wideTitleWidth: CGFloat = 0
@@ -28,15 +29,16 @@ enum TerminalRowLayoutFixture {
             let diagnosis = LayoutEngine.layout(root)
             precondition(diagnosis.solved, "shared terminal content broke navigator layout")
             guard let row = root.mountedRow(at: 0),
-                  let content = row.subviews.compactMap({ $0 as? ThemedTerminalRowContentView }).first
+                  let terminalRow = row.subviews.compactMap({ $0 as? ProjectTerminalRowView }).first,
+                  let content = terminalRow.subviews.compactMap({ $0 as? ThemedTerminalRowContentView }).first
             else { preconditionFailure("shared terminal content was not mounted") }
-            guard let action = row.subviews.compactMap({ $0 as? ThemedIconButton }).first(where: {
+            guard let action = terminalRow.subviews.compactMap({ $0 as? ThemedIconButton }).first(where: {
                 $0.accessibilityIdentifier() == "sidebar.terminal.actions"
             }) else { preconditionFailure("shared terminal action was not mounted") }
-            precondition(abs(content.frame.midY - row.bounds.midY) < 0.5 &&
+            precondition(abs(content.frame.midY - terminalRow.bounds.midY) < 0.5 &&
                          content.frame.minX == SidebarRowDefaults.leadingInset &&
                          content.frame.maxX <= action.frame.minX - SidebarRowDefaults.horizontalSpacing &&
-                         action.frame.maxX == row.bounds.maxX
+                         action.frame.maxX == terminalRow.bounds.maxX
                             - max(0, SidebarRowDefaults.trailingInset - action.opticalHorizontalInset),
                          "shared terminal content lost its Mac row constraints")
             precondition(content.iconView.frame.width == SidebarRowDefaults.iconSlotWidth &&
@@ -50,6 +52,9 @@ enum TerminalRowLayoutFixture {
                              "narrow sidebar did not compress the terminal title")
             } else { wideTitleWidth = content.titleLabel.frame.width }
             if let retainedRow { precondition(row === retainedRow, "terminal slot was rebuilt") }
+            if let retainedTerminalRow {
+                precondition(terminalRow === retainedTerminalRow, "production terminal row was rebuilt")
+            }
             if let retainedContent {
                 precondition(content === retainedContent, "terminal content was rebuilt")
             }
@@ -57,9 +62,10 @@ enum TerminalRowLayoutFixture {
                 precondition(action === retainedAction, "terminal action was rebuilt")
             }
             retainedRow = row
+            retainedTerminalRow = terminalRow
             retainedContent = content
             retainedAction = action
         }
-        print("PASS shared terminal row assembly in recycled navigator slot")
+        print("PASS production terminal row in recycled navigator slot")
     }
 }

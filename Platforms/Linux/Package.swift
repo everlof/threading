@@ -14,6 +14,7 @@ let package = Package(
         // check keeps it Foundation-only, so building it here is the cheapest available test of
         // that claim on a platform it has never been compiled for.
         .package(path: "../../Packages/ThreadingDomain"),
+        .package(path: "../../Packages/ThreadingExtensionKit"),
         .package(path: "../../Packages/ThreadingRemoteKit"),
         .package(path: "../../Packages/ThreadingUsage"),
         .package(path: "../../Packages/ThreadingPTYHostKit"),
@@ -66,7 +67,7 @@ let package = Package(
         // Keep the legacy GzipWriter probe's narrow shim out of optional framework discovery:
         // SwiftTerm's canImport(Compression) must not mistake it for Apple's complete framework.
         .target(name: "LinuxCompression", dependencies: ["CZlib"], path: "Sources/Compression"),
-        // Real Threading persistence, vendored byte-identical. No AppKit anywhere near it.
+        // Real Threading persistence, linked directly from production. No AppKit anywhere near it.
         // OSLog's privacy interpolation, kept so 760 real call sites need no edit. See its header.
         .target(name: "OSLog"),
         .target(
@@ -74,6 +75,7 @@ let package = Package(
             dependencies: ["SQLite3", "OSLog",
                 .target(name: "CNativeAgentProcess", condition: .when(platforms: [.linux])),
                 .product(name: "ThreadingDomain", package: "ThreadingDomain"),
+                .product(name: "ThreadingExtensionKit", package: "ThreadingExtensionKit"),
                 .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
                 .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
                 .product(name: "ThreadingRemoteKit", package: "ThreadingRemoteKit"),
@@ -106,7 +108,7 @@ let package = Package(
             .product(name: "ThreadingPTYClient", package: "ThreadingPTYClient"),
             .target(name: "CLinuxTerminal", condition: .when(platforms: [.linux])),
             .product(name: "ThreadingPTYHostKit", package: "ThreadingPTYHostKit")]),
-        // Symlinks to the verified CoreSlice copies keep the production wrapper and logger exact.
+        // Symlinks to the CoreSlice links keep the production wrapper and logger exact.
         // This measures SQLite behavior independently of the project graph's remote-kit dependency.
         .executableTarget(
             name: "SQLiteHarness",
@@ -156,7 +158,9 @@ let package = Package(
             path: "tests/icon_button", exclude: ["run.sh"],
             sources: ["ThemedControl.swift", "ThemedIconButton.swift", "PointerClaims.swift",
                       "SurfaceDrawing.swift", "GlyphView.swift", "TemplateImageDrawing.swift",
-                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
+                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift",
+                      "ThemedMenuPresentationTypes.swift", "ThemeRefreshContracts.swift",
+                      "ThemeBoundaryContracts.swift", "OpticalInsets.swift", "AppEvent.swift",
                       "LinuxTheme.swift", "LinuxThemeSnapshot.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "LabelLegibilityInk.swift",
                       "NSColor+Terminal.swift", "ThemeContrast.swift", "PerceptualColor.swift", "SpecimenBoundary.swift",
@@ -168,7 +172,9 @@ let package = Package(
             sources: ["SubagentNavigatorRowView.swift", "SubagentSummaryItem.swift",
                       "ThemedControl.swift", "ThemedIconButton.swift", "PointerClaims.swift",
                       "SurfaceDrawing.swift", "GlyphView.swift", "TemplateImageDrawing.swift",
-                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
+                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift",
+                      "ThemedMenuPresentationTypes.swift", "ThemeRefreshContracts.swift",
+                      "ThemeBoundaryContracts.swift", "OpticalInsets.swift", "AppEvent.swift",
                       "LinuxTheme.swift", "LinuxThemeSnapshot.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "LabelLegibilityInk.swift",
                       "NSColor+Terminal.swift", "ThemeContrast.swift", "PerceptualColor.swift", "SpecimenBoundary.swift",
@@ -179,7 +185,9 @@ let package = Package(
                       "SeparatorView.swift", "ThemedControl.swift", "ThemedIconButton.swift",
                       "PointerClaims.swift", "SurfaceDrawing.swift", "GlyphView.swift",
                       "TemplateImageDrawing.swift", "AppKitLifetime.swift",
-                      "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
+                      "GlyphThemeBoundary.swift", "IconButtonBoundary.swift",
+                      "ThemedMenuPresentationTypes.swift", "ThemeRefreshContracts.swift",
+                      "ThemeBoundaryContracts.swift", "AppEvent.swift",
                       "LinuxTheme.swift", "LinuxThemeSnapshot.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "LabelLegibilityInk.swift",
                       "NSColor+Terminal.swift", "ThemeContrast.swift", "PerceptualColor.swift", "SpecimenBoundary.swift",
@@ -192,7 +200,9 @@ let package = Package(
             sources: ["PageTitleView.swift", "MorphingTitleLabel.swift", "PageTitleBoundary.swift", "Fixture.swift",
                       "ThemedControl.swift", "ThemedIconButton.swift", "PointerClaims.swift",
                       "SurfaceDrawing.swift", "GlyphView.swift", "TemplateImageDrawing.swift",
-                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift", "AppEvent.swift",
+                      "AppKitLifetime.swift", "GlyphThemeBoundary.swift", "IconButtonBoundary.swift",
+                      "ThemedMenuPresentationTypes.swift", "ThemeRefreshContracts.swift",
+                      "ThemeBoundaryContracts.swift", "OpticalInsets.swift", "AppEvent.swift",
                       "LinuxTheme.swift", "LinuxThemeSnapshot.swift",
                       "NeutralInk.swift", "TextLegibilityPolicy.swift", "LabelLegibilityInk.swift",
                       "NSColor+Terminal.swift", "ThemeContrast.swift", "PerceptualColor.swift", "SpecimenBoundary.swift"]),

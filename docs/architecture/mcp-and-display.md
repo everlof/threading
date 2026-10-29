@@ -1514,6 +1514,45 @@ pointerless twin, per the design system's rule.
 The Attachments tab is the session's visual history: everything that passed between the two
 parties, newest first, capped at `SessionAttachmentDefaults.maximumPerSession`.
 
+`SessionAttachmentsContentView` in Design owns the pane's fixed layout on both desktop hosts:
+header, list, fold, flexible preview, footer and optional scope band. Hosts provide the actual
+list and preview controls. `SessionAttachmentHeaderRow` owns the count/filter baseline and
+filter-collapse layout, while hosts supply the filter control and actions.
+`SessionAttachmentRowView` owns each file row's labels, chronology mark, selection ink,
+comparison-drop caption and accessibility sentence on both hosts. Hosts supply only the
+bounded thumbnail or file icon and an optional annotation badge. The shell is
+host-owned; the existing `attachments.preview@1` offer can replace only a selected preview
+body, never the chronology, scope gate or actions.
+
+`AttachmentReferenceDetector`, `SessionAttachmentKind`, `SessionAttachmentStore`, its persisted
+document and both terminal attachment observers are standalone Core sources linked unchanged
+into the Linux host. Keep path matching, project containment, custody and read gating there.
+The Linux host supplies project roots and a serial SQLite worker for the
+shared store's document codec. Selected sessions install a checked snapshot before writes become
+eligible; early live rows merge with that snapshot and are saved afterward. A future or damaged
+document refuses replacement. Completed native assistant prose and live PTY output pass through
+the shared detector on bounded worker lanes. Chats mounts the shared Attachments card with
+per-agent switches that gate both Linux scanners and the outside-project scope switch. Both
+scanners pass outside candidates to the shared store's custody worker and read gate; the SDL
+host receives the result through its UI mailbox. The SDL bridge now retains a third, bounded
+workspace texture to the right of the terminal; a native X11 fixture mounts the exact shared
+attachment shell there and checks the sidebar/terminal/pane clipping boundary. Production input,
+accessibility and list/preview hosting, plus terminal-turn transcript recovery, remain.
+The fixture mounts the same `PaneFoldDivider` source as macOS through the Linux AppKit shim;
+only its corner gesture that moves the macOS split seam is host-specific. Linux still needs an
+SDL seam route before that diagonal gesture can work in its production workspace.
+The fixed attachment choices now come from one shared `AttachmentFilter` value and the native
+fixture mounts the unchanged `ThemedSegmentedControl` used by the Mac header. Linux supplies
+the AppKit key constants and status colour through its shim; filter artwork and selection
+behavior remain in the shared view.
+
+SwiftTerm's bounded logical-row capture is shared too: `Terminal.recentLogicalBufferText` holds
+the terminal lock only while copying cells, then assembles Unicode text after release. The
+Apple view and Linux `PTYEmulator` call that same reader. The Linux terminal adapter reads its
+256 KiB logical suffix after live output and admits prepared inside-project rows through the
+shared store on the SDL owner thread. It uses the shared quiet and busy intervals; the daemon
+callback to that owner still needs a direct end-to-end fixture.
+
 **Six kinds, one explicit map.** Images, PDFs, HTML, archives (`zip`/`tar`/`gz`/`7z`/…), open
 document formats (ODF, OOXML, `rtf`) and diagram source (`dot`/`gv`/`mmd`/`mermaid`) —
 `AttachmentReferenceDetector.kind(for:)` names each family explicitly. It used to answer `.image` for anything on the extension list that was not a
@@ -1651,16 +1690,30 @@ chronology, selection and file admission stay host-owned; `attachments.preview@1
 only the preview body.
 
 **Turn disclosures make that chronology navigable without making transcript rows its authority.**
-`SessionAttachmentTurnSectioning` projects the bounded attachment values against the bounded,
-provider-neutral `GitTurnBaselineStore` checkpoint ledger. Exact native message/outbox identities
-win; agent output otherwise points back to the current checkpoint, prompt handoffs point forward
+`SessionAttachmentTurnSectioning` and `GitTurnCheckpointID` are shared Core sources on both
+desktop hosts. The Mac controller adapts its checkpoint record to the provider-neutral boundary
+value; Linux uses that same value model through its CoreSlice link. Sectioning projects bounded
+attachment values against the bounded `GitTurnBaselineStore` checkpoint ledger. Exact native
+message/outbox identities win; agent output otherwise points back to the current checkpoint,
+prompt handoffs point forward
 to the next admitted checkpoint, and a comparison dropped directly on this pane remains **Between
-turns** so a later unrelated prompt cannot claim it. Headers are `ThemedDisclosureRow` controls:
-Latest turn stays explicit even when it has no files, and collapsing a turn removes its attachment
-items before `NSTableView` asks for cells. The build cost remains O(attachments log turns), with the
+turns** so a later unrelated prompt cannot claim it. Headers use one
+`SessionAttachmentTurnHeaderView` Design source on both hosts, built from `ThemedDisclosureRow`:
+`SessionAttachmentListView` owns the same `ThemedTableView` and `ThemedScrollView` construction,
+column, selection capacity and viewport on both desktop hosts. Mac supplies its table delegate
+and actions; Linux supplies only its AppKit shim and list data. Latest turn stays explicit even
+when it has no files, and collapsing a turn removes its attachment items before `NSTableView`
+asks for cells. The build cost remains O(attachments log turns), with the
 store and ledger ceilings still doing the bounding. The grouping, collapse state, selection repair
 and chronology labels stay host-owned beside the list; `attachments.preview@1` still replaces only
 the selected file's preview body.
+
+The shared file row changes its constraints and height below 280 points: name and path keep their
+two lines, and the full numeric moment moves beneath them. The table delegate changes row heights
+only when the pane crosses that width, then updates mounted cells without constructing hidden
+rows. At wider widths the date retains its original one-line placement beside the name. This
+keeps a narrow panel's exact date from drawing over the filename while preserving the same row
+view and accessibility sentence on both desktop hosts.
 
 **The pane is two panes, and the footer is a band.** The list is one half, its preview the
 other — a full-bleed `SeparatorView` folds them apart, and the preview is the layout's one
@@ -1803,6 +1856,18 @@ Two consequences worth keeping for ordinary declared and scanned attachments:
 - **Custody ends where the row does.** A row evicted by the cap, and every row of a session that
   `retainOnly` forgets, takes its copied bytes with it. A *referenced* file is never deleted:
   it belongs to the checkout, and losing a row is not a reason to touch the user's file.
+
+**The reference root is the session's execution directory, not its project's folder.** An
+automation or managed-workspace session can run in a separate checkout. The Linux SQLite adapter
+reads the exact session and its attachment document on one worker connection, derives
+`workingDirectory(in:)` from that session and project, then lets the shared codec validate each
+reference against that root. Using a navigator project path instead admits a scanned checkout
+file live but rejects it on the next launch. The Linux native stream adapter scans only completed
+assistant prose. Its PTY adapter reads SwiftTerm's bounded logical suffix after coalesced live
+output receipts. Both use the shared detector, inside-project row preparation and shared
+outside-project custody. A scope change widens already withheld paths through one paced worker
+job per session and the store gates reads immediately on narrowing. Terminal-turn transcript
+recovery still needs host wiring.
 
 **The opening prompt's images are a handoff too, and were the one that filed nothing.** The
 session-start composer shows an attached picture, appends its path to the text it sends — a CLI

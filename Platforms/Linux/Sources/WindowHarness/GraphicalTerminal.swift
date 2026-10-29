@@ -12,9 +12,12 @@ import ThreadingPTYHostKit
 /// input and exit truth. This is not a new extension component or a shipping theme boundary.
 final class GraphicalTerminal: @unchecked Sendable {
     private let onActivityChange: (@Sendable () -> Void)?
+    private let onAgentOutput: (@Sendable (GraphicalTerminal, SessionID) -> Void)?
 
-    init(onActivityChange: (@Sendable () -> Void)? = nil) {
+    init(onActivityChange: (@Sendable () -> Void)? = nil,
+         onAgentOutput: (@Sendable (GraphicalTerminal, SessionID) -> Void)? = nil) {
         self.onActivityChange = onActivityChange
+        self.onAgentOutput = onAgentOutput
     }
 
     enum RuntimePresence {
@@ -39,6 +42,54 @@ final class GraphicalTerminal: @unchecked Sendable {
             guard semaphore.wait(timeout: .now() + 2) == .success else { return .unavailable }
             lock.lock(); defer { lock.unlock() }
             return result ?? .unavailable
+        }
+    }
+    private final class AgentSummariesSurvey: @unchecked Sendable {
+        private let lock = NSLock()
+        private let semaphore = DispatchSemaphore(value: 0)
+        private var finished = false
+        private var result: [PTYHostSessionSummary]?
+
+        func finish(_ value: [PTYHostSessionSummary]?) {
+            lock.lock()
+            guard !finished else { lock.unlock(); return }
+            finished = true
+            result = value
+            lock.unlock()
+            semaphore.signal()
+        }
+
+        func wait() -> [PTYHostSessionSummary]? {
+            guard semaphore.wait(timeout: .now() + 2) == .success else { return nil }
+            lock.lock(); defer { lock.unlock() }
+            return result
+        }
+    }
+
+    /// One off-window list answers every held identity and its transport channel. Native pipe
+    /// children need a stop and transcript resume; PTY children can be reattached as they are.
+    static func agentSummaries(socket: String) -> [PTYHostSessionSummary]? {
+        let survey = AgentSummariesSurvey()
+        let client = PTYHostClient(socketPath: socket, build: "linux-native-window",
+            events: .init(frame: { frame in
+                guard case .sessions(let summaries) = frame else { return }
+                survey.finish(summaries)
+            }, closed: { _ in survey.finish(nil) }), journal: { _, _ in })
+        defer { client.close() }
+        do {
+            try client.connect()
+            try client.list()
+            return survey.wait()
+        } catch { return nil }
+    }
+    /// A missing daemon answer is unknown, never permission to launch another child.
+    static func runningAgentIDs(socket: String) -> Set<SessionID>? {
+        agentSummaries(socket: socket).map { summaries in
+            Set(summaries.compactMap { summary -> SessionID? in
+                guard summary.exit == nil,
+                      case .agentSession(let id) = summary.id.identity else { return nil }
+                return id
+            })
         }
     }
     /// Bounded off-window daemon survey, called only on startup or explicit agent selection.
@@ -108,6 +159,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     // Lock-owned publication/admission. One snapshot/render request and one published frame.
     private var pendingFrame = false
     private var pendingInputCount = 0
+    private var attachmentOutputNotificationPending = false
     private enum Input: Sendable {
         case text(Data)
         case paste(Data)
@@ -122,6 +174,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var selectionMotionScheduled = false
     private var failure: String?
     private var running = false
+    private var foregroundBusy = false
     private var closed = false
     private var terminalRecordID: TerminalID?
     private var terminalRecordTitle: String?
@@ -138,6 +191,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     struct AgentCreation: Sendable {
         let projectID: ProjectID
         let row: AgentSessionRowPresentation
+        let branch: String?
         let sessionCount: Int
     }
     private var agentCreation: AgentCreation?
@@ -148,10 +202,12 @@ final class GraphicalTerminal: @unchecked Sendable {
     private var initialViewport: (Int, Int)?
     // Worker-owned runtime. Every emulator operation stays off the UI actor.
     private var emulator: PTYEmulator?
+    private var attachmentDirectory: URL?
     private var themeColors: (foreground: UInt32, background: UInt32, ansi: [UInt32])?
     private var client: PTYHostClient?
     private var connectionGeneration = 0
     private var identity: PTYHostSessionIdentity?
+    private var shellProcessID: Int32 = 0
     private var dirty = true
     // Worker-owned, uncommitted IME text. Preedit never enters the PTY queue.
     private var preedit: Preedit?
@@ -224,7 +280,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     }
     func startAgent(store: String, socket: String, directory: String, shell: String,
                     kind: AgentKind, executable: String, accountHandle: AccountHandle, id: SessionID,
-                    width: Int, height: Int, prompt: String? = nil,
+                    width: Int, height: Int, prompt: String? = nil, title: String? = nil,
                     permissionMode: AgentPermissionMode? = nil,
                     model: String? = nil, reasoningEffort: String? = nil,
                     fastMode: Bool? = nil,
@@ -238,7 +294,7 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let accountPath = try Self.accountPath(for: kind, handle: accountHandle)
                 let plan = try Self.createAgent(store: store, directory: directory,
                                                 shell: shell, kind: kind, executable: executable,
-                                                accountHandle: accountHandle, prompt: prompt,
+                                                accountHandle: accountHandle, prompt: prompt, title: title,
                                                 permissionMode: permissionMode, model: model, reasoningEffort: reasoningEffort,
                                                 fastMode: fastMode,
                                                 expectedCheckout: expectedCheckout,
@@ -248,6 +304,7 @@ final class GraphicalTerminal: @unchecked Sendable {
                 let environment = Self.launchEnvironment()
                 let identity = PTYHostSessionIdentity.agentSession(id)
                 self.identity = identity
+                attachmentDirectory = URL(fileURLWithPath: directory, isDirectory: true)
                 savedAgent = (store, id)
                 if kind == .codex { codexDiscovery = (store, directory, accountPath, id, Date()) }
                 lastWidth = width; lastHeight = height
@@ -286,6 +343,8 @@ final class GraphicalTerminal: @unchecked Sendable {
     }
     private func connect(socket: String, columns: Int = 80, rows: Int = 24) throws -> PTYHostClient {
         connectionGeneration += 1
+        shellProcessID = 0
+        setForegroundBusy(false)
         let generation = connectionGeneration
         emulator = try PTYEmulator(columns: columns, rows: rows) { [weak self] data in
             do { try self?.client?.sendInput(data) } catch { self?.fail(error) }
@@ -556,21 +615,69 @@ final class GraphicalTerminal: @unchecked Sendable {
         }
     }
     private func receiveOutput(_ data: Data) {
+        var hasLiveOutput = !attaching && !data.isEmpty
         if attaching {
             guard let remaining = replayRemaining else { fail(WindowFailure("output before attach boundary")); return }
             let count = min(remaining, data.count)
             if count > 0 { emulator?.feed(data.prefix(count), replaying: true) }
             if count < data.count { emulator?.feed(data.dropFirst(count)) }
+            hasLiveOutput = count < data.count
             replayRemaining = remaining - count
             if replayRemaining == 0 {
-                lock.lock(); if !finished && !closed && failure == nil { running = true }; lock.unlock()
+                lock.lock()
+                let wasRunning = running
+                if !finished && !closed && failure == nil { running = true }
+                let foregroundBecameVisible = !wasRunning && running && foregroundBusy
+                lock.unlock()
+                if foregroundBecameVisible { onActivityChange?() }
             }
         } else { emulator?.feed(data) }
         if let directory = emulator?.takeWorkingDirectoryUpdate() {
+            if directory.hasPrefix("/"), directory.utf8.count <= 4096,
+               !directory.utf8.contains(0) {
+                attachmentDirectory = URL(fileURLWithPath: directory, isDirectory: true)
+            }
             initialProcessDirectoryPending = false
             observeWorkingDirectory(directory)
         }
         dirty = true
+        if hasLiveOutput { notifyAgentOutput() }
+    }
+
+    private func notifyAgentOutput() {
+        guard let identity, case .agentSession(let id) = identity.identity else { return }
+        lock.lock()
+        let shouldNotify = !attachmentOutputNotificationPending
+        attachmentOutputNotificationPending = true
+        lock.unlock()
+        if shouldNotify { onAgentOutput?(self, id) }
+    }
+
+    func acknowledgeAttachmentOutput() {
+        lock.lock()
+        attachmentOutputNotificationPending = false
+        lock.unlock()
+    }
+
+    struct AttachmentRead: Sendable {
+        let buffer: TerminalScanRead
+        let currentDirectory: URL?
+    }
+
+    /// Only the attachment utility worker calls this. The terminal worker owns the emulator;
+    /// SwiftTerm's snapshot then releases its lock before joining at most 256 KiB of text.
+    func attachmentScanRead(sinceAbsoluteRow: Int) -> AttachmentRead {
+        worker.sync {
+            guard let emulator else {
+                return AttachmentRead(buffer: .empty, currentDirectory: attachmentDirectory)
+            }
+            let read = emulator.recentLogicalBufferText(
+                maximumUTF8Bytes: SessionAttachmentDefaults.maximumTerminalScanBytes,
+                sinceAbsoluteRow: sinceAbsoluteRow)
+            return AttachmentRead(
+                buffer: TerminalScanRead(text: read.text, nextAbsoluteRow: read.nextAbsoluteRow),
+                currentDirectory: attachmentDirectory)
+        }
     }
     private func observeWorkingDirectory(_ path: String) {
         guard directoryTimer != nil, !directoryWritesPaused,
@@ -742,7 +849,8 @@ final class GraphicalTerminal: @unchecked Sendable {
     }
     private static func createAgent(store: String, directory: String, shell: String,
                                     kind: AgentKind, executable: String, accountHandle: AccountHandle,
-                                    prompt: String?, permissionMode: AgentPermissionMode?,
+                                    prompt: String?, title: String?,
+                                    permissionMode: AgentPermissionMode?,
                                     model: String?, reasoningEffort: String?, fastMode: Bool?,
                                     expectedCheckout: LinuxGitCheckout?,
                                     accountPath: String, id: SessionID,
@@ -778,6 +886,7 @@ final class GraphicalTerminal: @unchecked Sendable {
             throw WindowFailure("session identity already exists")
         }
         let catalogue = model != nil || reasoningEffort != nil || fastMode != nil
+            || LinuxGeneralSettings.startupSpeed(for: kind).fastModeOverride != nil
             ? ComposerModelCatalog.read(provider: kind,
                 directory: URL(fileURLWithPath: accountPath, isDirectory: true),
                 projectDirectory: folder.path) : .empty
@@ -794,10 +903,15 @@ final class GraphicalTerminal: @unchecked Sendable {
                                                             accountHandle: accountHandle, model: model,
                                                             reasoningEffort: reasoningEffort,
                                                             fastMode: fastMode,
-                                                            permissionMode: permissionMode, id: id) else {
+                                                            permissionMode: permissionMode,
+                                                            title: title, id: id) else {
             throw WindowFailure("unsupported session configuration")
         }
         session.branch = checkout?.branch
+        let launchPermission = LinuxGeneralSettings.effectivePermissionMode(
+            selected: session.permissionMode)
+        let launchSpeed = ComposerSpeedLaunch.launchOverride(selected: session.fastMode,
+            kind: kind, model: session.model, catalogue: catalogue)
         let agentCommand: ShellCommand
         let resumeState: ResumeState
         switch kind {
@@ -805,14 +919,14 @@ final class GraphicalTerminal: @unchecked Sendable {
             (agentCommand, resumeState) = CodexLaunchCommand.terminal(executable: executable,
                 model: session.model, reasoningEffort: session.reasoningEffort,
                 conversationOverrides: ComposerSpeedLaunch.codexOverrides(
-                    session.fastMode, model: session.model, catalogue: catalogue),
-                permissionMode: session.permissionMode,
+                    launchSpeed, model: session.model, catalogue: catalogue),
+                permissionMode: launchPermission,
                 resumeState: session.resumeState, prompt: prompt)
         case .claude:
             let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: executable,
-                permissionMode: session.permissionMode, prompt: prompt,
+                permissionMode: launchPermission, prompt: prompt,
                 integrationFlags: try ComposerSpeedLaunch.claudeFlags(
-                    session.fastMode, store: store, id: session.id))
+                    launchSpeed, store: store, id: session.id))
             agentCommand = pair.fresh
             resumeState = .resumable(pair.transcriptID)
         case .grok, .openCode, .cursor:
@@ -831,6 +945,7 @@ final class GraphicalTerminal: @unchecked Sendable {
         admitted(AgentCreation(projectID: project.id,
             row: AgentSessionRowPresentation(session: session, usesAgentTitle: true,
                                              untitledTitle: AgentDefaults.untitledSessionName),
+            branch: session.branch,
             sessionCount: project.sessionCount + 1))
         return plan
     }
@@ -859,6 +974,8 @@ final class GraphicalTerminal: @unchecked Sendable {
             lastWidth = max(320, value.grid.cols * Self.cellWidth)
             lastHeight = max(180, value.grid.rows * Self.cellHeight)
             replayRemaining = count
+            shellProcessID = value.pid
+            setForegroundBusy(false)
             lock.lock(); initialViewport = (lastWidth, lastHeight); running = count == 0; lock.unlock()
             agentResume = nil
             startDirectoryTracking(pid: value.pid, expectedStartTime: value.startTime)
@@ -873,6 +990,8 @@ final class GraphicalTerminal: @unchecked Sendable {
                 } catch { fail(error); return }
             }
             lock.lock(); running = true; lock.unlock(); dirty = true
+            shellProcessID = value.pid
+            setForegroundBusy(false)
             startDirectoryTracking(pid: value.pid, expectedStartTime: value.startTime)
             if let discovery = codexDiscovery {
                 codexDiscovery = nil
@@ -885,6 +1004,8 @@ final class GraphicalTerminal: @unchecked Sendable {
             // this incarnation's final metadata. An ended PID is never sampled again.
             stopDirectoryTracking(sample: false)
             exitStatus = value.signalled ? 128 + value.status : value.status
+            shellProcessID = 0
+            setForegroundBusy(false)
             lock.lock()
             let wasReplaceable = !spawnMayBeLive && (finished || failure != nil)
             running = false; spawnMayBeLive = false; finished = true
@@ -896,6 +1017,11 @@ final class GraphicalTerminal: @unchecked Sendable {
                                               status: exitStatus, observedNow: true) }
                 catch { fail(WindowFailure("could not save agent exit: \(error)")) }
             }
+        case .foreground(let value):
+            guard value.id == identity,
+                  case .projectTerminal = value.id.identity else { return }
+            setForegroundBusy(shellProcessID > 0 && value.processGroup > 0
+                && value.processGroup != shellProcessID)
         case .spawnRefused(let value):
             guard value.id == identity else { fail(WindowFailure("spawn refusal identity mismatch")); return }
             if openingSavedTerminal {
@@ -1051,9 +1177,14 @@ final class GraphicalTerminal: @unchecked Sendable {
         }
         let accountPath = try accountPath(for: session.kind, handle: session.accountHandle)
         let catalogue = session.fastMode != nil
+            || LinuxGeneralSettings.startupSpeed(for: session.kind).fastModeOverride != nil
             ? ComposerModelCatalog.read(provider: session.kind,
                 directory: URL(fileURLWithPath: accountPath, isDirectory: true),
                 projectDirectory: project.folderPath) : .empty
+        let launchSpeed = ComposerSpeedLaunch.launchOverride(selected: session.fastMode,
+            kind: session.kind, model: session.model, catalogue: catalogue)
+        let launchPermission = LinuxGeneralSettings.effectivePermissionMode(
+            selected: session.permissionMode)
         let agentCommand: ShellCommand
         let resumeState: ResumeState
         switch session.kind {
@@ -1074,8 +1205,8 @@ final class GraphicalTerminal: @unchecked Sendable {
             (agentCommand, resumeState) = CodexLaunchCommand.terminal(executable: codex,
                 model: session.model, reasoningEffort: session.reasoningEffort,
                 conversationOverrides: ComposerSpeedLaunch.codexOverrides(
-                    session.fastMode, model: session.model, catalogue: catalogue),
-                permissionMode: session.permissionMode,
+                    launchSpeed, model: session.model, catalogue: catalogue),
+                permissionMode: launchPermission,
                 resumeState: session.resumeState, prompt: nil)
         case .claude:
             guard let claude, claude.hasPrefix("/") else {
@@ -1087,9 +1218,9 @@ final class GraphicalTerminal: @unchecked Sendable {
                 throw WindowFailure("saved Claude conversation is missing from its account")
             }
             let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: claude,
-                permissionMode: session.permissionMode, prompt: nil,
+                permissionMode: launchPermission, prompt: nil,
                 integrationFlags: try ComposerSpeedLaunch.claudeFlags(
-                    session.fastMode, store: store, id: session.id))
+                    launchSpeed, store: store, id: session.id))
             agentCommand = pair.resume
             resumeState = .resumable(pair.transcriptID)
         case .grok, .openCode, .cursor:
@@ -1105,6 +1236,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         return (plan, project.folderPath)
     }
     private func fail(_ error: Error) {
+        shellProcessID = 0
+        setForegroundBusy(false)
         lock.lock()
         let firstFailure = !closed && failure == nil
         let wasReplaceable = !spawnMayBeLive && (finished || failure != nil)
@@ -1226,7 +1359,7 @@ final class GraphicalTerminal: @unchecked Sendable {
     func stop() {
         lock.lock()
         guard !closed else { lock.unlock(); return }
-        closed = true; running = false; frame = nil
+        closed = true; running = false; foregroundBusy = false; frame = nil
         Self.pendingStops.enter()
         lock.unlock()
         worker.async { [self] in
@@ -1252,6 +1385,20 @@ final class GraphicalTerminal: @unchecked Sendable {
         if let failure { throw WindowFailure(failure) }
         let value = frame; frame = nil; return value
     }
+    var hasForegroundProcess: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return foregroundBusy && running && !closed
+    }
+
+    /// A daemon push changes only the retained fact. The host redraws its visible row once;
+    /// no process sampling or recurring UI timer is needed.
+    private func setForegroundBusy(_ busy: Bool) {
+        lock.lock()
+        let changed = foregroundBusy != busy
+        foregroundBusy = busy
+        lock.unlock()
+        if changed { onActivityChange?() }
+    }
     func takeTerminalCreation() -> TerminalCreation? {
         lock.lock(); defer { lock.unlock() }
         defer { terminalCreation = nil }
@@ -1273,6 +1420,12 @@ final class GraphicalTerminal: @unchecked Sendable {
     var canReplace: Bool {
         lock.lock(); defer { lock.unlock() }
         return !spawnMayBeLive && (finished || failure != nil)
+    }
+    /// Snapshot before the window drops its client. A spawn whose daemon reply has not yet
+    /// arrived may already own a child, so quit records that identity conservatively.
+    var isLiveOrMayBeLive: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return !closed && (running || (spawnMayBeLive && !finished && failure == nil))
     }
     var canReopenSavedTerminal: Bool {
         lock.lock(); defer { lock.unlock() }

@@ -123,14 +123,23 @@ enum LinuxTextPrompt {
             fieldDescription: "Branch for the new worktree."))
     }
 
-    static func runRename(displayTitle: String, currentTitle: String) throws -> String? {
+    enum RenameSubject: Sendable { case session, terminal }
+
+    static func runRename(displayTitle: String, currentTitle: String,
+                          subject: RenameSubject = .session) throws -> String? {
+        let terminal = subject == .terminal
         let prompt = TextPromptRequest(
-            title: "Rename Session", message: nil, confirmTitle: "Rename",
-            clearTitle: currentTitle.isEmpty ? nil : "Use Agent's Name",
+            title: terminal ? "Rename Terminal" : "Rename Session",
+            message: nil, confirmTitle: "Rename",
+            clearTitle: currentTitle.isEmpty ? nil
+                : (terminal ? "Use Terminal Name" : "Use Agent's Name"),
             current: currentTitle, placeholder: displayTitle, allowsEmpty: true)
         return try run(Request(prompt: prompt,
-            identity: "linux.prompt.rename-session", fieldID: "linux.prompt.session-name",
-            fieldDescription: "Custom session name. Leave empty to use the agent's name."))
+            identity: terminal ? "linux.prompt.rename-terminal" : "linux.prompt.rename-session",
+            fieldID: terminal ? "linux.prompt.terminal-name" : "linux.prompt.session-name",
+            fieldDescription: terminal
+                ? "Custom terminal name. Leave empty to use the terminal's name."
+                : "Custom session name. Leave empty to use the agent's name."))
     }
 
     static func runConfirmation(title: String, message: String,

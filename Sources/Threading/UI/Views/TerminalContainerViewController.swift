@@ -2182,47 +2182,23 @@ final class TerminalContainerViewController: NSViewController {
         setPlaceholderVisible(true)
         hideLaunchFailureIfNeeded()
         applyPaneBackground(.chrome)
+        let content = DormantSessionPlaceholderContent.agent(
+            displayTitle: agentSession.displayTitle,
+            supportsResume: agentSession.kind.supportsResume,
+            canResume: agentSession.isResumable,
+            lastAttemptFailed: agentSession.lastLaunchFailure != nil
+        )
         placeholderView.configure(
             symbolName: "arrow.clockwise.circle",
-            title: L10n.format("%@ ended", agentSession.displayTitle),
-            detail: dormantDetail(for: agentSession),
-            actionTitle: agentSession.isResumable
-                ? L10n.string("Resume Session")
-                : L10n.string("Start Again")
+            title: content.title,
+            detail: content.detail,
+            actionTitle: content.actionTitle
         )
         placeholderView.onAction = { [weak self] in
             self?.resumeCurrentSession()
         }
     }
 
-    /// Explains what resuming will do, which differs once a resumable identifier is known.
-    ///
-    /// A session that holds an identifier is not the same as a session that can be resumed with
-    /// it. The optimistic sentence below was shown after a resume the runtime had just refused,
-    /// beside a button that would refuse it again — which is how a placeholder ends up being the
-    /// least accurate surface in the app. A session with a standing failure gets the launch
-    /// failure surface instead of this one, and this sentence keeps the claim it can support.
-    private func dormantDetail(for agentSession: AgentSession) -> String {
-        if agentSession.lastLaunchFailure != nil {
-            return L10n.string(
-                "The last attempt to open this conversation did not finish."
-            )
-        }
-
-        if agentSession.isResumable {
-            return L10n.string(
-                "The conversation is saved and will pick up where it left off."
-            )
-        }
-
-        if agentSession.kind.supportsResume {
-            return L10n.string(
-                "No saved conversation was found, so this will start fresh."
-            )
-        }
-
-        return L10n.string("Starting again opens a new shell.")
-    }
 }
 
 // MARK: - Git Status Overlay

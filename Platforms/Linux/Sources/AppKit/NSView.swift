@@ -50,6 +50,7 @@ open class NSResponder: Equatable {
 /// separate measurements.
 @MainActor
 open class NSView: NSResponder, NSLayoutItem {
+    public static let boundsDidChangeNotification = Notification.Name("NSViewBoundsDidChangeNotification")
     open var nextResponder: NSResponder? { superview }
     open func validateProposedFirstResponder(_ responder: NSResponder, for event: NSEvent?) -> Bool { true }
     public enum BackgroundStyle { case normal, emphasized }
@@ -151,6 +152,7 @@ open class NSView: NSResponder, NSLayoutItem {
     }
 
     private var storedBoundsOrigin: NSPoint = .zero
+    open var postsBoundsChangedNotifications = false
 
     open var bounds: NSRect {
         get { NSRect(origin: storedBoundsOrigin, size: frame.size) }
@@ -164,6 +166,9 @@ open class NSView: NSResponder, NSLayoutItem {
             if sizeChanged { frame = NSRect(origin: frame.origin, size: newValue.size) }
             needsDisplay = true
             updateTrackingAreasInSubtree()
+            if originChanged && postsBoundsChangedNotifications {
+                NotificationCenter.default.post(name: Self.boundsDidChangeNotification, object: self)
+            }
         }
     }
 
@@ -910,6 +915,7 @@ open class NSView: NSResponder, NSLayoutItem {
     // MARK: - Accessibility
 
     private var accessibilityIsElement = true
+    private var accessibilityIsHidden = false
     private var accessibilityLabelValue: String?
     private var accessibilityRoleValue: NSAccessibility.Role?
     private var accessibilityIdentifierValue: String?
@@ -921,6 +927,8 @@ open class NSView: NSResponder, NSLayoutItem {
 
     open func setAccessibilityElement(_ isElement: Bool) { accessibilityIsElement = isElement }
     open func isAccessibilityElement() -> Bool { accessibilityIsElement }
+    open func setAccessibilityHidden(_ hidden: Bool) { accessibilityIsHidden = hidden }
+    open func isAccessibilityHidden() -> Bool { accessibilityIsHidden }
     open func setAccessibilityLabel(_ label: String?) { accessibilityLabelValue = label }
     open func accessibilityLabel() -> String? { accessibilityLabelValue }
     open func setAccessibilityRole(_ role: NSAccessibility.Role?) { accessibilityRoleValue = role }
@@ -936,6 +944,9 @@ open class NSView: NSResponder, NSLayoutItem {
     }
     open func isAccessibilitySelected() -> Bool { accessibilitySelectedValue }
     open func accessibilityPerformPress() -> Bool { false }
+    open func accessibilityPerformIncrement() -> Bool { false }
+    open func accessibilityPerformDecrement() -> Bool { false }
+    open func accessibilityOrientation() -> NSAccessibilityOrientation { .unknown }
     open func isAccessibilityEnabled() -> Bool { true }
     open func setAccessibilityTitle(_ title: String?) { accessibilityTitleValue = title }
     open func accessibilityTitle() -> String? { accessibilityTitleValue }
@@ -946,7 +957,7 @@ open class NSView: NSResponder, NSLayoutItem {
         accessibilityExplicitParent = parent as AnyObject?
     }
     open func accessibilityParent() -> Any? { accessibilityExplicitParent ?? superview }
-    open func accessibilityChildren() -> [Any]? { subviews }
+    open func accessibilityChildren() -> [Any]? { accessibilityIsHidden ? [] : subviews }
     open func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { nil }
 
     open nonisolated func accessibilityHitTest(_ point: NSPoint) -> Any? {
@@ -958,7 +969,7 @@ open class NSView: NSResponder, NSLayoutItem {
 
     private func accessibleHitTest(_ screenPoint: NSPoint) -> NSView? {
         let local = convert(window?.convertPoint(fromScreen: screenPoint) ?? screenPoint, from: nil)
-        guard !isHiddenOrHasHiddenAncestor,
+        guard !accessibilityIsHidden, !isHiddenOrHasHiddenAncestor,
               bounds.intersection(visibleRect).contains(local) else { return nil }
         for child in subviews.reversed() {
             if let hit = child.accessibleHitTest(screenPoint) { return hit }
@@ -1009,7 +1020,14 @@ public enum NSAccessibility {
         case menuItem
         case popUpButton
         case disclosureTriangle
+        case splitter
     }
+}
+
+public enum NSAccessibilityOrientation: Equatable, Sendable {
+    case unknown
+    case horizontal
+    case vertical
 }
 
 /// A secondary action stays on the row in the accessibility tree. The closure is retained by

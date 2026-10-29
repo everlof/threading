@@ -80,10 +80,3 @@ public enum WindowBackdrop {
         NotificationCenter.default.post(WindowBackdropDidChange(color: color))
     }
 }
-
-// MARK: - Event
-
-public struct WindowBackdropDidChange: AppEvent {
-    public static let name = Notification.Name("windowBackdropDidChange")
-    public let color: NSColor
-}

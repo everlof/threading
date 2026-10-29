@@ -52,6 +52,8 @@ struct ProjectSnapshot: Sendable {
         var usesNativeUI = false
         var isPinned = false
         var agentSessionID: String? = nil
+        var branch: String? = nil
+        var handoffLine: String? = nil
         var attention: AgentSessionRowPresentation.Attention? = nil
 
         var snoozedUntil: Date? = nil
@@ -89,9 +91,11 @@ struct ProjectSnapshot: Sendable {
     var recentTerminals: [SavedRuntime]
 }
 struct WindowSnapshot: Sendable {
+    enum AgentStartupAction: Sendable { case attach, resume, afterHostedStop }
     let projects: [ProjectSnapshot]
     let selectedProjectIndex: Int
     let restoreAgentID: String?
+    let restoreAgentAction: AgentStartupAction?
     let restoreAgentActivity: Date?
     let restoreAgentProjectID: ProjectID?
     let restoreTerminalID: String?
@@ -144,6 +148,7 @@ func render(_ root: NSView, scale: CGFloat = 2, background: NSColor, to path: St
 
 @main
 struct WindowHarness {
+    @MainActor private static var attachmentPersistenceToDrain: LinuxAttachmentPersistence?
     @MainActor private static let terminalMark: NSImage = {
         guard let image = Design.Symbol.image("terminal", slot: SidebarRowDefaults.iconSlotWidth,
                                               pointSize: SidebarRowDefaults.iconSize,
@@ -221,7 +226,7 @@ struct WindowHarness {
     /// A visible saved shell uses the Mac terminal row's icon and title composition. The
     /// host retains exact runtime identity, selection, activation and accessibility labels.
     @MainActor private static func addSavedTerminalRow(
-        _ runtime: ProjectSnapshot.SavedRuntime, running: Bool, index: Int,
+        _ runtime: ProjectSnapshot.SavedRuntime, running: Bool, busy: Bool, index: Int,
         width: Int, height: Int, accent: NSColor, selected: Bool,
         selectedInk: Specimen.Ink, root: Specimen.Window, indent: CGFloat = 0
     ) {
@@ -229,8 +234,9 @@ struct WindowHarness {
         let ink = selected ? selectedInk : root.bodyInk
         root.mountNavigatorRow(frame: frame, accent: accent, selected: selected,
                                ink: ink, showsMark: false)
-        root.mountTerminalContent(title: readableNavigatorText(runtime.title), icon: terminalMark,
-                                  selected: selected, running: running)
+        root.mountTerminalContent(id: runtime.id,
+                                  title: readableNavigatorText(runtime.title), icon: terminalMark,
+                                  selected: selected, running: running, busy: busy)
     }
 
     private enum SavedPicker {
@@ -260,6 +266,8 @@ struct WindowHarness {
         saved.usesNativeUI = session.usesNativeUI
         saved.isPinned = session.isPinned
         saved.agentSessionID = session.resumeState.transcriptID?.rawValue
+        saved.branch = session.branch
+        saved.handoffLine = SessionPopoverDefaults.handoffLine(for: session.handoff)
         saved.customTitle = session.customTitle.map {
             String($0.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars))
         }
@@ -296,12 +304,18 @@ struct WindowHarness {
             try await run()
         } catch {
             #if os(Linux)
+            await attachmentPersistenceToDrain?.finishPendingWrites()
+            attachmentPersistenceToDrain = nil
+            await LinuxStartupRestoreStore.finishPendingQuits()
             await GraphicalTerminal.waitForPendingStops()
             #endif
             FileHandle.standardError.write(Data("WindowHarness: \(error)\n".utf8))
             exit(1)
         }
         #if os(Linux)
+        await attachmentPersistenceToDrain?.finishPendingWrites()
+        attachmentPersistenceToDrain = nil
+        await LinuxStartupRestoreStore.finishPendingQuits()
         await GraphicalTerminal.waitForPendingStops()
         #endif
     }
@@ -317,6 +331,10 @@ struct WindowHarness {
             try SessionArchiveActionFixture.run()
             return
         }
+        if mode == "--attachment-persistence-fixture" {
+            try await LinuxAttachmentPersistenceFixture.run()
+            return
+        }
         if mode == "--text-prompt" {
             if CommandLine.arguments.count == 3, CommandLine.arguments[2] == "worktree" {
                 guard let branch = try LinuxTextPrompt.runWorktree() else { exit(2) }
@@ -327,22 +345,24 @@ struct WindowHarness {
                CommandLine.arguments[2] == "confirm-close-session",
                CommandLine.arguments[3].utf8.count <= 4_096,
                CommandLine.arguments[4] == "resume" || CommandLine.arguments[4] == "shell" {
-                let title = "Close “\(CommandLine.arguments[3])”?"
-                let message = CommandLine.arguments[4] == "resume"
-                    ? "The agent will stop. The session stays in the sidebar and can be resumed."
-                    : "The shell will stop. The session stays in the sidebar."
+                let title = CloseRunningSessionConfirmationCopy.title(
+                    for: CommandLine.arguments[3])
+                let message = CloseRunningSessionConfirmationCopy.message(
+                    supportsResume: CommandLine.arguments[4] == "resume")
                 guard try LinuxTextPrompt.runConfirmation(title: title, message: message,
-                                                          confirmTitle: "Close Session") else { exit(2) }
+                    confirmTitle: CloseRunningSessionConfirmationCopy.confirmTitle) else { exit(2) }
                 return
             }
             guard CommandLine.arguments.count == 5,
-                  CommandLine.arguments[2] == "rename-session",
+                  CommandLine.arguments[2] == "rename-session"
+                    || CommandLine.arguments[2] == "rename-terminal",
                   CommandLine.arguments[3].utf8.count <= 4_096,
                   CommandLine.arguments[4].utf8.count <= 4_096 else {
-                throw WindowFailure("usage: WindowHarness --text-prompt rename-session <display> <current>")
+                throw WindowFailure("usage: WindowHarness --text-prompt rename-{session|terminal} <display> <current>")
             }
             guard let title = try LinuxTextPrompt.runRename(
-                displayTitle: CommandLine.arguments[3], currentTitle: CommandLine.arguments[4]
+                displayTitle: CommandLine.arguments[3], currentTitle: CommandLine.arguments[4],
+                subject: CommandLine.arguments[2] == "rename-terminal" ? .terminal : .session
             ) else { exit(2) }
             let encoded = try JSONEncoder().encode(title)
             FileHandle.standardOutput.write(encoded + Data([10]))
@@ -354,6 +374,10 @@ struct WindowHarness {
             }
             guard let deadline = try LinuxScheduleMomentPicker.runSnooze() else { exit(2) }
             FileHandle.standardOutput.write(Data("\(deadline.timeIntervalSince1970)\n".utf8))
+            return
+        }
+        if mode == "--startup-restore-contract" {
+            try LinuxStartupRestoreStoreFixture.run()
             return
         }
         let decodedMarks = await Task.detached(priority: .utility) {
@@ -405,6 +429,14 @@ struct WindowHarness {
             ProjectRowLayoutFixture.run()
             return
         }
+        if mode == "--attachment-shell-fixture" {
+            AttachmentShellFixture.run()
+            return
+        }
+        if mode == "--display-pane-fixture" {
+            try AttachmentShellFixture.runNativeSplit()
+            return
+        }
         if mode == "--prompt-completion-layout-fixture" {
             guard CommandLine.arguments.count == 3 else {
                 throw WindowFailure("usage: WindowHarness --prompt-completion-layout-fixture OUTPUT_PREFIX")
@@ -453,7 +485,8 @@ struct WindowHarness {
             let snapshot = try await Task.detached {
                 try loadSnapshot(args[0], selectingProjectAt: requestedProject, socket: args[1])
             }.value
-            try show(snapshot, launch: targeted ? Array(args.prefix(3)) : args)
+            try await show(snapshot, storePath: args[0],
+                           launch: targeted ? Array(args.prefix(3)) : args)
             return
         }
         if mode == "--app-codex" || mode == "--app-codex-project"
@@ -481,7 +514,8 @@ struct WindowHarness {
                  codex == nil ? [.standard] : discoverAccounts(for: .codex),
                  claude == nil ? [.standard] : discoverAccounts(for: .claude))
             }.value
-            try show(prepared.0, launch: Array(args.prefix(3)), agentExecutable: codex,
+            try await show(prepared.0, storePath: args[0],
+                     launch: Array(args.prefix(3)), agentExecutable: codex,
                      claudeExecutable: claude, codexAccounts: prepared.1,
                      claudeAccounts: prepared.2)
             return
@@ -491,7 +525,7 @@ struct WindowHarness {
         // Database open, recovery and graph decoding never run on the UI actor. Only immutable
         // values cross back. The snapshot is deliberately fixed for this window's lifetime.
         let snapshot = try await Task.detached { try loadSnapshot(path) }.value
-        try show(snapshot)
+        try await show(snapshot, storePath: path)
         #else
         throw WindowFailure("WindowHarness requires Linux")
         #endif
@@ -599,6 +633,21 @@ struct WindowHarness {
         }
     }
 
+    private final class WorkerResultGate<Value: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<Value, Error>?
+
+        func finish(_ value: Result<Value, Error>) {
+            lock.lock(); result = value; lock.unlock()
+        }
+        func take() -> Result<Value, Error>? {
+            lock.lock(); defer { lock.unlock() }
+            let value = result
+            result = nil
+            return value
+        }
+    }
+
     private final class RenamePromptGate: @unchecked Sendable {
         private let lock = NSLock()
         private var process: Process?
@@ -627,13 +676,17 @@ struct WindowHarness {
     }
 
     private static func beginRenamePrompt(displayTitle: String, currentTitle: String,
-                                          dark: Bool) -> RenamePromptGate {
+                                          dark: Bool,
+                                          subject: LinuxTextPrompt.RenameSubject = .session)
+        -> RenamePromptGate {
         let gate = RenamePromptGate()
         DispatchQueue.global(qos: .userInitiated).async {
             gate.finish(Result {
                 let child = Process()
                 child.executableURL = URL(fileURLWithPath: "/proc/self/exe")
-                child.arguments = ["--text-prompt", "rename-session", displayTitle, currentTitle]
+                child.arguments = ["--text-prompt",
+                    subject == .terminal ? "rename-terminal" : "rename-session",
+                    displayTitle, currentTitle]
                 var environment = ProcessInfo.processInfo.environment
                 environment["THREADING_LINUX_PROMPT_DARK"] = dark ? "1" : "0"
                 child.environment = environment
@@ -1007,12 +1060,17 @@ struct WindowHarness {
 
     /// The prompt or GTK folder picker and store import run away from SDL's owning thread. One bounded
     /// snapshot crosses back to the navigator; closing the window closes a pending dialog.
+    private enum FolderImportOutcome {
+        case project(WindowSnapshot?)
+        case scratchpadMoved(WindowSnapshot, URL)
+    }
+
     private final class FolderImportGate: @unchecked Sendable {
         let blocksParentInput: Bool
         private let lock = NSLock()
         private var chooser: Process?
         private var cancelled = false
-        private var result: Result<WindowSnapshot?, Error>?
+        private var result: Result<FolderImportOutcome, Error>?
 
         init(blocksParentInput: Bool) { self.blocksParentInput = blocksParentInput }
 
@@ -1037,10 +1095,10 @@ struct WindowHarness {
             lock.lock(); defer { lock.unlock() }
             return cancelled
         }
-        func finish(_ value: Result<WindowSnapshot?, Error>) {
+        func finish(_ value: Result<FolderImportOutcome, Error>) {
             lock.lock(); result = value; lock.unlock()
         }
-        func take() -> Result<WindowSnapshot?, Error>? {
+        func take() -> Result<FolderImportOutcome, Error>? {
             lock.lock(); defer { lock.unlock() }
             let value = result
             result = nil
@@ -1051,14 +1109,18 @@ struct WindowHarness {
     private enum ProjectFolderChoice: Equatable {
         case existing, new, scratchpad
         case worktree(sourcePath: String, dark: Bool)
+        case scratchpadChoose(sourcePath: String)
+        case scratchpadDefault(sourcePath: String)
     }
 
     private static func beginFolderImport(store: String, socket: String,
                                           choice: ProjectFolderChoice = .existing,
                                           droppedPath: String? = nil) -> FolderImportGate {
         let blocksParentInput: Bool
-        if case .worktree = choice { blocksParentInput = true }
-        else { blocksParentInput = false }
+        switch choice {
+        case .worktree, .scratchpadChoose, .scratchpadDefault: blocksParentInput = true
+        default: blocksParentInput = false
+        }
         let gate = FolderImportGate(blocksParentInput: blocksParentInput)
         DispatchQueue.global(qos: .userInitiated).async {
             gate.finish(Result { try importFolder(store: store, socket: socket,
@@ -1068,9 +1130,23 @@ struct WindowHarness {
     }
 
     private static func importFolder(store: String, socket: String, choice: ProjectFolderChoice,
-                                     droppedPath: String?, gate: FolderImportGate) throws -> WindowSnapshot? {
+                                     droppedPath: String?, gate: FolderImportGate) throws -> FolderImportOutcome {
+        switch choice {
+        case .scratchpadChoose(let sourcePath):
+            guard let parent = try chooseScratchpadParent(gate: gate) else {
+                return .project(nil)
+            }
+            return try moveScratchpad(store: store, socket: socket, sourcePath: sourcePath,
+                destination: ScratchpadLocation.destination(parent: parent), gate: gate)
+        case .scratchpadDefault(let sourcePath):
+            let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+            let destination = ScratchpadLocation.defaultFolderURL(home:
+                URL(fileURLWithPath: home, isDirectory: true))
+            return try moveScratchpad(store: store, socket: socket, sourcePath: sourcePath,
+                destination: destination, gate: gate)
+        default: break
+        }
         var bytes = Data()
-        var tooLong = false
         if case .worktree(let sourcePath, let dark) = choice {
             let chooser = Process()
             chooser.executableURL = URL(fileURLWithPath: "/proc/self/exe")
@@ -1096,7 +1172,7 @@ struct WindowHarness {
             }
             chooser.waitUntilExit()
             gate.closed()
-            if gate.isCancelled() || chooser.terminationStatus == 2 { return nil }
+            if gate.isCancelled() || chooser.terminationStatus == 2 { return .project(nil) }
             guard chooser.terminationStatus == 0, branchBytes.last == 10,
                   let branch = String(data: branchBytes.dropLast(), encoding: .utf8) else {
                 throw WindowFailure("Worktree prompt returned an invalid branch name.")
@@ -1105,32 +1181,14 @@ struct WindowHarness {
         } else if let droppedPath {
             bytes = Data(droppedPath.utf8)
         } else if choice != .scratchpad {
-            let chooser = Process()
-            chooser.executableURL = URL(fileURLWithPath: "/usr/bin/zenity")
-            chooser.arguments = choice == .new
+            let arguments = choice == .new
                 ? ["--file-selection", "--save", "--filename=New Project",
                    "--title=New Project"]
                 : ["--file-selection", "--directory", "--title=Add project folder"]
-            let output = Pipe()
-            // A launcher may be reading commands from stdin (including bash -s smoke runs).
-            // Neither child may consume those commands while the window remains open.
-            chooser.standardInput = FileHandle.nullDevice
-            chooser.standardOutput = output
-            chooser.standardError = FileHandle.nullDevice
-            try chooser.run()
-            gate.opened(chooser)
-            while true {
-                let chunk = output.fileHandleForReading.availableData
-                if chunk.isEmpty { break }
-                if bytes.count + chunk.count > 4096 { tooLong = true }
-                else if !tooLong { bytes.append(chunk) }
+            guard let path = try pickFolder(arguments: arguments, gate: gate) else {
+                return .project(nil)
             }
-            chooser.waitUntilExit()
-            gate.closed()
-            if gate.isCancelled() || chooser.terminationStatus == 1 { return nil }
-            guard chooser.terminationStatus == 0 else { throw WindowFailure("folder picker failed") }
-            guard !tooLong, bytes.last == 10 else { throw WindowFailure("folder picker returned an invalid path") }
-            bytes.removeLast()
+            bytes = Data(path.utf8)
         }
         let folder: URL?
         if choice == .scratchpad { folder = nil }
@@ -1139,7 +1197,7 @@ struct WindowHarness {
                   path.utf8.count <= 4096, path != "/" else {
                 throw WindowFailure("folder picker returned an invalid path")
             }
-            guard !gate.isCancelled() else { return nil }
+            guard !gate.isCancelled() else { return .project(nil) }
             if choice == .new {
                 let destination = URL(fileURLWithPath: path, isDirectory: true)
                 try FileManager.default.createDirectory(at: destination,
@@ -1150,7 +1208,77 @@ struct WindowHarness {
             }
             folder = existing
         }
-        guard !gate.isCancelled() else { return nil }
+        guard !gate.isCancelled() else { return .project(nil) }
+        let hostArguments = choice == .scratchpad
+            ? ["--ensure-scratchpad", store] +
+                (LinuxGeneralSettings.configuredScratchpadFolderURL.map { [$0.path] } ?? [])
+            : ["--add-project", store, folder!.path]
+        guard let hostPath = try runProjectHost(hostArguments, gate: gate) else {
+            return .project(nil)
+        }
+        guard ProjectDirectory.existing(at: hostPath) != nil,
+              choice == .scratchpad || hostPath == folder!.path else {
+            throw WindowFailure("project host returned a mismatched path")
+        }
+        return .project(try loadSnapshot(store, selectingProjectAt: hostPath, socket: socket))
+    }
+
+    private static func pickFolder(arguments: [String], gate: FolderImportGate) throws -> String? {
+        let chooser = Process()
+        chooser.executableURL = URL(fileURLWithPath: "/usr/bin/zenity")
+        chooser.arguments = arguments
+        let output = Pipe()
+        // A launcher may be reading commands from stdin; the picker must not consume them.
+        chooser.standardInput = FileHandle.nullDevice
+        chooser.standardOutput = output
+        chooser.standardError = FileHandle.nullDevice
+        try chooser.run()
+        gate.opened(chooser)
+        var bytes = Data()
+        var tooLong = false
+        while true {
+            let chunk = output.fileHandleForReading.availableData
+            if chunk.isEmpty { break }
+            if bytes.count + chunk.count > 4096 { tooLong = true }
+            else if !tooLong { bytes.append(chunk) }
+        }
+        chooser.waitUntilExit()
+        gate.closed()
+        if gate.isCancelled() || chooser.terminationStatus == 1 { return nil }
+        guard chooser.terminationStatus == 0 else { throw WindowFailure("folder picker failed") }
+        guard !tooLong, bytes.last == 10,
+              let path = String(data: bytes.dropLast(), encoding: .utf8),
+              path.hasPrefix("/"), path != "/" else {
+            throw WindowFailure("folder picker returned an invalid path")
+        }
+        return path
+    }
+
+    private static func chooseScratchpadParent(gate: FolderImportGate) throws -> URL? {
+        guard let path = try pickFolder(arguments: ["--file-selection", "--directory",
+            "--title=Choose the folder to keep the scratchpad in"], gate: gate) else { return nil }
+        guard let folder = ProjectDirectory.existing(at: path) else {
+            throw WindowFailure("selected Scratchpad parent does not exist")
+        }
+        return folder
+    }
+
+    private static func moveScratchpad(store: String, socket: String, sourcePath: String,
+                                       destination: URL, gate: FolderImportGate)
+        throws -> FolderImportOutcome {
+        guard !gate.isCancelled() else { return .project(nil) }
+        guard let path = try runProjectHost(
+            ["--relocate-scratchpad", store, sourcePath, destination.path], gate: gate) else {
+            return .project(nil)
+        }
+        guard path == destination.path else {
+            throw WindowFailure("Scratchpad host returned a mismatched path")
+        }
+        return .scratchpadMoved(try loadSnapshot(store, socket: socket), destination)
+    }
+
+    private static func runProjectHost(_ arguments: [String], gate: FolderImportGate)
+        throws -> String? {
         guard let executable = Bundle.main.executableURL?.deletingLastPathComponent()
             .appendingPathComponent("LinuxHost"),
             FileManager.default.isExecutableFile(atPath: executable.path) else {
@@ -1158,43 +1286,94 @@ struct WindowHarness {
         }
         let host = Process()
         host.executableURL = executable
-        host.arguments = choice == .scratchpad ? ["--ensure-scratchpad", store]
-            : ["--add-project", store, folder!.path]
-        let hostOutput = Pipe()
+        host.arguments = arguments
+        let output = Pipe()
         host.standardInput = FileHandle.nullDevice
-        host.standardOutput = hostOutput
-        host.standardError = hostOutput
+        host.standardOutput = output
+        host.standardError = output
         try host.run()
-        var hostBytes = Data()
-        var hostTooLong = false
+        // Once the host starts its rename and database transaction, let it finish even if the
+        // window closes. The host also persists the location for the next launch.
+        var bytes = Data()
+        var tooLong = false
         while true {
-            let chunk = hostOutput.fileHandleForReading.availableData
+            let chunk = output.fileHandleForReading.availableData
             if chunk.isEmpty { break }
-            if hostBytes.count + chunk.count > 4096 { hostTooLong = true }
-            else if !hostTooLong { hostBytes.append(chunk) }
+            if bytes.count + chunk.count > 4096 { tooLong = true }
+            else if !tooLong { bytes.append(chunk) }
         }
         host.waitUntilExit()
-        guard host.terminationStatus == 0 else {
-            let detail = String(data: hostBytes, encoding: .utf8)?
+        guard !gate.isCancelled() else { return nil }
+        if host.terminationStatus != 0 {
+            let detail = String(data: bytes, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? "project host failed"
-            throw WindowFailure(hostTooLong ? "project host refusal exceeded its bound" : detail)
+            throw WindowFailure(tooLong ? "project host refusal exceeded its bound" : detail)
         }
-        guard !hostTooLong, hostBytes.last == 10 else {
+        guard !tooLong, bytes.last == 10,
+              let path = String(data: bytes.dropLast(), encoding: .utf8),
+              path.hasPrefix("/"), path != "/" else {
             throw WindowFailure("project host returned an invalid path")
         }
-        hostBytes.removeLast()
-        guard let hostPath = String(data: hostBytes, encoding: .utf8),
-              hostPath.hasPrefix("/"), ProjectDirectory.existing(at: hostPath) != nil,
-              choice == .scratchpad || hostPath == folder!.path else {
-            throw WindowFailure("project host returned a mismatched path")
-        }
-        return try loadSnapshot(store, selectingProjectAt: hostPath, socket: socket)
+        return path
     }
 
     private struct PendingSelection {
         let event: TWEvent
         let continuesOnRefusal: Bool
         let gate: SelectionGate
+    }
+
+    /// The SDL window owns these mutable decisions for its whole lifetime. AppKit callbacks
+    /// capture this actor-owned reference, never task-local variables from the async run body.
+    @MainActor private final class WindowInteractionGate {
+        var pendingSelection: PendingSelection?
+        var pendingFolderImport: FolderImportGate?
+        var composerSubmitRequested = false
+
+        func requestComposerSubmit() {
+            guard pendingFolderImport == nil, pendingSelection == nil else { return }
+            composerSubmitRequested = true
+        }
+    }
+
+    @MainActor private final class NativeRuntimeRegistry {
+        var panes: [SavedRuntimeKey: WorkspaceConversationPane] = [:]
+        var background: [SavedRuntimeKey: NativeWorkspaceSession] = [:]
+        private(set) var retentionVersion: UInt64 = 0
+        private var recency = SessionProcessResidencyRecency()
+
+        func runtime(for key: SavedRuntimeKey) -> NativeWorkspaceSession? {
+            panes[key]?.runtime ?? background[key]
+        }
+
+        func noteRetentionChange() { retentionVersion &+= 1 }
+
+        func observeRetention(of runtime: NativeWorkspaceSession) {
+            runtime.onRetentionChange = { [weak self] in self?.noteRetentionChange() }
+            noteRetentionChange()
+        }
+
+        func noteLocalView(of id: SessionID) {
+            recency.noteLocalView(of: id)
+            noteRetentionChange()
+        }
+
+        func forget(_ id: SessionID) {
+            recency.forget(id)
+            noteRetentionChange()
+        }
+
+        func retentionCandidates(visibleID: SessionID?) -> [SessionProcessRetentionCandidate] {
+            let runtimes = panes.values.map(\.runtime) + Array(background.values)
+            recency.retainOnly(Set(runtimes.map(\.id)))
+            return runtimes.compactMap { runtime in
+                guard let conversationUseAt = runtime.conversationUseAt else { return nil }
+                return runtime.retentionCandidate(
+                    lastWarmUseAt: recency.lastWarmUseAt(
+                        for: runtime.id, conversationUseAt: conversationUseAt),
+                    isLocallyVisible: runtime.id == visibleID)
+            }
+        }
     }
 
     private static func recordSelection(_ agentID: String?, terminalID: String? = nil,
@@ -1215,6 +1394,12 @@ struct WindowHarness {
     static func loadSnapshot(_ path: String, selectingProjectAt requestedPath: String? = nil,
                              socket: String? = nil) throws -> WindowSnapshot {
         let snapshot = try loadStoredSnapshot(path, selectingProjectAt: requestedPath)
+        guard LinuxGeneralSettings.restoresLastSession else {
+            return WindowSnapshot(projects: snapshot.projects,
+                selectedProjectIndex: snapshot.selectedProjectIndex,
+                restoreAgentID: nil, restoreAgentAction: nil, restoreAgentActivity: nil,
+                restoreAgentProjectID: nil, restoreTerminalID: nil)
+        }
         if let socket, let idText = snapshot.restoreTerminalID,
            let uuid = UUID(uuidString: idText) {
             switch GraphicalTerminal.terminalPresence(socket: socket, id: TerminalID(uuid)) {
@@ -1222,18 +1407,23 @@ struct WindowHarness {
             case .absent, .exited:
                 return WindowSnapshot(projects: snapshot.projects,
                     selectedProjectIndex: snapshot.selectedProjectIndex,
-                    restoreAgentID: nil, restoreAgentActivity: nil,
+                    restoreAgentID: nil, restoreAgentAction: nil, restoreAgentActivity: nil,
                     restoreAgentProjectID: nil, restoreTerminalID: nil)
             }
         }
         guard let socket, let idText = snapshot.restoreAgentID,
-              let uuid = UUID(uuidString: idText) else { return snapshot }
-        switch GraphicalTerminal.agentPresence(socket: socket, id: SessionID(uuid)) {
-        case .running, .unavailable: return snapshot
-        case .absent: break
-        case .exited(let status):
+              let uuid = UUID(uuidString: idText),
+              let summaries = GraphicalTerminal.agentSummaries(socket: socket) else {
+            return snapshot
+        }
+        let id = SessionID(uuid)
+        let match = summaries.first { summary in
+            guard case .agentSession(let heldID) = summary.id.identity else { return false }
+            return heldID == id
+        }
+        if let status = match?.exit {
             do {
-                try GraphicalTerminal.recordAgentExit(store: path, id: SessionID(uuid),
+                try GraphicalTerminal.recordAgentExit(store: path, id: id,
                     status: status, observedNow: false,
                     expectedActivity: snapshot.restoreAgentActivity,
                     expectedProject: snapshot.restoreAgentProjectID)
@@ -1241,11 +1431,22 @@ struct WindowHarness {
                 FileHandle.standardError.write(Data("Agent exit reconciliation: \(error)\n".utf8))
             }
         }
-        // No daemon-held live child means startup must not open an unavailable terminal. A
-        // missing summary gives no exit status; explicit selection remains the resume route.
+        if let match, match.exit == nil {
+            guard match.resolvedChannel == .pipes else { return snapshot }
+            return WindowSnapshot(projects: snapshot.projects,
+                selectedProjectIndex: snapshot.selectedProjectIndex,
+                restoreAgentID: snapshot.restoreAgentID, restoreAgentAction: .afterHostedStop,
+                restoreAgentActivity: snapshot.restoreAgentActivity,
+                restoreAgentProjectID: snapshot.restoreAgentProjectID,
+                restoreTerminalID: snapshot.restoreTerminalID)
+        }
+        // The selected conversation opens through its ordinary saved-runtime path even after
+        // a reboot. Its worker revalidates the transcript and daemon identity before spawning.
         return WindowSnapshot(projects: snapshot.projects,
-            selectedProjectIndex: snapshot.selectedProjectIndex, restoreAgentID: nil,
-            restoreAgentActivity: nil, restoreAgentProjectID: nil,
+            selectedProjectIndex: snapshot.selectedProjectIndex,
+            restoreAgentID: snapshot.restoreAgentID, restoreAgentAction: .resume,
+            restoreAgentActivity: snapshot.restoreAgentActivity,
+            restoreAgentProjectID: snapshot.restoreAgentProjectID,
             restoreTerminalID: snapshot.restoreTerminalID)
     }
 
@@ -1298,7 +1499,10 @@ struct WindowHarness {
             let agents = project.recentSessions.map(savedAgent)
             let terminals = project.recentTerminals.map {
                 ProjectSnapshot.SavedRuntime(id: String(describing: $0.id),
-                    title: String($0.displayTitle.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars)))
+                    title: String($0.displayTitle.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars)),
+                    customTitle: $0.customTitle.map {
+                        String($0.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars))
+                    })
             }
             return ProjectSnapshot(id: String(describing: project.id), name: project.name,
                 path: project.folderPath, isScratchpad: project.isScratchpad,
@@ -1307,7 +1511,7 @@ struct WindowHarness {
                 sessions: project.sessionCount,
                 terminalCount: project.terminalCount, recentAgents: agents, recentTerminals: terminals)
         }
-        // Restore only a selected live runtime in the chosen project. An older selected row
+        // Restore a selected, resumable runtime in the chosen project. An older selected row
         // joins its bounded picker without increasing the mounted-row ceiling.
         let restoreAgentID: String?
         let restoreAgentActivity: Date?
@@ -1318,7 +1522,7 @@ struct WindowHarness {
            selectedAgent.projectID == catalog.projects[selectedIndex].id {
             let selected = selectedAgent.session
             if selected.hasLaunched, !selected.isArchived,
-               selected.lastExitCode == nil {
+               (selected.lastExitCode == nil || selected.resumeState.isResumable) {
                 if !projects[selectedIndex].recentAgents.contains(where: {
                     $0.id == selected.id.uuidString
                 }) {
@@ -1369,6 +1573,7 @@ struct WindowHarness {
         } ?? 0
         return WindowSnapshot(projects: projects, selectedProjectIndex: displayedSelectedIndex,
                               restoreAgentID: restoreAgentID,
+                              restoreAgentAction: restoreAgentID == nil ? nil : .attach,
                               restoreAgentActivity: restoreAgentActivity,
                               restoreAgentProjectID: restoreAgentProjectID,
                               restoreTerminalID: restoreTerminalID)
@@ -1704,7 +1909,9 @@ struct WindowHarness {
                 let newer = projects[index].recentAgents.lastIndex {
                     (publishedCounts[$0.id] ?? 0) > receipt.sessionCount
                 }
-                projects[index].recentAgents.insert(savedAgent(receipt.row), at: newer.map { $0 + 1 } ?? 0)
+                var saved = savedAgent(receipt.row)
+                saved.branch = receipt.branch
+                projects[index].recentAgents.insert(saved, at: newer.map { $0 + 1 } ?? 0)
                 if projects[index].recentAgents.count > maximumSelectableAgentsPerProject {
                     let last = projects[index].recentAgents.count - 1
                     let preservesLast = selection?.projectID == projects[index].id
@@ -1750,11 +1957,38 @@ struct WindowHarness {
         return changed
     }
 
-    @MainActor static func show(_ snapshot: WindowSnapshot, launch: [String]? = nil,
+    @MainActor static func show(_ snapshot: WindowSnapshot, storePath: String,
+                                launch: [String]? = nil,
                                 agentExecutable: String? = nil,
                                 claudeExecutable: String? = nil,
                                 codexAccounts: [AccountHandle] = [],
-                                claudeAccounts: [AccountHandle] = []) throws {
+                                claudeAccounts: [AccountHandle] = []) async throws {
+        defer { LinuxGeneralSettings.finishPendingWrites() }
+        let attachmentPersistence = LinuxAttachmentPersistence(storePath: storePath)
+        attachmentPersistenceToDrain = attachmentPersistence
+        let attachmentStore = attachmentPersistence.makeStore()
+        var preparedAttachmentSessions: Set<SessionID> = []
+        if let idText = snapshot.restoreAgentID,
+           let id = SessionID(uuidString: idText) {
+            do {
+                let rows = try await attachmentPersistence.load(sessionID: id)
+                attachmentPersistence.markPreparedInstalled(for: id)
+                if attachmentStore.installPrepared(rows, for: id) {
+                    preparedAttachmentSessions.insert(id)
+                }
+            } catch {
+                FileHandle.standardError.write(Data(
+                    "Attachment preload refused for \(id.uuidString): \(error)\n".utf8))
+            }
+        }
+        SessionAttachmentStore.shared = attachmentStore
+        if let scratchpad = snapshot.projects.first(where: \.isScratchpad),
+           LinuxGeneralSettings.scratchpadFolderURL.path != scratchpad.path {
+            // A completed host rename may outlive a closing SDL window. The stored project
+            // identity is authoritative; repair an older or interrupted UI preference.
+            LinuxGeneralSettings.setScratchpadFolderURL(
+                URL(fileURLWithPath: scratchpad.path, isDirectory: true))
+        }
         if launch != nil { try WorkspaceDisplay.configureForApp() }
         let scale = WorkspaceDisplay.scale
         var traceFirstFrame = ProcessInfo.processInfo.environment["THREADING_LINUX_STARTUP_TRACE"] == "1"
@@ -2028,14 +2262,33 @@ struct WindowHarness {
         }
         var terminals: [String: GraphicalTerminal] = [:]
         var restoredRuntimes: [SavedRuntimeKey: GraphicalTerminal] = [:]
-        var nativeRuntimes: [SavedRuntimeKey: WorkspaceConversationPane] = [:]
+        // Background native sessions own streams without mounting transcript or composer views.
+        // The production pane is created only if its row is selected.
+        let nativeRegistry = NativeRuntimeRegistry()
+        let nativeRetention = LinuxNativeProcessRetention()
+        func retainedTerminalCount() -> Int {
+            terminals.count + restoredRuntimes.count
+        }
+        var pendingStartupPrepare: WorkerResultGate<LinuxStartupRestoreStore.Preparation>?
+        // A visible session's attachment document is prepared off-main before its shared store
+        // can be read. At most the retained-runtime ceiling may be awaiting a database receipt.
+        var pendingAttachmentLoads: [SessionID: WorkerResultGate<[SessionAttachment]>] = [:]
+        let terminalAttachmentCoordinator = LinuxTerminalAttachmentCoordinator(
+            persistence: attachmentPersistence, store: attachmentStore)
+        let outsideProjectAdmission = LinuxOutsideProjectAdmissionCoordinator(store: attachmentStore)
+        var pendingStartupConsume: (LinuxStartupRestoreStore.Preparation,
+                                    LinuxStartupRestoreStore.ConsumeReceipt)?
+        var startupLaunches: [LinuxStartupRestoreStore.Launch] = []
+        var startupDeferredIDs: [SessionID] = []
+        var nextStartupLaunchAt = Date.distantFuture
+        var startupConsumeRequested = false
         var composerCreationPending = false
         var pendingAgentProjects: [String: ProjectID] = [:]
-        // At most one commit count per retained agent runtime, within the shared eight-slot cap.
+        // At most one commit count per retained agent runtime.
         var publishedAgentCounts: [String: Int] = [:]
         var restoredProjectIDs: Set<String> = []
         // A fresh project shell keeps one owner even when selected through its saved row.
-        // These lookups never add aliases, so the sum of cache counts stays the eight-slot bound.
+        // These lookups never add aliases to terminal ownership.
         func owner(of key: SavedRuntimeKey, projectID: String) -> RuntimeOwner {
             if case .terminal(let id) = key, terminals[projectID]?.terminalID == id {
                 return .project(projectID)
@@ -2053,7 +2306,7 @@ struct WindowHarness {
                 return !runtime.canReplace
             }
             if case .agent = key {
-                return nativeRuntimes[key]?.runtime.presentsActiveAgent == true
+                return nativeRegistry.runtime(for: key)?.presentsActiveAgent == true
             }
             return false
         }
@@ -2063,11 +2316,62 @@ struct WindowHarness {
             case .saved(let key): restoredRuntimes[key] = runtime
             }
         }
+        var quitIdleExpirations: [SessionID: Date] = [:]
         defer {
             for terminal in terminals.values { terminal.stop() }
             for terminal in restoredRuntimes.values { terminal.stop() }
             let deadline = Date().addingTimeInterval(1)
-            for pane in nativeRuntimes.values { pane.runtime.closeForQuit(by: deadline) }
+            for pane in nativeRegistry.panes.values {
+                pane.runtime.closeForQuit(by: deadline,
+                    idleExpiresAt: quitIdleExpirations[pane.runtime.id])
+            }
+            for runtime in nativeRegistry.background.values {
+                runtime.closeForQuit(by: deadline,
+                    idleExpiresAt: quitIdleExpirations[runtime.id])
+            }
+        }
+        defer {
+            let plan = SessionProcessRetentionPolicy.plan(
+                candidates: nativeRegistry.retentionCandidates(visibleID: nil),
+                windowDays: LinuxGeneralSettings.sessionRestoreWindowDays,
+                limit: LinuxGeneralSettings.sessionRestoreLimit,
+                protectsLocalVisibility: false)
+            quitIdleExpirations = plan.warmIdleExpirations
+            for id in plan.retire {
+                let key = SavedRuntimeKey.agent(id.uuidString)
+                let runtime = nativeRegistry.panes.removeValue(forKey: key)?.runtime
+                    ?? nativeRegistry.background.removeValue(forKey: key)
+                runtime?.stop()
+                nativeRegistry.forget(id)
+            }
+            if let launch {
+                let terminalIDs = restoredRuntimes.compactMap { key, runtime -> SessionID? in
+                    guard case .agent(let raw) = key, runtime.isLiveOrMayBeLive else { return nil }
+                    return SessionID(uuidString: raw)
+                }
+                let nativeIDs = nativeRegistry.panes.compactMap { key, pane -> SessionID? in
+                    guard case .agent(let raw) = key, pane.runtime.presentsActiveAgent else { return nil }
+                    return SessionID(uuidString: raw)
+                }
+                let backgroundNativeIDs = nativeRegistry.background.compactMap {
+                    key, runtime -> SessionID? in
+                    guard case .agent(let raw) = key, runtime.presentsActiveAgent else { return nil }
+                    return SessionID(uuidString: raw)
+                }
+                // A quick quit must carry forward relaunches still queued after this launch
+                // consumed the preceding record, including a consume receipt still in flight.
+                let owedIDs = startupLaunches.map { $0.session.id } + startupDeferredIDs
+                let pendingConsume = pendingStartupConsume.map {
+                    LinuxStartupRestoreStore.PendingConsume(
+                        receipt: $0.1, owed: Set($0.0.launches.map { $0.session.id }))
+                }
+                LinuxStartupRestoreStore.recordCleanQuitLater(
+                    store: launch[0], socket: launch[1],
+                    captured: Set(terminalIDs + nativeIDs + backgroundNativeIDs + owedIDs),
+                    consumed: startupConsumeRequested, retired: plan.retire,
+                    pendingConsume: pendingConsume
+                )
+            }
         }
         var width = Int(initialWidth), height = Int(initialHeight),
             selected = snapshot.selectedProjectIndex, first = 0
@@ -2077,11 +2381,9 @@ struct WindowHarness {
         var savedPicker: SavedPicker?
         var savedSelected = 0, savedFirst = 0
         var accountPicker: AgentKind?
-        let retainedMenuRows = RetainedMenuRows()
         var accountSelected = 0, accountFirst = 0
         var activatedAccountHandle: AccountHandle?
-        var pendingSelection: PendingSelection?
-        var pendingFolderImport: FolderImportGate?
+        let interaction = WindowInteractionGate()
         var pendingArchive: (id: String, projectID: String, gate: ArchiveGate)?
         var pendingPin: (id: String, projectID: String, gate: PinGate)?
         var pendingRename: (id: String, projectID: String, gate: RenameGate)?
@@ -2089,6 +2391,14 @@ struct WindowHarness {
                                   displayedCurrentTitle: String?, gate: RenamePromptGate)?
         var pendingClosePrompt: (id: String, projectID: String, gate: ClosePromptGate)?
         var pendingClose: (id: String, projectID: String, gate: CloseGate)?
+        var pendingTerminalRenamePrompt: (id: String, projectID: String,
+                                          displayedCurrentTitle: String?, gate: RenamePromptGate)?
+        var pendingTerminalRename: (id: String, projectID: String,
+                                    gate: WorkerResultGate<TerminalRowAction.RenameReceipt>)?
+        var pendingTerminalClose: (id: String, projectID: String,
+                                   gate: WorkerResultGate<Bool>)?
+        var pendingTerminalCopyPath: (id: String, projectID: String,
+                                      gate: WorkerResultGate<String>)?
         var pendingSessionMenuPresence: (id: String, projectID: String,
                                          gate: SessionPresenceGate)?
         let snoozeWorker = DispatchQueue(label: "threading.linux.session-snooze", qos: .utility)
@@ -2103,26 +2413,34 @@ struct WindowHarness {
         let snoozeWakeInbox = SnoozeWakeInbox()
         var pendingSnoozeAcknowledgements: [String: String] = [:]
         var actions: NavigatorActions.Presentation?
-        let actionMenuSurface = ThemedMenuPanelView(frame: .zero)
+        var actionMenuSurface: ThemedMenuSurfaceView?
+        var actionMenuSurfaceKey: [String] = []
+        var actionMenuHighlightedIndex: Int?
         var actionMenuFrame = NSRect.zero
         var actionMenuUsesProjectRow = false
-        let accountMenuSurface = ThemedMenuPanelView(frame: .zero)
+        var accountMenuSurface: ThemedMenuSurfaceView?
+        var accountMenuSurfaceKey: [String] = []
+        var accountMenuHighlightedIndex: Int?
         var accountMenuFrame = NSRect.zero
-        let addProjectMenuSeparator = ThemedMenuSeparatorView()
         var sessionMenu: SidebarSessionMenu?
-        let sessionMenuSurface = ThemedMenuPanelView(frame: .zero)
-        let retainedSessionMenuRows = RetainedMenuRows()
-        var sessionMenuSeparators: [ThemedMenuSeparatorView] = []
-        var sessionMenuFrame = NSRect.zero
+        var sessionMenuUsesPaneHeader = false
+        var sessionMenuPreviousSidebarFocus: Bool?
+        var terminalMenu: SidebarTerminalMenu?
+        var sidebarMenuSurface: ThemedMenuSurfaceView?
+        var sidebarMenuSurfaceKey: [String] = []
+        var sidebarMenuHighlightedIndex: Int?
+        var sidebarMenuFrame = NSRect.zero
         var navigatorFloatingSurface: ThemedMenuPanelView?
-        var navigatorFloatingRows: [NSView] = []
         var navigatorFloatingFrame = NSRect.zero
-        var sessionMenuVisibleEntries: [Int] = []
-        var activatedSessionMenuEntry: Int?
+        var sidebarMenuVisibleEntries: [Int] = []
+        var activatedSidebarMenuEntry: Int?
         var activatedMenuEntry: Int?
         var actionsEnabled = true
         var dismissedActionGesture: Int32?
         var hoveredOutlineItem: NavigatorOutlineItem?
+        var hoverCardDueAt: Date?
+        var hoverCardItem: NavigatorOutlineItem?
+        var hoverCardSurface: ThemedMenuPanelView?
         var dirty = true
         func refreshSnoozeDeadline() {
             nextSnoozeDeadline = snoozeDeadlines.values.min()
@@ -2152,6 +2470,12 @@ struct WindowHarness {
         func makeObservedTerminal() -> GraphicalTerminal {
             GraphicalTerminal(onActivityChange: {
                 NativeConversationDelivery.callbacks.receive { navigatorRoot.needsDisplay = true }
+            }, onAgentOutput: { terminal, sessionID in
+                NativeConversationDelivery.callbacks.receive {
+                    terminal.acknowledgeAttachmentOutput()
+                    terminalAttachmentCoordinator.noteOutput(
+                        from: terminal, sessionID: sessionID)
+                }
             })
         }
         var collapsedRepositoryIdentities = Set(PreferenceStore.shared.stringArray(
@@ -2201,6 +2525,7 @@ struct WindowHarness {
         var activatedOutlineProjectActionID: String?
         var activatedOutlineProjectCreateID: String?
         var activatedOutlineSessionActionID: String?
+        var activatedOutlineTerminalActionID: String?
         var activatedOutlineSessionArchiveID: String?
         var rowActionMenuGesture = false
         var rowActionMenuSource: NSRect = .zero
@@ -2223,22 +2548,24 @@ struct WindowHarness {
                 project = projects.indices.contains(selected) ? projects[selected] : nil
             }
             let shell = project.flatMap { terminals[$0.id] }
-            let runtimeCount = terminals.count + restoredRuntimes.count + nativeRuntimes.count
+            let runtimeCount = retainedTerminalCount()
                 + (composerCreationPending ? 1 : 0)
             return .init(projectID: project.flatMap { ProjectID(uuidString: $0.id) },
                 canOpenShell: shell != nil || runtimeCount < maximumOpenRuntimes,
                 canCreateShell: (shell == nil || shell!.canReplace)
                     && runtimeCount - (shell == nil ? 0 : 1) < maximumOpenRuntimes,
                 shellMayBeRunning: shell != nil && shell?.canReplace != true,
-                canCreateAgent: runtimeCount < maximumOpenRuntimes,
+                canCreateAgent: runtimeCount < maximumOpenRuntimes
+                    || !nativeExecutables.isEmpty,
                 canCreateWorktree: project.flatMap { outlineSource.checkoutCatalog.checkouts[$0.id] } != nil,
                 hasCodex: agentExecutable != nil, hasClaude: claudeExecutable != nil,
                 hasAgents: project?.recentAgents.isEmpty == false,
                 hasTerminals: project?.recentTerminals.isEmpty == false)
         }
-        defer { pendingFolderImport?.cancel() }
+        defer { interaction.pendingFolderImport?.cancel() }
         defer { pendingSnoozePicker?.gate.cancel() }
         defer { pendingRenamePrompt?.gate.cancel() }
+        defer { pendingTerminalRenamePrompt?.gate.cancel() }
         defer { pendingClosePrompt?.gate.cancel() }
         var navigatorDisplayRevision: UInt64 = 0
         var nextVisibleAttentionExpiry: Date?
@@ -2297,6 +2624,7 @@ struct WindowHarness {
             row.onProjectCreate = { activatedOutlineProjectCreateID = $0 }
             row.onProjectControlVisualChange = { dirty = true }
             row.onSessionAction = { activatedOutlineSessionActionID = $0 }
+            row.onTerminalAction = { activatedOutlineTerminalActionID = $0 }
             row.onSessionArchive = { activatedOutlineSessionArchiveID = $0 }
             row.onSessionControlVisualChange = { dirty = true }
 
@@ -2345,7 +2673,7 @@ struct WindowHarness {
                 let project = projects[projectIndex]
                 let runtime = project.recentAgents[childIndex]
                 let retained = hasActiveRuntime(.agent(runtime.id), projectID: project.id)
-                let activity = nativeRuntimes[.agent(runtime.id)]?.activity ?? .idle
+                let activity = nativeRegistry.runtime(for: .agent(runtime.id))?.activity ?? .idle
                 if activity.showsWorkingMark { visibleWorkingActivity = true }
                 let now = Date()
                 let attention = runtime.attention(at: now)
@@ -2368,18 +2696,38 @@ struct WindowHarness {
             case .terminal(let projectIndex, let childIndex, _):
                 let project = projects[projectIndex]
                 let runtime = project.recentTerminals[childIndex]
-                let retained = hasActiveRuntime(.terminal(runtime.id), projectID: project.id)
-                row.configureProductionTerminal(title: readableNavigatorText(runtime.title),
-                    icon: terminalMark, selected: isSelected, running: retained)
+                let key = SavedRuntimeKey.terminal(runtime.id)
+                let retained = hasActiveRuntime(key, projectID: project.id)
+                let busy = retainedRuntime(for: owner(of: key,
+                    projectID: project.id))?.hasForegroundProcess ?? false
+                row.configureProductionTerminal(id: runtime.id,
+                    title: readableNavigatorText(runtime.title),
+                    icon: terminalMark, selected: isSelected, running: retained, busy: busy,
+                    actionsEnabled: actionsEnabled && pendingTerminalClose == nil,
+                    menuPresented: terminalMenu?.terminalID == runtime.id,
+                    hovered: hoveredOutlineItem == item)
                 row.configureProductionStatus(nil, color: ink.secondary)
             }
         }
-        func configureOutlineChrome(_ row: SidebarHoverRowView, in view: NSOutlineView) {
+        func configureOutlineChrome(_ row: SidebarHoverRowView, item: NavigatorOutlineItem,
+                                    in view: NSOutlineView) {
             row.isHoverEnabled = true
             row.showsGroupRule = false
             row.applySidebarDensity(SidebarDensity(width: view.bounds.width,
                 floor: min(SidebarDefaults.tightDensityWidth, view.bounds.width)))
-            row.setActivityBeam(workload: .none)
+            let selectedItem = inlineSelection
+                ?? (projects.indices.contains(selected)
+                    ? NavigatorOutlineItem(projectID: projects[selected].id, projectIndex: selected) : nil)
+            guard item == selectedItem,
+                  case .agent(let projectIndex, let childIndex, _) = item.resolvedRow(
+                    in: projects, indexes: projectIndexes),
+                  projects.indices.contains(projectIndex),
+                  projects[projectIndex].recentAgents.indices.contains(childIndex) else {
+                row.setActivityBeam(workload: .none)
+                return
+            }
+            let sessionID = projects[projectIndex].recentAgents[childIndex].id
+            row.setActivityBeam(workload: nativeRegistry.runtime(for: .agent(sessionID))?.sidebarWorkload ?? .none)
         }
         outlineSource.makeRow = { view, item in
             let rowIndex = view.row(forItem: item)
@@ -2393,19 +2741,19 @@ struct WindowHarness {
             configureOutlineRow(row, item: item, frame: frame)
             return row
         }
-        outlineSource.makeChrome = { view, _ in
+        outlineSource.makeChrome = { view, item in
             let identifier = NSUserInterfaceItemIdentifier("SidebarHoverRow")
             let row = (view.makeView(withIdentifier: identifier, owner: nil)
                 as? SidebarHoverRowView) ?? SidebarHoverRowView(frame: .zero)
             row.identifier = identifier
-            configureOutlineChrome(row, in: view)
+            configureOutlineChrome(row, item: item, in: view)
             return row
         }
-        var composerSubmitRequested = false
         let composerCreationWorker = DispatchQueue(label: "threading.linux.composer-creation",
                                                    qos: .userInitiated)
         var pendingNativeCreation: (gate: NativeCreationGate, request: ComposerNativeCreation.Request,
-                                    prompt: String, pane: WorkspacePlaceholderPane?)?
+                                    prompt: String, openingPrompt: String,
+                                    pane: WorkspacePlaceholderPane?)?
         var composerAccount: AccountID?
         var composerPermissionMode: AgentPermissionMode?
         var composerFastMode: Bool?
@@ -2452,8 +2800,7 @@ struct WindowHarness {
         discoverCheckouts()
         var idlePane = launch.map { _ in
             WorkspacePlaceholderPane(onSubmit: {
-                guard pendingFolderImport == nil, pendingSelection == nil else { return }
-                composerSubmitRequested = true
+                interaction.requestComposerSubmit()
             })
         }
         idlePane?.setThemeAppearance()
@@ -2562,8 +2909,11 @@ struct WindowHarness {
                 }
             }
             if !identityBindings.contains(where: { $0.identity == composerAccount }) {
+                let preferredKind = LinuxGeneralSettings.defaultAgentKind
                 let preferred = identityBindings.first { binding in
-                    binding.identity.handle == (binding.identity.provider == .codex ? codexAccount : claudeAccount)
+                    binding.identity.provider == preferredKind
+                        && binding.identity.handle == (preferredKind == .codex
+                            ? codexAccount : claudeAccount)
                 }
                 composerAccount = preferred?.identity ?? identityBindings.first?.identity
             }
@@ -2607,11 +2957,11 @@ struct WindowHarness {
                 },
                 onNewWorktree: {
                     guard pane.isComposing, currentCheckout != nil,
-                          pendingFolderImport == nil, pendingSelection == nil,
+                          interaction.pendingFolderImport == nil, interaction.pendingSelection == nil,
                           let launch,
                           let index = projectIndexes[projectID], projects.indices.contains(index),
                           projects[index].id == projectID else { return }
-                    pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1],
+                    interaction.pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1],
                         choice: .worktree(sourcePath: projects[index].path,
                                           dark: LinuxTheme.isDark))
                 },
@@ -2683,9 +3033,11 @@ struct WindowHarness {
                 composerModels.supportsFastMode(kind: $0, model: composerModel)
             } ?? false
             if !supportsSpeed { composerFastMode = nil }
-            pane.configureSpeedChoice(available: supportsSpeed,
-                title: speedKind.map { composerModels.speedTitle(selected: composerFastMode, kind: $0) }
-                    ?? "Agent's Setting",
+            let speedChip = ConversationSpeedMenuContent.chip(
+                effective: speedKind.flatMap { LinuxGeneralSettings.effectiveSpeed(
+                    selected: composerFastMode, kind: $0,
+                    configured: composerModels.inheritedFastMode) })
+            pane.configureSpeedChoice(available: supportsSpeed, chip: speedChip,
                 fastMode: composerFastMode,
                 onChoose: { value in
                     guard pane.isComposing, let kind = composerAccount?.provider,
@@ -2695,25 +3047,23 @@ struct WindowHarness {
                     dirty = true
                 })
             let permissionChoices: [ComposerPermissionChoice]
-            let inheritedPermissionMode = composerModels.inheritedPermissionMode
+            let inheritedPermissionMode = LinuxGeneralSettings.defaultPermissionMode
+                ?? composerModels.inheritedPermissionMode
             let lastUsedPermissionMode = composerModels.lastUsedPermissionMode
             if let kind = composerAccount?.provider, kind.supportsPermissionModes {
-                let inheritRow = inheritedPermissionMode == nil
-                    ? [ComposerPermissionChoice(id: "inherit",
-                        title: PermissionModeLabels.agentSettingRowTitle, detail: "")]
-                    : []
-                permissionChoices = inheritRow + AgentPermissionMode.allCases.map { mode in
-                    ComposerPermissionChoice(id: mode == inheritedPermissionMode ? "inherit" : mode.rawValue,
-                        title: mode.displayName(for: kind)
-                            + (mode == inheritedPermissionMode ? "  (default)"
-                               : mode == lastUsedPermissionMode ? "  (last used)" : ""),
-                        detail: [mode.menuDescription(for: kind), mode.caveat(for: kind)]
-                            .compactMap { $0 }.joined(separator: " "))
+                permissionChoices = PermissionModeMenuContent.rows(for: kind,
+                    selected: composerPermissionMode,
+                    governingMode: inheritedPermissionMode,
+                    reportedMode: lastUsedPermissionMode).compactMap { entry in
+                    guard case .item(let item) = entry else { return nil }
+                    let mode = item.representedValue as? AgentPermissionMode
+                    return ComposerPermissionChoice(id: mode?.rawValue ?? "inherit",
+                        title: item.title, detail: item.subtitle ?? "")
                 }
             } else { permissionChoices = [] }
             let permissionTitle = composerAccount.map { identity in
-                (composerPermissionMode ?? inheritedPermissionMode)?.displayName(for: identity.provider)
-                    ?? PermissionModeLabels.agentSettingTitle
+                PermissionModeMenuContent.chipTitle(for: identity.provider,
+                    selected: composerPermissionMode, nameableMode: inheritedPermissionMode)
             } ?? PermissionModeLabels.agentSettingTitle
             pane.configurePermissionChoices(permissionChoices,
                 selectedID: composerPermissionMode == inheritedPermissionMode
@@ -2750,6 +3100,7 @@ struct WindowHarness {
         var activePane: (any WorkspacePane)?
         var activePageTarget: NavigatorOutlineItem?
         var settingsPane: WorkspaceSettingsPane?
+        defer { settingsPane?.finishPendingTextWrites() }
         var settingsReturnPane: (any WorkspacePane)?
         var settingsReturnIdlePane: WorkspacePlaceholderPane?
         var settingsReturnSidebarFocus = true
@@ -2761,7 +3112,7 @@ struct WindowHarness {
             let key = SavedRuntimeKey.agent(id)
             // A provider archive must first stop an in-process writer, as on macOS. The
             // worker performs the daemon stop and durable/provider transaction.
-            nativeRuntimes[key]?.runtime.stop()
+            nativeRegistry.runtime(for: key)?.stop()
             let gate = ArchiveGate()
             pendingArchive = (id, projectID, gate)
             hoveredOutlineItem = nil
@@ -2814,7 +3165,7 @@ struct WindowHarness {
                   projects[index].recentAgents.contains(where: { $0.id == id }) else { return }
             let key = SavedRuntimeKey.agent(id)
             let hosted = restoredRuntimes[key] != nil
-                || nativeRuntimes[key]?.runtime.presentsActiveAgent != true
+                || nativeRegistry.runtime(for: key)?.presentsActiveAgent != true
             let gate = CloseGate()
             pendingClose = (id, projectID, gate)
             dirty = true
@@ -2823,6 +3174,53 @@ struct WindowHarness {
                     try SessionCloseAction.run(store: launch[0], socket: launch[1],
                         sessionID: sessionID, projectID: targetProjectID,
                         stopHostedChild: hosted)
+                })
+            }
+        }
+        func beginTerminalRename(_ id: String, projectID: String, title: String,
+                                 displayedCurrentTitle: String?) {
+            guard pendingTerminalRename == nil, let launch,
+                  let terminalID = TerminalID(uuidString: id),
+                  let targetProjectID = ProjectID(uuidString: projectID),
+                  let index = projectIndexes[projectID], projects.indices.contains(index),
+                  projects[index].recentTerminals.contains(where: { $0.id == id }) else { return }
+            let gate = WorkerResultGate<TerminalRowAction.RenameReceipt>()
+            pendingTerminalRename = (id, projectID, gate)
+            dirty = true
+            DispatchQueue.global(qos: .utility).async {
+                gate.finish(Result {
+                    try TerminalRowAction.rename(store: launch[0], terminalID: terminalID,
+                        projectID: targetProjectID, title: title,
+                        displayedCurrentTitle: displayedCurrentTitle)
+                })
+            }
+        }
+        func beginTerminalClose(_ id: String, projectID: String) {
+            guard pendingTerminalClose == nil, let launch,
+                  let terminalID = TerminalID(uuidString: id),
+                  let targetProjectID = ProjectID(uuidString: projectID),
+                  let index = projectIndexes[projectID], projects.indices.contains(index),
+                  projects[index].recentTerminals.contains(where: { $0.id == id }) else { return }
+            let gate = WorkerResultGate<Bool>()
+            pendingTerminalClose = (id, projectID, gate)
+            dirty = true
+            DispatchQueue.global(qos: .utility).async {
+                gate.finish(Result {
+                    try TerminalRowAction.close(store: launch[0], socket: launch[1],
+                        terminalID: terminalID, projectID: targetProjectID)
+                })
+            }
+        }
+        func beginTerminalCopyPath(_ id: String, projectID: String) {
+            guard pendingTerminalCopyPath == nil, let launch,
+                  let terminalID = TerminalID(uuidString: id),
+                  let targetProjectID = ProjectID(uuidString: projectID) else { return }
+            let gate = WorkerResultGate<String>()
+            pendingTerminalCopyPath = (id, projectID, gate)
+            DispatchQueue.global(qos: .utility).async {
+                gate.finish(Result {
+                    try TerminalRowAction.worktreePath(store: launch[0],
+                        terminalID: terminalID, projectID: targetProjectID)
                 })
             }
         }
@@ -2845,29 +3243,48 @@ struct WindowHarness {
                 })
             }
         }
-        func dismissSessionMenu() {
-            guard sessionMenu != nil else { return }
+        func dismissSidebarMenu() {
+            guard sessionMenu != nil || terminalMenu != nil else { return }
+            let previousSidebarFocus = sessionMenuPreviousSidebarFocus
+            if sessionMenuUsesPaneHeader {
+                activePane?.chrome.setSessionActionsSelected(false)
+            }
             sessionMenu = nil
+            sessionMenuUsesPaneHeader = false
+            sessionMenuPreviousSidebarFocus = nil
+            terminalMenu = nil
             pendingSessionMenuPresence = nil
-            sessionMenuVisibleEntries.removeAll(keepingCapacity: true)
-            activatedSessionMenuEntry = nil
-            retainedSessionMenuRows.reset()
+            sidebarMenuVisibleEntries.removeAll(keepingCapacity: true)
+            activatedSidebarMenuEntry = nil
+            sidebarMenuSurface = nil
+            sidebarMenuSurfaceKey = []
+            sidebarMenuHighlightedIndex = nil
+            if let previousSidebarFocus { focusSidebar(previousSidebarFocus) }
             dirty = true
         }
         func openSessionMenu(_ id: String, projectID: String,
-                             openInApps: [LinuxExternalApp]) {
+                             openInApps: [LinuxExternalApp],
+                             fromPaneHeader: Bool = false) {
             guard let launch, actions == nil, accountPicker == nil, savedPicker == nil,
                   pendingArchive == nil, pendingPin == nil, pendingSnooze == nil,
                   pendingSnoozePicker == nil,
                   pendingRename == nil, pendingRenamePrompt == nil,
                   pendingClose == nil, pendingClosePrompt == nil,
+                  pendingTerminalRename == nil, pendingTerminalRenamePrompt == nil,
+                  pendingTerminalClose == nil,
                   pendingSnoozeScan == nil, pendingSnoozeExpiry == nil,
                   let index = projectIndexes[projectID], projects.indices.contains(index),
                   let runtime = projects[index].recentAgents.first(where: { $0.id == id }) else {
                 return
             }
-            if sessionMenu?.sessionID == id { dismissSessionMenu(); return }
+            if sessionMenu?.sessionID == id,
+               sessionMenuUsesPaneHeader == fromPaneHeader {
+                dismissSidebarMenu()
+                return
+            }
+            dismissSidebarMenu()
             pendingSessionMenuPresence = nil
+            sessionMenuUsesPaneHeader = fromPaneHeader
             let isRunning = hasActiveRuntime(.agent(id), projectID: projectID)
             sessionMenu = SidebarSessionMenu(sessionID: id, projectID: projectID,
                 worktreePath: projects[index].path, agentSessionID: runtime.agentSessionID,
@@ -2877,6 +3294,11 @@ struct WindowHarness {
                 isRunning: isRunning,
                 canResume: runtime.kind?.supportsResume ?? true,
                 snoozeMoments: SnoozeWallClockMoments.future(from: Date()))
+            if fromPaneHeader {
+                sessionMenuPreviousSidebarFocus = sidebarFocused
+                activePane?.chrome.setSessionActionsSelected(true)
+                focusSidebar(true)
+            }
             if !isRunning, let sessionID = SessionID(uuidString: id) {
                 let gate = SessionPresenceGate()
                 pendingSessionMenuPresence = (id, projectID, gate)
@@ -2893,7 +3315,7 @@ struct WindowHarness {
             guard var menu = sessionMenu,
                   let index = projectIndexes[menu.projectID], projects.indices.contains(index),
                   projects[index].recentAgents.contains(where: { $0.id == menu.sessionID })
-            else { dismissSessionMenu(); return }
+            else { dismissSidebarMenu(); return }
             switch command {
             case .copy:
                 menu.openCopy()
@@ -2916,11 +3338,11 @@ struct WindowHarness {
                 dirty = true
                 return
             case .pin:
-                dismissSessionMenu()
+                dismissSidebarMenu()
                 beginPin(menu.sessionID, projectID: menu.projectID, pinned: !menu.isPinned)
                 return
             case .unsnooze:
-                dismissSessionMenu()
+                dismissSidebarMenu()
                 beginSnooze(menu.sessionID, projectID: menu.projectID, change: .unsnooze)
                 return
             case .snoozeChoice:
@@ -2928,28 +3350,28 @@ struct WindowHarness {
                       deadline > Date() else { return }
                 let sessionID = menu.sessionID
                 let projectID = menu.projectID
-                let hasPendingOutcome = nativeRuntimes[.agent(sessionID)]?.runtime.hasPendingOutcome
+                let hasPendingOutcome = nativeRegistry.runtime(for: .agent(sessionID))?.hasPendingOutcome
                     ?? false
-                dismissSessionMenu()
+                dismissSidebarMenu()
                 beginSnooze(sessionID, projectID: projectID,
                     change: .snooze(until: deadline, at: Date(),
                                     hadTurnInFlight: hasPendingOutcome))
                 return
             case .customSnooze:
-                let hasPendingOutcome = nativeRuntimes[.agent(menu.sessionID)]?
-                    .runtime.hasPendingOutcome ?? false
-                dismissSessionMenu()
+                let hasPendingOutcome = nativeRegistry.runtime(for: .agent(menu.sessionID))?
+                    .hasPendingOutcome ?? false
+                dismissSidebarMenu()
                 pendingSnoozePicker = (menu.sessionID, menu.projectID,
                     hasPendingOutcome, beginSnoozePicker(dark: LinuxTheme.isDark))
                 dirty = true
                 return
             case .archive:
-                dismissSessionMenu()
+                dismissSidebarMenu()
                 beginArchive(menu.sessionID, projectID: menu.projectID)
                 return
             case .close:
                 guard menu.isRunning else { return }
-                dismissSessionMenu()
+                dismissSidebarMenu()
                 if LinuxConfirmationSettings.asks(before: .closeRunningSession) {
                     pendingClosePrompt = (menu.sessionID, menu.projectID,
                         Self.beginCloseConfirmation(displayTitle: menu.displayTitle,
@@ -2960,7 +3382,7 @@ struct WindowHarness {
                 dirty = true
                 return
             case .rename:
-                dismissSessionMenu()
+                dismissSidebarMenu()
                 pendingRenamePrompt = (menu.sessionID, menu.projectID, menu.customTitle,
                     beginRenamePrompt(displayTitle: menu.displayTitle,
                         currentTitle: menu.customTitle ?? "", dark: LinuxTheme.isDark))
@@ -2968,7 +3390,7 @@ struct WindowHarness {
                 return
             case .openInChoice:
                 guard let app = menu.openInApp(at: menu.selected) else { return }
-                dismissSessionMenu()
+                dismissSidebarMenu()
                 launchOpenInForProject(app.id, projectID: menu.projectID, remember: false)
                 return
             case .copyAgentID, .copyThreadingID, .copyWorktreePath:
@@ -2986,8 +3408,77 @@ struct WindowHarness {
                 }
                 print("SESSION_VALUE_COPIED \(command.rawValue) id=\(menu.sessionID)")
                 fflush(nil)
-                dismissSessionMenu()
+                dismissSidebarMenu()
             }
+        }
+        func openTerminalMenu(_ id: String, projectID: String) {
+            guard launch != nil, actions == nil, accountPicker == nil, savedPicker == nil,
+                  pendingTerminalRename == nil, pendingTerminalRenamePrompt == nil,
+                  pendingTerminalClose == nil,
+                  pendingRename == nil, pendingRenamePrompt == nil,
+                  pendingClose == nil, pendingClosePrompt == nil,
+                  let index = projectIndexes[projectID], projects.indices.contains(index),
+                  let runtime = projects[index].recentTerminals.first(where: { $0.id == id }) else {
+                return
+            }
+            if terminalMenu?.terminalID == id { dismissSidebarMenu(); return }
+            dismissSidebarMenu()
+            terminalMenu = SidebarTerminalMenu(terminalID: id, projectID: projectID,
+                displayTitle: runtime.title, customTitle: runtime.customTitle)
+            dirty = true
+        }
+        func chooseTerminalMenu(_ command: SidebarTerminalMenu.Command) {
+            guard var menu = terminalMenu,
+                  let index = projectIndexes[menu.projectID], projects.indices.contains(index),
+                  projects[index].recentTerminals.contains(where: { $0.id == menu.terminalID })
+            else { dismissSidebarMenu(); return }
+            switch command {
+            case .copy:
+                menu.openCopy()
+                terminalMenu = menu
+                dirty = true
+            case .back:
+                menu.returnToActions()
+                terminalMenu = menu
+                dirty = true
+            case .rename:
+                dismissSidebarMenu()
+                pendingTerminalRenamePrompt = (menu.terminalID, menu.projectID, menu.customTitle,
+                    Self.beginRenamePrompt(displayTitle: menu.displayTitle,
+                        currentTitle: menu.customTitle ?? "", dark: LinuxTheme.isDark,
+                        subject: .terminal))
+                dirty = true
+            case .close:
+                dismissSidebarMenu()
+                beginTerminalClose(menu.terminalID, projectID: menu.projectID)
+            case .copyThreadingID, .copyWorktreePath:
+                if command == .copyWorktreePath {
+                    dismissSidebarMenu()
+                    beginTerminalCopyPath(menu.terminalID, projectID: menu.projectID)
+                    return
+                }
+                guard NSPasteboard.general.setString(menu.terminalID.lowercased(),
+                                                     forType: .string) else {
+                    tw_title(window, "Threading - could not copy terminal value")
+                    return
+                }
+                print("TERMINAL_VALUE_COPIED \(command.rawValue) id=\(menu.terminalID)")
+                fflush(nil)
+                dismissSidebarMenu()
+            }
+        }
+        @MainActor func showPlaceholderAfterRemovingActiveRuntime() {
+            activePane?.focus(false, window: window)
+            activePane = nil
+            activePageTarget = nil
+            idlePane = WorkspacePlaceholderPane(onSubmit: {
+                interaction.requestComposerSubmit()
+            })
+            idlePane?.setThemeAppearance()
+            tw_workspace_terminal_top_inset(window, 0)
+            tw_workspace_mode(window, Int32(sidebarWidth), 1)
+            tw_workspace_placeholder_mode(window, 1)
+            focusSidebar(true)
         }
         var pendingTerminalReveal: GraphicalTerminal?
         let pageReveal = WorkspacePageRevealRequest()
@@ -3061,11 +3552,20 @@ struct WindowHarness {
                 })
             }
         }
+        func openActivePaneSessionMenu(_ pane: any WorkspacePane) {
+            guard let target = activePageTarget, target.kind == .agent,
+                  target.id == pane.chrome.pageIdentity,
+                  pane.chrome.hasSessionActions else { return }
+            pane.chrome.dismissMenu(window: window)
+            openSessionMenu(target.id, projectID: target.projectID,
+                openInApps: openInCatalogue.apps, fromPaneHeader: true)
+        }
         func drainOpenInRequests(_ pane: any WorkspacePane) {
             if let appID = pane.chrome.takeOpenInPressRequest() {
                 launchOpenIn(appID, remember: false)
             }
             if pane.chrome.takeOpenInChooserToggleRequest() {
+                if sessionMenu != nil { dismissSidebarMenu() }
                 if pane.chrome.hasOpenInMenu {
                     pane.chrome.toggleOpenInMenu(window: window, paneWidth: terminalWidth,
                         paneHeight: height)
@@ -3132,6 +3632,7 @@ struct WindowHarness {
                 if sidebarFocused { tw_title(window, navigatorTitle) }
                 else if let activePane { activePane.focus(true, window: window) }
                 else { idlePane?.focus(true) }
+                refreshComposerChoices()
                 print("SETTINGS_CLOSED")
             } else {
                 settingsReturnPane = activePane
@@ -3141,6 +3642,29 @@ struct WindowHarness {
                 idlePane?.focus(false)
                 let pane = WorkspaceSettingsPane()
                 pane.onDone = { toggleSettings() }
+                let settingsWake = tw_worker_wake_identity(window)
+                pane.onPresentationChange = {
+                    dirty = true
+                    _ = tw_worker_wake(settingsWake)
+                }
+                pane.onRetentionChange = { nativeRegistry.noteRetentionChange() }
+                pane.onOutsideProjectScopeChange = { enabled in
+                    outsideProjectAdmission.settingChanged(enabled: enabled)
+                }
+                pane.onChooseScratchpadFolder = {
+                    guard interaction.pendingFolderImport == nil, let launch else { return }
+                    interaction.pendingFolderImport = beginFolderImport(
+                        store: launch[0], socket: launch[1],
+                        choice: .scratchpadChoose(
+                            sourcePath: LinuxGeneralSettings.scratchpadFolderURL.path))
+                }
+                pane.onUseDefaultScratchpadFolder = {
+                    guard interaction.pendingFolderImport == nil, let launch else { return }
+                    interaction.pendingFolderImport = beginFolderImport(
+                        store: launch[0], socket: launch[1],
+                        choice: .scratchpadDefault(
+                            sourcePath: LinuxGeneralSettings.scratchpadFolderURL.path))
+                }
                 settingsPane = pane
                 activePane = pane
                 idlePane = nil
@@ -3155,6 +3679,9 @@ struct WindowHarness {
         }
         func dismissActions(returnToParent: Bool = true) {
             guard let presentation = actions else { return }
+            actionMenuSurface = nil
+            actionMenuSurfaceKey = []
+            actionMenuHighlightedIndex = nil
             if returnToParent, presentation.kind == .chatProviders,
                let target = presentation.projectID,
                actionState(for: target).projectID == target {
@@ -3182,6 +3709,9 @@ struct WindowHarness {
             rowActionMenuGesture = false
             rowActionMenuEntered = false
             actionMenuUsesProjectRow = targetID != nil
+            actionMenuSurface = nil
+            actionMenuSurfaceKey = []
+            actionMenuHighlightedIndex = nil
             actions = .init(kind: .projectActions, projectID: state.projectID,
                             returnToSidebar: returnToSidebar,
                             commands: NavigatorActions.projectCommands(state))
@@ -3189,7 +3719,8 @@ struct WindowHarness {
             dirty = true
         }
         func openAddProjectMenu() {
-            guard actionsEnabled, pendingFolderImport == nil, pendingSelection == nil,
+            guard actionsEnabled, interaction.pendingFolderImport == nil,
+                  interaction.pendingSelection == nil,
                   addProjectButton.isEnabled else { return }
             if actions != nil { dismissActions(returnToParent: false) }
             hoveredOutlineItem = nil
@@ -3226,39 +3757,16 @@ struct WindowHarness {
             focusSidebar(true)
             dirty = true
         }
-        func invokeSessionMenuCommand(_ command: SessionMenuCommand) {
-            guard let pane = activePane, let target = activePageTarget,
-                  target.kind == .agent, pane.chrome.pageIdentity == target.id,
-                  let projectIndex = projectIndexes[target.projectID],
-                  projects.indices.contains(projectIndex),
-                  projects[projectIndex].id == target.projectID,
-                  projects[projectIndex].recentAgents.contains(where: { $0.id == target.id })
-            else {
-                print("SESSION_ACTION_REFUSED stale page identity"); fflush(nil)
-                return
-            }
-            let value: String
-            switch command {
-            case .copySessionID: value = target.id
-            case .copyProjectPath: value = projects[projectIndex].path
-            }
-            let bytes = Data(value.utf8)
-            guard !bytes.isEmpty, bytes.count <= 1_048_576 else {
-                print("SESSION_ACTION_REFUSED clipboard payload exceeds bound"); fflush(nil)
-                return
-            }
-            let result = bytes.withUnsafeBytes {
-                tw_clipboard_write($0.bindMemory(to: UInt8.self).baseAddress, Int32(bytes.count))
-            }
-            if result == 0 {
-                print("SESSION_ACTION_COPIED \(command.rawValue) \(target.id)")
-            } else {
-                print("SESSION_ACTION_REFUSED clipboard unavailable")
-            }
-            fflush(nil)
-        }
         func routeTerminalInput(_ event: TWEvent) -> Bool {
-            if event.kind == 48, let pane = activePane as? WorkspaceSettingsPane {
+            if event.kind == 63 {
+                guard let pane = activePane as? WorkspaceSettingsPane else { return true }
+                var request = event
+                guard let id = String(validatingCString: tw_event_text(&request)) else { return true }
+                if pane.pressAccessibleControl(id: id, window: window) { dirty = true }
+                return true
+            }
+            if [46, 47, 48].contains(event.kind),
+               let pane = activePane as? WorkspaceSettingsPane {
                 pane.handle(event, window: window)
                 return true
             }
@@ -3423,13 +3931,7 @@ struct WindowHarness {
                     pane.chrome.chooseMenuRow(Int(event.key), identity: identity)
                 }
                 if pane.chrome.takeMenuToggleRequest() {
-                    focusSidebar(false)
-                    pane.chrome.toggleMenu(window: window, paneWidth: terminalWidth,
-                        paneHeight: height)
-                }
-                if let command = pane.chrome.takeMenuCommand() {
-                    invokeSessionMenuCommand(command)
-                    pane.chrome.dismissMenu(window: window)
+                    openActivePaneSessionMenu(pane)
                 }
                 drainOpenInRequests(pane)
                 dirty = true
@@ -3456,7 +3958,7 @@ struct WindowHarness {
                     }
                 } else {
                     let pressed = idlePane.pressAction()
-                    trace("composer.action pressed=\(pressed) submit=\(composerSubmitRequested) native=\(composerUsesNativeUI) selection=\(pendingSelection != nil) import=\(pendingFolderImport != nil)")
+                    trace("composer.action pressed=\(pressed) submit=\(interaction.composerSubmitRequested) native=\(composerUsesNativeUI) selection=\(interaction.pendingSelection != nil) import=\(interaction.pendingFolderImport != nil)")
                 }
                 return true
             }
@@ -3468,9 +3970,7 @@ struct WindowHarness {
                     _ = activePane?.chrome.pressPageTitle()
                 }
                 if let pane = activePane, pane.chrome.takeMenuToggleRequest() {
-                    focusSidebar(false)
-                    pane.chrome.toggleMenu(window: window, paneWidth: terminalWidth,
-                        paneHeight: height)
+                    openActivePaneSessionMenu(pane)
                     dirty = true
                 }
                 if let pane = activePane { drainOpenInRequests(pane) }
@@ -3487,6 +3987,9 @@ struct WindowHarness {
                     savedPicker = nil
                     accountPicker = nil
                     actions = nil
+                    actionMenuSurface = nil
+                    actionMenuSurfaceKey = []
+                    actionMenuHighlightedIndex = nil
                     outlineScrollSelection = true
                     focusSidebar(true)
                     dirty = true
@@ -3551,6 +4054,27 @@ struct WindowHarness {
             activePane = pane
             activePane?.setThemeAppearance()
             activePageTarget = pageTarget
+            if pageTarget.kind == .agent, let id = SessionID(uuidString: pageTarget.id) {
+                SessionRestorationLedger.shared.forget(sessionID: id)
+                if let projectIndex = projectIndexes[pageTarget.projectID],
+                   projects.indices.contains(projectIndex),
+                   projects[projectIndex].recentAgents.contains(where: { $0.id == pageTarget.id }) {
+                    if !preparedAttachmentSessions.contains(id),
+                       pendingAttachmentLoads[id] == nil,
+                       pendingAttachmentLoads.count < Self.maximumOpenRuntimes {
+                        let gate = WorkerResultGate<[SessionAttachment]>()
+                        pendingAttachmentLoads[id] = gate
+                        Task.detached(priority: .utility) {
+                            do {
+                                let rows = try await attachmentPersistence.load(sessionID: id)
+                                gate.finish(.success(rows))
+                            } catch {
+                                gate.finish(.failure(error))
+                            }
+                        }
+                    }
+                }
+            }
             if pageTarget.kind == .agent,
                let index = projectIndexes[pageTarget.projectID], projects.indices.contains(index),
                let row = projects[index].recentAgents.first(where: { $0.id == pageTarget.id }),
@@ -3579,7 +4103,9 @@ struct WindowHarness {
             dirty = true
         }
         @MainActor func activateNative(_ runtime: ProjectSnapshot.SavedRuntime,
-                                       projectIndex: Int, childIndex: Int) throws {
+                                       projectIndex: Int, childIndex: Int,
+                                       restoreAtStartup: Bool = false,
+                                       waitForHostedStop: Bool = false) throws {
             guard let launch, let id = SessionID(uuidString: runtime.id) else {
                 throw WindowFailure("Saved conversation identity is invalid.")
             }
@@ -3587,24 +4113,27 @@ struct WindowHarness {
             let target = NavigatorOutlineItem(kind: .agent, projectID: projects[projectIndex].id,
                 id: runtime.id, projectIndex: projectIndex, childIndex: childIndex)
             let pane: WorkspaceConversationPane
-            if let existing = nativeRuntimes[key] { pane = existing }
+            if let existing = nativeRegistry.panes[key] { pane = existing }
             else {
-                guard terminals.count + restoredRuntimes.count + nativeRuntimes.count
-                        + (composerCreationPending ? 1 : 0) < maximumOpenRuntimes else {
-                    throw WindowFailure("The workspace's open-runtime limit was reached.")
-                }
-                let session = NativeWorkspaceSession(store: launch[0], socket: launch[1], id: id,
-                    shell: launch[2], executables: nativeExecutables)
+                let background = nativeRegistry.background.removeValue(forKey: key)
+                let session = background ?? NativeWorkspaceSession(
+                    store: launch[0], socket: launch[1], id: id,
+                    shell: launch[2], executables: nativeExecutables,
+                    restoreAtStartup: restoreAtStartup,
+                    waitForHostedStop: waitForHostedStop)
                 pane = WorkspaceConversationPane(runtime: session, pageName: readableNavigatorText(runtime.title),
                     icon: ProviderMarks.image(for: runtime.kind, selected: false),
                     onReveal: { pageReveal.target = target })
                 pane.onAgentActivityChange = { navigatorRoot.needsDisplay = true }
-                pane.onSnoozeWakeReason = { reason in
+                session.onSnoozeWakeReason = { reason in
                     snoozeWakeInbox.record(reason, id: runtime.id,
                                            projectID: target.projectID)
                 }
-                nativeRuntimes[key] = pane
+                if background != nil { session.replayCurrentRows() }
+                nativeRegistry.panes[key] = pane
+                nativeRegistry.observeRetention(of: session)
             }
+            nativeRegistry.noteLocalView(of: id)
             try activatePane(pane, pageTarget: target)
         }
         func beginAgent(_ kind: AgentKind, prompt: String?,
@@ -3622,7 +4151,7 @@ struct WindowHarness {
             let executable = kind == .codex ? agentExecutable : claudeExecutable
             guard let executable else { return }
             let accountHandle = accountOverride ?? (kind == .codex ? codexAccount : claudeAccount)
-            guard terminals.count + restoredRuntimes.count + nativeRuntimes.count
+            guard retainedTerminalCount()
                     + (composerCreationPending ? 1 : 0) < maximumOpenRuntimes else {
                 tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                 return
@@ -3646,7 +4175,9 @@ struct WindowHarness {
                                accountHandle: accountHandle, id: id,
                                width: terminalWidth,
                                height: max(1, height - WorkspaceTerminalPane.headerPixelHeight),
-                               prompt: prompt, permissionMode: permissionMode,
+                               prompt: LinuxGeneralSettings.openingMessage(for: prompt),
+                               title: prompt.flatMap(SessionPromptTitle.from),
+                               permissionMode: permissionMode,
                                model: model, reasoningEffort: reasoningEffort,
                                fastMode: fastMode,
                                expectedCheckout: composerProjectID.flatMap {
@@ -3665,11 +4196,6 @@ struct WindowHarness {
             guard let launch, !composerCreationPending,
                   let targetIndex = projectIndexes[choice.projectID],
                   projects.indices.contains(targetIndex) else { return }
-            guard terminals.count + restoredRuntimes.count + nativeRuntimes.count
-                    < maximumOpenRuntimes else {
-                tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
-                return
-            }
             guard prompt.utf8.count <= 65_536 else {
                 tw_title(window, "Threading composer - brief is too long")
                 return
@@ -3677,12 +4203,14 @@ struct WindowHarness {
             let request = ComposerNativeCreation.Request(store: launch[0],
                 directory: projects[targetIndex].path, kind: choice.identity.provider,
                 accountHandle: choice.identity.handle, permissionMode: composerPermissionMode,
+                title: SessionPromptTitle.from(prompt),
                 model: composerModel, reasoningEffort: composerEffort,
                 fastMode: composerFastMode,
                 expectedCheckout: composerCheckoutCatalog.checkouts[choice.projectID],
                 id: SessionID())
             let gate = NativeCreationGate()
-            pendingNativeCreation = (gate, request, prompt, idlePane)
+            let openingPrompt = LinuxGeneralSettings.openingMessage(for: prompt) ?? prompt
+            pendingNativeCreation = (gate, request, prompt, openingPrompt, idlePane)
             composerCreationPending = true
             composerCreationWorker.async {
                 gate.finish(Result { try ComposerNativeCreation.create(request) })
@@ -3691,6 +4219,7 @@ struct WindowHarness {
         }
         func finishNativeCreation(_ receipt: ComposerNativeCreation.Receipt,
                                   request: ComposerNativeCreation.Request, prompt: String,
+                                  openingPrompt: String,
                                   composingPane: WorkspacePlaceholderPane?) throws {
             composerModelLoader.remember(
                 ComposerNewSessionRunChoice(model: request.model,
@@ -3705,6 +4234,7 @@ struct WindowHarness {
             let savedID = receipt.row.id.uuidString
             var saved = savedAgent(receipt.row)
             saved.usesNativeUI = true
+            saved.branch = receipt.branch
             let selectedSavedID: String?
             if let picker = savedPicker, picker.isAgent, picker.projectIndex == index,
                projects[index].recentAgents.indices.contains(savedSelected) {
@@ -3733,22 +4263,24 @@ struct WindowHarness {
                 id: savedID, projectIndex: index, childIndex: row)
             let session = NativeWorkspaceSession(store: launch[0], socket: launch[1],
                 id: request.id, shell: launch[2], executables: nativeExecutables,
-                initialPrompt: prompt)
+                initialPrompt: openingPrompt)
             let pane = WorkspaceConversationPane(runtime: session,
                 pageName: readableNavigatorText(saved.title),
                 icon: ProviderMarks.image(for: saved.kind, selected: false),
                 onReveal: { pageReveal.target = target })
             pane.onAgentActivityChange = { navigatorRoot.needsDisplay = true }
-            pane.onSnoozeWakeReason = { reason in
+            session.onSnoozeWakeReason = { reason in
                 snoozeWakeInbox.record(reason, id: savedID, projectID: projectID)
             }
-            nativeRuntimes[.agent(savedID)] = pane
+            nativeRegistry.panes[.agent(savedID)] = pane
+            nativeRegistry.observeRetention(of: session)
             outlineNeedsReload = true
             let stillSubmitting = idlePane === composingPane
                 && (composerCheckoutProjectID ?? projects[selected].id) == projectID
                 && composerAccount == AccountID(provider: request.kind, handle: request.accountHandle)
                 && composerUsesNativeUI && idlePane?.composedPrompt == prompt
             if stillSubmitting {
+                nativeRegistry.noteLocalView(of: request.id)
                 selected = index
                 inlineSelection = target
                 outlineRevealTarget = target
@@ -3763,6 +4295,7 @@ struct WindowHarness {
             guard let (account, choice) = pendingComposerRunChoices.removeValue(
                 forKey: receipt.row.id.uuidString) else { return }
             composerModelLoader.remember(choice, for: account)
+            LinuxGeneralSettings.defaultAgentKind = account.provider
         }
         func forgetFailedComposerChoice(_ id: String) {
             pendingComposerRunChoices.removeValue(forKey: id)
@@ -3824,6 +4357,7 @@ struct WindowHarness {
                 dirty = true
             }
         }
+        var selectedNativeNeedsHostSurvey = false
         if let id = snapshot.restoreAgentID, let launch,
            projects.indices.contains(selected),
            let row = projects[selected].recentAgents.firstIndex(where: { $0.id == id }) {
@@ -3833,12 +4367,23 @@ struct WindowHarness {
             inlineSelection = target
             outlineRevealTarget = target
             if runtime.usesNativeUI {
-                try activateNative(runtime, projectIndex: selected, childIndex: row)
+                selectedNativeNeedsHostSurvey = snapshot.restoreAgentAction != .resume
+                try activateNative(runtime, projectIndex: selected, childIndex: row,
+                    restoreAtStartup: snapshot.restoreAgentAction == .resume,
+                    waitForHostedStop: snapshot.restoreAgentAction == .afterHostedStop
+                        || snapshot.restoreAgentAction == .attach)
             } else {
                 let session = makeObservedTerminal()
                 restoredRuntimes[.agent(id)] = session
                 restoredProjectIDs.insert(projects[selected].id)
-                session.attachAgent(store: launch[0], socket: launch[1], sessionID: id)
+                if snapshot.restoreAgentAction == .resume {
+                    session.openAgent(store: launch[0], socket: launch[1], sessionID: id,
+                        shell: launch[2], codex: agentExecutable, claude: claudeExecutable,
+                        width: terminalWidth,
+                        height: max(1, height - WorkspaceTerminalPane.headerPixelHeight))
+                } else if snapshot.restoreAgentAction == .attach {
+                    session.attachAgent(store: launch[0], socket: launch[1], sessionID: id)
+                }
                 try activate(session, pageName: readableNavigatorText(runtime.title),
                     pageIdentity: id, pageIcon: ProviderMarks.image(for: runtime.kind, selected: false),
                     pageTarget: target)
@@ -3859,8 +4404,199 @@ struct WindowHarness {
             try activate(session, pageName: readableNavigatorText(runtime.title),
                 pageIdentity: id, pageTarget: target)
         }
+        if let launch, !nativeExecutables.isEmpty {
+            let gate = WorkerResultGate<LinuxStartupRestoreStore.Preparation>()
+            pendingStartupPrepare = gate
+            let wakeIdentity = tw_worker_wake_identity(window)
+            LinuxStartupRestoreStore.prepareLater(
+                store: launch[0], socket: launch[1],
+                excluding: snapshot.restoreAgentID.flatMap(SessionID.init(uuidString:)),
+                stopSelectedHeldNative: snapshot.restoreAgentAction == .afterHostedStop
+                    || selectedNativeNeedsHostSurvey
+            ) { result in
+                gate.finish(result)
+                _ = tw_worker_wake(wakeIdentity)
+            }
+        }
         while true {
             _ = uiWork.drain()
+            ThemedToggle.advanceActiveAnimations()
+            for id in Array(pendingAttachmentLoads.keys) {
+                guard let result = pendingAttachmentLoads[id]?.take() else { continue }
+                pendingAttachmentLoads.removeValue(forKey: id)
+                switch result {
+                case .success(let rows):
+                    attachmentPersistence.markPreparedInstalled(for: id)
+                    _ = attachmentStore.installPrepared(rows, for: id)
+                    preparedAttachmentSessions.insert(id)
+                    if let terminal = restoredRuntimes[.agent(id.uuidString)] {
+                        terminalAttachmentCoordinator.noteOutput(
+                            from: terminal, sessionID: id)
+                    }
+                case .failure(let error):
+                    FileHandle.standardError.write(Data(
+                        "Attachment load refused for \(id.uuidString): \(error)\n".utf8))
+                }
+            }
+            if actions != nil || accountPicker != nil || savedPicker != nil
+                || sessionMenu != nil || terminalMenu != nil {
+                if hoverCardSurface != nil { dirty = true }
+                hoverCardDueAt = nil
+                hoverCardItem = nil
+                hoverCardSurface = nil
+            }
+            if let due = hoverCardDueAt, Date() >= due {
+                hoverCardDueAt = nil
+                if let item = hoveredOutlineItem,
+                   case .agent(let projectIndex, let childIndex, _) = item.resolvedRow(
+                    in: projects, indexes: projectIndexes),
+                   projects.indices.contains(projectIndex),
+                   projects[projectIndex].recentAgents.indices.contains(childIndex) {
+                    let project = projects[projectIndex]
+                    let runtime = project.recentAgents[childIndex]
+                    let running = hasActiveRuntime(.agent(runtime.id), projectID: project.id)
+                    let info = LinuxSessionInfoAdapter.info(
+                        for: runtime, in: project,
+                        branch: outlineSource.branch(for: project.id),
+                        worktree: outlineSource.checkoutCatalog.checkouts[project.id]?.worktreeName,
+                        activity: nativeRegistry.runtime(for: .agent(runtime.id))?.activity,
+                        isRunning: running)
+                    let surface = SessionInfoCardSurface.panel(
+                        info: info, appearance: LinuxTheme.appearance)
+                    hoverCardItem = item
+                    hoverCardSurface = surface
+                    dirty = true
+                    print("SESSION_HOVER_CARD id=\(runtime.id) height=\(Int(surface.frame.height)) reason=\(info.dormancyReason != nil) branch=\(info.branch != nil) handoff=\(info.handoffLine != nil) worktree=\(info.worktree != nil)")
+                }
+            }
+            let visibleNativeID: SessionID? = activePageTarget.flatMap { target in
+                target.kind == .agent ? SessionID(uuidString: target.id) : nil
+            }
+            let retire = nativeRetention.retirementsIfNeeded(
+                version: nativeRegistry.retentionVersion, visibleID: visibleNativeID,
+                candidates: { nativeRegistry.retentionCandidates(visibleID: visibleNativeID) })
+            for id in retire {
+                let key = SavedRuntimeKey.agent(id.uuidString)
+                let runtime = nativeRegistry.panes.removeValue(forKey: key)?.runtime
+                    ?? nativeRegistry.background.removeValue(forKey: key)
+                runtime?.stop()
+                nativeRegistry.forget(id)
+                navigatorRoot.needsDisplay = true
+                dirty = true
+                print("IDLE_NATIVE_RETIRED id=\(id.uuidString)")
+            }
+            if let gate = pendingStartupPrepare, let result = gate.take() {
+                pendingStartupPrepare = nil
+                switch result {
+                case .failure(let error):
+                    FileHandle.standardError.write(Data("Startup restore plan: \(error)\n".utf8))
+                case .success(let preparation):
+                    if !preparation.hostSurveySucceeded {
+                        FileHandle.standardError.write(Data("STARTUP_RESTORE_HOST_UNAVAILABLE\n".utf8))
+                    } else if let launch {
+                        if snapshot.restoreAgentAction == .afterHostedStop
+                            || selectedNativeNeedsHostSurvey,
+                           let idText = snapshot.restoreAgentID,
+                           let id = SessionID(uuidString: idText),
+                           preparation.stoppedNativeIDs.contains(id) {
+                            let key = SavedRuntimeKey.agent(idText)
+                            if let native = nativeRegistry.runtime(for: key) {
+                                native.resumeAfterHostedStop()
+                            } else if let terminal = restoredRuntimes[key] {
+                                terminal.openAgent(store: launch[0], socket: launch[1],
+                                    sessionID: idText, shell: launch[2], codex: agentExecutable,
+                                    claude: claudeExecutable, width: terminalWidth,
+                                    height: max(1, height - WorkspaceTerminalPane.headerPixelHeight))
+                            }
+                        }
+                        startupConsumeRequested = true
+                        let wakeIdentity = tw_worker_wake_identity(window)
+                        let receipt = LinuxStartupRestoreStore.consumeLater(store: launch[0],
+                            expected: preparation.recorded) {
+                            _ = tw_worker_wake(wakeIdentity)
+                        }
+                        pendingStartupConsume = (preparation, receipt)
+                    }
+                }
+            }
+            if let pending = pendingStartupConsume, let result = pending.1.take() {
+                pendingStartupConsume = nil
+                switch result {
+                case .success(true):
+                    SessionRestorationLedger.shared.record(pending.0.plan)
+                    startupLaunches = pending.0.launches
+                    nextStartupLaunchAt = Date().addingTimeInterval(StartupSessionRelaunch.staggerInterval)
+                    print("STARTUP_RESTORE_PLAN count=\(startupLaunches.count)")
+                case .success(false):
+                    FileHandle.standardError.write(Data("STARTUP_RESTORE_RECORD_CHANGED\n".utf8))
+                case .failure(let error):
+                    FileHandle.standardError.write(Data("Startup restore consume: \(error)\n".utf8))
+                }
+            }
+            // The shared plan has already bounded this set by policy or the last live record.
+            // A host-only pane cache limit must not strand a consumed restore queue forever.
+            if let launch, !startupLaunches.isEmpty, Date() >= nextStartupLaunchAt {
+                let next = startupLaunches.removeFirst()
+                nextStartupLaunchAt = Date().addingTimeInterval(StartupSessionRelaunch.staggerInterval)
+                let id = next.session.id.uuidString
+                let key = SavedRuntimeKey.agent(id)
+                if projectIndexes[next.projectID.uuidString] != nil,
+                   restoredRuntimes[key] == nil, nativeRegistry.runtime(for: key) == nil {
+                    var started = false
+                    if next.session.usesNativeUI, nativeExecutables[next.session.kind] != nil {
+                        let runtime = NativeWorkspaceSession(store: launch[0], socket: launch[1],
+                            id: next.session.id, shell: launch[2], executables: nativeExecutables,
+                            restoreAtStartup: true)
+                        runtime.onChange = { navigatorRoot.needsDisplay = true }
+                        runtime.onSnoozeWakeReason = { reason in
+                            snoozeWakeInbox.record(reason, id: id,
+                                                   projectID: next.projectID.uuidString)
+                        }
+                        nativeRegistry.background[key] = runtime
+                        nativeRegistry.observeRetention(of: runtime)
+                        started = true
+                        print("STARTUP_RESTORE_LAUNCH id=\(id) native=1")
+                    } else if !next.session.usesNativeUI,
+                              (next.session.kind == .codex ? agentExecutable : claudeExecutable) != nil {
+                        let runtime = makeObservedTerminal()
+                        restoredRuntimes[key] = runtime
+                        started = true
+                        runtime.openAgent(store: launch[0], socket: launch[1], sessionID: id,
+                            shell: launch[2], codex: agentExecutable, claude: claudeExecutable,
+                            width: terminalWidth,
+                            height: max(1, height - WorkspaceTerminalPane.headerPixelHeight))
+                        print("STARTUP_RESTORE_LAUNCH id=\(id) native=0")
+                    }
+                    if !started { startupDeferredIDs.append(next.session.id) }
+                    if started { SessionRestorationLedger.shared.forget(sessionID: next.session.id) }
+                    if let index = projectIndexes[next.projectID.uuidString],
+                       projects[index].recentAgents.contains(where: { $0.id == id }) == false {
+                        let pickerSelectedID: String? = {
+                            guard let picker = savedPicker, picker.isAgent,
+                                  picker.projectIndex == index,
+                                  projects[index].recentAgents.indices.contains(savedSelected) else {
+                                return nil
+                            }
+                            return projects[index].recentAgents[savedSelected].id
+                        }()
+                        let visibleSelectedID = inlineSelection?.projectID == next.projectID.uuidString
+                            ? inlineSelection?.id : nil
+                        let protected = Set([pickerSelectedID, visibleSelectedID].compactMap { $0 })
+                        projects[index].recentAgents.append(savedAgent(next.session))
+                        if projects[index].recentAgents.count > maximumSelectableAgentsPerProject {
+                            let replaceable = projects[index].recentAgents.indices.dropLast()
+                                .reversed().first { !protected.contains(projects[index].recentAgents[$0].id) }
+                            if let replaceable { projects[index].recentAgents.remove(at: replaceable) }
+                        }
+                        if let pickerSelectedID,
+                           let row = projects[index].recentAgents.firstIndex(where: { $0.id == pickerSelectedID }) {
+                            savedSelected = row
+                        }
+                        outlineNeedsReload = true
+                    }
+                    dirty = true
+                }
+            }
             if pendingSnoozeScan == nil, Date() >= nextSnoozeScanAttempt {
                 startSnoozeScan()
             }
@@ -3979,25 +4715,43 @@ struct WindowHarness {
                 fflush(nil)
                 dirty = true
             }
-            if let gate = pendingFolderImport, let result = gate.take() {
-                pendingFolderImport = nil
+            if let gate = interaction.pendingFolderImport, let result = gate.take() {
+                interaction.pendingFolderImport = nil
                 switch result {
-                case .success(let imported?):
-                    projects = imported.projects
-                    composerCheckoutProjectID = nil
-                    composerProjectChoices = projects.map { (id: $0.id, name: $0.name) }
-                    projectIndexes = Dictionary(uniqueKeysWithValues: projects.enumerated().map { ($0.element.id, $0.offset) })
-                    selected = imported.selectedProjectIndex
-                    pendingImportedProjectID = projects[selected].id
-                    first = 0
-                    inlineSelection = nil
-                    outlineNeedsReload = true
-                    outlineScrollSelection = true
-                    dirty = true
-                    print("PROJECT_IMPORTED \(projects[selected].path)"); fflush(nil)
-                    discoverCheckouts()
-                case .success(nil):
-                    print("PROJECT_IMPORT_CANCELLED"); fflush(nil)
+                case .success(let outcome):
+                    let imported: WindowSnapshot?
+                    let movedPath: URL?
+                    switch outcome {
+                    case .project(let snapshot): imported = snapshot; movedPath = nil
+                    case .scratchpadMoved(let snapshot, let path):
+                        imported = snapshot; movedPath = path
+                    }
+                    if let imported {
+                        projects = imported.projects
+                        composerCheckoutProjectID = nil
+                        composerProjectChoices = projects.map { (id: $0.id, name: $0.name) }
+                        projectIndexes = Dictionary(uniqueKeysWithValues:
+                            projects.enumerated().map { ($0.element.id, $0.offset) })
+                        selected = imported.selectedProjectIndex
+                        pendingImportedProjectID = projects.indices.contains(selected)
+                            ? projects[selected].id : nil
+                        first = 0
+                        inlineSelection = nil
+                        outlineNeedsReload = true
+                        outlineScrollSelection = true
+                        dirty = true
+                        if let movedPath {
+                            LinuxGeneralSettings.setScratchpadFolderURL(movedPath)
+                            settingsPane?.updateScratchpadFolder()
+                            print("SCRATCHPAD_MOVED \(movedPath.path)")
+                        } else if projects.indices.contains(selected) {
+                            print("PROJECT_IMPORTED \(projects[selected].path)")
+                        }
+                        fflush(nil)
+                        discoverCheckouts()
+                    } else {
+                        print("PROJECT_IMPORT_CANCELLED"); fflush(nil)
+                    }
                 case .failure(let error):
                     print("PROJECT_IMPORT_REFUSED \(error)"); fflush(nil)
                     tw_title(window, "Threading experiment - project import failed")
@@ -4008,9 +4762,12 @@ struct WindowHarness {
                 composerCreationPending = false
                 switch result {
                 case .success(let receipt):
+                    LinuxGeneralSettings.defaultAgentKind = pending.request.kind
                     do {
                         try finishNativeCreation(receipt, request: pending.request,
-                                                 prompt: pending.prompt, composingPane: pending.pane)
+                                                 prompt: pending.prompt,
+                                                 openingPrompt: pending.openingPrompt,
+                                                 composingPane: pending.pane)
                     } catch {
                         print("NATIVE_CREATION_MOUNT_REFUSED \(error)"); fflush(nil)
                         tw_title(window, "Threading composer - conversation saved, but could not open")
@@ -4021,8 +4778,8 @@ struct WindowHarness {
                 }
                 dirty = true
             }
-            if composerSubmitRequested {
-                composerSubmitRequested = false
+            if interaction.composerSubmitRequested {
+                interaction.composerSubmitRequested = false
                 if let choice = composerTarget(), let idlePane, idlePane.isComposing,
                    projectIndexes[choice.projectID] != nil {
                     let prompt = idlePane.composedPrompt
@@ -4055,7 +4812,8 @@ struct WindowHarness {
                 refreshComposerChoices()
                 dirty = true
             }
-            idlePane?.setLaunchBlocked(pendingFolderImport != nil || pendingSelection != nil
+            idlePane?.setLaunchBlocked(interaction.pendingFolderImport != nil
+                || interaction.pendingSelection != nil
                 || composerCreationPending)
             (activePane as? WorkspaceConversationPane)?.drainAttachments()
             idlePane?.drainAttachments()
@@ -4087,12 +4845,15 @@ struct WindowHarness {
                 }
             } else {
                 accountMenuEntries = []
+                accountMenuSurface = nil
+                accountMenuSurfaceKey = []
+                accountMenuHighlightedIndex = nil
             }
             // Consume after import installs its snapshot, and after a pending selection has
             // replayed its committed action. Neither operation may observe shifted row indices.
-            if pendingFolderImport == nil, pendingSelection == nil,
+            if interaction.pendingFolderImport == nil, interaction.pendingSelection == nil,
                reconcileTerminals() { outlineNeedsReload = true; dirty = true }
-            if pendingFolderImport == nil, pendingSelection == nil {
+            if interaction.pendingFolderImport == nil, interaction.pendingSelection == nil {
                 let selection: (projectID: String, agentID: String)?
                 if let picker = savedPicker, picker.isAgent,
                    projects[picker.projectIndex].recentAgents.indices.contains(savedSelected) {
@@ -4116,7 +4877,8 @@ struct WindowHarness {
                     dirty = true
                 }
             }
-            let enabled = pendingFolderImport == nil && pendingSelection == nil
+            let enabled = interaction.pendingFolderImport == nil
+                && interaction.pendingSelection == nil
             if actionsEnabled != enabled { actionsEnabled = enabled; dirty = true }
             if dirty {
                 navigatorRoot.prepareNavigatorFrame(NSRect(x: 0, y: 0,
@@ -4163,7 +4925,7 @@ struct WindowHarness {
             } else if accountPicker != nil {
                 navigatorRoot.layoutSubtreeIfNeeded()
                 let width = ThemedMenuMetrics.width(for: accountMenuEntries, minimum: 190,
-                    selectedEntryIndex: accountSelected)
+                    selectedEntryIndex: nil)
                 let frame = ThemedMenuLayout.frame(
                     anchor: actionsButton.convert(actionsButton.bounds, to: navigatorRoot),
                     desiredSize: NSSize(width: width,
@@ -4199,14 +4961,21 @@ struct WindowHarness {
                 return index - menu.first + separatorOffset
             }
             func floatingMenuRowRect(_ slot: Int) -> NSRect? {
-                if hasSplitPane, let surface = navigatorFloatingSurface,
-                   navigatorFloatingRows.indices.contains(slot) {
-                    let row = navigatorFloatingRows[slot]
-                    return row.convert(row.bounds, to: surface).offsetBy(
-                        dx: navigatorFloatingFrame.minX, dy: navigatorFloatingFrame.minY)
+                if actions != nil, let surface = actionMenuSurface,
+                   let row = surface.row(at: slot) {
+                    let rect = row.convert(row.bounds, to: surface)
+                    return hasSplitPane
+                        ? rect.offsetBy(dx: actionMenuFrame.minX, dy: actionMenuFrame.minY)
+                        : row.convert(row.bounds, to: navigatorRoot)
                 }
-                guard let row = navigatorRoot.mountedMenuRow(at: slot) else { return nil }
-                return row.convert(row.bounds, to: navigatorRoot)
+                if accountPicker != nil, let surface = accountMenuSurface,
+                   let row = surface.row(at: slot) {
+                    let rect = row.convert(row.bounds, to: surface)
+                    return hasSplitPane
+                        ? rect.offsetBy(dx: accountMenuFrame.minX, dy: accountMenuFrame.minY)
+                        : row.convert(row.bounds, to: navigatorRoot)
+                }
+                return nil
             }
             func floatingMenuRowPixels(_ slot: Int) ->
                 (x: Int32, y: Int32, width: Int32, height: Int32)? {
@@ -4334,9 +5103,10 @@ struct WindowHarness {
                 root.prepareNavigatorFrame(NSRect(x: 0, y: 0, width: CGFloat(width) / scale, height: CGFloat(height) / scale))
                 let accent = Design.Surface.selectionFill
                 let selectedInk = LinuxTheme.neutralInk(on: accent, dark: LinuxTheme.isDark)
-                var menuRows: [NSView] = []
-                var menuHeights: [CGFloat] = []
                 var actionMenuEntries: [ThemedMenuEntry] = []
+                var visibleActionEntries: [ThemedMenuEntry] = []
+                var actionEntryCommands: [Int?] = []
+                var visibleAccountEntries: [ThemedMenuEntry] = []
                 let end: Int
                 if let menu = actions {
                     end = min(menu.commands.count, menu.first + count)
@@ -4349,56 +5119,19 @@ struct WindowHarness {
                         ))
                     }
                     actionMenuEntries = entries
-                    let plan = ThemedMenuRowPlan(entries: entries)
-                    retainedMenuRows.prepare(menu: "actions:\(menu.kind)", entries: entries,
-                                             visible: menu.first..<end)
+                    let separator = scratchpadSeparatorIndex(in: menu)
                     for index in menu.first..<end {
-                        if index > menu.first, index == scratchpadSeparatorIndex(in: menu) {
-                            menuRows.append(addProjectMenuSeparator)
-                            menuHeights.append(ThemedMenuMetrics.separatorHeight)
+                        if index > menu.first, index == separator {
+                            visibleActionEntries.append(.separator)
+                            actionEntryCommands.append(nil)
                         }
-                        guard let row = retainedMenuRows.row(at: index, plan: plan) else {
-                            throw WindowFailure("host command was not a menu item")
-                        }
-                        let rowHeight = plan.heights[index]
-                        row.isKeyboardHighlighted = index == menu.selected
-                        row.onChoose = { entry, _ in activatedMenuEntry = entry }
-                        row.onHighlight = { entry in
-                            guard var current = actions, current.commands.indices.contains(entry),
-                                  current.selected != entry else { return }
-                            current.selected = entry
-                            actions = current
-                            dirty = true
-                        }
-                        menuRows.append(row)
-                        menuHeights.append(rowHeight)
+                        visibleActionEntries.append(entries[index])
+                        actionEntryCommands.append(index)
                     }
-                } else if let accountPicker {
-                    let provider = accountPicker == .claude ? "Claude" : "Codex"
+                } else if accountPicker != nil {
                     end = min(pickerAccounts.count, accountFirst + count)
-                    let plan = ThemedMenuRowPlan(entries: accountMenuEntries)
-                    retainedMenuRows.prepare(menu: "accounts:\(provider)", entries: accountMenuEntries,
-                                             visible: accountFirst..<end)
-                    for index in accountFirst..<end {
-                        guard let row = retainedMenuRows.row(at: index, plan: plan) else {
-                            throw WindowFailure("account choice was not a menu item")
-                        }
-                        let rowHeight = plan.heights[index]
-                        row.isKeyboardHighlighted = index == accountSelected
-                        row.onChoose = { _, item in
-                            activatedAccountHandle = item.representedValue as? AccountHandle
-                        }
-                        row.onHighlight = { entry in
-                            guard pickerAccounts.indices.contains(entry), accountSelected != entry
-                            else { return }
-                            accountSelected = entry
-                            dirty = true
-                        }
-                        menuRows.append(row)
-                        menuHeights.append(rowHeight)
-                    }
+                    visibleAccountEntries = Array(accountMenuEntries[accountFirst..<end])
                 } else if let savedPicker {
-                    retainedMenuRows.reset()
                     let project = projects[savedPicker.projectIndex]
                     let saved = savedPicker.isAgent ? project.recentAgents : project.recentTerminals
                     end = min(saved.count, savedFirst + count)
@@ -4408,7 +5141,7 @@ struct WindowHarness {
                         let retained = hasActiveRuntime(key, projectID: project.id)
                         if savedPicker.isAgent {
                             let mark = ProviderMarks.image(for: runtime.kind, selected: index == savedSelected)
-                            let activity = nativeRuntimes[.agent(runtime.id)]?.activity ?? .idle
+                            let activity = nativeRegistry.runtime(for: .agent(runtime.id))?.activity ?? .idle
                             if activity.showsWorkingMark { visibleWorkingActivity = true }
                             if runtime.attention(at: presentationDate) == .snoozed,
                                let expiry = runtime.snoozedUntil {
@@ -4423,13 +5156,15 @@ struct WindowHarness {
                                 workingMarks.append(mark)
                             }
                         } else {
-                            addSavedTerminalRow(runtime, running: retained, index: index - savedFirst,
+                            let busy = retainedRuntime(for: owner(of: key,
+                                projectID: project.id))?.hasForegroundProcess ?? false
+                            addSavedTerminalRow(runtime, running: retained, busy: busy,
+                                index: index - savedFirst,
                                 width: width, height: height, accent: accent,
                                 selected: index == savedSelected, selectedInk: selectedInk, root: root)
                         }
                     }
                 } else {
-                    retainedMenuRows.reset()
                     if projects.isEmpty, launch != nil {
                         end = 0
                     } else {
@@ -4443,97 +5178,107 @@ struct WindowHarness {
                             configureOutlineRow(cell, item: item, frame: outline.rect(ofRow: index))
                             if let chrome = outline.rowView(atRow: index,
                                 makeIfNecessary: false) as? SidebarHoverRowView {
-                                configureOutlineChrome(chrome, in: outline)
+                                configureOutlineChrome(chrome, item: item, in: outline)
                             }
                         }
                         trace("outline.configure.end")
                     }
                 }
                 var floatingMenuRows: [ThemedMenuRowView] = []
-                var floatingMenuViews: [NSView] = []
-                var floatingMenuHeights: [CGFloat] = []
-                sessionMenuVisibleEntries.removeAll(keepingCapacity: true)
-                if var menu = sessionMenu {
+                sidebarMenuVisibleEntries.removeAll(keepingCapacity: true)
+                let sidebarMenuPresentation: (kind: NavigatorOutlineItem.Kind, id: String,
+                    projectID: String, page: String, selected: Int,
+                    entries: [ThemedMenuEntry])?
+                if let menu = sessionMenu {
+                    sidebarMenuPresentation = (.agent, menu.sessionID, menu.projectID,
+                        String(describing: menu.page), menu.selected, menu.entries)
+                } else if let menu = terminalMenu {
+                    sidebarMenuPresentation = (.terminal, menu.terminalID, menu.projectID,
+                        String(describing: menu.page), menu.selected, menu.entries)
+                } else {
+                    sidebarMenuPresentation = nil
+                }
+                if let menu = sidebarMenuPresentation {
                     root.layoutSubtreeIfNeeded()
-                    let anchor = outline.visibleRowIndexes.compactMap { index -> NSRect? in
-                        guard let item = outline.item(atRow: index) as? NavigatorOutlineItem,
-                              item.kind == .agent, item.id == menu.sessionID,
-                              item.projectID == menu.projectID,
-                              let row = outline.view(atColumn: 0, row: index,
-                                  makeIfNecessary: false) as? Specimen.Row else { return nil }
-                        return row.sessionActionAnchor(in: root)
-                    }.first
+                    let anchor: NSRect?
+                    if menu.kind == .agent, sessionMenuUsesPaneHeader {
+                        if let pane = activePane, let target = activePageTarget,
+                           target.kind == .agent, target.id == menu.id,
+                           target.projectID == menu.projectID,
+                           pane.chrome.pageIdentity == menu.id {
+                            anchor = pane.chrome.sessionActionAnchor(
+                                windowHeight: height, sidebarWidth: sidebarWidth,
+                                paneWidth: terminalWidth)
+                        } else {
+                            anchor = nil
+                        }
+                    } else {
+                        anchor = outline.visibleRowIndexes.compactMap { index -> NSRect? in
+                            guard let item = outline.item(atRow: index) as? NavigatorOutlineItem,
+                                  item.kind == menu.kind, item.id == menu.id,
+                                  item.projectID == menu.projectID,
+                                  let row = outline.view(atColumn: 0, row: index,
+                                      makeIfNecessary: false) as? Specimen.Row else { return nil }
+                            return menu.kind == .agent
+                                ? row.sessionActionAnchor(in: root)
+                                : row.terminalActionAnchor(in: root)
+                        }.first
+                    }
                     if let anchor {
                         let entries = menu.entries
-                        let plan = ThemedMenuRowPlan(entries: entries)
                         let menuWidth = ThemedMenuMetrics.width(for: entries, minimum: 190,
-                            selectedEntryIndex: menu.selected)
-                        let placement = ThemedMenuLayout.frame(
+                            selectedEntryIndex: nil)
+                        sidebarMenuFrame = ThemedMenuLayout.frame(
                             anchor: anchor,
                             desiredSize: NSSize(width: menuWidth,
                                 height: ThemedMenuMetrics.height(for: entries)),
-                            in: menuLayoutBounds, flipped: root.isFlipped)
-                        let maximumHeight = max(64, placement.height)
-                        func visibleEnd(start: Int) -> Int {
-                            var height: CGFloat = 12
-                            var end = start
-                            while end < entries.count,
-                                  height + plan.heights[end] <= maximumHeight {
-                                height += plan.heights[end]
-                                end += 1
+                            in: menuLayoutBounds, flipped: root.isFlipped,
+                            whenClipped: { ThemedMenuMetrics.clippedHeight(for: entries, atMost: $0) })
+                        let key = [menu.id, menu.page,
+                            String(describing: sidebarMenuFrame.width)] + entries.map { entry in
+                            switch entry {
+                            case .separator: return "separator"
+                            case .header(let title): return "header:\(title)"
+                            case .item(let item):
+                                return "item:\(item.title):\(item.help ?? ""):\(item.representedValue as? String ?? ""):\(item.isEnabled)"
                             }
-                            return max(start + 1, end)
                         }
-                        var firstVisible = min(menu.firstVisible, menu.selected)
-                        while menu.selected >= visibleEnd(start: firstVisible),
-                              firstVisible < entries.count - 1 {
-                            firstVisible += 1
-                        }
-                        let visible = firstVisible..<visibleEnd(start: firstVisible)
-                        if menu.firstVisible != firstVisible {
-                            menu.firstVisible = firstVisible
-                            sessionMenu = menu
-                        }
-                        let menuHeight = visible.reduce(CGFloat(12)) {
-                            $0 + plan.heights[$1]
-                        }
-                        sessionMenuFrame = ThemedMenuLayout.frame(
-                            anchor: anchor,
-                            desiredSize: NSSize(width: menuWidth, height: menuHeight),
-                            in: menuLayoutBounds, flipped: root.isFlipped)
-                        retainedSessionMenuRows.prepare(
-                            menu: "session:\(menu.sessionID):\(menu.page)",
-                            entries: entries, visible: visible)
-                        var separatorCount = 0
-                        for entry in visible {
-                            let rowHeight = plan.heights[entry]
-                            if case .separator = entries[entry] {
-                                if separatorCount == sessionMenuSeparators.count {
-                                    sessionMenuSeparators.append(ThemedMenuSeparatorView())
-                                }
-                                let separator = sessionMenuSeparators[separatorCount]
-                                separatorCount += 1
-                                floatingMenuViews.append(separator)
-                                floatingMenuHeights.append(rowHeight)
-                            } else if let row = retainedSessionMenuRows.row(at: entry, plan: plan) {
-                                row.isKeyboardHighlighted = entry == menu.selected
-                                row.onChoose = { chosen, _ in activatedSessionMenuEntry = chosen }
-                                row.onHighlight = { highlighted in
-                                    guard var current = sessionMenu,
-                                          current.entries.indices.contains(highlighted),
-                                          current.selected != highlighted else { return }
+                        if sidebarMenuSurfaceKey != key || sidebarMenuSurface == nil {
+                            let surface = ThemedMenuSurfaceView(
+                                frame: NSRect(origin: .zero, size: sidebarMenuFrame.size),
+                                entries: entries, selectedEntryIndex: nil)
+                            surface.appearance = LinuxTheme.appearance
+                            surface.onChoose = { chosen, _ in activatedSidebarMenuEntry = chosen }
+                            surface.onHighlight = { highlighted in
+                                if var current = sessionMenu,
+                                   current.entries.indices.contains(highlighted),
+                                   current.selected != highlighted {
                                     current.selected = highlighted
                                     sessionMenu = current
-                                    dirty = true
-                                }
-                                floatingMenuRows.append(row)
-                                floatingMenuViews.append(row)
-                                floatingMenuHeights.append(rowHeight)
-                                sessionMenuVisibleEntries.append(entry)
+                                } else if var current = terminalMenu,
+                                          current.entries.indices.contains(highlighted),
+                                          current.selected != highlighted {
+                                    current.selected = highlighted
+                                    terminalMenu = current
+                                } else { return }
+                                dirty = true
                             }
+                            surface.onScrolled = { dirty = true }
+                            sidebarMenuSurface = surface
+                            sidebarMenuSurfaceKey = key
+                            sidebarMenuHighlightedIndex = nil
+                        }
+                        if let surface = sidebarMenuSurface {
+                            surface.frame = NSRect(origin: .zero, size: sidebarMenuFrame.size)
+                            surface.appearance = LinuxTheme.appearance
+                            if sidebarMenuHighlightedIndex != menu.selected {
+                                surface.highlight(menu.selected)
+                                sidebarMenuHighlightedIndex = menu.selected
+                            }
+                            floatingMenuRows = entries.indices.compactMap { surface.row(at: $0) }
                         }
                     } else {
-                        dismissSessionMenu()
+                        dismissSidebarMenu()
                     }
                 }
                 root.title = ""
@@ -4556,55 +5301,134 @@ struct WindowHarness {
                 trace("header bandHeight=\(navigatorHeaderHeight) title=\(titleRect) add=\(addRect) actions=\(actionsRect)")
                 let mountStarted = DispatchTime.now().uptimeNanoseconds
                 root.finishNavigatorRows()
-                func mountNavigatorMenu(_ surface: ThemedMenuPanelView,
-                                        frame: NSRect, rows: [NSView]) {
+                func mountNavigatorMenu(_ surface: ThemedMenuPanelView, frame: NSRect) {
                     if hasSplitPane {
-                        root.mountMenuRows([], heights: [], topInset: navigatorHeaderHeight + 2)
+                        root.clearFloatingMenu()
                         surface.frame = NSRect(origin: .zero, size: frame.size)
                         surface.appearance = LinuxTheme.appearance
                         navigatorMenuWindow.contentView = surface
                         navigatorFloatingSurface = surface
                         navigatorFloatingFrame = frame
-                        navigatorFloatingRows = rows
                     } else {
-                        root.mountFloatingMenu(surface, frame: frame, rows: rows)
+                        root.mountFloatingMenu(surface, frame: frame)
                         navigatorFloatingSurface = nil
-                        navigatorFloatingRows.removeAll(keepingCapacity: true)
                     }
                 }
-                if sessionMenu != nil {
-                    sessionMenuSurface.setRows(floatingMenuViews, heights: floatingMenuHeights)
-                    mountNavigatorMenu(sessionMenuSurface, frame: sessionMenuFrame,
-                        rows: floatingMenuViews)
+                if let sidebarMenuSurface {
+                    mountNavigatorMenu(sidebarMenuSurface, frame: sidebarMenuFrame)
                 } else if let menu = actions {
                     let width = ThemedMenuMetrics.width(for: actionMenuEntries, minimum: 190,
-                        selectedEntryIndex: menu.selected)
-                    let height = menuHeights.reduce(ThemedMenuMetrics.verticalOuterInset * 2, +)
+                        selectedEntryIndex: nil)
+                    let height = ThemedMenuMetrics.height(for: visibleActionEntries)
                     actionMenuFrame = ThemedMenuLayout.frame(
                         anchor: actionMenuAnchor(in: menu),
                         desiredSize: NSSize(width: width, height: height),
                         in: menuLayoutBounds, flipped: root.isFlipped)
-                    actionMenuSurface.setRows(menuRows, heights: menuHeights,
-                        padding: ThemedMenuMetrics.verticalOuterInset)
-                    mountNavigatorMenu(actionMenuSurface, frame: actionMenuFrame,
-                        rows: menuRows)
+                    let key = [String(describing: menu.kind), menu.projectID?.uuidString ?? "",
+                        String(menu.first), String(describing: actionMenuFrame.width)] + visibleActionEntries.map { entry in
+                            switch entry {
+                            case .separator: return "separator"
+                            case .header(let title): return "header:\(title)"
+                            case .item(let item):
+                                return "item:\(item.title):\(item.help ?? ""):\(item.representedValue as? String ?? ""):\(item.isEnabled)"
+                            }
+                        }
+                    let selectedEntry = actionMenuSlot(menu.selected, in: menu)
+                    if actionMenuSurfaceKey != key || actionMenuSurface == nil {
+                        let surface = ThemedMenuSurfaceView(
+                            frame: NSRect(origin: .zero, size: actionMenuFrame.size),
+                            entries: visibleActionEntries, selectedEntryIndex: nil)
+                        surface.appearance = LinuxTheme.appearance
+                        surface.onChoose = { entry, _ in
+                            guard actionEntryCommands.indices.contains(entry) else { return }
+                            activatedMenuEntry = actionEntryCommands[entry]
+                        }
+                        surface.onHighlight = { entry in
+                            guard actionEntryCommands.indices.contains(entry),
+                                  let commandIndex = actionEntryCommands[entry],
+                                  var current = actions, current.commands.indices.contains(commandIndex),
+                                  current.selected != commandIndex else { return }
+                            current.selected = commandIndex
+                            actions = current
+                            dirty = true
+                        }
+                        surface.onScrolled = { dirty = true }
+                        actionMenuSurface = surface
+                        actionMenuSurfaceKey = key
+                        actionMenuHighlightedIndex = nil
+                    }
+                    if let surface = actionMenuSurface {
+                        surface.frame = NSRect(origin: .zero, size: actionMenuFrame.size)
+                        surface.appearance = LinuxTheme.appearance
+                        if actionMenuHighlightedIndex != selectedEntry {
+                            surface.highlight(selectedEntry)
+                            actionMenuHighlightedIndex = selectedEntry
+                        }
+                        mountNavigatorMenu(surface, frame: actionMenuFrame)
+                    }
                 } else if accountPicker != nil {
                     let width = ThemedMenuMetrics.width(for: accountMenuEntries, minimum: 190,
-                        selectedEntryIndex: accountSelected)
-                    let height = menuHeights.reduce(ThemedMenuMetrics.verticalOuterInset * 2, +)
+                        selectedEntryIndex: nil)
+                    let height = ThemedMenuMetrics.height(for: visibleAccountEntries)
                     accountMenuFrame = ThemedMenuLayout.frame(
                         anchor: actionsButton.convert(actionsButton.bounds, to: root),
                         desiredSize: NSSize(width: width, height: height),
                         in: menuLayoutBounds, flipped: root.isFlipped)
-                    accountMenuSurface.setRows(menuRows, heights: menuHeights,
-                        padding: ThemedMenuMetrics.verticalOuterInset)
-                    mountNavigatorMenu(accountMenuSurface, frame: accountMenuFrame,
-                        rows: menuRows)
+                    let key = [String(describing: accountPicker), String(accountFirst),
+                        String(describing: accountMenuFrame.width)] + visibleAccountEntries.map { entry in
+                            guard case .item(let item) = entry else { return "separator" }
+                            return "item:\(item.title):\(String(reflecting: item.representedValue)):\(item.isSelected)"
+                        }
+                    let selectedEntry = accountSelected - accountFirst
+                    if accountMenuSurfaceKey != key || accountMenuSurface == nil {
+                        let surface = ThemedMenuSurfaceView(
+                            frame: NSRect(origin: .zero, size: accountMenuFrame.size),
+                            entries: visibleAccountEntries, selectedEntryIndex: nil)
+                        surface.appearance = LinuxTheme.appearance
+                        surface.onChoose = { _, item in
+                            activatedAccountHandle = item.representedValue as? AccountHandle
+                        }
+                        surface.onHighlight = { entry in
+                            let accountIndex = accountFirst + entry
+                            guard pickerAccounts.indices.contains(accountIndex),
+                                  accountSelected != accountIndex else { return }
+                            accountSelected = accountIndex
+                            dirty = true
+                        }
+                        surface.onScrolled = { dirty = true }
+                        accountMenuSurface = surface
+                        accountMenuSurfaceKey = key
+                        accountMenuHighlightedIndex = nil
+                    }
+                    if let surface = accountMenuSurface {
+                        surface.frame = NSRect(origin: .zero, size: accountMenuFrame.size)
+                        surface.appearance = LinuxTheme.appearance
+                        if accountMenuHighlightedIndex != selectedEntry {
+                            surface.highlight(selectedEntry)
+                            accountMenuHighlightedIndex = selectedEntry
+                        }
+                        mountNavigatorMenu(surface, frame: accountMenuFrame)
+                    }
+                } else if let surface = hoverCardSurface, let item = hoverCardItem,
+                          let rowIndex = outline.visibleRowIndexes.first(where: {
+                              outline.item(atRow: $0) as? NavigatorOutlineItem == item
+                          }),
+                          let row = outline.view(atColumn: 0, row: rowIndex,
+                              makeIfNecessary: false) as? Specimen.Row {
+                    let anchor = row.convert(row.bounds, to: root)
+                    let panelSize = surface.frame.size
+                    let inset = Design.Spacing.small
+                    let preferredX = anchor.maxX + Design.Spacing.small
+                    let x = min(max(preferredX, inset),
+                                max(inset, menuLayoutBounds.maxX - inset - panelSize.width))
+                    let y = min(max(anchor.midY - panelSize.height / 2, inset),
+                                max(inset, menuLayoutBounds.maxY - inset - panelSize.height))
+                    mountNavigatorMenu(surface, frame: NSRect(x: x, y: y,
+                                                              width: panelSize.width,
+                                                              height: panelSize.height))
                 } else {
-                    root.mountMenuRows(menuRows, heights: menuHeights,
-                        topInset: navigatorHeaderHeight + 2)
+                    root.clearFloatingMenu()
                     navigatorFloatingSurface = nil
-                    navigatorFloatingRows.removeAll(keepingCapacity: true)
                     navigatorMenuWindow.contentView = nil
                 }
                 let focusedSlot: Int
@@ -4614,19 +5438,21 @@ struct WindowHarness {
                 else { focusedSlot = selectedInlineIndex - first }
                 let focusedView: NSView?
                 if let menu = sessionMenu {
-                    focusedView = floatingMenuRows.first { $0.entryIndex == menu.selected }
+                    focusedView = sidebarMenuSurface?.row(at: menu.selected)
+                } else if let menu = terminalMenu {
+                    focusedView = sidebarMenuSurface?.row(at: menu.selected)
                 } else if actions != nil || accountPicker != nil {
-                    focusedView = hasSplitPane
-                        ? (navigatorFloatingRows.indices.contains(focusedSlot)
-                            ? navigatorFloatingRows[focusedSlot] : nil)
-                        : root.mountedMenuRow(at: focusedSlot)
+                    focusedView = actions != nil
+                        ? actionMenuSurface?.row(at: focusedSlot)
+                        : accountMenuSurface?.row(at: focusedSlot)
                 } else if projectsMode && !projects.isEmpty {
                     focusedView = outline.view(atColumn: 0, row: selectedInlineIndex,
                                                makeIfNecessary: false)
                 } else {
                     focusedView = root.mountedRow(at: focusedSlot)
                 }
-                if hasSplitPane, navigatorFloatingSurface != nil {
+                if hasSplitPane, let floating = navigatorFloatingSurface,
+                   floating !== hoverCardSurface {
                     contentWindow.makeFirstResponder(nil)
                     navigatorMenuWindow.makeFirstResponder(sidebarFocused && accountPicker == nil
                         ? focusedView : nil)
@@ -4695,7 +5521,8 @@ struct WindowHarness {
                         tw_present_navigator_menu(window, $0.baseAddress,
                             Int32(pixelWidth), Int32(pixelHeight),
                             Int32((frame.minX * scale).rounded()),
-                            Int32((menuLayoutBounds.height - frame.maxY) * scale))
+                            Int32((menuLayoutBounds.height - frame.maxY) * scale),
+                            surface === hoverCardSurface ? 0 : 1)
                     }
                     guard overlayResult == 0 else {
                         throw WindowFailure("navigator menu overlay exceeds its window")
@@ -4707,25 +5534,33 @@ struct WindowHarness {
                     try paintWorkingPatches()
                 }
                 trace("accessibility-title.begin")
-                if let menu = sessionMenu {
-                    let rows = floatingMenuRows.filter { menu.command(at: $0.entryIndex) != nil }
-                    let bounds = hasSplitPane ? sessionMenuFrame
-                        : sessionMenuSurface.convert(sessionMenuSurface.bounds, to: root)
+                if let menu = sidebarMenuPresentation, let surface = sidebarMenuSurface {
+                    let viewport = surface.bounds.insetBy(
+                        dx: 0, dy: ThemedMenuMetrics.verticalOuterInset)
+                    let rows = floatingMenuRows.filter { row in
+                        menu.entries[row.entryIndex].item?.representedValue as? String != nil
+                            && viewport.contains(row.convert(row.bounds, to: surface))
+                    }
+                    sidebarMenuVisibleEntries = rows.map(\.entryIndex)
+                    let bounds = hasSplitPane ? sidebarMenuFrame
+                        : surface.convert(surface.bounds, to: root)
                     let listX = Int32(bounds.minX * scale)
                     let listY = Int32((root.bounds.height - bounds.maxY) * scale)
-                    tw_accessibility_begin_list(window, "Session actions", 0,
+                    tw_accessibility_begin_list(window,
+                        menu.kind == .agent ? "Session actions" : "Terminal actions", 0,
                         Int32(rows.count), 1, listX, listY,
                         Int32(bounds.width * scale), Int32(bounds.height * scale))
                     for row in rows {
-                        guard let command = menu.command(at: row.entryIndex),
-                              let title = menu.entries[row.entryIndex].item?.title else { continue }
+                        guard let item = menu.entries[row.entryIndex].item,
+                              let command = item.representedValue as? String else { continue }
+                        let title = item.title
                         let rect = hasSplitPane
-                            ? row.convert(row.bounds, to: sessionMenuSurface).offsetBy(
-                                dx: sessionMenuFrame.minX, dy: sessionMenuFrame.minY)
+                            ? row.convert(row.bounds, to: surface).offsetBy(
+                                dx: sidebarMenuFrame.minX, dy: sidebarMenuFrame.minY)
                             : row.convert(row.bounds, to: root)
                         let x = Int32(rect.minX * scale)
                         let y = Int32((root.bounds.height - rect.maxY) * scale)
-                        let result = command.rawValue.withCString { identifier in
+                        let result = command.withCString { identifier in
                             title.withCString { label in
                                 tw_accessibility_add_action_row(window, identifier, label,
                                     row.entryIndex == menu.selected ? 1 : 0, 1,
@@ -4835,7 +5670,7 @@ struct WindowHarness {
                         let provider = runtime.kind.map { "[\($0.displayName)] " } ?? ""
                         let account = runtime.account.map { " [\($0)]" } ?? ""
                         let activity = savedPicker.isAgent
-                            ? nativeRuntimes[.agent(runtime.id)]?.activity ?? .idle : .idle
+                            ? nativeRegistry.runtime(for: .agent(runtime.id))?.activity ?? .idle : .idle
                         let activityText: String = switch activity {
                             case .idle: ""
                             case .loading: " loading"
@@ -4953,7 +5788,7 @@ struct WindowHarness {
                                 let retained = hasActiveRuntime(.agent(runtime.id), projectID: project.id)
                                 let provider = runtime.kind.map { "[\($0.displayName)] " } ?? ""
                                 let account = runtime.account.map { " [\($0)]" } ?? ""
-                                let activityText: String = switch nativeRuntimes[.agent(runtime.id)]?.activity ?? .idle {
+                                let activityText: String = switch nativeRegistry.runtime(for: .agent(runtime.id))?.activity ?? .idle {
                                 case .idle: ""
                                 case .loading: " loading"
                                 case .working: " working"
@@ -4971,8 +5806,11 @@ struct WindowHarness {
                             case .terminal(let projectIndex, let childIndex, _):
                                 let project = projects[projectIndex]
                                 let runtime = project.recentTerminals[childIndex]
-                                let retained = hasActiveRuntime(.terminal(runtime.id), projectID: project.id)
-                                let label = "\(runtime.identityTitle) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")"
+                                let key = SavedRuntimeKey.terminal(runtime.id)
+                                let retained = hasActiveRuntime(key, projectID: project.id)
+                                let busy = retainedRuntime(for: owner(of: key,
+                                    projectID: project.id))?.hasForegroundProcess ?? false
+                                let label = "\(runtime.identityTitle) [\(String(runtime.id.prefix(8)))]\(retained ? " retained" : "")\(busy ? " command running" : "")"
                                 try publishOutlineAccessibleRow(index, id: runtime.id,
                                     label: label, selected: isSelected)
                             }
@@ -5019,20 +5857,13 @@ struct WindowHarness {
                         outlineNeedsReload = true
                     }
                     restoredRuntimes.removeValue(forKey: key)?.stop()
-                    nativeRuntimes.removeValue(forKey: key)?.runtime.stop()
+                    if let id = SessionID(uuidString: pending.id) {
+                        terminalAttachmentCoordinator.forget(id)
+                    }
+                    nativeRegistry.panes.removeValue(forKey: key)?.runtime.stop()
+                    nativeRegistry.background.removeValue(forKey: key)?.stop()
                     if activePageTarget?.id == pending.id {
-                        activePane?.focus(false, window: window)
-                        activePane = nil
-                        activePageTarget = nil
-                        idlePane = WorkspacePlaceholderPane(onSubmit: {
-                            guard pendingFolderImport == nil, pendingSelection == nil else { return }
-                            composerSubmitRequested = true
-                        })
-                        idlePane?.setThemeAppearance()
-                        tw_workspace_terminal_top_inset(window, 0)
-                        tw_workspace_mode(window, Int32(sidebarWidth), 1)
-                        tw_workspace_placeholder_mode(window, 1)
-                        focusSidebar(true)
+                        showPlaceholderAfterRemovingActiveRuntime()
                     }
                     print("SESSION_ARCHIVED id=\(pending.id)")
                 case .failure(let error):
@@ -5081,6 +5912,23 @@ struct WindowHarness {
                 dirty = true
                 continue
             }
+            if let pending = pendingTerminalRenamePrompt,
+               let result = pending.gate.take() {
+                pendingTerminalRenamePrompt = nil
+                switch result {
+                case .success(let title?):
+                    beginTerminalRename(pending.id, projectID: pending.projectID, title: title,
+                        displayedCurrentTitle: pending.displayedCurrentTitle)
+                case .success(nil):
+                    print("TERMINAL_RENAME_CANCELLED id=\(pending.id)")
+                case .failure(let error):
+                    tw_title(window, "Threading - could not rename terminal")
+                    print("TERMINAL_RENAME_PROMPT_REFUSED id=\(pending.id) \(error)")
+                }
+                fflush(nil)
+                dirty = true
+                continue
+            }
             if let pending = pendingClosePrompt, let result = pending.gate.take() {
                 pendingClosePrompt = nil
                 switch result {
@@ -5112,7 +5960,11 @@ struct WindowHarness {
                 case .success:
                     let key = SavedRuntimeKey.agent(pending.id)
                     restoredRuntimes.removeValue(forKey: key)?.stop()
-                    nativeRuntimes.removeValue(forKey: key)?.runtime.stop()
+                    if let id = SessionID(uuidString: pending.id) {
+                        terminalAttachmentCoordinator.forget(id)
+                    }
+                    nativeRegistry.panes.removeValue(forKey: key)?.runtime.stop()
+                    nativeRegistry.background.removeValue(forKey: key)?.stop()
                     if let target = activePageTarget, target.kind == .agent,
                        target.id == pending.id, target.projectID == pending.projectID,
                        let index = projectIndexes[pending.projectID],
@@ -5170,6 +6022,88 @@ struct WindowHarness {
                 case .failure(let error):
                     tw_title(window, "Threading - could not rename session")
                     print("SESSION_RENAME_REFUSED id=\(pending.id) \(error)")
+                }
+                fflush(nil)
+                dirty = true
+                continue
+            }
+            if let pending = pendingTerminalRename, let result = pending.gate.take() {
+                pendingTerminalRename = nil
+                switch result {
+                case .success(let saved):
+                    if let index = projectIndexes[pending.projectID], projects.indices.contains(index),
+                       let row = projects[index].recentTerminals.firstIndex(where: {
+                           $0.id == pending.id
+                       }) {
+                        let title = String(saved.title.unicodeScalars.prefix(
+                            maximumPersistedRuntimeTitleScalars))
+                        projects[index].recentTerminals[row].title = title
+                        projects[index].recentTerminals[row].customTitle = saved.customTitle.map {
+                            String($0.unicodeScalars.prefix(maximumPersistedRuntimeTitleScalars))
+                        }
+                        if activePageTarget?.kind == .terminal,
+                           activePageTarget?.id == pending.id,
+                           activePageTarget?.projectID == pending.projectID {
+                            activePane?.chrome.updatePageName(readableNavigatorText(title))
+                        }
+                        outlineNeedsReload = true
+                    }
+                    print("TERMINAL_RENAME_SAVED id=\(pending.id) changed=\(saved.changed)")
+                case .failure(let error):
+                    tw_title(window, "Threading - could not rename terminal")
+                    print("TERMINAL_RENAME_REFUSED id=\(pending.id) \(error)")
+                }
+                fflush(nil)
+                dirty = true
+                continue
+            }
+            if let pending = pendingTerminalCopyPath, let result = pending.gate.take() {
+                pendingTerminalCopyPath = nil
+                switch result {
+                case .success(let path):
+                    if NSPasteboard.general.setString(path, forType: .string) {
+                        print("TERMINAL_VALUE_COPIED copyWorktreePath id=\(pending.id)")
+                    } else {
+                        tw_title(window, "Threading - could not copy terminal path")
+                    }
+                case .failure(let error):
+                    tw_title(window, "Threading - could not copy terminal path")
+                    print("TERMINAL_COPY_PATH_REFUSED id=\(pending.id) \(error)")
+                }
+                fflush(nil)
+                dirty = true
+                continue
+            }
+            if let pending = pendingTerminalClose, let result = pending.gate.take() {
+                pendingTerminalClose = nil
+                switch result {
+                case .success(let daemonStopped):
+                    let key = SavedRuntimeKey.terminal(pending.id)
+                    restoredRuntimes.removeValue(forKey: key)?.stop()
+                    nativeRegistry.panes.removeValue(forKey: key)?.runtime.stop()
+                    if let index = projectIndexes[pending.projectID], projects.indices.contains(index) {
+                        projects[index].recentTerminals.removeAll { $0.id == pending.id }
+                        projects[index].terminalCount = max(0, projects[index].terminalCount - 1)
+                        if inlineSelection?.kind == .terminal,
+                           inlineSelection?.id == pending.id {
+                            inlineSelection = NavigatorOutlineItem(projectID: pending.projectID,
+                                projectIndex: index)
+                            outlineScrollSelection = true
+                        }
+                        outlineNeedsReload = true
+                    }
+                    if activePageTarget?.kind == .terminal,
+                       activePageTarget?.id == pending.id,
+                       activePageTarget?.projectID == pending.projectID {
+                        showPlaceholderAfterRemovingActiveRuntime()
+                    }
+                    print("TERMINAL_CLOSED id=\(pending.id) daemonStopped=\(daemonStopped)")
+                    if !daemonStopped {
+                        tw_title(window, "Threading - terminal removed; shell stop unconfirmed")
+                    }
+                case .failure(let error):
+                    tw_title(window, "Threading - could not close terminal")
+                    print("TERMINAL_CLOSE_REFUSED id=\(pending.id) \(error)")
                 }
                 fflush(nil)
                 dirty = true
@@ -5332,9 +6266,9 @@ struct WindowHarness {
                 }
                 continue
             }
-            if let pending = pendingSelection {
+            if let pending = interaction.pendingSelection {
                 if let result = pending.gate.take() {
-                    pendingSelection = nil
+                    interaction.pendingSelection = nil
                     switch result {
                     case .success:
                         event = pending.event
@@ -5363,7 +6297,7 @@ struct WindowHarness {
                     }
                     continue
                 }
-            } else if let pendingFolderImport {
+            } else if let pendingFolderImport = interaction.pendingFolderImport {
                 if tw_next_timeout(window, &event, 33) == 1 {
                     if event.kind == 5 { return }
                     if event.kind == 1 {
@@ -5384,6 +6318,15 @@ struct WindowHarness {
                     if event.kind == 1 { try updateSurface(event) }
                 }
                 continue
+            } else if let pendingTerminalRenamePrompt {
+                if tw_next_timeout(window, &event, 33) == 1 {
+                    if event.kind == 5 {
+                        pendingTerminalRenamePrompt.gate.cancel()
+                        return
+                    }
+                    if event.kind == 1 { try updateSurface(event) }
+                }
+                continue
             } else if let pendingClosePrompt {
                 if tw_next_timeout(window, &event, 33) == 1 {
                     if event.kind == 5 {
@@ -5393,7 +6336,7 @@ struct WindowHarness {
                     if event.kind == 1 { try updateSurface(event) }
                 }
                 continue
-            } else if pendingClose != nil {
+            } else if pendingClose != nil || pendingTerminalClose != nil {
                 if tw_next_timeout(window, &event, 33) == 1 {
                     if event.kind == 5 { return }
                     if event.kind == 1 { try updateSurface(event) }
@@ -5414,11 +6357,14 @@ struct WindowHarness {
                 let awaitingCreation = terminals.values.contains { $0.hasPendingTerminalCreation }
                     || restoredRuntimes.values.contains { $0.hasPendingAgentCreation }
                 let pollsRuntime = awaitingCreation || activePane?.needsPolling == true
+                    || !pendingAttachmentLoads.isEmpty
                     || pendingNativeCreation != nil || pendingOpenInCatalogue != nil
                     || pendingOpenInLaunch != nil || pendingArchive != nil || pendingPin != nil
                     || pendingSnoozeScan != nil || pendingSnooze != nil
                     || pendingSnoozeExpiry != nil
                     || pendingRename != nil || pendingClose != nil
+                    || pendingTerminalRename != nil || pendingTerminalClose != nil
+                    || pendingTerminalCopyPath != nil
                     || openInIcons.isLoading
                 // A picker without a terminal still owes a deadline update. Sleep until that
                 // expiry (at most one second to recheck wall-clock changes), while the bridge
@@ -5432,7 +6378,16 @@ struct WindowHarness {
                 let activityWait = visibleWorkingActivity && !Design.Motion.reducesStatusMotion
                     ? Int32(max(1, min(42, ceil(nextActivityFrame.timeIntervalSinceNow * 1_000))))
                     : nil
-                let timeout = [pollsRuntime ? Int32(33) : nil, expiryWait, snoozeWait, activityWait]
+                let startupWait = !startupLaunches.isEmpty
+                    ? Int32(max(1, min(1_000, ceil(nextStartupLaunchAt.timeIntervalSinceNow * 1_000))))
+                    : nil
+                let hoverWait = hoverCardDueAt.map {
+                    Int32(max(1, min(1_000, ceil($0.timeIntervalSinceNow * 1_000))))
+                }
+                let toggleWait = ThemedToggle.hasActiveAnimations ? Int32(16) : nil
+                let timeout = [pollsRuntime ? Int32(33) : nil, toggleWait, expiryWait, snoozeWait,
+                               activityWait, startupWait, hoverWait,
+                               nativeRetention.waitMilliseconds]
                     .compactMap { $0 }.min()
                 let received = timeout.map { tw_next_timeout(window, &event, $0) }
                     ?? tw_next(window, &event)
@@ -5464,7 +6419,7 @@ struct WindowHarness {
                 accountPicker = nil
                 savedPicker = nil
                 focusSidebar(true)
-                pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1],
+                interaction.pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1],
                                                        droppedPath: path)
                 dirty = true
                 continue
@@ -5613,19 +6568,23 @@ struct WindowHarness {
                     activatedOutlineProjectActionID = nil
                     activatedOutlineProjectCreateID = nil
                     activatedOutlineSessionActionID = nil
+                    activatedOutlineTerminalActionID = nil
                     activatedOutlineSessionArchiveID = nil
-                    activatedSessionMenuEntry = nil
+                    activatedSidebarMenuEntry = nil
                     activatedAccountHandle = nil
                     rowActionMenuGesture = false
                     rowActionMenuEntered = false
                     if event.action == 4, navigatorFloatingSurface != nil {
-                        if sessionMenu != nil { dismissSessionMenu() }
+                        if sessionMenu != nil || terminalMenu != nil { dismissSidebarMenu() }
                         else if actions != nil { dismissActions() }
                         else if accountPicker != nil { accountPicker = nil; dirty = true }
                     }
                     if hoveredOutlineItem != nil {
                         hoveredOutlineItem = nil; dirty = true
                     }
+                    hoverCardDueAt = nil
+                    hoverCardItem = nil
+                    hoverCardSurface = nil
                     if event.action == 7, activePane == nil, let idlePane {
                         var motion = event
                         motion.kind = 39
@@ -5640,10 +6599,11 @@ struct WindowHarness {
                 // a pointer move never scans a stored catalogue or builds hidden controls.
                 var pointerOutlineItem: NavigatorOutlineItem?
                 if actions == nil, accountPicker == nil, savedPicker == nil,
-                   sessionMenu == nil,
+                   sessionMenu == nil, terminalMenu == nil,
                    launch != nil, let index = outlineRowIndex(at: event),
                    let item = outline.item(atRow: index) as? NavigatorOutlineItem,
-                   (item.kind == .project || item.kind == .repository || item.kind == .agent),
+                   (item.kind == .project || item.kind == .repository
+                    || item.kind == .agent || item.kind == .terminal),
                    let row = outlineRowPixels(index) {
                     if event.x >= row.x, event.x < row.x + row.width,
                        event.y >= row.y, event.y < row.y + row.height {
@@ -5652,6 +6612,10 @@ struct WindowHarness {
                 }
                 if hoveredOutlineItem != pointerOutlineItem {
                     hoveredOutlineItem = pointerOutlineItem
+                    hoverCardItem = nil
+                    hoverCardSurface = nil
+                    hoverCardDueAt = pointerOutlineItem?.kind == .agent
+                        ? Date().addingTimeInterval(SessionPopoverDefaults.hoverDelay) : nil
                     dirty = true
                 }
                 let eventType: NSEvent.EventType
@@ -5677,10 +6641,11 @@ struct WindowHarness {
                     activatedOutlineProjectActionID = nil
                     activatedOutlineProjectCreateID = nil
                     activatedOutlineSessionActionID = nil
+                    activatedOutlineTerminalActionID = nil
                     activatedOutlineSessionArchiveID = nil
-                    activatedSessionMenuEntry = nil
+                    activatedSidebarMenuEntry = nil
                 }
-                if navigatorFloatingSurface != nil {
+                if let floating = navigatorFloatingSurface, floating !== hoverCardSurface {
                     let menuPoint = NSPoint(x: point.x - navigatorFloatingFrame.minX,
                                             y: point.y - navigatorFloatingFrame.minY)
                     _ = navigatorMenuWindow.dispatchToContent(NSEvent(type: eventType,
@@ -5700,27 +6665,57 @@ struct WindowHarness {
                     }
                     continue
                 }
+                if event.action == 1, let actionID = activatedOutlineTerminalActionID {
+                    activatedOutlineTerminalActionID = nil
+                    if pointerOutlineItem?.kind == .terminal,
+                       pointerOutlineItem?.id == actionID,
+                       let projectID = pointerOutlineItem?.projectID {
+                        openTerminalMenu(actionID, projectID: projectID)
+                    }
+                    continue
+                }
                 if event.action == 5,
-                   sessionMenu == nil || !sessionMenuFrame.contains(point) {
+                   (sessionMenu == nil && terminalMenu == nil)
+                    || !sidebarMenuFrame.contains(point) {
                     if pointerOutlineItem?.kind == .agent,
                        let item = pointerOutlineItem {
                         openSessionMenu(item.id, projectID: item.projectID,
                             openInApps: openInCatalogue.apps)
                         continue
                     }
-                    dismissSessionMenu()
+                    if pointerOutlineItem?.kind == .terminal,
+                       let item = pointerOutlineItem {
+                        openTerminalMenu(item.id, projectID: item.projectID)
+                        continue
+                    }
+                    dismissSidebarMenu()
                 }
                 if let menu = sessionMenu {
-                    if event.action == 3, let entry = activatedSessionMenuEntry,
+                    if event.action == 3, let entry = activatedSidebarMenuEntry,
                        let command = menu.command(at: entry) {
-                        activatedSessionMenuEntry = nil
+                        activatedSidebarMenuEntry = nil
                         sessionMenu?.selected = entry
                         chooseSessionMenu(command)
-                    } else if event.action == 1, !sessionMenuFrame.contains(point) {
+                    } else if event.action == 1, !sidebarMenuFrame.contains(point) {
                         contentWindow.cancelPointerGesture()
                         _ = navigatorRoot.takeActivatedRowSlot()
                         activatedOutlineItem = nil
-                        dismissSessionMenu()
+                        dismissSidebarMenu()
+                    }
+                    if navigatorRoot.takeProjectControlVisualChange() { dirty = true }
+                    continue
+                }
+                if let menu = terminalMenu {
+                    if event.action == 3, let entry = activatedSidebarMenuEntry,
+                       let command = menu.command(at: entry) {
+                        activatedSidebarMenuEntry = nil
+                        terminalMenu?.selected = entry
+                        chooseTerminalMenu(command)
+                    } else if event.action == 1, !sidebarMenuFrame.contains(point) {
+                        contentWindow.cancelPointerGesture()
+                        _ = navigatorRoot.takeActivatedRowSlot()
+                        activatedOutlineItem = nil
+                        dismissSidebarMenu()
                     }
                     if navigatorRoot.takeProjectControlVisualChange() { dirty = true }
                     continue
@@ -5826,7 +6821,8 @@ struct WindowHarness {
                         event.kind = 8 // Reuse the menu's exact-project command admission.
                     } else { continue }
                 }
-                if navigatorFloatingSurface != nil && event.kind != 8 { continue }
+                if let floating = navigatorFloatingSurface,
+                   floating !== hoverCardSurface, event.kind != 8 { continue }
                 if event.kind == 8 {
                     // A held press that entered the menu is completed by its release below.
                 } else if event.action == 1 {
@@ -5868,44 +6864,67 @@ struct WindowHarness {
                     } else { continue }
                 } else { continue }
             }
-            if var menu = sessionMenu {
-                let selectable = menu.entries.indices.filter { menu.command(at: $0) != nil }
+            if sessionMenu != nil || terminalMenu != nil {
+                let entries = sessionMenu?.entries ?? terminalMenu!.entries
+                let selected = sessionMenu?.selected ?? terminalMenu!.selected
+                let selectable = entries.indices.filter {
+                    entries[$0].item?.representedValue as? String != nil
+                }
+                func selectSidebarMenuEntry(_ index: Int) {
+                    if sessionMenu != nil { sessionMenu?.selected = index }
+                    else { terminalMenu?.selected = index }
+                    dirty = true
+                }
+                func chooseSidebarMenuEntry() {
+                    if let menu = sessionMenu, let command = menu.command(at: menu.selected) {
+                        chooseSessionMenu(command)
+                    } else if let menu = terminalMenu,
+                              let command = menu.command(at: menu.selected) {
+                        chooseTerminalMenu(command)
+                    }
+                }
                 switch event.kind {
                 case 5: return
                 case 1: try updateSurface(event); continue
                 case 12, 24:
-                    if menu.page != .actions { menu.returnToActions(); sessionMenu = menu; dirty = true }
-                    else { dismissSessionMenu() }
+                    if var menu = sessionMenu, menu.page != .actions {
+                        menu.returnToActions(); sessionMenu = menu; dirty = true
+                    } else if var menu = terminalMenu, menu.page != .actions {
+                        menu.returnToActions(); terminalMenu = menu; dirty = true
+                    } else { dismissSidebarMenu() }
                     continue
                 case 10:
-                    if let command = menu.command(at: menu.selected),
+                    if let menu = sessionMenu, let command = menu.command(at: selected),
                        command == .copy || command == .openIn {
                         chooseSessionMenu(command)
+                    } else if let menu = terminalMenu,
+                              menu.command(at: selected) == .copy {
+                        chooseTerminalMenu(.copy)
                     }
                     continue
                 case 11:
-                    if menu.page != .actions { chooseSessionMenu(.back) }
-                    else { dismissSessionMenu() }
+                    if let menu = sessionMenu, menu.page != .actions {
+                        chooseSessionMenu(.back)
+                    } else if let menu = terminalMenu, menu.page != .actions {
+                        chooseTerminalMenu(.back)
+                    } else { dismissSidebarMenu() }
                     continue
                 case 3, 4:
-                    guard let current = selectable.firstIndex(of: menu.selected),
+                    guard let current = selectable.firstIndex(of: selected),
                           !selectable.isEmpty else { continue }
                     let step = event.kind == 3 ? -1 : 1
-                    menu.selected = selectable[(current + step + selectable.count) % selectable.count]
-                    sessionMenu = menu
-                    dirty = true
+                    selectSidebarMenuEntry(
+                        selectable[(current + step + selectable.count) % selectable.count])
                     continue
                 case 2, 15:
                     let slot = Int(event.key)
-                    guard sessionMenuVisibleEntries.indices.contains(slot) else { continue }
-                    menu.selected = sessionMenuVisibleEntries[slot]
-                    sessionMenu = menu
-                    dirty = true
+                    guard sidebarMenuVisibleEntries.indices.contains(slot) else { continue }
+                    selectSidebarMenuEntry(sidebarMenuVisibleEntries[slot])
                     if event.kind == 2 && event.action == 1 { continue }
                 case 8: break
                 default: continue
                 }
-                if let command = menu.command(at: menu.selected) { chooseSessionMenu(command) }
+                chooseSidebarMenuEntry()
                 continue
             }
             if var menu = actions {
@@ -5954,10 +6973,10 @@ struct WindowHarness {
                        let launch, let target = menu.projectID,
                        let index = projectIndexes[target.uuidString], projects.indices.contains(index),
                        projects[index].id == target.uuidString,
-                       pendingFolderImport == nil {
+                       interaction.pendingFolderImport == nil {
                         let sourcePath = projects[index].path
                         dismissActions(returnToParent: false)
-                        pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1],
+                        interaction.pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1],
                             choice: .worktree(sourcePath: sourcePath,
                                               dark: LinuxTheme.isDark))
                         continue
@@ -6005,7 +7024,7 @@ struct WindowHarness {
                 // Preserve import access after a terminal occupies the adjacent pane.
                 if event.action == 1, sidebarFocused, accountPicker == nil,
                    savedPicker == nil, let launch {
-                    pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
+                    interaction.pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
                 } else {
                     focusSidebar(event.action == 1)
                     if event.action == 0, idlePane?.isComposing == true {
@@ -6061,7 +7080,7 @@ struct WindowHarness {
                 if let mounted = pressedSlot, mounted >= 0, mounted < visibleCount {
                     if projects.isEmpty, let launch, accountPicker == nil, savedPicker == nil {
                         if event.action != 1 {
-                            pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
+                            interaction.pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
                         }
                         break
                     }
@@ -6103,7 +7122,7 @@ struct WindowHarness {
             case 8:
                 guard let launch else { break }
                 if projects.isEmpty {
-                    pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
+                    interaction.pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
                     break
                 }
                 if let pickerKind = accountPicker {
@@ -6134,7 +7153,7 @@ struct WindowHarness {
                     let key: SavedRuntimeKey = picker.isAgent ? .agent(runtime.id) : .terminal(runtime.id)
                     if picker.isAgent && runtime.usesNativeUI {
                         if !selectionWasCommitted {
-                            pendingSelection = recordSelection(runtime.id, terminalID: nil,
+                            interaction.pendingSelection = recordSelection(runtime.id, terminalID: nil,
                                 terminalProjectID: nil, store: launch[0], after: event)
                             break
                         }
@@ -6152,13 +7171,13 @@ struct WindowHarness {
                             && !(!picker.isAgent && $0.canReopenSavedTerminal)
                     } ?? false
                     guard reuses || existing != nil
-                            || terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                            || retainedTerminalCount()
                                 + (composerCreationPending ? 1 : 0) < maximumOpenRuntimes else {
                         tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                         break
                     }
                     if !selectionWasCommitted {
-                        pendingSelection = recordSelection(picker.isAgent ? runtime.id : nil,
+                        interaction.pendingSelection = recordSelection(picker.isAgent ? runtime.id : nil,
                                                            terminalID: picker.isAgent ? nil : runtime.id,
                                                            terminalProjectID: picker.isAgent ? nil : project.id,
                                                            store: launch[0], after: event)
@@ -6198,13 +7217,13 @@ struct WindowHarness {
                 }
                 let project = projects[selected]
                 guard terminals[project.id] != nil
-                        || terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                        || retainedTerminalCount()
                             + (composerCreationPending ? 1 : 0) < maximumOpenRuntimes else {
                     tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                     break
                 }
                 if !selectionWasCommitted {
-                    pendingSelection = recordSelection(nil,
+                    interaction.pendingSelection = recordSelection(nil,
                                                        terminalID: terminals[project.id]?.terminalID,
                                                        terminalProjectID: project.id,
                                                        store: launch[0], after: event,
@@ -6214,7 +7233,7 @@ struct WindowHarness {
                 let session: GraphicalTerminal
                 if let existing = terminals[project.id] { session = existing }
                 else {
-                    guard terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                    guard retainedTerminalCount()
                             + (composerCreationPending ? 1 : 0) < maximumOpenRuntimes else {
                         tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                         break
@@ -6236,14 +7255,14 @@ struct WindowHarness {
                 // A failed creation can have persisted just after this loop's reconciliation.
                 // Its row must survive discarding the finished surface for an explicit new shell.
                 if reconcileTerminals() { dirty = true }
-                guard terminals.count + restoredRuntimes.count + nativeRuntimes.count
+                guard retainedTerminalCount()
                         + (composerCreationPending ? 1 : 0)
                         - (terminals[project.id] == nil ? 0 : 1) < maximumOpenRuntimes else {
                     tw_title(window, "Threading experiment - limit of \(maximumOpenRuntimes) open terminals")
                     break
                 }
                 if !selectionWasCommitted {
-                    pendingSelection = recordSelection(nil, store: launch[0], after: event,
+                    interaction.pendingSelection = recordSelection(nil, store: launch[0], after: event,
                                                        continuesOnRefusal: true)
                     break
                 }
@@ -6259,10 +7278,10 @@ struct WindowHarness {
                 dirty = true
             case 23:
                 guard accountPicker == nil, savedPicker == nil, let launch else { break }
-                pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
+                interaction.pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1])
             case 31, 32:
                 guard accountPicker == nil, savedPicker == nil, let launch else { break }
-                pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1],
+                interaction.pendingFolderImport = beginFolderImport(store: launch[0], socket: launch[1],
                     choice: event.kind == 31 ? .new : .scratchpad)
             case 13, 21:
                 let composerTargetID = pendingComposerProjectID
@@ -6389,6 +7408,9 @@ struct WindowHarness {
                 guard accountPicker == nil, savedPicker == nil, executable != nil,
                       !projects.isEmpty, !available.isEmpty else { break }
                 accountPicker = kind
+                accountMenuSurface = nil
+                accountMenuSurfaceKey = []
+                accountMenuHighlightedIndex = nil
                 accountSelected = available.firstIndex(of: active) ?? 0
                 accountFirst = 0
                 dirty = true

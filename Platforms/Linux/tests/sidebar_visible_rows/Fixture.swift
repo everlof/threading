@@ -117,7 +117,8 @@ enum Fixture {
 
         let repositoryIdentity = "/virtual/repo/.git"
         let checkout = LinuxGitCheckout(root: "/virtual/repo", identity: repositoryIdentity,
-                                        repositoryIdentity: repositoryIdentity, branch: "main")
+                                        repositoryIdentity: repositoryIdentity, branch: "main",
+                                        worktreeName: nil)
         let checkouts = Dictionary(uniqueKeysWithValues: reordered.map { ($0.id, checkout) })
         source.rebuildRepositories(catalogue: LinuxGitCheckoutCatalog(checkouts: checkouts,
             projectIDsByRepository: [repositoryIdentity: reordered.map(\.id)]))

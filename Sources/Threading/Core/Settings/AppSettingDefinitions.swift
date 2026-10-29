@@ -700,7 +700,7 @@ enum AppSettingDefinitions {
 
     static let defaultAgentKind = AppSettingDescriptor<String>(
         identity: .defaultAgentKind,
-        persistenceKey: "defaultAgentKind",
+        persistenceKey: NewChatDefaults.agentPersistenceKey,
         absence: .registered(AgentDefaults.defaultKind.rawValue),
         validation: .allowedStrings(Set(AgentKind.allCases.map(\.rawValue))),
         presentations: [row("chats", 0, "New Chats", "New sessions use",
@@ -716,19 +716,19 @@ enum AppSettingDefinitions {
     )
     static let restoresLastSession = AppSettingDescriptor<Bool>(
         identity: .restoresLastSession,
-        persistenceKey: "restoresLastSession",
-        absence: .registered(true),
+        persistenceKey: SelectedSessionRestorePreference.key,
+        absence: .registered(SelectedSessionRestorePreference.defaultValue),
         presentations: [row("general", 0, "Startup", "Reopen the last session at launch",
                             ["relaunch", "restore", "startup"])]
     )
     static let restoresRunningSessions = AppSettingDescriptor<Bool>(
         identity: .restoresRunningSessions,
-        persistenceKey: "restoresRunningSessions",
+        persistenceKey: SessionRestoreDefaults.legacyRunningSessionsKey,
         absence: .registered(true)
     )
     static let sessionRestorePolicy = AppSettingDescriptor<String>(
         identity: .sessionRestorePolicy,
-        persistenceKey: "sessionRestorePolicy",
+        persistenceKey: SessionRestoreDefaults.policyKey,
         absence: .legacy(.restoresRunningSessions),
         validation: .allowedStrings(Set(SessionRestorePolicy.allCases.map(\.rawValue))),
         presentations: [row("general", 1, "Startup", "Bring back at launch",
@@ -736,7 +736,7 @@ enum AppSettingDefinitions {
     )
     static let sessionRestoreWindowDays = AppSettingDescriptor<Int>(
         identity: .sessionRestoreWindowDays,
-        persistenceKey: "sessionRestoreWindowDays",
+        persistenceKey: SessionRestoreDefaults.windowDaysKey,
         absence: .registered(SessionRestoreDefaults.windowDays),
         validation: .range((SessionRestoreDefaults.windowDayChoices.first ?? 1)...(SessionRestoreDefaults.windowDayChoices.last ?? 30)),
         presentations: [row("general", 2, "Idle Agents", "Stop idle agents after",
@@ -744,7 +744,7 @@ enum AppSettingDefinitions {
     )
     static let sessionRestoreLimit = AppSettingDescriptor<Int>(
         identity: .sessionRestoreLimit,
-        persistenceKey: "sessionRestoreLimit",
+        persistenceKey: SessionRestoreDefaults.limitKey,
         absence: .registered(SessionRestoreDefaults.limit),
         validation: .range((SessionRestoreDefaults.limitChoices.first ?? 4)...(SessionRestoreDefaults.limitChoices.last ?? 32)),
         presentations: [row("general", 3, "Idle Agents", "Keep idle agents running",
@@ -752,9 +752,9 @@ enum AppSettingDefinitions {
     )
     static let newChatOpeningPrefix = AppSettingDescriptor<String>(
         identity: .newChatOpeningPrefix,
-        persistenceKey: "newChatOpeningPrefix",
+        persistenceKey: NewChatDefaults.openingPrefixPersistenceKey,
         absence: .emptyString,
-        validation: .maximumBytes(1_048_576),
+        validation: .maximumBytes(NewChatDefaults.openingTextMaximumBytes),
         encoding: .removeEmpty,
         presentations: [row("chats", 4, "Opening Message", "Before the task you write",
                             ["first message", "instructions", "opening message", "prefix",
@@ -764,9 +764,9 @@ enum AppSettingDefinitions {
     /// existed, and a stored instruction is not worth losing to a tidier spelling.
     static let newChatOpeningSuffix = AppSettingDescriptor<String>(
         identity: .newChatOpeningSuffix,
-        persistenceKey: "newChatOpeningMessage",
+        persistenceKey: NewChatDefaults.openingSuffixPersistenceKey,
         absence: .emptyString,
-        validation: .maximumBytes(1_048_576),
+        validation: .maximumBytes(NewChatDefaults.openingTextMaximumBytes),
         encoding: .removeEmpty,
         presentations: [row("chats", 5, "Opening Message", "After the task you write",
                             ["first message", "instructions", "opening message", "suffix",
@@ -1015,12 +1015,12 @@ enum AppSettingDefinitions {
 
     static let disabledAttachmentDetectionAgentKinds = AppSettingDescriptor<[String]>(
         identity: .disabledAttachmentDetectionAgentKinds,
-        persistenceKey: "disabledAttachmentDetectionAgentKinds",
+        persistenceKey: AttachmentDetectionPreferences.disabledAgentKindsKey,
         absence: .emptyCollection
     )
     static let includesAttachmentsOutsideProject = AppSettingDescriptor<Bool>(
         identity: .includesAttachmentsOutsideProject,
-        persistenceKey: "includesAttachmentsOutsideProject",
+        persistenceKey: AttachmentDetectionPreferences.includesOutsideProjectKey,
         absence: .falseValue,
         presentations: [row("chats", 6, "Attachments",
                             "Include files outside the project", ["attachments"])]
@@ -1221,7 +1221,7 @@ enum AppSettingDefinitions {
     )
     static let claudeStartupSpeed = AppSettingDescriptor<String>(
         identity: .claudeStartupSpeed,
-        persistenceKey: "claudeStartupSpeed",
+        persistenceKey: AgentStartupSpeed.claudePersistenceKey,
         absence: .fallback("agentSetting"),
         validation: .allowedStrings(Set(AgentStartupSpeed.allCases.map(\.rawValue))),
         presentations: [row("chats", 2, "New Chats", "Claude sessions start in",
@@ -1229,7 +1229,7 @@ enum AppSettingDefinitions {
     )
     static let codexStartupSpeed = AppSettingDescriptor<String>(
         identity: .codexStartupSpeed,
-        persistenceKey: "codexStartupSpeed",
+        persistenceKey: AgentStartupSpeed.codexPersistenceKey,
         absence: .fallback("agentSetting"),
         validation: .allowedStrings(Set(AgentStartupSpeed.allCases.map(\.rawValue))),
         presentations: [row("chats", 3, "New Chats", "Codex sessions start in",
@@ -1237,7 +1237,7 @@ enum AppSettingDefinitions {
     )
     static let defaultPermissionMode = AppSettingDescriptor<String>(
         identity: .defaultPermissionMode,
-        persistenceKey: "defaultPermissionMode",
+        persistenceKey: NewChatDefaults.permissionPersistenceKey,
         absence: .inherit,
         validation: .allowedStrings(Set(AgentPermissionMode.allCases.map(\.rawValue))),
         presentations: [row("chats", 1, "New Chats", "New sessions start in",

@@ -159,6 +159,10 @@ func checkScrollback() throws {
     try check(!held.atLiveEnd && held.cursorColumn == -1, "historical viewport drew live cursor")
     try check(held.cells[1].text != live.cells[1].text, "historical viewport did not change rows")
     emulator.feed(Data("R8\r\n".utf8))
+    let recent = emulator.recentLogicalBufferText(maximumUTF8Bytes: 256, sinceAbsoluteRow: 0)
+    try check(recent.text.contains("R8") && recent.text.utf8.count <= 256,
+              "bounded logical reader lost the newest complete terminal row")
+    try check(recent.nextAbsoluteRow > 0, "logical reader lost its absolute-row cursor")
     let afterOutput = emulator.snapshot()
     try check(afterOutput.cells[1].text == held.cells[1].text && !afterOutput.atLiveEnd,
               "new output pulled a held viewport to the live end")

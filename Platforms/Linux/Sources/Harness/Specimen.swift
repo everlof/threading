@@ -1,5 +1,8 @@
 import AppKit
 import Foundation
+#if THREADING_WINDOW_HARNESS
+@testable import CoreSlice
+#endif
 
 /// Diagnostic assembly using production drawing leaves vendored byte-identically from
 /// `Sources/Threading/UI/Design/`. The shim supplies AppKit geometry and raster operations;
@@ -129,8 +132,6 @@ enum Specimen {
         private var workspaceWell: NSView?
         private var workspaceContent: SidebarNavigatorContentView?
         private var workspaceFooter: NSView?
-        private var mountedMenuDocument: ThemedMenuDocumentView?
-        private var mountedMenuHeights: [CGFloat] = []
         #else
         let bodyInk = Ink(on: Specimen.bodyGround)
         let headerInk = Ink(on: Specimen.headerGround)
@@ -139,7 +140,6 @@ enum Specimen {
         private let textLayer = NoninteractiveTextLayer(frame: .zero)
         private let menuLayer = MenuRowLayer(frame: .zero)
         private var mountedRows: [Row] = []
-        private var mountedMenuRows: [NSView] = []
         private var mountedFloatingMenu: NSView?
         private var nextRowSlot = 0
         private var mountedLabels: [NSTextField] = []
@@ -297,68 +297,23 @@ enum Specimen {
             textLayer.isHidden = visible
         }
 
-        /// Menu rows come from the production design component. The host supplies only the
-        /// bounded visible page and retains command identity in its own presentation model.
-        /// Rows that stay visible stay mounted: detaching a row mid-press would end the
-        /// gesture its release is meant to complete.
-        #if THREADING_WINDOW_HARNESS
-        func mountMenuRows(_ rows: [NSView], heights: [CGFloat], topInset: CGFloat) {
-            precondition(rows.count == heights.count)
+        /// The shared surface owns its document and rows. The sidebar only places that surface
+        /// above the standing outline, preserving its identity through a pointer gesture.
+        func mountFloatingMenu(_ surface: NSView, frame: NSRect) {
             if subviews.last !== menuLayer {
                 addSubview(menuLayer, positioned: .above, relativeTo: nil)
             }
-            mountedFloatingMenu?.removeFromSuperview()
-            mountedFloatingMenu = nil
-            let keepsDocument = rows.count == mountedMenuRows.count &&
-                zip(rows, mountedMenuRows).allSatisfy { $0 === $1 } &&
-                heights == mountedMenuHeights
-            if !keepsDocument {
-                mountedMenuDocument?.removeFromSuperview()
-                mountedMenuDocument = nil
-                if !rows.isEmpty {
-                    let document = ThemedMenuDocumentView(views: rows, heights: heights)
-                    menuLayer.addSubview(document)
-                    mountedMenuDocument = document
-                }
-            }
-            mountedMenuRows = rows
-            mountedMenuHeights = heights
-            let documentHeight = heights.reduce(0, +)
-            mountedMenuDocument?.frame = NSRect(
-                x: 6, y: bounds.height - topInset - documentHeight,
-                width: max(1, bounds.width - 12), height: documentHeight
-            )
-        }
-        #endif
-
-        /// Keep an anchored menu over the standing outline, with the same production menu rows
-        /// used by the navigator's older full-column menus. Retain row identity through a press.
-        func mountFloatingMenu(_ surface: NSView, frame: NSRect, rows: [NSView]) {
-            if subviews.last !== menuLayer {
-                addSubview(menuLayer, positioned: .above, relativeTo: nil)
-            }
-            #if THREADING_WINDOW_HARNESS
-            mountedMenuDocument?.removeFromSuperview()
-            mountedMenuDocument = nil
-            mountedMenuHeights.removeAll(keepingCapacity: true)
-            #endif
             if mountedFloatingMenu !== surface {
                 mountedFloatingMenu?.removeFromSuperview()
                 mountedFloatingMenu = surface
             }
             if surface.superview !== menuLayer { menuLayer.addSubview(surface) }
             surface.frame = frame
-            let kept = Set(rows.map(ObjectIdentifier.init))
-            for row in mountedMenuRows where !kept.contains(ObjectIdentifier(row)) {
-                row.removeFromSuperview()
-            }
-            mountedMenuRows = rows
-            for row in rows where row.superview == nil { surface.addSubview(row) }
         }
 
-        func mountedMenuRow(at slot: Int) -> NSView? {
-            guard mountedMenuRows.indices.contains(slot) else { return nil }
-            return mountedMenuRows[slot]
+        func clearFloatingMenu() {
+            mountedFloatingMenu?.removeFromSuperview()
+            mountedFloatingMenu = nil
         }
 
         func mountNavigatorRow(frame: NSRect, accent: NSColor, selected: Bool, ink: Ink,
@@ -418,11 +373,14 @@ enum Specimen {
             mountedRows[nextRowSlot - 1].configureProductionActivity(activity)
         }
 
-        func mountTerminalContent(title: String, icon: NSImage, selected: Bool,
-                                  running: Bool) {
+        func mountTerminalContent(id: String = "00000000-0000-0000-0000-000000000001",
+                                  title: String, icon: NSImage, selected: Bool,
+                                  running: Bool, busy: Bool = false) {
             guard nextRowSlot > 0 else { return }
-            mountedRows[nextRowSlot - 1].configureProductionTerminal(
-                title: title, icon: icon, selected: selected, running: running)
+            let row = mountedRows[nextRowSlot - 1]
+            row.configureProductionTerminal(
+                id: id, title: title, icon: icon, selected: selected,
+                running: running, busy: busy)
         }
         #endif
 
@@ -623,11 +581,12 @@ enum Specimen {
                   productionSessionStack?.isHidden == false else { return nil }
             return mark
         }
-        private var productionTerminalAssembly: SidebarTerminalRowAssembly?
-        private var productionTerminalView: ThemedTerminalRowContentView? {
-            productionTerminalAssembly?.visuals
+        private var productionTerminalRow: ProjectTerminalRowView?
+        private func hideProductionTerminal() {
+            guard let productionTerminalRow, !productionTerminalRow.isHidden else { return }
+            productionTerminalRow.prepareForReuse()
+            productionTerminalRow.isHidden = true
         }
-        private var productionTerminalMount: ProductionContentMount?
         private var productionAttentionLabel: NSTextField?
         private var productionProjectActionsRevealed = false
 
@@ -651,6 +610,7 @@ enum Specimen {
         var onProjectCreate: ((String) -> Void)?
         var onProjectControlVisualChange: (() -> Void)?
         var onSessionAction: ((String) -> Void)?
+        var onTerminalAction: ((String) -> Void)?
         var onSessionArchive: ((String) -> Void)?
         var onSessionControlVisualChange: (() -> Void)?
 
@@ -701,7 +661,9 @@ enum Specimen {
                 }
                 return self
             }
-            if productionTerminalView?.isHidden == false { return self }
+            if let productionTerminalRow, !productionTerminalRow.isHidden {
+                return productionTerminalRow.containsActiveActionTarget(target) ? target : self
+            }
             guard let productionProjectView, !productionProjectView.isHidden else { return target }
             if !productionProjectActionsRevealed { return self }
             var ancestor: NSView? = target
@@ -745,9 +707,8 @@ enum Specimen {
             if !preserveProductionContent {
                 productionProjectView?.isHidden = true
                 productionSessionStack?.isHidden = true
-                productionTerminalView?.isHidden = true
+                hideProductionTerminal()
                 productionSessionMount?.slot.isHidden = true
-                productionTerminalMount?.slot.isHidden = true
             }
             #endif
             if let image {
@@ -777,8 +738,8 @@ enum Specimen {
         /// measured AppKit slots. Only mounted, expandable rows materialize a marker.
         func configureProductionOutline(density: SidebarDensity, level: Int, expanded: Bool?) {
             let depth = CGFloat(level) * density.indentationPerLevel
-            productionLeadingInset = SidebarDefaults.insetCellLeadingMargin + depth
-            productionTrailingInset = SidebarDefaults.insetCellTrailingMargin - density.trailingCellReclaim
+            productionLeadingInset = LinuxInsetOutlineMetrics.cellLeadingMargin + depth
+            productionTrailingInset = LinuxInsetOutlineMetrics.cellTrailingMargin - density.trailingCellReclaim
             guard let expanded else {
                 productionDisclosureView?.isHidden = true
                 return
@@ -791,7 +752,7 @@ enum Specimen {
                 marker.translatesAutoresizingMaskIntoConstraints = false
                 addSubview(marker)
                 let leading = marker.leadingAnchor.constraint(
-                    equalTo: leadingAnchor, constant: SidebarDefaults.insetDisclosureLeading + depth)
+                    equalTo: leadingAnchor, constant: LinuxInsetOutlineMetrics.disclosureLeading + depth)
                 productionDisclosureLeading = leading
                 NSLayoutConstraint.activate([
                     leading,
@@ -809,7 +770,7 @@ enum Specimen {
             // Match SidebarHoverRowView's marker contract: quiet chrome at rest, the
             // selected ground's label tier when the project itself is selected.
             marker.tint = selected ? ink.label : Design.Text.tertiary
-            let leading = SidebarDefaults.insetDisclosureLeading + depth
+            let leading = LinuxInsetOutlineMetrics.disclosureLeading + depth
             if productionDisclosureLeading?.constant != leading {
                 productionDisclosureLeading?.constant = leading
             }
@@ -841,8 +802,7 @@ enum Specimen {
                                         archiveEnabled: Bool = true) {
             configureSidebarSelectionSilhouette()
             productionProjectView?.isHidden = true
-            productionTerminalView?.isHidden = true
-            productionTerminalMount?.slot.isHidden = true
+            hideProductionTerminal()
             let content: ThemedSessionRowContentView
             if let productionSessionView {
                 content = productionSessionView
@@ -926,43 +886,46 @@ enum Specimen {
             return button.convert(button.bounds, to: root)
         }
 
-        func configureProductionTerminal(title: String, icon: NSImage, selected: Bool,
-                                         running: Bool, leadingIndent: CGFloat = 0) {
+        // Swift 6.3's Release copy-propagation misverifies the borrowed row assembly when this
+        // body is inlined into mountTerminalContent; keep the ownership boundary explicit.
+        @inline(never) func configureProductionTerminal(id: String, title: String, icon: NSImage, selected: Bool,
+                                         running: Bool, busy: Bool = false,
+                                         actionsEnabled: Bool = false, menuPresented: Bool = false,
+                                         hovered: Bool = false,
+                                         leadingIndent: CGFloat = 0) {
             configureSidebarSelectionSilhouette()
             productionProjectView?.isHidden = true
             productionSessionStack?.isHidden = true
             productionSessionMount?.slot.isHidden = true
-            let assembly: SidebarTerminalRowAssembly
-            if let productionTerminalAssembly {
-                assembly = productionTerminalAssembly
+            let terminalRow: ProjectTerminalRowView
+            if let productionTerminalRow {
+                terminalRow = productionTerminalRow
             } else {
-                assembly = SidebarTerminalRowAssembly()
-                // The Linux host has no standalone-terminal menu route yet. Keep the shared
-                // control's layout, but do not expose an inert command to keyboard or AT-SPI.
-                assembly.actionButton.isEnabled = false
-                assembly.actionButton.setAccessibilityElement(false)
-                let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
-                let edges = assembly.mount(in: self, leadingInset: leading,
-                    trailingInset: productionTrailingInset + SidebarRowDefaults.trailingInset)
-                productionTerminalMount = ProductionContentMount(
-                    slot: assembly.actionButton, leading: edges.leading,
-                    trailing: edges.trailing, width: nil)
-                productionTerminalAssembly = assembly
+                let mounted = ProjectTerminalRowView(frame: bounds)
+                SidebarRowDefaults.mountCellContent(mounted, in: self)
+                productionTerminalRow = mounted
+                terminalRow = mounted
             }
             let leading = productionLeadingInset + leadingIndent + SidebarRowDefaults.leadingInset
-            if let productionTerminalMount {
-                let gutter = productionTrailingInset + SidebarRowDefaults.trailingInset
-                updateProductionContent(productionTerminalMount, leadingInset: leading,
-                    trailingInset: assembly.trailingSlotInset(for: gutter))
-                productionTerminalMount.slot.isHidden = false
+            let gutter = productionTrailingInset + SidebarRowDefaults.trailingInset
+            terminalRow.applyContentInsets(leading: leading, trailing: gutter)
+            terminalRow.backgroundStyle = selected ? .emphasized : .normal
+            terminalRow.setActionEnabled(actionsEnabled)
+            terminalRow.themedMenuPresentationDidChange(isPresented: menuPresented)
+            terminalRow.setHostHover(hovered)
+            terminalRow.onAction = { [weak self] terminalID, _ in
+                self?.onTerminalAction?(terminalID.uuidString)
             }
-            let content = assembly.visuals
-            content.setTitle(title)
-            content.setIcon(icon)
-            content.iconView.contrastGround = { [weak self] in self?.contentGround ?? Specimen.bodyGround }
-            content.setInk(selected: selected, running: running, on: inkGround)
-            content.isHidden = false
+            terminalRow.configure(terminalID: TerminalID(uuidString: id),
+                                  title: title, icon: icon, running: running,
+                                  busy: busy, tooltip: nil)
+            terminalRow.isHidden = false
             iconView?.isHidden = true
+        }
+
+        func terminalActionAnchor(in root: NSView) -> NSRect? {
+            guard let productionTerminalRow, !productionTerminalRow.isHidden else { return nil }
+            return productionTerminalRow.actionAnchor(in: root)
         }
 
         private func configureSidebarSelectionSilhouette() {
@@ -1041,9 +1004,8 @@ enum Specimen {
             unavailable: Bool = false
         ) {
             productionSessionStack?.isHidden = true
-            productionTerminalView?.isHidden = true
+            hideProductionTerminal()
             productionSessionMount?.slot.isHidden = true
-            productionTerminalMount?.slot.isHidden = true
             let content: ThemedProjectRowView
             if let productionProjectView {
                 content = productionProjectView

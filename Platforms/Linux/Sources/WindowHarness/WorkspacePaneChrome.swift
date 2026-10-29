@@ -4,18 +4,6 @@ import Foundation
 import LinuxWindowBridge
 @testable import TerminalRuntime
 
-enum SessionMenuCommand: String, CaseIterable {
-    case copySessionID
-    case copyProjectPath
-
-    var title: String {
-        switch self {
-        case .copySessionID: "Copy Session ID"
-        case .copyProjectPath: "Copy Project Path"
-        }
-    }
-}
-
 /// Shared pane header and bounded menus. The content runtime owns input and lifecycle.
 @MainActor
 final class WorkspacePaneChrome {
@@ -27,8 +15,6 @@ final class WorkspacePaneChrome {
         let id: String
         let name: String
     }
-
-    private enum MenuContent: Equatable { case sessionActions, openIn }
 
     private let headerWindow = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
     private let headerRoot = NSView(frame: .zero)
@@ -51,18 +37,15 @@ final class WorkspacePaneChrome {
     private(set) var pageIdentity: String
     private var pageSymbolName: String
     private let menuWindow = NSWindow(backingScaleFactor: WorkspaceDisplay.scale)
-    private let menuRoot = ThemedMenuPanelView(frame: .zero)
+    private var menuRoot: ThemedMenuSurfaceView?
     private var menuRows: [ThemedMenuRowView] = []
     private var menuPlan: ThemedMenuRowPlan?
-    private var menuFirstVisible = 0
     private var menuOrigin = (x: 0, y: 0)
     private var menuSize = (width: 0, height: 0)
     private var menuSelected = 0
-    private var menuContent: MenuContent = .sessionActions
     private var menuOpen = false
     private var menuNeedsPresentation = false
     private(set) var menuToggleRequested = false
-    private(set) var chosenMenuCommand: SessionMenuCommand?
     private var openInChoices: [OpenInChoice] = []
     private var presentedOpenInChoices: [OpenInChoice] = []
     private var preferredOpenInID: String?
@@ -73,7 +56,7 @@ final class WorkspacePaneChrome {
     private var headerWidth = 0
     var hasSessionActions: Bool { !pageTitle.actionsAnchor.isHidden }
     var hasOpenMenu: Bool { menuOpen }
-    var hasOpenInMenu: Bool { menuOpen && menuContent == .openIn }
+    var hasOpenInMenu: Bool { menuOpen }
 
     init(pageName: String, pageIdentity: String, symbolName: String = "terminal",
          icon: NSImage? = nil,
@@ -105,14 +88,13 @@ final class WorkspacePaneChrome {
         ])
         headerWindow.contentView = headerRoot
         headerWindow.isKeyWindow = true
-        menuWindow.contentView = menuRoot
         setThemeAppearance()
     }
 
     func setThemeAppearance() {
         let appearance = LinuxTheme.appearance
         headerRoot.appearance = appearance
-        menuRoot.appearance = appearance
+        menuRoot?.appearance = appearance
         openInControl.invalidateBackdropInk()
         headerNeedsPresentation = true
         menuNeedsPresentation = menuOpen
@@ -218,69 +200,52 @@ final class WorkspacePaneChrome {
         return pageTitle.actionsAnchor.accessibilityPerformPress()
     }
 
+    /// The navigator menu overlay uses full-window coordinates. Keep the header's actual
+    /// constrained control as the anchor rather than copying its button dimensions here.
+    func sessionActionAnchor(windowHeight: Int, sidebarWidth: Int,
+                             paneWidth: Int) -> NSRect {
+        headerRoot.frame = NSRect(x: 0, y: 0,
+            width: CGFloat(paneWidth) / WorkspaceDisplay.scale,
+            height: PaneHeaderView.bandHeight)
+        headerRoot.layoutSubtreeIfNeeded()
+        let local = pageTitle.actionsAnchor.convert(pageTitle.actionsAnchor.bounds, to: headerRoot)
+        return local.offsetBy(dx: CGFloat(sidebarWidth) / WorkspaceDisplay.scale,
+            dy: CGFloat(windowHeight) / WorkspaceDisplay.scale - PaneHeaderView.bandHeight)
+    }
+
+    func setSessionActionsSelected(_ selected: Bool) {
+        guard pageTitle.actionsAnchor.isSelected != selected else { return }
+        pageTitle.actionsAnchor.isSelected = selected
+        headerNeedsPresentation = true
+    }
+
     func takeMenuToggleRequest() -> Bool {
         defer { menuToggleRequested = false }
         return menuToggleRequested
     }
 
-    func takeMenuCommand() -> SessionMenuCommand? {
-        defer { chosenMenuCommand = nil }
-        return chosenMenuCommand
-    }
-
-    func toggleMenu(window: OpaquePointer, paneWidth: Int, paneHeight: Int) {
-        if menuOpen {
-            let wasSessionMenu = menuContent == .sessionActions
-            dismissMenu(window: window)
-            if wasSessionMenu { return }
-        }
-        guard hasSessionActions, paneWidth >= 280 else { return }
-        openMenu(.sessionActions, paneWidth: paneWidth, paneHeight: paneHeight)
-    }
-
     func toggleOpenInMenu(window: OpaquePointer, paneWidth: Int, paneHeight: Int) {
         if menuOpen {
-            let wasOpenInMenu = menuContent == .openIn
             dismissMenu(window: window)
-            if wasOpenInMenu { return }
+            return
         }
         guard !openInChoices.isEmpty, paneWidth >= 280 else { return }
-        openMenu(.openIn, paneWidth: paneWidth, paneHeight: paneHeight)
+        openMenu(paneWidth: paneWidth, paneHeight: paneHeight)
     }
 
-    private func openMenu(_ content: MenuContent, paneWidth: Int, paneHeight: Int) {
-        menuContent = content
-        chosenMenuCommand = nil
+    private func openMenu(paneWidth: Int, paneHeight: Int) {
         chosenOpenInID = nil
-        let entries: [ThemedMenuEntry]
-        let selectedEntryIndex: Int?
-        switch content {
-        case .sessionActions:
-            entries = SessionMenuCommand.allCases.map {
-                .item(ThemedMenuItem(title: $0.title, representedValue: $0.rawValue))
-            }
-            selectedEntryIndex = nil
-        case .openIn:
-            presentedOpenInChoices = openInChoices
-            entries = presentedOpenInChoices.map {
-                .item(ThemedMenuItem(title: $0.name, representedValue: $0.id))
-            }
-            selectedEntryIndex = presentedOpenInChoices.firstIndex { $0.id == preferredOpenInID }
+        presentedOpenInChoices = openInChoices
+        let entries: [ThemedMenuEntry] = presentedOpenInChoices.map {
+            .item(ThemedMenuItem(title: $0.name, representedValue: $0.id))
         }
+        let selectedEntryIndex = presentedOpenInChoices.firstIndex { $0.id == preferredOpenInID }
         let plan = ThemedMenuRowPlan(entries: entries, selectedEntryIndex: selectedEntryIndex)
         menuPlan = plan
         menuSelected = selectedEntryIndex ?? 0
         headerWindow.layoutIfNeeded()
-        let headerAnchor: NSRect
-        switch content {
-        case .sessionActions:
-            headerAnchor = pageTitle.actionsAnchor.convert(pageTitle.actionsAnchor.bounds,
-                                                            to: headerRoot)
-            pageTitle.actionsAnchor.isSelected = true
-        case .openIn:
-            headerAnchor = openInChooser.convert(openInChooser.bounds, to: headerRoot)
-            openInChooser.isSelected = true
-        }
+        let headerAnchor = openInChooser.convert(openInChooser.bounds, to: headerRoot)
+        openInChooser.isSelected = true
         let paneHeightPoints = CGFloat(paneHeight) / WorkspaceDisplay.scale
         let anchor = headerAnchor.offsetBy(dx: 0,
             dy: paneHeightPoints - PaneHeaderView.bandHeight)
@@ -300,13 +265,23 @@ final class WorkspacePaneChrome {
             visibleHeight += rowHeight
             menuVisibleRows += 1
         }
-        menuFirstVisible = min(menuSelected, max(0, entries.count - menuVisibleRows))
         let frame = ThemedMenuLayout.frame(anchor: anchor,
             desiredSize: NSSize(width: width,
                 height: visibleHeight + ThemedMenuMetrics.verticalOuterInset * 2),
             in: bounds, flipped: false)
         menuSize.width = Int((frame.width * WorkspaceDisplay.scale).rounded())
-        rebuildVisibleMenuRows()
+        menuSize.height = Int((frame.height * WorkspaceDisplay.scale).rounded())
+        let surface = ThemedMenuSurfaceView(
+            frame: NSRect(origin: .zero, size: frame.size),
+            entries: entries, selectedEntryIndex: selectedEntryIndex)
+        surface.appearance = LinuxTheme.appearance
+        surface.onChoose = { [weak self] index, _ in self?.recordMenuSelection(at: index) }
+        surface.onHighlight = { [weak self] index in self?.highlightMenuRow(index) }
+        surface.onScrolled = { [weak self] in self?.menuNeedsPresentation = true }
+        menuRoot = surface
+        menuWindow.contentView = surface
+        menuRows = entries.indices.compactMap { surface.row(at: $0) }
+        surface.highlight(menuSelected)
         menuOrigin = (
             Int((frame.minX * WorkspaceDisplay.scale).rounded()),
             Int(((paneHeightPoints - frame.maxY) * WorkspaceDisplay.scale).rounded())
@@ -316,71 +291,29 @@ final class WorkspacePaneChrome {
         menuNeedsPresentation = true
     }
 
-    private func rebuildVisibleMenuRows() {
-        guard let plan = menuPlan else { return }
-        let last = min(plan.heights.count, menuFirstVisible + menuVisibleRows)
-        let visible = menuFirstVisible..<last
-        let padding = ThemedMenuMetrics.verticalOuterInset
-        let menuHeight = visible.reduce(2 * padding) { $0 + plan.heights[$1] }
-        menuSize.height = Int(menuHeight * WorkspaceDisplay.scale)
-        let menuWidth = CGFloat(menuSize.width) / WorkspaceDisplay.scale
-        menuRoot.frame = NSRect(x: 0, y: 0, width: menuWidth, height: menuHeight)
-        menuRows.removeAll(keepingCapacity: true)
-        var heights: [CGFloat] = []
-        for index in visible {
-            guard let row = plan.row(at: index) else { continue }
-            row.onChoose = { [weak self] selected, _ in
-                self?.recordMenuSelection(at: selected)
-            }
-            row.onHighlight = { [weak self] selected in self?.highlightMenuRow(selected) }
-            menuRows.append(row)
-            heights.append(plan.heights[index])
-        }
-        menuRoot.setRows(menuRows, heights: heights, padding: padding)
-        for row in menuRows {
-            row.isKeyboardHighlighted = row.entryIndex == menuSelected
-        }
-        menuNeedsPresentation = true
-    }
-
     func dismissMenu(window: OpaquePointer) {
         guard menuOpen else { return }
         menuOpen = false
         menuNeedsPresentation = false
-        switch menuContent {
-        case .sessionActions: pageTitle.actionsAnchor.isSelected = false
-        case .openIn: openInChooser.isSelected = false
-        }
+        openInChooser.isSelected = false
         headerNeedsPresentation = true
         menuWindow.cancelPointerGesture()
+        menuWindow.contentView = nil
+        menuRoot = nil
+        menuRows.removeAll(keepingCapacity: true)
         tw_hide_session_menu(window)
     }
 
     private func highlightMenuRow(_ index: Int) {
         guard menuOpen, let plan = menuPlan, plan.heights.indices.contains(index) else { return }
         menuSelected = index
-        if index < menuFirstVisible {
-            menuFirstVisible = index
-            rebuildVisibleMenuRows()
-        } else if index >= menuFirstVisible + menuRows.count {
-            menuFirstVisible = index - menuVisibleRows + 1
-            rebuildVisibleMenuRows()
-        } else {
-            for row in menuRows {
-                row.isKeyboardHighlighted = row.entryIndex == index
-            }
-        }
+        menuRoot?.highlight(index)
         menuNeedsPresentation = true
     }
 
     private func recordMenuSelection(at index: Int) {
         guard menuOpen, let plan = menuPlan, plan.heights.indices.contains(index) else { return }
-        switch menuContent {
-        case .sessionActions:
-            chosenMenuCommand = SessionMenuCommand.allCases[index]
-        case .openIn:
-            chosenOpenInID = presentedOpenInChoices[index].id
-        }
+        chosenOpenInID = presentedOpenInChoices[index].id
     }
 
     func handleMenu(_ input: TWEvent, window: OpaquePointer) {
@@ -395,16 +328,12 @@ final class WorkspacePaneChrome {
         case 9:
             recordMenuSelection(at: menuSelected)
         case 10, 12:
-            if menuContent == .openIn {
-                let step = input.action == 10 ? menuVisibleRows : max(1, Int(input.key))
-                highlightMenuRow(max(0, menuSelected - step))
-            }
+            let step = input.action == 10 ? menuVisibleRows : max(1, Int(input.key))
+            highlightMenuRow(max(0, menuSelected - step))
         case 11, 13:
-            if menuContent == .openIn {
-                let step = input.action == 11 ? menuVisibleRows : max(1, Int(input.key))
-                highlightMenuRow(min((menuPlan?.heights.count ?? 1) - 1,
-                                     menuSelected + step))
-            }
+            let step = input.action == 11 ? menuVisibleRows : max(1, Int(input.key))
+            highlightMenuRow(min((menuPlan?.heights.count ?? 1) - 1,
+                                 menuSelected + step))
         default:
             let eventType: NSEvent.EventType
             switch input.action {
@@ -414,20 +343,21 @@ final class WorkspacePaneChrome {
             default: eventType = .mouseMoved
             }
             let point = NSPoint(x: CGFloat(input.x) / WorkspaceDisplay.scale,
-                                y: menuRoot.bounds.height - CGFloat(input.y) / WorkspaceDisplay.scale)
+                                y: (menuRoot?.bounds.height ?? 0) - CGFloat(input.y) / WorkspaceDisplay.scale)
             _ = menuWindow.dispatchToContent(NSEvent(type: eventType, locationInWindow: point))
             menuNeedsPresentation = true
         }
     }
 
     func chooseMenuRow(_ slot: Int, identity: String) {
-        guard menuOpen, identity == pageIdentity,
-              menuRows.indices.contains(slot) else { return }
-        recordMenuSelection(at: menuRows[slot].entryIndex)
+        guard menuOpen, identity == pageIdentity, let menuRoot else { return }
+        let visible = visibleMenuRows(in: menuRoot)
+        guard visible.indices.contains(slot) else { return }
+        recordMenuSelection(at: visible[slot].entryIndex)
     }
 
     private func presentMenu(window: OpaquePointer, originX: Int) throws {
-        guard menuOpen, menuNeedsPresentation else { return }
+        guard menuOpen, menuNeedsPresentation, let menuRoot else { return }
         menuNeedsPresentation = false
         let bitmap = Bitmap(width: menuSize.width, height: menuSize.height)
         menuRoot.render(in: NSGraphicsContext(bitmap: bitmap, scale: WorkspaceDisplay.scale))
@@ -442,20 +372,14 @@ final class WorkspacePaneChrome {
                 Int32(originX + menuOrigin.x), Int32(menuOrigin.y),
                 Int32(menuSize.width), Int32(menuSize.height))
         }
-        if menuContent == .openIn {
-            tw_accessibility_session_menu_label(window, "Open In applications")
-        }
-        for row in menuRows {
+        tw_accessibility_session_menu_label(window, "Open In applications")
+        for row in visibleMenuRows(in: menuRoot) {
             let bounds = row.convert(row.bounds, to: menuRoot)
             let x = originX + menuOrigin.x + Int((bounds.minX * WorkspaceDisplay.scale).rounded())
             let y = menuOrigin.y + Int(((menuRoot.bounds.height - bounds.maxY) * WorkspaceDisplay.scale).rounded())
-            let rowID: String
-            switch menuContent {
-            case .sessionActions: rowID = SessionMenuCommand.allCases[row.entryIndex].rawValue
             // ATK row IDs are bounded display tokens. The real desktop ID stays in the
             // pane-side choice snapshot and is resolved only after a validated row press.
-            case .openIn: rowID = "open-in.choice.\(row.entryIndex)"
-            }
+            let rowID = "open-in.choice.\(row.entryIndex)"
             _ = rowID.withCString { identifier in
                 row.item.title.withCString { name in
                     tw_accessibility_session_menu_add_row(window, identifier, name,
@@ -465,6 +389,17 @@ final class WorkspacePaneChrome {
             }
         }
         tw_accessibility_session_menu_end(window)
+    }
+
+    /// The shared surface owns scrolling. Publish only rows clipped into its current viewport
+    /// to the native accessibility bridge, preserving their drawn order.
+    private func visibleMenuRows(in surface: ThemedMenuSurfaceView) -> [ThemedMenuRowView] {
+        surface.layoutSubtreeIfNeeded()
+        let viewport = surface.bounds.insetBy(dx: 0, dy: ThemedMenuMetrics.verticalOuterInset)
+        // The native ATK bridge rejects a row whose rectangle extends beyond the menu bitmap.
+        // Report the same full rows to it and to its activation callback; including a partly
+        // clipped row here shifts every later accessibility slot by one after scrolling.
+        return menuRows.filter { viewport.contains($0.convert($0.bounds, to: surface)) }
     }
 
     private func presentHeader(window: OpaquePointer, width: Int, originX: Int) throws {
@@ -550,7 +485,7 @@ final class WorkspacePaneChrome {
         if menuOpen, let plan = menuPlan {
             let available = CGFloat(max(0, height - Self.headerPixelHeight)) / WorkspaceDisplay.scale
             var rows = 0
-            var used: CGFloat = 12
+            var used = ThemedMenuMetrics.verticalOuterInset * 2
             for rowHeight in plan.heights.prefix(Self.visibleMenuRows) {
                 guard used + rowHeight <= available else { break }
                 used += rowHeight
@@ -560,12 +495,13 @@ final class WorkspacePaneChrome {
                 dismissMenu(window: window)
             } else if rows != menuVisibleRows {
                 menuVisibleRows = rows
-                menuFirstVisible = min(menuFirstVisible, max(0, plan.heights.count - rows))
-                if menuSelected < menuFirstVisible { menuFirstVisible = menuSelected }
-                if menuSelected >= menuFirstVisible + rows {
-                    menuFirstVisible = menuSelected - rows + 1
+                if let menuRoot {
+                    menuRoot.frame = NSRect(x: 0, y: 0, width: menuRoot.frame.width,
+                                            height: used)
+                    menuSize.height = Int((used * WorkspaceDisplay.scale).rounded())
+                    menuRoot.highlight(menuSelected)
                 }
-                rebuildVisibleMenuRows()
+                menuNeedsPresentation = true
             }
         }
         tw_workspace_terminal_top_inset(window, Int32(Self.headerPixelHeight))

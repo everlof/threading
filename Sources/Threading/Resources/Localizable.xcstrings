@@ -26420,6 +26420,17 @@
         }
       }
     },
+    "Follow Agent Setting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Följ agentens inställning"
+          }
+        }
+      }
+    },
     "Follow App Font" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62495,6 +62506,17 @@
         }
       }
     },
+    "The menu panel, section heading, scrolling and choices as one live view. Hover or click a choice." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Menypanelen, avsnittsrubriken, rullningen och valen i en och samma vy. Hovra över eller klicka på ett val."
+          }
+        }
+      }
+    },
     "The message was typed, but delivery was not confirmed. Check the chat before sending again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -65379,6 +65401,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ThemedMenuRowView valde “%@”."
+          }
+        }
+      }
+    },
+    "ThemedMenuSurfaceView & ThemedMenuHeaderView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemedMenuSurfaceView & ThemedMenuHeaderView"
+          }
+        }
+      }
+    },
+    "ThemedMenuSurfaceView chose “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemedMenuSurfaceView valde “%@”."
           }
         }
       }
@@ -72066,6 +72110,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använder hastigheten som valts i Inställningar ▸ Chattar."
+          }
+        }
+      }
+    },
+    "Uses the speed configured for this agent." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använder hastigheten som konfigurerats för den här agenten."
           }
         }
       }

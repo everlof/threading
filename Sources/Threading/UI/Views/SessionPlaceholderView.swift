@@ -135,6 +135,34 @@ final class SessionPlaceholderView: NSView {
     }
 }
 
+/// What the shared placeholder says about a closed agent session. The host decides whether
+/// the stored conversation can actually resume; the view's claim follows that fact.
+@MainActor
+struct DormantSessionPlaceholderContent {
+    let title: String
+    let detail: String
+    let actionTitle: String
+
+    static func agent(displayTitle: String, supportsResume: Bool,
+                      canResume: Bool, lastAttemptFailed: Bool = false) -> Self {
+        let detail: String
+        if lastAttemptFailed {
+            detail = L10n.string("The last attempt to open this conversation did not finish.")
+        } else if canResume {
+            detail = L10n.string("The conversation is saved and will pick up where it left off.")
+        } else if supportsResume {
+            detail = L10n.string("No saved conversation was found, so this will start fresh.")
+        } else {
+            detail = L10n.string("Starting again opens a new shell.")
+        }
+        return Self(
+            title: L10n.format("%@ ended", displayTitle),
+            detail: detail,
+            actionTitle: canResume ? L10n.string("Resume Session") : L10n.string("Start Again")
+        )
+    }
+}
+
 // MARK: - Placeholder Defaults
 
 enum PlaceholderDefaults {

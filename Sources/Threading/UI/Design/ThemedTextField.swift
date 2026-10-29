@@ -99,6 +99,9 @@ public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary
     }
 
     private func setup() {
+        // AppKit starts a plain text field editable; the Linux shim starts labels read-only.
+        // This component is an input on both hosts, including when built with init(string:).
+        isEditable = true
         isBezeled = false
         // The surface is ours; leaving AppKit's on would paint a system rectangle under it.
         drawsBackground = false

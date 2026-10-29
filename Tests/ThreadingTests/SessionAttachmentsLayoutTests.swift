@@ -1937,6 +1937,22 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         )
     }
 
+    func testNarrowRowMovesCompleteMomentBelowFileLines() throws {
+        let url = try writePNG(size: NSSize(width: 40, height: 40))
+        let pane = try laidOutPane(showing: url, size: NSSize(width: 200, height: 640))
+        let table = try attachmentsTable(in: pane.view)
+        XCTAssertEqual(table.rect(ofRow: 0).height, SessionAttachmentRowMetrics.compactHeight)
+
+        let cell = try XCTUnwrap(row(0, of: pane) as? SessionAttachmentRowView)
+        pane.view.layoutSubtreeIfNeeded()
+        XCTAssertTrue(cell.isCompact)
+        let labels = cell.subviews.compactMap { $0 as? NSTextField }
+        XCTAssertGreaterThanOrEqual(labels.count, 4)
+        XCTAssertLessThanOrEqual(labels[3].frame.maxY, labels[1].frame.minY)
+        XCTAssertGreaterThan(labels[3].frame.width, 0)
+        XCTAssertEqual(labels[3].toolTip, labels[3].stringValue)
+    }
+
     /// A PDF keeps the file icon. ImageIO is asked for a picture and there is none to give, and a
     /// blank well would be worse than the icon the system already has for the format.
     func testAPDFRowKeepsTheFileIcon() throws {

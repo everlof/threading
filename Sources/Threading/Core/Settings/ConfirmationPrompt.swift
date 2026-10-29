@@ -426,3 +426,18 @@ enum ConfirmationPrompt: String, CaseIterable {
         .switchRunningSessionSurface
     ]
 }
+
+/// The same close question travels through AppKit's alert and Linux's text-prompt shim.
+enum CloseRunningSessionConfirmationCopy {
+    static func title(for displayTitle: String) -> String {
+        L10n.format("Close “%@”?", displayTitle)
+    }
+
+    static func message(supportsResume: Bool) -> String {
+        supportsResume
+            ? L10n.string("The agent will stop. The session stays in the sidebar and can be resumed.")
+            : L10n.string("The shell will stop. The session stays in the sidebar.")
+    }
+
+    static var confirmTitle: String { L10n.string("Close Session") }
+}

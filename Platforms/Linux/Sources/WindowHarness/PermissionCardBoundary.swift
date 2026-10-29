@@ -1,6 +1,7 @@
 #if os(Linux)
 import AppKit
 import ThreadingRemoteKit
+@testable import CoreSlice
 
 // The production permission card links unchanged. Its Mac-only paths, which mirror a request to
 // a paired device or let an appointed manager answer it, cross this boundary.
@@ -14,13 +15,6 @@ enum RemoteConversationWirePolicy {
         RemotePermissionRequestDTO(id: request.id, toolName: request.toolName, summary: request.summary,
             filePath: request.filePath, diff: [], canDecide: false, unavailableReason: localReviewReason)
     }
-}
-
-/// The production manager vocabulary. The Linux host has no control plane yet, so no manager
-/// resolves a card; `resolveManager` refuses through the fail-closed projection above.
-enum ControlPermissionDecision: String, Equatable, Sendable {
-    case allow
-    case deny
 }
 
 extension NSView {

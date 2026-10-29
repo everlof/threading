@@ -8,6 +8,8 @@ struct LinuxGitCheckout: Sendable {
     let identity: String
     let repositoryIdentity: String
     let branch: String?
+    /// Git's administrative name for a linked worktree; absent for the main checkout.
+    let worktreeName: String?
 
     static func discover(_ projects: [(id: String, path: String)]) -> LinuxGitCheckoutCatalog {
         var checkouts: [String: LinuxGitCheckout] = [:]
@@ -34,13 +36,14 @@ struct LinuxGitCheckout: Sendable {
             if files.fileExists(atPath: entry.path) {
                 guard let gitDirectory = gitDirectory(at: entry) else { return nil }
                 let identity = gitDirectory.standardizedFileURL.resolvingSymlinksInPath().path
-                let repository = sharedDirectory(for: identity)
+                let linkedLocation = linkedWorktree(for: identity)
                 let head = boundedText(at: gitDirectory.appendingPathComponent("HEAD"))?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let prefix = "ref: refs/heads/"
                 let branch = head.flatMap { $0.hasPrefix(prefix) ? String($0.dropFirst(prefix.count)) : nil }
                 return LinuxGitCheckout(root: directory.path, identity: identity,
-                                        repositoryIdentity: repository, branch: branch)
+                                        repositoryIdentity: linkedLocation?.repository ?? identity,
+                                        branch: branch, worktreeName: linkedLocation?.name)
             }
             guard directory.path != "/" else { return nil }
             directory.deleteLastPathComponent()
@@ -63,10 +66,10 @@ struct LinuxGitCheckout: Sendable {
         return destination
     }
 
-    private static func sharedDirectory(for identity: String) -> String {
+    private static func linkedWorktree(for identity: String) -> (repository: String, name: String)? {
         let parts = identity.split(separator: "/")
-        guard parts.count >= 3, parts[parts.count - 2] == "worktrees" else { return identity }
-        return "/" + parts.dropLast(2).joined(separator: "/")
+        guard parts.count >= 3, parts[parts.count - 2] == "worktrees" else { return nil }
+        return ("/" + parts.dropLast(2).joined(separator: "/"), String(parts[parts.count - 1]))
     }
 
     private static func boundedText(at url: URL) -> String? {

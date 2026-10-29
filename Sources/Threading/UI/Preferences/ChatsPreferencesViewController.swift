@@ -114,18 +114,16 @@ final class ChatsPreferencesViewController: NSViewController {
             action: #selector(beforeActionCaptureChanged)
         )
 
-        newChatOpeningPrefixField.placeholderString = L10n.string(
-            "For example: Think it through before you start changing files."
-        )
+        newChatOpeningPrefixField.placeholderString =
+            L10n.string(OpeningMessageSettingsStructure.prefixPlaceholder)
         newChatOpeningPrefixField.stringValue = AppSettings.shared.newChatOpeningPrefix
         newChatOpeningPrefixField.setAccessibilityIdentifier(
             "settings.chats.new-chat-opening-prefix"
         )
         newChatOpeningPrefixField.delegate = self
 
-        newChatOpeningSuffixField.placeholderString = L10n.string(
-            "For example: Rename this chat to a ONE-WORD, ALL-CAPS name that represents it."
-        )
+        newChatOpeningSuffixField.placeholderString =
+            L10n.string(OpeningMessageSettingsStructure.suffixPlaceholder)
         newChatOpeningSuffixField.stringValue = AppSettings.shared.newChatOpeningSuffix
         newChatOpeningSuffixField.setAccessibilityIdentifier(
             "settings.chats.new-chat-opening-suffix"
@@ -161,31 +159,14 @@ final class ChatsPreferencesViewController: NSViewController {
     }
 
     private func setupLayout() {
-        let page = SettingsUI.page(title: "Chats", sections: [
-            SettingsUI.section("New Chats", newChatsCard()),
-            SettingsUI.section(
-                "Opening Message",
-                openingMessageCard(),
-                help: SettingsUI.help(
-                    "Opening Message",
-                    "Both are sent once, inside the first turn of a new chat — side chats and "
-                        + "cross-provider continuations included. Neither is sent again when a "
-                        + "chat resumes, and an imported conversation receives nothing. The name "
-                        + "in the sidebar still comes from the task you wrote."
-                )
-            ),
-            SettingsUI.section(
-                "Attachments",
-                attachmentDetectionCard(),
-                help: SettingsUI.help(
-                    "Attachments",
-                    "Threading reads each agent's output for image, PDF, document, archive "
-                        + "and diagram paths and lists them in the chat's panel. Turn an agent "
-                        + "off here if an update changes how it prints paths."
-                )
-            ),
-            SettingsUI.section("Scratchpad", SettingsCard(rows: [scratchpadRow()]))
-        ])
+        let content = ChatsSettingsPageStructure.Content(
+            newChats: newChatsCard(),
+            openingMessage: openingMessageCard(),
+            attachments: attachmentDetectionCard(),
+            scratchpad: SettingsCard(rows: [scratchpadRow()])
+        )
+        let page = SettingsUI.page(title: "Chats",
+            sections: ChatsSettingsPageStructure.sections(content))
 
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -207,44 +188,13 @@ final class ChatsPreferencesViewController: NSViewController {
     /// would override a `permissions.defaultMode` or `config.toml` the user set themselves, on
     /// the one axis where being wrong either nags them all day or stops asking when it should.
     private func newChatsCard() -> SettingsCard {
-        SettingsCard(rows: [
-            SettingsUI.row(
-                title: "New sessions use",
-                subtitle: "Used by New Session (⌘N). Other agents stay available from the Project menu.",
-                control: defaultAgentPopUp
-            ),
-            SettingsUI.row(
-                title: "New sessions start in",
-                subtitle: "How much a session may do before it stops to ask.",
-                help: SettingsUI.help(
-                    "New sessions start in",
-                    "Following leaves it to the agent's own configuration. A single chat can "
-                        + "still be set from its ⋯ menu, and the mode applies from that chat's "
-                        + "next launch."
-                ),
-                control: permissionModePopUp
-            ),
-            SettingsUI.row(
-                title: "Claude sessions start in",
-                subtitle: "Fast uses more credits and needs a supported model.",
-                help: SettingsUI.help(
-                    "Claude sessions start in",
-                    "Applies to Terminal and Native chats. Agent's Setting preserves Claude "
-                        + "Code's own choice."
-                ),
-                control: claudeStartupSpeedPopUp
-            ),
-            SettingsUI.row(
-                title: "Codex sessions start in",
-                subtitle: "Fast uses more credits.",
-                help: SettingsUI.help(
-                    "Codex sessions start in",
-                    "Applies to Terminal and Native chats. Agent's Setting preserves Codex's "
-                        + "own service tier."
-                ),
-                control: codexStartupSpeedPopUp
-            )
-        ])
+        let controls = NewChatsSettingsStructure.Controls(
+            agent: defaultAgentPopUp, permission: permissionModePopUp,
+            claudeSpeed: claudeStartupSpeedPopUp, codexSpeed: codexStartupSpeedPopUp)
+        return SettingsCard(rows: NewChatsSettingsStructure.rows(controls: controls) { row, control in
+            SettingsUI.row(title: row.title, subtitle: row.subtitle,
+                help: row.help?.topic, control: control)
+        })
     }
 
     /// Standing context for a new conversation, kept visibly separate from the task composed
@@ -255,57 +205,24 @@ final class ChatsPreferencesViewController: NSViewController {
     /// answer — an order the model reads as written, which is why they are separate fields
     /// rather than one message the user has to position by hand.
     private func openingMessageCard() -> SettingsCard {
-        SettingsCard(rows: [
-            SettingsUI.row(
-                title: "Before the task you write",
-                subtitle: "Sent once ahead of the task, framing how this chat should be worked on."
-            ),
-            SettingsUI.fullRow(newChatOpeningPrefixField),
-            SettingsUI.row(
-                title: "After the task you write",
-                subtitle: "Sent once after the task, for a standing instruction about the answer."
-            ),
-            SettingsUI.fullRow(newChatOpeningSuffixField)
-        ])
+        SettingsCard(rows: OpeningMessageSettingsStructure.rows(
+            prefixField: newChatOpeningPrefixField,
+            suffixField: newChatOpeningSuffixField,
+            makeLabelRow: { SettingsUI.row(title: $0.title, subtitle: $0.subtitle) },
+            makeFullRow: SettingsUI.fullRow))
     }
 
     /// One switch per runtime, named by the runtime alone: what every one of them does is the
     /// same sentence, said once on the section's "?" rather than five times down the card.
     private func attachmentDetectionCard() -> SettingsCard {
-        let runtimeRows = AgentKind.allCases.compactMap { kind -> NSView? in
-            guard let toggle = attachmentDetectionToggles[kind] else { return nil }
-            return SettingsUI.row(
-                title: "Detect attachments from \(kind.displayName)",
-                control: toggle
-            )
+        let controls = AttachmentSettingsStructure.Controls(
+            detection: attachmentDetectionToggles,
+            outsideProject: outsideProjectAttachmentToggle,
+            beforeActionCapture: beforeActionCaptureToggle)
+        return AttachmentSettingsStructure.card(controls: controls) { row, control in
+            SettingsUI.row(title: row.title, subtitle: row.subtitle,
+                           help: row.help?.topic, control: control)
         }
-        return SettingsCard(rows: runtimeRows + [
-            SettingsUI.row(
-                title: "Include files outside the project",
-                subtitle: "Lists paths from anywhere, copying each one in.",
-                help: SettingsUI.help(
-                    "Include files outside the project",
-                    "Detected paths are normally kept to the session's own project, because a "
-                        + "paired phone can fetch anything in the list and printed text is not a "
-                        + "handoff. Images you attach or the agent shows are never affected."
-                ),
-                control: outsideProjectAttachmentToggle
-            ),
-            SettingsUI.row(
-                title: "Keep the page as it was before each agent action",
-                subtitle: "Lets an agent ask what its own browser click changed.",
-                help: SettingsUI.help(
-                    "Keep the page as it was before each agent action",
-                    "The agent compares the page with a picture taken just before its action. "
-                        + "The pictures stay in memory for the chat and are never added to your "
-                        + "visual baselines.",
-                    "Off by default because every page-changing tool call then costs a "
-                        + "screenshot. It covers the agent's own actions only, not your clicks or "
-                        + "a page updating itself."
-                ),
-                control: beforeActionCaptureToggle
-            )
-        ])
     }
 
     /// Where the scratchpad's folder is, and the two ways to move it. The path is the row's
@@ -316,29 +233,17 @@ final class ChatsPreferencesViewController: NSViewController {
             target: self,
             action: #selector(browseForScratchpadFolder)
         )
-        var pathField: NSTextField?
-        let row = SettingsUI.row(
-            title: L10n.string("Scratchpad folder"),
-            subtitle: Self.scratchpadPath,
-            help: SettingsUI.help(
-                "Scratchpad folder",
-                "Chats that are about no project live here. The folder is made the first time "
-                    + "you start a scratchpad, and it is an ordinary git repository, so Git "
-                    + "Review works on it and nothing you write is lost. It sits outside "
-                    + "Threading's own storage on purpose — Reset Everything does not touch it."
-            ),
-            control: SettingsUI.controlGroup([choose, scratchpadDefaultButton]),
-            subtitleField: &pathField,
-            localizes: false
-        )
-        pathField?.lineBreakMode = .byTruncatingMiddle
-        scratchpadFolderLabel = pathField
+        let help = HelpPopoverButton(topic: ScratchpadSettingsStructure.helpTopic)
+        let row = ScratchpadSettingsStructure.row(path: Self.scratchpadPath,
+            choose: choose, useDefault: scratchpadDefaultButton, helpButton: help)
+        scratchpadFolderLabel = row.pathLabel
         updateScratchpadFolder()
-        return row
+        return row.view
     }
 
     private static var scratchpadPath: String {
-        (ScratchpadWorkspace.folderURL.path as NSString).abbreviatingWithTildeInPath
+        ScratchpadLocation.displayPath(ScratchpadWorkspace.folderURL,
+            home: FileManager.default.homeDirectoryForCurrentUser)
     }
 
     // MARK: - Opening Message
@@ -350,7 +255,7 @@ final class ChatsPreferencesViewController: NSViewController {
         unsettledOpeningMessageField = field
         openingMessageWriteTimer?.invalidate()
         openingMessageWriteTimer = Timer.scheduledTimer(
-            withTimeInterval: ChatsPreferencesDefaults.textSettingCoalescingInterval,
+            withTimeInterval: NewChatDefaults.textSettingCoalescingInterval,
             repeats: false
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.flushOpeningMessageWrite() }
@@ -379,18 +284,9 @@ final class ChatsPreferencesViewController: NSViewController {
     /// automatic reviewer behavior the launch will select.
     private func rebuildPermissionModePopUp(for kind: AgentKind) {
         permissionModePopUp.removeAllItems()
-        // The first item inherits — no flag, the agent's own configuration decides — and the
-        // six follow. Its represented value is deliberately nil, which is how the handler
-        // tells "leave it alone" from a mode.
-        permissionModePopUp.addItem(
-            ThemedMenuItem(title: L10n.string("Agent's Setting"), representedValue: nil)
-        )
-        for mode in AgentPermissionMode.allCases {
-            permissionModePopUp.addItem(ThemedMenuItem(
-                title: mode.displayName(for: kind),
-                subtitle: mode.menuDescription(for: kind),
-                representedValue: mode
-            ))
+        for choice in NewChatsSettingsStructure.permissionChoices(for: kind) {
+            permissionModePopUp.addItem(ThemedMenuItem(title: choice.title,
+                subtitle: choice.subtitle, representedValue: choice.mode))
         }
         permissionModePopUp.selectItem(
             at: AppSettings.shared.defaultPermissionMode
@@ -511,7 +407,6 @@ final class ChatsPreferencesViewController: NSViewController {
         }
     }
 }
-
 extension ChatsPreferencesViewController: NSTextFieldDelegate {
     /// Coalesced, because writing this setting is not free: every write posts
     /// `AppSettingsDidChange`, and its observers re-read each project's git control files,
@@ -540,12 +435,4 @@ extension ChatsPreferencesViewController: NSTextFieldDelegate {
         else { return nil }
         return field
     }
-}
-
-// MARK: - Chats Preferences Defaults
-
-enum ChatsPreferencesDefaults {
-    /// Long enough that an ordinary sentence is one write, short enough that a page closed by
-    /// ⌘W a moment after the last character has already settled without needing the flush.
-    static let textSettingCoalescingInterval: TimeInterval = 0.4
 }

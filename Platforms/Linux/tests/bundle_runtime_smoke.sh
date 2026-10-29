@@ -137,6 +137,24 @@ dbus-run-session -- python3 /workspace_smoke.py "$bin/WindowHarness" "$bin/Linux
   "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
 dbus-run-session -- python3 /session_actions_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$fixture/pty.sock" "$fixture" /evidence/restart-out
+python3 /startup_restore_quit_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$fixture/pty.sock" "$fixture"
+python3 /startup_restore_background_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture"
+python3 /startup_restore_background_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture" many
+python3 /startup_restore_native_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$fixture/pty.sock" "$fixture"
+python3 /startup_restore_native_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$fixture/pty.sock" "$fixture" selected
+python3 /startup_restore_native_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$fixture/pty.sock" "$fixture" held
+python3 /native_retention_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/pty.sock" "$fixture" \
+  /evidence/restart-out/native-retention
+dbus-run-session -- python3 /session_hover_card_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" \
+  /evidence/restart-out/session-hover-card
 dbus-run-session -- python3 /session_close_unmounted_smoke.py \
   "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" "$fixture" \
   /evidence/restart-out
@@ -171,6 +189,12 @@ dbus-run-session -- python3 /composer_surface_smoke.py "$bin/WindowHarness" "$bi
 dbus-run-session -- python3 /composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
   "$bin/threading-ptyd" "$fixture/composer-surface-claude.sock" "$fixture" \
   /evidence/restart-out/composer-surface-claude claude
+dbus-run-session -- python3 /composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/opening-codex-native.sock" "$fixture" \
+  /evidence/restart-out/opening-codex-native codex opening-native
+dbus-run-session -- python3 /composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
+  "$bin/threading-ptyd" "$fixture/opening-claude-terminal.sock" "$fixture" \
+  /evidence/restart-out/opening-claude-terminal claude opening-terminal
 for provider in codex claude; do
   for mode in speed-terminal speed-native speed-live configuration-live attachment; do
     dbus-run-session -- python3 /composer_surface_smoke.py "$bin/WindowHarness" "$bin/LinuxHost" \
@@ -228,6 +252,20 @@ dbus-run-session -- python3 /native_activity_smoke.py \
 dbus-run-session -- python3 /sidebar_footer_smoke.py \
   "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
   "$fixture/ui-scale-2" /evidence/restart-out/sidebar-footer
+dbus-run-session -- python3 /settings_startup_restore_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
+  "$fixture" /evidence/restart-out/settings-startup-restore
+dbus-run-session -- python3 /scratchpad_settings_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/scratchpad-settings.sock" \
+  "$fixture" /evidence/restart-out/scratchpad-settings
+dbus-run-session -- python3 /settings_popup_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
+  "$fixture" /evidence/restart-out/settings-policy
+dbus-run-session -- python3 /settings_attachment_detection_smoke.py \
+  "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \
+  "$fixture" /evidence/restart-out/settings-attachments
+python3 /display_pane_bridge_smoke.py "$bin/WindowHarness" \
+  /evidence/restart-out/display-pane
 mkdir "$fixture/ui-scale-2-dark"
 THREADING_TEST_DARK=1 dbus-run-session -- python3 /native_activity_smoke.py \
   "$bin/WindowHarness" "$bin/LinuxHost" "$fixture/pty.sock" \

@@ -1292,8 +1292,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Session action menu",
-      "description": "The shared sidebar, context, and header session menu for a chat whose repository has two branch-attached checkouts, plus usage-bearing move, continuation and recovery account choices across three themes.",
-      "states": ["Restart Terminal in the product shell", "Move to Checkout available", "Account usage columns", "Scoped model usage", "Selected recovery login", "Light", "Dark"],
+      "description": "The shared sidebar, context, and header session menu for a chat whose repository has two branch-attached checkouts; the standalone terminal menu in the product shell; and usage-bearing move, continuation and recovery account choices across three themes.",
+      "states": ["Restart Terminal in the product shell", "Standalone terminal Rename, Copy, Theme, Sounds and Close", "Move to Checkout available", "Account usage columns", "Scoped model usage", "Selected recovery login", "Light", "Dark"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark"],

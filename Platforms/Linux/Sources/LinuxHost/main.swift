@@ -40,15 +40,19 @@ func run() throws -> Int32 {
     let args = Array(CommandLine.arguments.dropFirst())
     let addingProject = args.first == "--add-project"
     let ensuringScratchpad = args.first == "--ensure-scratchpad"
+    let relocatingScratchpad = args.first == "--relocate-scratchpad"
     let initializingStore = args.first == "--init-store"
-    try check(initializingStore || ensuringScratchpad ? args.count == 2 :
-        (addingProject ? args.count == 3 : args.count >= 3),
-        "usage: LinuxHost --init-store STORE | --add-project STORE DIRECTORY | --ensure-scratchpad STORE | STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | claude DIRECTORY SHELL CLAUDE_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | resume-claude SESSION_UUID SHELL CLAUDE_EXECUTABLE | attach-agent SESSION_UUID")
+    try check(initializingStore ? args.count == 2 :
+        (ensuringScratchpad ? (args.count == 2 || args.count == 3) :
+        (relocatingScratchpad ? args.count == 4 :
+        (addingProject ? args.count == 3 : args.count >= 3))),
+        "usage: LinuxHost --init-store STORE | --add-project STORE DIRECTORY | --ensure-scratchpad STORE [CONFIGURED_PATH] | --relocate-scratchpad STORE SOURCE TARGET | STORE SOCKET list | run DIRECTORY EXECUTABLE [ARG ...] | login-run DIRECTORY SHELL EXECUTABLE [ARG ...] | attach TERMINAL_UUID | codex DIRECTORY SHELL CODEX_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | claude DIRECTORY SHELL CLAUDE_EXECUTABLE PROMPT [ACCOUNT_HANDLE] | resume-claude SESSION_UUID SHELL CLAUDE_EXECUTABLE | attach-agent SESSION_UUID")
     let importFolder = addingProject ? try projectDirectory(args[2]) : nil
     // Establish the signal mask before database decoding can create worker threads.
-    let terminalControl: LocalTerminal? = initializingStore || addingProject || ensuringScratchpad || args[2] == "list" ? nil : try LocalTerminal()
-    let root = URL(fileURLWithPath: args[initializingStore || addingProject || ensuringScratchpad ? 1 : 0], isDirectory: true)
-    if !initializingStore && !addingProject && !ensuringScratchpad && args[2] == "resume-claude" {
+    let hostCommand = initializingStore || addingProject || ensuringScratchpad || relocatingScratchpad
+    let terminalControl: LocalTerminal? = hostCommand || args[2] == "list" ? nil : try LocalTerminal()
+    let root = URL(fileURLWithPath: args[hostCommand ? 1 : 0], isDirectory: true)
+    if !hostCommand && args[2] == "resume-claude" {
         try check(FileManager.default.fileExists(atPath: root.appendingPathComponent("threading.db").path),
                   "saved session store does not exist")
     }
@@ -63,7 +67,13 @@ func run() throws -> Int32 {
     defer { database.close() }
     if initializingStore { return 0 }
     if ensuringScratchpad {
-        let folder = try LinuxScratchpad.ensure(in: database)
+        let folder = try LinuxScratchpad.ensure(in: database,
+            configuredPath: args.count == 3 ? args[2] : nil)
+        print(folder.path)
+        return 0
+    }
+    if relocatingScratchpad {
+        let folder = try LinuxScratchpad.relocate(in: database, from: args[2], to: args[3])
         print(folder.path)
         return 0
     }

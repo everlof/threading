@@ -1,31 +1,5 @@
 import Foundation
 
-// MARK: - Defaults
-
-/// Where the scratchpad lives, and what Threading puts in it the first time.
-enum ScratchpadDefaults {
-
-    /// The container Threading owns in the user's home directory. A container rather than a
-    /// bare `Threading Scratchpad`, so anything else the app ever has to keep somewhere the
-    /// user can reach has a home already named — and so the path has no space in it, which
-    /// matters for a folder people `cd` into.
-    static let containerName = "Threading"
-
-    static let folderName = "Scratchpad"
-
-    static let readmeName = "README.md"
-    static let gitignoreName = ".gitignore"
-
-    /// Deliberately tiny. This is a folder the user writes in; an opinionated ignore list
-    /// would be Threading deciding what their notes are allowed to contain.
-    static let ignoredEntries = [".DS_Store"]
-
-    /// The override, under `PreferenceStore` rather than `AppSettings`: this records a
-    /// *choice*, and a hosted test that wrote it to `.standard` would repoint the developer's
-    /// real scratchpad at whatever fixture path it happened to use.
-    static let folderPathKey = "scratchpadFolderPath"
-}
-
 // MARK: - Workspace
 
 /// The folder behind scratchpad chats — the ones that belong to no project.
@@ -83,25 +57,19 @@ enum ScratchpadWorkspace {
     /// comparing them, so without this, choosing the folder the scratchpad is already in read as
     /// a move onto itself — and failed with "something is already there".
     private static func directoryURL(_ url: URL) -> URL {
-        URL(fileURLWithPath: url.standardizedFileURL.path, isDirectory: true)
+        ScratchpadLocation.directoryURL(url)
     }
 
     /// `~/Threading/Scratchpad`.
     static var defaultFolderURL: URL {
-        directoryURL(
-            FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(ScratchpadDefaults.containerName, isDirectory: true)
-                .appendingPathComponent(ScratchpadDefaults.folderName, isDirectory: true)
-        )
+        ScratchpadLocation.defaultFolderURL(home: FileManager.default.homeDirectoryForCurrentUser)
     }
 
     /// The user's override, or nil when they have not moved it.
     static var configuredFolderURL: URL? {
         get {
-            guard let path = PreferenceStore.shared.string(
-                forKey: ScratchpadDefaults.folderPathKey
-            ), path.hasPrefix("/") else { return nil }
-            return directoryURL(URL(fileURLWithPath: path))
+            ScratchpadLocation.configuredFolderURL(path: PreferenceStore.shared.string(
+                forKey: ScratchpadDefaults.folderPathKey))
         }
         set {
             guard let newValue else {
@@ -204,7 +172,7 @@ enum ScratchpadWorkspace {
 
         seedFile(
             named: ScratchpadDefaults.readmeName,
-            contents: readmeContents,
+            contents: ScratchpadDefaults.readmeContents,
             in: root
         )
         seedFile(
@@ -241,17 +209,6 @@ enum ScratchpadWorkspace {
         let url = root.appendingPathComponent(name)
         guard !FileManager.default.fileExists(atPath: url.path) else { return }
         try? contents.write(to: url, atomically: true, encoding: .utf8)
-    }
-
-    /// What somebody finds when they open this folder in Finder months later with no memory of
-    /// agreeing to it.
-    private static var readmeContents: String {
-        "# " + L10n.string("Scratchpad") + "\n\n" + L10n.string(
-            "Threading created this folder to hold chats that are not about any project. "
-                + "It is an ordinary git repository, so nothing you write here is lost — and "
-                + "nothing outside it belongs to Threading. You can move it, or point "
-                + "Threading somewhere else, in Settings."
-        ) + "\n"
     }
 
     /// `isProbe` marks a call whose non-zero exit is an ordinary negative answer rather than a

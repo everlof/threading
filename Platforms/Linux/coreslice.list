@@ -1,5 +1,5 @@
-# Persistence and portable launch values, vendored byte-identical from the working tree. One path per line; an optional
-# second, tab-separated field renames the copy (only where a basename would mislead).
+# Persistence and portable launch values, linked directly from the working tree. One path per
+# line; an optional second, tab-separated field renames the link (where a basename would mislead).
 #
 # There are no stand-ins. There used to be two — `TerminalThemeID` extracted from an AppKit file,
 # and `SettingsEvents` minus its AppKit-bearing last four lines — and both were *recommendations*
@@ -14,9 +14,22 @@ Platforms/Linux/Shared/LinuxGitCheckout.swift
 Sources/Threading/Core/Logging/Logger.swift	ThreadingLogger.swift
 Sources/Threading/Core/Localization/AppLocalization.swift
 Sources/Threading/Core/Events/AppEvent.swift
+Sources/Threading/Core/Control/ControlPermissionDecision.swift
 Sources/Threading/Core/Settings/SettingsEvents.swift
 Sources/Threading/Core/Settings/LimitRecoveryPolicy.swift
 Sources/Threading/Core/Settings/PreferenceStore.swift
+Sources/Threading/Core/Settings/AgentStartupSpeed.swift
+Sources/Threading/Core/Settings/NewChatDefaults.swift
+Sources/Threading/Core/Agent/NewChatOpeningMessage.swift
+Sources/Threading/Core/Agent/SessionPromptTitle.swift
+Sources/Threading/Core/Settings/SessionRestorePolicy.swift
+Sources/Threading/Core/Session/SessionActivityState.swift
+Sources/Threading/Core/Session/SessionRuntimeFacts.swift
+Sources/Threading/Core/Session/SessionProcessRetentionPolicy.swift
+Sources/Threading/Core/Session/SessionRestorationLedger.swift
+Sources/Threading/Core/Session/RowConductDefaults.swift
+Sources/Threading/Core/RemoteHost/RemoteExecutionHostMark.swift
+Sources/Threading/Core/Settings/MotionPreferences.swift
 Sources/Threading/Core/Settings/ConfirmationPrompt.swift
 Sources/Threading/Core/Agent/AgentDefaults.swift
 Sources/Threading/Core/Agent/ProviderArchiveState.swift
@@ -75,7 +88,6 @@ Sources/Threading/Core/Agent/AgentEnvironment.swift
 Sources/Threading/Core/Constants/EnvironmentKeys.swift
 Sources/Threading/Core/Control/HostCommandContract.swift
 Sources/Threading/Core/Agent/CodeContextPreview.swift
-Sources/Threading/Core/Agent/ConversationContextAttachment.swift
 Sources/Threading/Core/Agent/GitReviewDefaults.swift
 Sources/Threading/Core/Agent/AgentStreamTransport.swift
 Sources/Threading/Core/Session/ChildProcessSpawn.swift
@@ -110,6 +122,7 @@ Sources/Threading/Core/PTYHost/PTYHostSessionTransport.swift
 Sources/Threading/Core/PTYHost/SignalSafePipeWriter.swift
 Sources/Threading/Core/Session/ProcessStartTime.swift
 Sources/Threading/Core/Session/SnoozeWallClockMoments.swift
+Sources/Threading/Core/Session/StartupSessionRelaunchPlan.swift
 Sources/Threading/Core/Session/ProjectIconDefaults.swift
 Sources/Threading/Core/Storage/AppDataReset.swift
 Sources/Threading/Core/Logging/EventLog.swift
@@ -131,6 +144,7 @@ Sources/Threading/Core/Agent/ConversationPermissionDecision.swift
 Sources/Threading/Core/PTYHost/PTYHostEvents.swift
 Sources/Threading/Core/PTYHost/PTYHostLatch.swift
 Sources/Threading/Core/PTYHost/PTYHostSessionStop.swift
+Sources/Threading/Core/PTYHost/PTYHostHeldDisposition.swift
 Sources/Threading/Core/MCP/MCPToolNaming.swift
 Sources/Threading/Models/ChartSpec+ToolCall.swift
 Sources/Threading/Core/Agent/ConversationTimeline+ChartTools.swift
@@ -158,4 +172,18 @@ Sources/Threading/Core/Agent/PermissionPolicy.swift
 Sources/Threading/Core/Agent/ShellCommandPolicy.swift
 Sources/Threading/Core/Agent/ShellWords.swift
 Sources/Threading/Core/Session/AttachmentDetection.swift
+Sources/Threading/Core/Agent/GitTurnCheckpointID.swift
+Sources/Threading/Core/Session/SessionAttachmentKind.swift
+Sources/Threading/Core/Session/SessionAttachmentTurnSections.swift
+Sources/Threading/Core/Session/AttachmentAgentSource.swift
+Sources/Threading/Core/Session/AttachmentReferenceDetector.swift
+Sources/Threading/Core/Session/AttachmentDetection+Recording.swift
+Sources/Threading/Core/Session/AttachmentMediaTypeRegistry.swift
+Sources/Threading/Core/Session/SessionAttachmentStore.swift
+Sources/Threading/Core/Session/TerminalAttachmentObservers.swift
+Platforms/Linux/Shared/LinuxSessionAttachmentStoreDefaults.swift
+Sources/Threading/Models/PersistedSessionAttachments.swift
+Sources/Threading/Core/Media/MediaContentProbe.swift
+Sources/Threading/Core/Session/ScratchpadDefaults.swift
+Sources/Threading/Core/Session/ScratchpadLocation.swift
 Sources/Threading/Core/Agent/ACPLaunchCommand.swift

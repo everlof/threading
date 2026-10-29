@@ -5,27 +5,28 @@ import CoreSlice
 // support the unchanged production menu row; no theme decisions belong in the AppKit shim.
 @MainActor
 public enum AppTheme {
-    public struct Material {
-        public enum IdentityMarks { case natural, tinted }
-        public enum BadgeStyle { case none, sticker }
-        public enum ChoiceStyle: Equatable {
-            case chip, dropdown, popup, doubleArrowPopup, aquaPopup, cycle
-
-            var isClassic: Bool { self != .chip }
-        }
-        public enum MenuAppearance {
-            case automatic, windows98, platinum, beOS, openStep, irix, amiga, aqua, aquaTiger
-
-            var isHistorical: Bool { self != .automatic }
-        }
-    }
+    public typealias Material = AppThemePalette.Material
 }
 
 extension AppThemePalette.Material {
+    public enum IdentityMarks { case natural, tinted }
+    public enum BadgeStyle { case none, sticker }
+    public enum ChoiceStyle: Equatable {
+        case chip, dropdown, popup, doubleArrowPopup, aquaPopup, cycle
+
+        var isClassic: Bool { self != .chip }
+    }
+    public enum MenuAppearance {
+        case automatic, windows98, platinum, beOS, openStep, irix, amiga, aqua, aquaTiger
+
+        var isHistorical: Bool { self != .automatic }
+    }
+
     var identityMarks: AppTheme.Material.IdentityMarks { .natural }
     var badgeStyle: AppTheme.Material.BadgeStyle { .none }
     var menuAppearance: AppTheme.Material.MenuAppearance { .automatic }
     var choiceStyle: AppTheme.Material.ChoiceStyle { .chip }
+    var choiceHeight: CGFloat { Design.Size.choiceHeight }
 }
 
 extension AppThemePalette.Palette {
@@ -45,8 +46,6 @@ enum DesignSettings {
 }
 
 extension Design.Spacing {
-    static let hairline: CGFloat = 2
-    static let tight: CGFloat = 4
     static let medium: CGFloat = 10
     static let large: CGFloat = 20
 }
@@ -88,6 +87,7 @@ extension Design {
     }
 
     @MainActor enum Status {
+        static var positive: NSColor { LinuxTheme.color("statusPositive") }
         static var warning: NSColor { LinuxTheme.color("statusWarning") }
         static var negative: NSColor { LinuxTheme.color("statusNegative") }
     }
@@ -105,7 +105,9 @@ extension Design {
 
         static func controlRegular() -> NSFont { control(weight: .regular) }
         static func caption() -> NSFont { NSFont.systemFont(ofSize: 11, weight: .semibold) }
-        static func detail() -> NSFont { NSFont.systemFont(ofSize: 11) }
+        static func detail(weight: NSFont.Weight = .regular) -> NSFont {
+            NSFont.systemFont(ofSize: 11, weight: weight)
+        }
         static func numericDetail(weight: NSFont.Weight = .regular) -> NSFont { NSFont.monospacedSystemFont(ofSize: 11, weight: weight) }
         static func lineHeight(of font: NSFont) -> CGFloat {
             font.boundingRectForFont.height

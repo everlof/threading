@@ -4,11 +4,6 @@ import AppKit
 /// the Threading theme. Geometry remains the production default. This host adapter belongs only
 /// to WindowHarness; the generic Harness keeps its separate symbol trap.
 @MainActor
-public protocol ThemeDerivedContent: AnyObject {
-    func rederiveThemedContent()
-}
-
-@MainActor
 public enum Design {
     @MainActor public struct Ink {
         public let base: NSColor
@@ -99,6 +94,8 @@ public enum Design {
         public static var selectionFillUnemphasized: NSColor { LinuxTheme.color("accentMuted") }
     }
     public enum Spacing {
+        public static let hairline: CGFloat = 2
+        public static let tight: CGFloat = 4
         public static let small: CGFloat = 6
         public static let inset: CGFloat = 12
     }
@@ -119,6 +116,7 @@ public enum Design {
         public static let promptAttachmentThumbnail: CGFloat = 80
         public static let splitMenuWidth: CGFloat = 24
         public static let chipHeight: CGFloat = 26
+        public static let fieldHeight: CGFloat = 32
         public static let compactSplitMenuWidth: CGFloat = 12
         public static let compactSubmitHeight: CGFloat = 18
         public static let deviceControlButtonSize: CGFloat = 40
@@ -151,12 +149,14 @@ public enum Design {
                          || name == "pin.fill" || name == "moon.zzz" || name == "bell"
                          || name == "calendar"
                          || name == "chevron.down" || name == "chevron.right"
-                         || name == "folder" || name == "doc.text" || name == "pencil"
+                         || name == "folder" || name == "doc.text"
+                         || name == "doc.on.doc" || name == "number" || name == "pencil"
                          || name == "arrow.up.forward.app"
                          || name == "text.bubble" || name == "bubble.left.and.text.bubble.right"
                          || name == "hand.raised" || name == "cpu" || name == "brain"
                          || name == "gauge" || name == "bolt.fill"
-                         || name == "questionmark.bubble" || name == "circle"
+                         || name == "questionmark.bubble" || name == "questionmark.circle"
+                         || name == "circle"
                          || name == "eye.slash"
                          || name == "exclamationmark.triangle"
                          || name == "info.circle.fill" || name == "exclamationmark.triangle.fill"
@@ -572,6 +572,23 @@ public enum Design {
                         check.stroke()
                         NSGraphicsContext.current?.compositingOperation = .sourceOver
                     }
+                } else if name == "questionmark.circle" {
+                    let ring = NSBezierPath(ovalIn: NSRect(
+                        x: origin + side * 0.12, y: origin + side * 0.12,
+                        width: side * 0.76, height: side * 0.76))
+                    ring.lineWidth = max(0.8, side * 0.07 * weightFactor)
+                    NSColor.white.setStroke()
+                    ring.stroke()
+                    let mark = NSBezierPath()
+                    mark.move(to: NSPoint(x: origin + side * 0.39, y: origin + side * 0.65))
+                    mark.curve(to: NSPoint(x: origin + side * 0.5, y: origin + side * 0.46),
+                               controlPoint1: NSPoint(x: origin + side * 0.42, y: origin + side * 0.75),
+                               controlPoint2: NSPoint(x: origin + side * 0.65, y: origin + side * 0.6))
+                    mark.lineWidth = ring.lineWidth
+                    mark.lineCapStyle = .round
+                    mark.stroke()
+                    NSBezierPath(ovalIn: NSRect(x: origin + side * 0.46, y: origin + side * 0.29,
+                                                width: side * 0.08, height: side * 0.08)).fill()
                 } else if name == "questionmark.bubble" {
                     // The question card's mark: the conversation bubble around a question mark.
                     let bubble = NSBezierPath()
@@ -673,6 +690,35 @@ public enum Design {
                     hand.lineCapStyle = .round
                     NSColor.white.setStroke()
                     hand.stroke()
+                } else if name == "doc.on.doc" {
+                    let documents = NSBezierPath()
+                    documents.move(to: NSPoint(x: origin + side * 0.14, y: origin + side * 0.24))
+                    documents.line(to: NSPoint(x: origin + side * 0.14, y: origin + side * 0.84))
+                    documents.line(to: NSPoint(x: origin + side * 0.66, y: origin + side * 0.84))
+                    documents.move(to: NSPoint(x: origin + side * 0.32, y: origin + side * 0.12))
+                    documents.line(to: NSPoint(x: origin + side * 0.84, y: origin + side * 0.12))
+                    documents.line(to: NSPoint(x: origin + side * 0.84, y: origin + side * 0.70))
+                    documents.line(to: NSPoint(x: origin + side * 0.32, y: origin + side * 0.70))
+                    documents.close()
+                    documents.lineWidth = max(0.8, side * 0.07 * weightFactor)
+                    documents.lineJoinStyle = .round
+                    NSColor.white.setStroke()
+                    documents.stroke()
+                } else if name == "number" {
+                    let number = NSBezierPath()
+                    for x: CGFloat in [0.40, 0.64] {
+                        number.move(to: NSPoint(x: origin + side * x, y: origin + side * 0.12))
+                        number.line(to: NSPoint(x: origin + side * (x - 0.12),
+                                                y: origin + side * 0.88))
+                    }
+                    for y: CGFloat in [0.38, 0.64] {
+                        number.move(to: NSPoint(x: origin + side * 0.16, y: origin + side * y))
+                        number.line(to: NSPoint(x: origin + side * 0.80, y: origin + side * y))
+                    }
+                    number.lineWidth = max(0.8, side * 0.07 * weightFactor)
+                    number.lineCapStyle = .round
+                    NSColor.white.setStroke()
+                    number.stroke()
                 } else if name == "doc.text" {
                     let paper = NSBezierPath()
                     paper.move(to: NSPoint(x: origin + side * 0.22, y: origin + side * 0.08))

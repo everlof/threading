@@ -8045,6 +8045,24 @@ open class Terminal {
         }
     }
 
+    /// Captures bounded terminal rows under the terminal lock, then converts the owned cells
+    /// to logical text after releasing it. Both AppleTerminalView and non-Apple hosts use this
+    /// path so attachment scans see the same wraps and absolute-row cursor.
+    public func recentLogicalBufferText(
+        maximumUTF8Bytes: Int,
+        sinceAbsoluteRow: Int = 0,
+        kind: BufferKind = .active
+    ) -> RecentBufferText {
+        let snapshot = terminalLock.withLock {
+            recentBufferTextSnapshot(
+                maximumUTF8Bytes: maximumUTF8Bytes,
+                sinceAbsoluteRow: sinceAbsoluteRow,
+                kind: kind
+            )
+        }
+        return snapshot.text(maximumUTF8Bytes: maximumUTF8Bytes)
+    }
+
     /// Specified the kind of buffer is being requested from the terminal
     public enum BufferKind: Sendable {
         /// The currently active buffer (can be either normal or alt)

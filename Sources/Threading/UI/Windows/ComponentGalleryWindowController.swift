@@ -127,6 +127,8 @@ final class ComponentGalleryViewController: NSViewController {
         "PromptTextScrollView",
         "PromptTextView",
         "ThemedMenuRowView",
+        "ThemedMenuSurfaceView",
+        "ThemedMenuHeaderView",
         "ThemedProjectRowView",
         "ThemedSessionRowContentView",
         "ThemedTerminalRowContentView",
@@ -5831,6 +5833,12 @@ final class ComponentGalleryViewController: NSViewController {
                     makeMenuRowStory()
                 ),
                 story(
+                    "ThemedMenuSurfaceView & ThemedMenuHeaderView",
+                    "The menu panel, section heading, scrolling and choices as one live view. "
+                        + "Hover or click a choice.",
+                    makeMenuSurfaceStory()
+                ),
+                story(
                     "ThemedProjectRowView, ThemedSessionRowContentView & ThemedTerminalRowContentView",
                     "The navigator's row shells — a project with its count, a checkout with its "
                         + "actions shown, a conversation and a running terminal — outside the "
@@ -5909,6 +5917,30 @@ final class ComponentGalleryViewController: NSViewController {
         stack.spacing = 0
         stack.applySurface(fill: Design.Surface.elevated, radius: .control)
         return stack
+    }
+
+    private func makeMenuSurfaceStory() -> NSView {
+        let entries: [ThemedMenuEntry] = [
+            .header(L10n.string("Layout")),
+            .item(ThemedMenuItem(title: L10n.string("Compact"), isSelected: true)),
+            .item(ThemedMenuItem(title: L10n.string("Expanded"))),
+            .separator,
+            .header(L10n.string("Actions")),
+            .item(ThemedMenuItem(title: L10n.string("Rename…")))
+        ]
+        let surface = ThemedMenuSurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 260, height: 180),
+            entries: entries,
+            selectedEntryIndex: 1
+        )
+        surface.onHighlight = { [weak surface] index in
+            surface?.highlight(index, scrollIntoView: false)
+        }
+        surface.onChoose = { [weak self] _, item in
+            self?.showReceipt(L10n.format("ThemedMenuSurfaceView chose “%@”.", item.title))
+        }
+        surface.fixSize(width: 260, height: 180)
+        return surface
     }
 
     private func makeNavigatorRowStory() -> NSView {

@@ -7940,6 +7940,8 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "PromptTextScrollView",
                 "PromptTextView",
                 "ThemedMenuRowView",
+                "ThemedMenuSurfaceView",
+                "ThemedMenuHeaderView",
                 "ThemedProjectRowView",
                 "ThemedSessionRowContentView",
                 "ThemedTerminalRowContentView",

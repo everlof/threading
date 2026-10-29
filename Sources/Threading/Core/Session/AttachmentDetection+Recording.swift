@@ -1,7 +1,7 @@
 import Foundation
 
-/// Recording a reference reaches the session attachment store and its off-main resolver, so it
-/// stays with the host; the content policy itself is portable.
+/// Recording a reference reaches the shared session attachment store and its off-main resolver.
+/// Hosts supply project roots and output; this admission path stays in Core on both platforms.
 extension AttachmentDetection {
     @MainActor
     static func record(
@@ -9,7 +9,7 @@ extension AttachmentDetection {
         sessionID: SessionID,
         projectRoot: URL,
         context: AttachmentReferenceContext = .main,
-        store: SessionAttachmentStore = .shared,
+        store: SessionAttachmentStore? = nil,
         shouldAdmit: @escaping @MainActor () -> Bool
     ) async {
         guard !texts.isEmpty, shouldAdmit() else { return }
@@ -17,7 +17,7 @@ extension AttachmentDetection {
             texts: texts, projectRoot: projectRoot, currentDirectory: nil
         )
         guard !resolution.isEmpty, !Task.isCancelled else { return }
-        _ = await store.recordScanned(
+        _ = await (store ?? SessionAttachmentStore.shared).recordScanned(
             resolved: resolution, sessionID: sessionID, projectRoot: projectRoot,
             context: context, shouldAdmit: shouldAdmit
         )
@@ -83,6 +83,15 @@ actor AttachmentDetectionWorker {
     }
 
     func resolve(
+        texts: [String], projectRoot: URL, currentDirectory: URL?
+    ) -> AttachmentReferenceDetector.Resolution {
+        Self.resolveBounded(texts: texts, projectRoot: projectRoot,
+                            currentDirectory: currentDirectory)
+    }
+
+    /// Hosts with their own UI event loop can call the identical bounded resolver from a
+    /// serial worker without resuming a main-actor task on a different native thread.
+    nonisolated static func resolveBounded(
         texts: [String], projectRoot: URL, currentDirectory: URL?
     ) -> AttachmentReferenceDetector.Resolution {
         guard !texts.isEmpty, !Task.isCancelled else { return .init() }

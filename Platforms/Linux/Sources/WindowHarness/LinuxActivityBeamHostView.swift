@@ -44,5 +44,7 @@ final class LinuxActivityBeamHostView: NSView {
 typealias BorderBeamHostView = LinuxActivityBeamHostView
 
 extension AppThemePalette.Palette {
-    var isSystem: Bool { true }
+    // The Linux snapshot is AppThemeStyles.threading, not AppTheme.system. The Mac hides
+    // activity beams under every styled theme, including Threading's own house palette.
+    var isSystem: Bool { false }
 }

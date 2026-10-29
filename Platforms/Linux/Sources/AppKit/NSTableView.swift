@@ -86,6 +86,7 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
                               "Linux table rows own their surface") }
     }
     public enum Style { case fullWidth, inset }
+    public enum RowSizeStyle { case `default` }
     public enum SelectionHighlightStyle { case regular, none }
     public enum ColumnAutoresizingStyle { case noColumnAutoresizing, uniformColumnAutoresizingStyle }
     public enum FocusRingType { case none }
@@ -95,6 +96,8 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         didSet { precondition(headerView == nil, "table header layout is unavailable") }
     }
     open var selectionHighlightStyle: SelectionHighlightStyle = .regular
+    /// The shared attachment list requests AppKit's default row sizing.
+    open var rowSizeStyle: RowSizeStyle = .default
     open var focusRingType: FocusRingType = .none
     open var columnAutoresizingStyle: ColumnAutoresizingStyle = .noColumnAutoresizing {
         didSet { resizeColumnsToFit() }
@@ -169,6 +172,8 @@ open class NSTableView: NSView, NSClipViewDocumentObserver {
         }
     }
     open var allowsMultipleSelection = false
+    /// Empty selection is already the table's ordinary state when no selectable row exists.
+    open var allowsEmptySelection = true
     public private(set) var numberOfRows = 0
 
     private var mounted: [Int: MountedRow] = [:]

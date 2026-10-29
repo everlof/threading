@@ -141,11 +141,30 @@ final class ThemedToggle: ThemedControl {
     private var animationDuration: TimeInterval = 0
     private var animatesNextStateChange = false
 
-    /// The frame source while the knob is in flight — a display link on 14+, a 60Hz timer on
-    /// 13, the `ThinkingOrbs` pattern. Runs only for the travel itself; both retain the view,
-    /// which is why completion and window removal each stop it.
+    /// The frame source runs only for the travel itself. Linux's SDL owner advances active
+    /// controls on its own event loop, keeping animation frames in order with presentation.
+    #if os(Linux)
+    private final class WeakToggle {
+        weak var value: ThemedToggle?
+        init(_ value: ThemedToggle) { self.value = value }
+    }
+
+    private static var activeAnimations: [ObjectIdentifier: WeakToggle] = [:]
+
+    static var hasActiveAnimations: Bool {
+        activeAnimations = activeAnimations.filter { $0.value.value != nil }
+        return !activeAnimations.isEmpty
+    }
+
+    static func advanceActiveAnimations() {
+        for toggle in activeAnimations.values.compactMap(\.value) {
+            toggle.advanceAnimation(now: toggle.animationClock())
+        }
+    }
+    #else
     private var displayLink: Any? // CADisplayLink, stored untyped for macOS 13
     private var fallbackTimer: Timer?
+    #endif
 
     /// The room the focus ring is given outside the track, on each side.
     ///
@@ -247,20 +266,11 @@ final class ThemedToggle: ThemedControl {
 
     #if os(Linux)
     private func startDriver() {
-        guard fallbackTimer == nil else { return }
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.advanceAnimation(now: self.animationClock())
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        fallbackTimer = timer
+        Self.activeAnimations[ObjectIdentifier(self)] = WeakToggle(self)
     }
 
     private func stopDriver() {
-        fallbackTimer?.invalidate()
-        fallbackTimer = nil
+        Self.activeAnimations.removeValue(forKey: ObjectIdentifier(self))
     }
     #else
     @objc private func tick() {
@@ -296,8 +306,8 @@ final class ThemedToggle: ThemedControl {
     }
     #endif
 
-    /// A driver retains its target, so a toggle leaving the window lands its knob and stops
-    /// rather than animating unseen — or, timer-driven, never deallocating.
+    /// A toggle leaving the window lands its knob and stops rather than animating unseen.
+    /// Mac's display driver also releases its retained target here.
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
         if newWindow == nil, animationPhase < 1 {

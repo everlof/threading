@@ -1476,7 +1476,7 @@ The rules, each of which is the answer to a way this goes wrong:
   conservative direction. It is consumed even with the setting off, so enabling it later
   cannot act on a list from some earlier quit. `AppRelaunch.PreparedRelaunch.commit` skips the
   quit path deliberately — a reset comes back to nothing running.
-- **Launches are staggered, one per `StartupRelaunchDefaults.staggerInterval`.** The
+- **Launches are staggered, one per `StartupSessionRelaunch.staggerInterval`.** The
   expensive part of a launch is the agent CLI's own boot — a burst of CPU per process — and
   N of those fired together contend through the app's first seconds, which is also when
   `MainThreadStallMonitor` is already watching. Spread out, each launch's main-thread slice
@@ -1525,9 +1525,10 @@ The rules, each of which is the answer to a way this goes wrong:
 - **A dormant row can say why it is dormant.** `StartupSessionRelaunch.Plan` carries a
   `SessionRestorationOutcome` for every unarchived session — restored, restore off, not running
   at the last quit, nothing recorded, outside the window (with when it was last used), or past
-  the limit, or reattached from the background host — and `SessionRestorationLedger` holds them for
-  the launch. The session hover card
-  reads it under "Dormant · resumable" and names the settings page. Recorded rather than
+  the limit, or reattached from the background host — and the Core
+  `SessionRestorationLedger` holds them for the launch on both desktop hosts. Their one
+  `SessionInfoCardView` reads it under "Dormant · resumable" and names the settings page.
+  Recorded rather than
   recomputed for two reasons: the answer belongs to the decision that was actually made, and a
   card built while the pointer rests on a row must not do work proportional to the whole store.
   The ledger forgets a session the moment it launches, because from then on its dormancy is its

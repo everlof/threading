@@ -121,6 +121,13 @@ refuses the launch. Unavailable or incomplete host evidence also refuses rather 
 same thing bury the one sentence that matters. Dormant means "this ended and can be picked up".
 This means "this did not start, and pressing the same button will do the same thing."
 
+Both desktop hosts mount `SessionPlaceholderView` for an ended agent session. Its
+`DormantSessionPlaceholderContent` now makes the title, detail and action claim from the host's
+`supportsResume` and `canResume` facts. A recorded failed attempt keeps its distinct explanation
+on macOS; Linux supplies the same shared content once it has a supported failure fact. The host
+still owns the decision to launch or resume, and a launch failure still gets the separate
+`LaunchFailureView` instead of being presented as an ordinary dormant session.
+
 The output well is the whole point of the component. Selectable (copying it is most of the point),
 not editable (the surface must not offer to let somebody change a record of what happened), not
 wrapped (a wrapped stack trace stops looking like the thing the terminal showed), scrolling inside

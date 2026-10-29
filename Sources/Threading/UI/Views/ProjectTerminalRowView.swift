@@ -1,4 +1,7 @@
 import AppKit
+#if os(Linux)
+@testable import CoreSlice
+#endif
 
 /// Sidebar row for a standalone terminal.
 final class ProjectTerminalRowView: NSTableCellView, ThemeDerivedContent {
@@ -16,10 +19,9 @@ final class ProjectTerminalRowView: NSTableCellView, ThemeDerivedContent {
     private var terminalID: TerminalID?
     private var isRunning = false
     private var isBusy = false
-    /// Materialized only after this recycled row first has foreground work to show.
-    private var statusSpinner: ThemedSpinner?
     private var isHovered = false
     private var isPresentingMenu = false
+    private var actionEnabled = true
     private var presentsHoverAction: Bool { isHovered || isPresentingMenu }
 
     var onAction: ((TerminalID, NSView) -> Void)?
@@ -48,36 +50,86 @@ final class ProjectTerminalRowView: NSTableCellView, ThemeDerivedContent {
 
     /// `projectRoot` is the folder of the project this row sits under, which the name is stated
     /// relative to: at the project's own folder the row above already says the folder's name.
+    #if !os(Linux)
     func configure(
         with terminal: ProjectTerminal,
         running: Bool,
         busy: Bool,
         projectRoot: String?
     ) {
-        let sameTerminal = terminalID == terminal.id
-        terminalID = terminal.id
-        isRunning = running
-        isBusy = busy
         let title = ProjectTerminalTitle.displayTitle(for: terminal, projectRoot: projectRoot)
-        rowVisuals.setTitle(
-            title,
-            animated: sameTerminal && titleLabel.stringValue != title
-        )
         // A sound this terminal does not inherit is named on the line under its folder, so an
         // overridden row is identifiable without opening a menu — and only then, since an
         // override is configuration rather than status.
-        toolTip = [
+        let tooltip = [
             terminal.currentDirectory,
             SoundOverrideAudit.toolTipLine(
                 for: .terminal(terminal.id),
                 overrides: terminal.soundOverrides
             )
         ].compactMap { $0 }.joined(separator: "\n")
-        updateBusyStatus()
+        configure(terminalID: terminal.id, title: title, icon: nil, running: running,
+                  busy: busy, tooltip: tooltip)
+    }
+    #endif
+
+    /// Hosts provide identity and measured runtime facts; the same row owns every visual state.
+    /// The Mac adapter above derives its title and tooltip from the project model. Linux supplies
+    /// those facts from its bounded sidebar snapshot and its platform symbol shim.
+    func configure(terminalID id: TerminalID?, title: String, icon: NSImage?,
+                   running: Bool, busy: Bool, tooltip: String?) {
+        let sameTerminal = terminalID == id
+        terminalID = id
+        isRunning = running
+        isBusy = busy
+        rowVisuals.setTitle(title,
+            animated: sameTerminal && titleLabel.stringValue != title)
+        if let icon { rowVisuals.setIcon(icon) }
+        toolTip = tooltip
+        assembly.setBusy(isBusy, in: self, selected: backgroundStyle == .emphasized,
+                         actionVisible: presentsHoverAction)
         // Foreground ownership is sampled while the pointer may already be over the row. Keep
         // the action/status crossfade in that state instead of flashing the spinner through it.
         setActionVisible(presentsHoverAction, animated: false)
         applyColors()
+    }
+
+    func setActionEnabled(_ enabled: Bool) {
+        guard actionEnabled != enabled else { return }
+        actionEnabled = enabled
+        actionButton.isEnabled = enabled
+        actionButton.setAccessibilityElement(enabled)
+        setActionVisible(presentsHoverAction, animated: false)
+    }
+
+    /// The host owns overlay placement and input transport; the production control owns its
+    /// bounds and hit target on both platforms.
+    func actionAnchor(in ancestor: NSView) -> NSRect? {
+        guard actionEnabled else { return nil }
+        return actionButton.convert(actionButton.bounds, to: ancestor)
+    }
+
+    func containsActiveActionTarget(_ target: NSView) -> Bool {
+        guard actionEnabled, presentsHoverAction else { return false }
+        var view: NSView? = target
+        while let candidate = view, candidate !== self {
+            if candidate === actionButton { return true }
+            view = candidate.superview
+        }
+        return false
+    }
+
+    /// A host with a native pointer transport may supply its already indexed row-hover fact.
+    /// AppKit continues to drive this through the tracking area on macOS.
+    func setHostHover(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        setActionVisible(presentsHoverAction, animated: false)
+    }
+
+    func applyContentInsets(leading: CGFloat, trailing: CGFloat) {
+        contentLeadingConstraint?.constant = leading
+        trailingSlotConstraint?.constant = -assembly.trailingSlotInset(for: trailing)
     }
 
     private func setupViews() {
@@ -133,70 +185,19 @@ final class ProjectTerminalRowView: NSTableCellView, ThemeDerivedContent {
         super.prepareForReuse()
         terminalID = nil
         isBusy = false
-        statusSpinner?.isAnimating = false
+        assembly.setBusy(false, in: self, selected: backgroundStyle == .emphasized,
+                         actionVisible: false)
         isHovered = false
         setActionVisible(presentsHoverAction, animated: false)
     }
 
-    /// A terminal shell lives for the lifetime of the row, so its running flag cannot say that a
-    /// command is in progress. The foreground process group can. Show the same themed progress
-    /// mark session rows use, without making an invisible spinner part of every terminal row.
-    private func updateBusyStatus() {
-        guard isBusy || statusSpinner != nil else { return }
-
-        let spinner: ThemedSpinner
-        if let statusSpinner {
-            spinner = statusSpinner
-        } else {
-            let materialized = ThemedSpinner()
-            materialized.translatesAutoresizingMaskIntoConstraints = false
-            materialized.setAccessibilityLabel(L10n.string("Terminal command running"))
-            materialized.setAccessibilityIdentifier("sidebar.terminal.status")
-            materialized.hostGround = backgroundStyle == .emphasized ? .selection : nil
-            // Keep the status behind the overlapping action. Alpha is presentation state, not
-            // hit-testing policy, so the hover button must remain the frontmost target.
-            addSubview(materialized, positioned: .below, relativeTo: actionButton)
-            NSLayoutConstraint.activate([
-                materialized.centerXAnchor.constraint(equalTo: actionButton.centerXAnchor),
-                materialized.centerYAnchor.constraint(equalTo: actionButton.centerYAnchor),
-                materialized.widthAnchor.constraint(
-                    equalToConstant: StatusIndicatorDefaults.spinnerSize
-                ),
-                materialized.heightAnchor.constraint(
-                    equalToConstant: StatusIndicatorDefaults.spinnerSize
-                )
-            ])
-            statusSpinner = materialized
-            spinner = materialized
-        }
-
-        spinner.isAnimating = isBusy
-    }
-
     private func setActionVisible(_ visible: Bool, animated: Bool) {
-        if visible { actionButton.materializeGlyphIfNeeded() }
-        let statusAlpha: CGFloat = (isBusy && !visible) ? 1 : 0
-
-        guard animated else {
-            actionButton.alphaValue = visible ? 1 : 0
-            statusSpinner?.alphaValue = statusAlpha
-            return
-        }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = Design.Motion.quick
-            actionButton.animator().alphaValue = visible ? 1 : 0
-            statusSpinner?.animator().alphaValue = statusAlpha
-        }
+        assembly.setActionVisible(visible && actionEnabled, animated: animated)
     }
 
     private func applyColors() {
         rowVisuals.setInk(selected: backgroundStyle == .emphasized, running: isRunning)
-        statusSpinner?.hostGround = backgroundStyle == .emphasized ? .selection : nil
-
-        // The `⋯` is a drawn control rather than a tinted image, so it is told which ground it is
-        // on rather than handed a colour — see `BackdropThemedControl.hostGround`, and the
-        // session row beside this one, which states the same thing.
-        actionButton.hostGround = backgroundStyle == .emphasized ? .selection : nil
+        assembly.setSelected(backgroundStyle == .emphasized)
     }
 }
 
@@ -216,7 +217,6 @@ extension ProjectTerminalRowView: SidebarDensityAdopting {
 
     /// Restates the row's two gutters at the width the column now has.
     func applySidebarDensity(_ density: SidebarDensity) {
-        contentLeadingConstraint?.constant = density.rowLeadingInset
-        trailingSlotConstraint?.constant = -assembly.trailingSlotInset(for: density.rowTrailingInset)
+        applyContentInsets(leading: density.rowLeadingInset, trailing: density.rowTrailingInset)
     }
 }

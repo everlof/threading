@@ -499,20 +499,10 @@ enum ImportDefaults {
     /// stops at the opening turn, so this ceiling is only paid by a session that has none.
     static let codexScanLimit = 8 * 1024 * 1024
 
-    static let titleLimit = 80
+    static let titleLimit = SessionPromptTitle.maximumCharacters
     static let claudeUserType = "user"
 
     /// Openings that are scaffolding rather than something the user typed. Both CLIs prepend
     /// several of these, and a resumed Codex session replays its history behind one more.
-    static let injectedPrefixes = [
-        "<local-command-caveat>",
-        "<command-name>",
-        "<environment_context>",
-        "<user_instructions>",
-        "<recommended_plugins>",
-        "<INSTRUCTIONS>",
-        "# AGENTS.md",
-        "Caveat:",
-        "The following is the Codex agent history"
-    ]
+    static let injectedPrefixes = SessionPromptTitle.injectedPrefixes
 }

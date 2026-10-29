@@ -77,6 +77,20 @@ public enum SidebarRowDefaults {
         ])
     }
 
+    /// A transport cell may host the production row while its outline owns reuse and input.
+    /// The inner row fills that cell; its own content and trailing slot keep their Mac geometry.
+    @MainActor
+    static func mountCellContent(_ content: NSView, in cell: NSView) {
+        content.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
+            content.topAnchor.constraint(equalTo: cell.topAnchor),
+            content.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
+        ])
+    }
+
     /// Preserve a readable location fragment even beside a long branch.
     public static let worktreePathMinimumFraction: CGFloat = 0.3
 

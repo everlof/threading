@@ -27,6 +27,8 @@ final class WorkspaceConversationPane: WorkspacePane {
     private var scroll: ThemedScrollView { transcript.scrollView }
     private var table: ThemedTableView { transcript.tableView }
     var transcriptRows: [ConversationTimeline.Row] = []
+    private var bufferedRows: [Int: (ConversationTimeline.Row, [[String]]?)] = [:]
+    private var hasTruncationNotice = false
     private var preparedMarkdownPages: [Int: [[String]]] = [:]
     private var streamingLabel: ProseLabel?
     private var displayedDecisionIDs: [ObjectIdentifier] = []
@@ -36,24 +38,25 @@ final class WorkspaceConversationPane: WorkspacePane {
     private let effortChip = ChipView()
     private let speedChip = ChipView()
     private let contextLabel = NSTextField(labelWithString: "")
-    private let configurationMenu = ThemedMenuPanelView(frame: .zero)
+    private var configurationMenu: ThemedMenuSurfaceView?
+    private var configurationMenuKey: [String] = []
+    private var configurationHighlightedIndex: Int?
     private enum ConfigurationKind: Int { case model = 1, effort = 2, mode = 3 }
     private var configurationKind: ConfigurationKind?
     private var configurationChoices: [NativeConfigurationChoice] = []
     private var configurationRows: [ThemedMenuRowView] = []
     private var configurationSession: ConversationChoiceSession?
     private var configurationFirst = 0
-    private var configurationMountedFirst = -1
     private var configurationSelected = 0
     private var configurationVisibleCount = 0
     private var configurationRowHeight: CGFloat = 44
     private var configurationWidth: CGFloat = 240
-    private let speedMenu = ThemedMenuPanelView(frame: .zero)
-    private var speedRows: [ThemedMenuRowView] = []
+    private var speedMenu: ThemedMenuSurfaceView?
     private var speedSession: ConversationChoiceSession?
     private var speedSelected = 0
     private var speedOpen = false
-    private var speedRowHeight: CGFloat = 44
+    private var speedMenuHeight: CGFloat = 0
+    private var speedMenuWidth: CGFloat = 300
     private var submit: ThemedButton { composer.linuxSubmitButton }
     private let status: NSTextField
     private lazy var composerColumnCap = composer.widthAnchor.constraint(
@@ -68,10 +71,6 @@ final class WorkspaceConversationPane: WorkspacePane {
     private var presentedSize = NSSize.zero
     private var displayRevision: UInt64 = 0
     var onAgentActivityChange: (() -> Void)?
-    var onSnoozeWakeReason: ((SessionWakeReason) -> Void)?
-    private var lastPendingOutcome: Bool?
-    private var lastCompletedTurns = 0
-    private var completionAwaitingOutcome = false
     private var lastPresentedActiveAgent: Bool?
     private var lastPresentedActivity: NativeSessionActivity?
     private var followTail = true
@@ -115,10 +114,6 @@ final class WorkspaceConversationPane: WorkspacePane {
         speedChip.nextKeyView = submit
         submit.nextKeyView = composer.linuxEditor
         root.mount(transcript: scroll, status: status, composer: composer)
-        root.addSubview(speedMenu)
-        root.addSubview(configurationMenu)
-        configurationMenu.isHidden = true
-        speedMenu.isHidden = true
         modelChip.configure(symbolName: "cpu", title: "Default model")
         modelChip.isHidden = true
         modelChip.choicePresentationProvider = { [weak self] _, didDismiss in
@@ -134,7 +129,8 @@ final class WorkspaceConversationPane: WorkspacePane {
         effortChip.choicePresentationProvider = { [weak self] _, didDismiss in
             self?.openConfigurationChoice(.effort, didDismiss: didDismiss)
         }
-        speedChip.configure(symbolName: "gauge", title: "Agent's Setting")
+        let initialSpeed = ConversationSpeedMenuContent.chip(effective: nil)
+        speedChip.configure(symbolName: initialSpeed.symbolName, title: initialSpeed.title)
         speedChip.isHidden = true
         speedChip.choicePresentationProvider = { [weak self] _, didDismiss in
             self?.openSpeedChoice(didDismiss: didDismiss)
@@ -179,22 +175,37 @@ final class WorkspaceConversationPane: WorkspacePane {
     private func present(_ row: ConversationTimeline.Row, at index: Int,
                          preparedPages: [[String]]?) {
         if index == Int.max {
+            guard !hasTruncationNotice else { return }
+            hasTruncationNotice = true
             transcript.append(.init(id: .surface(.truncation),
                 content: .surface(.truncation(ConversationRowView.make(for: row).view))))
             return
         }
+        if index > transcriptRows.count {
+            bufferedRows[index] = (row, preparedPages)
+            return
+        }
         precondition(index >= 0 && index <= transcriptRows.count,
             "native transcript row delivery must be ordered")
-        preparedMarkdownPages[index] = preparedPages
         if index < transcriptRows.count {
+            preparedMarkdownPages[index] = preparedPages
             transcriptRows[index] = row
             if case .toolCall = row { transcript.applyToolResult(at: index) }
             else { transcript.reload() }
             return
         }
+        appendPresentedRow(row, preparedPages: preparedPages)
+        while let next = bufferedRows.removeValue(forKey: transcriptRows.count) {
+            appendPresentedRow(next.0, preparedPages: next.1)
+        }
+    }
 
+    private func appendPresentedRow(_ row: ConversationTimeline.Row,
+                                    preparedPages: [[String]]?) {
         // Surface items trail the canonical timeline. Move only this small, host-owned tail
         // while the shared table appends the row with its normal divider and tool grouping.
+        let index = transcriptRows.count
+        preparedMarkdownPages[index] = preparedPages
         let streaming = streamingLabel
         let cards = decisionOrder
         if streaming != nil { transcript.remove(.surface(.streaming)) }
@@ -254,7 +265,6 @@ final class WorkspaceConversationPane: WorkspacePane {
     private func updatePermission() {
         let pending = runtime.pendingPermission
         guard pending?.id != presentedPermission else { return }
-        if pending != nil { onSnoozeWakeReason?(.approvalRequested) }
         presentedPermission = pending?.id
         let card = pending.map { pending in
             PermissionRequestView(request: pending.request) { [weak self] decision in
@@ -278,7 +288,6 @@ final class WorkspaceConversationPane: WorkspacePane {
             retire(card, returningFocus: true)
         }
         for question in runtime.questions where questionCards[question.request.id] == nil {
-            onSnoozeWakeReason?(.inputRequested)
             let id = question.request.id
             let card = ConversationQuestionCard(request: question.request) { [weak self] answers in
                 self?.runtime.answerQuestion(id, answers)
@@ -309,20 +318,6 @@ final class WorkspaceConversationPane: WorkspacePane {
     private func updateState() {
         let activeAgent = runtime.presentsActiveAgent
         let activity = runtime.activity
-        let pendingOutcome = runtime.hasPendingOutcome
-        if runtime.completedTurns > lastCompletedTurns {
-            completionAwaitingOutcome = true
-        }
-        if lastPendingOutcome == true, !pendingOutcome {
-            if completionAwaitingOutcome {
-                onSnoozeWakeReason?(.turnCompleted)
-            } else if runtime.failure != nil {
-                onSnoozeWakeReason?(.failed)
-            }
-            completionAwaitingOutcome = false
-        }
-        lastPendingOutcome = pendingOutcome
-        lastCompletedTurns = runtime.completedTurns
         if (lastPresentedActiveAgent != nil && lastPresentedActiveAgent != activeAgent)
             || (lastPresentedActivity != nil && lastPresentedActivity != activity) {
             onAgentActivityChange?()
@@ -369,8 +364,7 @@ final class WorkspaceConversationPane: WorkspacePane {
             if configurationKind == .effort { dismissConfigurationChoice() }
         }
         if let choice = runtime.speedChoice {
-            speedChip.configure(symbolName: choice.title == "Fast" ? "bolt.fill" : "gauge",
-                                title: choice.title)
+            speedChip.configure(symbolName: choice.symbolName, title: choice.title)
             speedChip.isHidden = false
             speedChip.isEnabled = choice.enabled
         } else {
@@ -395,7 +389,8 @@ final class WorkspaceConversationPane: WorkspacePane {
         guard !choices.isEmpty else { return nil }
         configurationKind = kind
         configurationChoices = choices
-        configurationMountedFirst = -1
+        configurationMenuKey = []
+        configurationHighlightedIndex = nil
         configurationSelected = choices.firstIndex(where: \.selected) ?? 0
         configurationFirst = max(0, configurationSelected - 2)
         let entries = choices.map { choice in
@@ -404,7 +399,6 @@ final class WorkspaceConversationPane: WorkspacePane {
         }
         configurationRowHeight = ThemedMenuMetrics.heights(for: entries).max() ?? 44
         configurationWidth = kind == .model ? 320 : kind == .mode ? 340 : 280
-        configurationMenu.isHidden = false
         let session = ConversationChoiceSession(didDismiss: didDismiss)
         configurationSession = session
         layoutConfigurationMenu()
@@ -431,41 +425,50 @@ final class WorkspaceConversationPane: WorkspacePane {
         configurationVisibleCount = min(6, configurationChoices.count, rowCapacity)
         configurationFirst = min(configurationFirst,
             max(0, configurationChoices.count - configurationVisibleCount))
-        configurationMenu.frame = ThemedMenuLayout.frame(anchor: source,
-            desiredSize: NSSize(width: configurationWidth,
-                height: configurationRowHeight * CGFloat(configurationVisibleCount) + outerInset),
-            in: root.bounds, flipped: root.isFlipped)
-        mountConfigurationRows()
-    }
-
-    private func mountConfigurationRows() {
         let end = min(configurationChoices.count, configurationFirst + configurationVisibleCount)
-        guard configurationFirst < end else { return }
-        if configurationMountedFirst == configurationFirst && configurationRows.count == end - configurationFirst {
-            for (slot, row) in configurationRows.enumerated() {
-                row.isKeyboardHighlighted = configurationFirst + slot == configurationSelected
-            }
-            return
-        }
-        configurationRows.removeAll(keepingCapacity: true)
-        configurationMountedFirst = configurationFirst
-        let entries = configurationChoices[configurationFirst..<end].map { choice in
+        let visibleChoices = Array(configurationChoices[configurationFirst..<end])
+        let entries = visibleChoices.map { choice in
             ThemedMenuEntry.item(ThemedMenuItem(title: choice.title, subtitle: choice.detail,
                 isSelected: choice.selected, isEnabled: choice.enabled))
         }
-        let plan = ThemedMenuRowPlan(entries: entries)
-        for slot in 0..<entries.count {
-            guard let row = plan.row(at: slot) else { continue }
-            let index = configurationFirst + slot
-            row.isKeyboardHighlighted = index == configurationSelected
-            row.onChoose = { [weak self] _, _ in self?.chooseConfiguration(index) }
-            row.onHighlight = { [weak self] _ in self?.highlightConfiguration(index) }
-            configurationRows.append(row)
+        let frame = ThemedMenuLayout.frame(anchor: source,
+            desiredSize: NSSize(width: configurationWidth,
+                height: ThemedMenuMetrics.height(for: entries)),
+            in: root.bounds, flipped: root.isFlipped)
+        let key = [String(kind.rawValue), String(configurationFirst),
+            String(describing: frame.width)] + visibleChoices.map { choice in
+                "\(choice.id ?? ""):\(choice.title):\(choice.detail ?? ""):\(choice.selected):\(choice.enabled)"
+            }
+        let selectedEntry = configurationSelected - configurationFirst
+        if configurationMenuKey != key || configurationMenu == nil {
+            configurationMenu?.removeFromSuperview()
+            let surface = ThemedMenuSurfaceView(
+                frame: NSRect(origin: .zero, size: frame.size), entries: entries,
+                selectedEntryIndex: nil)
+            surface.appearance = LinuxTheme.appearance
+            surface.onChoose = { [weak self] entry, _ in
+                guard let self else { return }
+                self.chooseConfiguration(self.configurationFirst + entry)
+            }
+            surface.onHighlight = { [weak self] entry in
+                guard let self else { return }
+                self.highlightConfiguration(self.configurationFirst + entry)
+            }
+            surface.onScrolled = { [weak self] in self?.needsPresentation = true }
+            configurationMenu = surface
+            configurationMenuKey = key
+            configurationHighlightedIndex = nil
+            root.addSubview(surface)
         }
-        configurationMenu.setRows(
-            configurationRows,
-            heights: Array(repeating: configurationRowHeight, count: configurationRows.count)
-        )
+        if let surface = configurationMenu {
+            surface.frame = frame
+            surface.appearance = LinuxTheme.appearance
+            if configurationHighlightedIndex != selectedEntry {
+                surface.highlight(selectedEntry)
+                configurationHighlightedIndex = selectedEntry
+            }
+            configurationRows = entries.indices.compactMap { surface.row(at: $0) }
+        }
     }
 
     private func highlightConfiguration(_ index: Int) {
@@ -473,14 +476,14 @@ final class WorkspaceConversationPane: WorkspacePane {
         let selectable = configurationChoices.indices.filter { configurationChoices[$0].enabled }
         guard let target = selectable.first(where: { $0 >= index }) ?? selectable.last else { return }
         configurationSelected = target
-        if target < configurationFirst { configurationFirst = target; mountConfigurationRows() }
+        if target < configurationFirst { configurationFirst = target; layoutConfigurationMenu() }
         else if target >= configurationFirst + configurationVisibleCount {
             configurationFirst = target - configurationVisibleCount + 1
-            mountConfigurationRows()
+            layoutConfigurationMenu()
         } else {
-            for (slot, row) in configurationRows.enumerated() {
-                row.isKeyboardHighlighted = configurationFirst + slot == target
-            }
+            let selectedEntry = target - configurationFirst
+            configurationMenu?.highlight(selectedEntry)
+            configurationHighlightedIndex = selectedEntry
         }
         needsPresentation = true
     }
@@ -502,12 +505,13 @@ final class WorkspaceConversationPane: WorkspacePane {
     private func dismissConfigurationChoice() {
         guard configurationKind != nil else { return }
         configurationKind = nil
-        configurationMenu.isHidden = true
-        configurationMenu.setRows([], heights: [])
+        configurationMenu?.removeFromSuperview()
+        configurationMenu = nil
+        configurationMenuKey = []
+        configurationHighlightedIndex = nil
         configurationRows.removeAll(keepingCapacity: true)
         configurationChoices.removeAll(keepingCapacity: true)
         configurationVisibleCount = 0
-        configurationMountedFirst = -1
         let session = configurationSession
         configurationSession = nil
         session?.dismissChipChoicePresentation()
@@ -549,19 +553,19 @@ final class WorkspaceConversationPane: WorkspacePane {
         dismissConfigurationChoice()
         dismissSpeedChoice()
         let entries = speedEntries(selected: choice.selected)
-        let plan = ThemedMenuRowPlan(entries: entries)
-        speedRowHeight = ThemedMenuMetrics.heights(for: entries).max() ?? 44
+        speedMenuHeight = ThemedMenuMetrics.height(for: entries)
         speedSelected = choice.selected.map { $0 ? 2 : 1 } ?? 0
-        for index in 0..<3 {
-            guard let row = plan.row(at: index) else { continue }
-            row.onChoose = { [weak self] _, _ in self?.chooseSpeed(index) }
-            row.onHighlight = { [weak self] _ in self?.highlightSpeed(index) }
-            speedRows.append(row)
-        }
-        speedMenu.setRows(speedRows,
-                          heights: Array(repeating: speedRowHeight, count: speedRows.count))
+        speedMenuWidth = ThemedMenuMetrics.width(for: entries, minimum: 300,
+            selectedEntryIndex: speedSelected)
+        let surface = ThemedMenuSurfaceView(frame: NSRect(x: 0, y: 0, width: speedMenuWidth,
+            height: speedMenuHeight), entries: entries, selectedEntryIndex: nil)
+        surface.appearance = LinuxTheme.appearance
+        surface.onChoose = { [weak self] index, _ in self?.chooseSpeed(index) }
+        surface.onHighlight = { [weak self] index in self?.highlightSpeed(index) }
+        surface.onScrolled = { [weak self] in self?.needsPresentation = true }
+        speedMenu = surface
+        root.addSubview(surface)
         speedOpen = true
-        speedMenu.isHidden = false
         let session = ConversationChoiceSession(didDismiss: didDismiss)
         speedSession = session
         layoutSpeedMenu()
@@ -571,30 +575,29 @@ final class WorkspaceConversationPane: WorkspacePane {
     }
 
     private func speedEntries(selected: Bool?) -> [ThemedMenuEntry] {
-        [
-            .item(ThemedMenuItem(title: "Follow Agent Setting",
-                subtitle: "Applies the next time this chat starts.", isSelected: selected == nil)),
-            .item(ThemedMenuItem(title: "Standard", subtitle: "Normal speed and usage",
-                isSelected: selected == false)),
-            .item(ThemedMenuItem(title: "Fast", subtitle: "1.5× speed, increased usage",
-                isSelected: selected == true))
-        ]
+        let startupSpeed = runtime.sessionKind.map(LinuxGeneralSettings.startupSpeed(for:))
+            ?? .agentSetting
+        let detail = ConversationSpeedMenuContent.followGeneralDetail(
+            startupSpeed: startupSpeed, whileRunning: true)
+        return ConversationSpeedMenuContent.rows(selected: selected,
+            inheritTitle: ConversationSpeedMenuContent.followGeneralTitle,
+            inheritDetail: detail)
     }
 
     private func layoutSpeedMenu() {
-        guard speedOpen else { return }
+        guard speedOpen, let speedMenu else { return }
         owner.layoutIfNeeded()
         let source = speedChip.convert(speedChip.bounds, to: root)
         speedMenu.frame = ThemedMenuLayout.frame(anchor: source,
-            desiredSize: NSSize(width: 300,
-                height: speedRowHeight * 3 + ThemedMenuMetrics.verticalOuterInset * 2),
+            desiredSize: NSSize(width: speedMenuWidth,
+                height: speedMenuHeight),
             in: root.bounds, flipped: root.isFlipped)
     }
 
     private func highlightSpeed(_ index: Int) {
-        guard (0..<speedRows.count).contains(index) else { return }
+        guard (0..<3).contains(index) else { return }
         speedSelected = index
-        for (slot, row) in speedRows.enumerated() { row.isKeyboardHighlighted = slot == index }
+        speedMenu?.highlight(index)
         needsPresentation = true
     }
 
@@ -617,7 +620,7 @@ final class WorkspaceConversationPane: WorkspacePane {
 
     @discardableResult
     func chooseSpeed(index: Int, identity: String) -> Bool {
-        guard identity == runtime.id.uuidString, speedOpen, speedRows.indices.contains(index) else { return false }
+        guard identity == runtime.id.uuidString, speedOpen, (0..<3).contains(index) else { return false }
         chooseSpeed(index)
         return true
     }
@@ -627,9 +630,8 @@ final class WorkspaceConversationPane: WorkspacePane {
     private func dismissSpeedChoice() {
         guard speedOpen else { return }
         speedOpen = false
-        speedMenu.isHidden = true
-        speedMenu.setRows([], heights: [])
-        speedRows.removeAll(keepingCapacity: true)
+        speedMenu?.removeFromSuperview()
+        speedMenu = nil
         let session = speedSession
         speedSession = nil
         session?.dismissChipChoicePresentation()
@@ -662,8 +664,8 @@ final class WorkspaceConversationPane: WorkspacePane {
     func setThemeAppearance() {
         chrome.setThemeAppearance()
         root.appearance = LinuxTheme.appearance
-        speedMenu.appearance = LinuxTheme.appearance
-        configurationMenu.appearance = LinuxTheme.appearance
+        speedMenu?.appearance = LinuxTheme.appearance
+        configurationMenu?.appearance = LinuxTheme.appearance
         root.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
         refreshComposerSurface()
         transcript.invalidateStyleCaches()
@@ -804,7 +806,7 @@ final class WorkspaceConversationPane: WorkspacePane {
                 Int32(rect.width * WorkspaceDisplay.scale), Int32(rect.height * WorkspaceDisplay.scale))
         }
         let chip = pixels(speedChip)
-        let menu = speedOpen ? pixels(speedMenu) : (Int32(0), Int32(0), Int32(0), Int32(0))
+        let menu = speedMenu.map(pixels) ?? (Int32(0), Int32(0), Int32(0), Int32(0))
         runtime.id.uuidString.withCString { identity in
             choice.title.withCString { title in
                 tw_accessibility_conversation_speed(window, identity, title,
@@ -812,6 +814,16 @@ final class WorkspaceConversationPane: WorkspacePane {
                     chip.0, chip.1, chip.2, chip.3,
                     menu.0, menu.1, menu.2, menu.3,
                     Int32(choice.selected.map { $0 ? 2 : 1 } ?? 0), Int32(speedSelected))
+            }
+        }
+        if let speedMenu {
+            for index in 0..<3 {
+                guard let item = speedMenu.row(at: index)?.item else { continue }
+                item.title.withCString { title in
+                    (item.subtitle ?? "").withCString { detail in
+                        tw_accessibility_conversation_speed_row(window, Int32(index), title, detail)
+                    }
+                }
             }
         }
     }
@@ -865,7 +877,7 @@ final class WorkspaceConversationPane: WorkspacePane {
                 }
             }
         }
-        guard let kind = configurationKind else {
+        guard let kind = configurationKind, let configurationMenu else {
             tw_accessibility_conversation_configuration_menu(window, nil, 0, 0, 0, 0, 0, 0)
             return
         }

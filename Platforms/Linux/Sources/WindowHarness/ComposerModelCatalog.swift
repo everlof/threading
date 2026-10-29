@@ -35,14 +35,6 @@ struct ComposerModelCatalog: Sendable {
         return option(for: effective)?.supportsFastMode == true
     }
 
-    func speedTitle(selected: Bool?, kind: AgentKind) -> String {
-        switch selected ?? inheritedFastMode {
-        case true: "Fast"
-        case false: "Standard"
-        case nil: "Agent's Setting"
-        }
-    }
-
     func admits(model: String?, effort: String?) -> Bool {
         if model == nil, effort == nil { return true }
         guard let option = option(for: model ?? defaultModel) else { return false }

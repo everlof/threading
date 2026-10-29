@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 #
-# Copies the shared core listed in coreslice.list into Sources/CoreSlice, verbatim.
+# Links the shared core listed in coreslice.list into Sources/CoreSlice.
 #
-#   ./vendor-core.sh            # replace Sources/CoreSlice with fresh copies from the working tree
-#   ./vendor-core.sh --verify   # fail if any copy differs from its original
+#   ./vendor-core.sh            # replace Sources/CoreSlice with links to the working tree
+#   ./vendor-core.sh --verify   # fail if a link is missing or points away from its original
 #
-# The same contract as vendor.sh for the UI half: the claim is "this file, exactly as it ships,
-# compiles on Linux", and --verify is the only thing that keeps that claim honest. The directory is
-# rebuilt from the manifest on every run, so a file vendored by hand and never recorded — which is
-# how five of these went unverified for two rounds — cannot survive a refresh.
+# The same contract as vendor.sh for the UI half: this exact production source compiles on Linux.
+# A manifest entry resolves to one source file; no copied body can drift from macOS.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,17 +21,32 @@ entries() {
   done
 }
 
+# Reject a collision before replacing the directory: two manifest rows cannot own one link.
+recorded_names="$(entries | cut -f2)"
+duplicate_names="$(printf '%s\n' "${recorded_names}" | sort | uniq -d)"
+if [[ -n "${duplicate_names}" ]]; then
+  echo "DUPLICATE destination: ${duplicate_names}" >&2
+  exit 1
+fi
+while IFS=$'\t' read -r source name; do
+  if [[ ! -f "${root}/${source}" ]]; then
+    echo "MISSING source: ${source}" >&2
+    exit 1
+  fi
+done < <(entries)
+
 if [[ "${1:-}" == "--verify" ]]; then
   status=0
   while IFS=$'\t' read -r source name; do
-    if ! cmp -s "${root}/${source}" "${destination}/${name}"; then
-      echo "DIFFERS: ${source} -> ${name}" >&2
+    expected="../../../../${source}"
+    link="${destination}/${name}"
+    if [[ ! -L "${link}" || "$(readlink "${link}")" != "${expected}" || ! -f "${link}" ]]; then
+      echo "NOT LINKED: ${source} -> ${name}" >&2
       status=1
     fi
   done < <(entries)
   # Parse the manifest once; rebuilding its full list for each file made this gate quadratic
   # in subprocess work as the native transport graph grew.
-  recorded_names="$(entries | cut -f2)"
   # Anything in the directory the manifest does not name is an unrecorded file.
   while IFS= read -r present; do
     if ! grep -qxF "${present}" <<<"${recorded_names}"; then
@@ -41,7 +54,7 @@ if [[ "${1:-}" == "--verify" ]]; then
       status=1
     fi
   done < <(ls "${destination}")
-  [[ ${status} -eq 0 ]] && echo "all $(printf '%s\n' "${recorded_names}" | wc -l | tr -d ' ') vendored files are byte-identical, and none is unrecorded"
+  [[ ${status} -eq 0 ]] && echo "all $(printf '%s\n' "${recorded_names}" | wc -l | tr -d ' ') core files link production sources, and none is unrecorded"
   exit ${status}
 fi
 
@@ -49,7 +62,7 @@ rm -rf "${destination}"
 mkdir -p "${destination}"
 count=0
 while IFS=$'\t' read -r source name; do
-  cp "${root}/${source}" "${destination}/${name}"
+  ln -s "../../../../${source}" "${destination}/${name}"
   count=$((count + 1))
 done < <(entries)
-echo "vendored ${count} files into Sources/CoreSlice"
+echo "linked ${count} production files into Sources/CoreSlice"

@@ -1,5 +1,8 @@
 import Foundation
 
+public let NSLeftArrowFunctionKey: UInt32 = 0xF702
+public let NSRightArrowFunctionKey: UInt32 = 0xF703
+
 /// The event information that can cross the diagnostic SDL/AppKit boundary. Local monitors are
 /// invoked in registration order before a window delivers the event to its view tree.
 @MainActor
@@ -71,6 +74,8 @@ open class NSEvent {
     private nonisolated let storedCharacters: String?
     private nonisolated let storedScrollingDeltaX: CGFloat
     private nonisolated let storedScrollingDeltaY: CGFloat
+    private nonisolated let storedDeltaX: CGFloat
+    private nonisolated let storedDeltaY: CGFloat
     private nonisolated let storedPhase: Phase
     private nonisolated let storedMomentumPhase: Phase
     private nonisolated let storedHasPreciseScrollingDeltas: Bool
@@ -90,6 +95,8 @@ open class NSEvent {
         trackingArea: NSTrackingArea? = nil,
         scrollingDeltaX: CGFloat = 0,
         scrollingDeltaY: CGFloat = 0,
+        deltaX: CGFloat = 0,
+        deltaY: CGFloat = 0,
         clickCount: Int = 1,
         phase: Phase = [],
         momentumPhase: Phase = [],
@@ -103,6 +110,8 @@ open class NSEvent {
         storedCharacters = charactersIgnoringModifiers
         storedScrollingDeltaX = scrollingDeltaX
         storedScrollingDeltaY = scrollingDeltaY
+        storedDeltaX = deltaX
+        storedDeltaY = deltaY
         storedPhase = phase
         storedMomentumPhase = momentumPhase
         storedHasPreciseScrollingDeltas = hasPreciseScrollingDeltas
@@ -118,6 +127,8 @@ open class NSEvent {
     open nonisolated var charactersIgnoringModifiers: String? { storedCharacters }
     open nonisolated var scrollingDeltaX: CGFloat { storedScrollingDeltaX }
     open nonisolated var scrollingDeltaY: CGFloat { storedScrollingDeltaY }
+    open nonisolated var deltaX: CGFloat { storedDeltaX }
+    open nonisolated var deltaY: CGFloat { storedDeltaY }
     open nonisolated var clickCount: Int { storedClickCount }
 
     /// The host may provide an event without a window; the receiving content window supplies
@@ -130,7 +141,8 @@ open class NSEvent {
         NSEvent(type: type, window: window, locationInWindow: locationInWindow,
                 modifierFlags: modifierFlags, keyCode: keyCode,
                 charactersIgnoringModifiers: charactersIgnoringModifiers, trackingArea: area,
-                scrollingDeltaX: scrollingDeltaX, scrollingDeltaY: scrollingDeltaY)
+                scrollingDeltaX: scrollingDeltaX, scrollingDeltaY: scrollingDeltaY,
+                deltaX: deltaX, deltaY: deltaY)
     }
 
     public static func addLocalMonitorForEvents(

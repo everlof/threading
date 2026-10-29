@@ -99,8 +99,23 @@ def child(identifier):
 
 
 def menu():
-    item = child('linux.session-actions')
-    return item if item is not None and item.get_child_count() == 2 else None
+    return next((item for item in children()
+                 if item.get_role_name() == 'list'
+                 and item.get_name() == 'Session actions'), None)
+
+
+def menu_with(title):
+    opened = menu()
+    if opened is None:
+        return None
+    return opened if any(opened.get_child_at_index(index).get_name() == title
+                         for index in range(opened.get_child_count())) else None
+
+
+def menu_row(opened, title):
+    return next(opened.get_child_at_index(index)
+                for index in range(opened.get_child_count())
+                if opened.get_child_at_index(index).get_name() == title)
 
 
 def prompt_with_id(identity):
@@ -126,8 +141,9 @@ def close_prompt():
 
 
 def clipboard():
-    return subprocess.check_output(['xclip', '-selection', 'clipboard', '-o'],
-                                   text=True, timeout=3)
+    result = subprocess.run(['xclip', '-selection', 'clipboard', '-o'],
+                            capture_output=True, text=True, timeout=3)
+    return result.stdout if result.returncode == 0 else ''
 
 
 def screenshot(name):
@@ -153,15 +169,28 @@ try:
                                 if item.get_role_name() == 'terminal'), None), 'live terminal')
     eventually(lambda: 'LIVE ACTION TARGET' in Atspi.Text.get_text(
         terminal.get_text_iface(), 0, -1), 'synthetic agent visible in terminal')
+    xdo('mousemove', '--window', window, '700', '200', 'click', '1')
     initial_input = input_log.read_bytes()
-    assert child('linux.session-actions') is None
+    assert menu() is None
     assert actions.get_action_iface().do_action(0), 'AT-SPI Actions press refused'
-    opened = eventually(menu, 'two mounted production menu rows')
-    rows = [opened.get_child_at_index(index) for index in range(2)]
-    assert [row.get_name() for row in rows] == ['Copy Session ID', 'Copy Project Path']
-    assert [row.get_accessible_id() for row in rows] == ['copySessionID', 'copyProjectPath']
-    assert all(row.get_action_iface().get_n_actions() == 1 for row in rows)
+    opened = eventually(lambda: menu_with('Copy'), 'shared pane-header session menu')
+    titles = [opened.get_child_at_index(index).get_name()
+              for index in range(opened.get_child_count())]
+    assert titles[:4] == ['Pin', 'Snooze', 'Archive', 'Close Session'], titles
+    assert 'Rename Session…' in titles and 'Copy' in titles, titles
+    assert menu_row(opened, 'Copy').get_accessible_id() == 'copy'
     light = screenshot('session-actions-open.png')
+    assert menu_row(opened, 'Snooze').get_action_iface().do_action(1)
+    snooze_page = eventually(lambda: menu_with('Custom time…'), 'shared Snooze submenu')
+    snooze_titles = [snooze_page.get_child_at_index(index).get_name()
+                     for index in range(snooze_page.get_child_count())]
+    assert snooze_titles[0] == '‹  Snooze', snooze_titles
+    assert 'In an hour' in snooze_titles and 'Custom time…' in snooze_titles, snooze_titles
+    assert any(title.startswith('Tomorrow at ') for title in snooze_titles), snooze_titles
+    assert menu_row(snooze_page, 'In an hour').get_accessible_id() == 'snoozeChoice:0'
+    screenshot('session-header-snooze-menu.png')
+    assert menu_row(snooze_page, '‹  Snooze').get_action_iface().do_action(1)
+    eventually(lambda: menu_with('Copy'), 'returned to shared Actions menu')
     before_theme = input_log.read_bytes()
     navigator_frames = log_path.read_text().count('NAVIGATOR_TEXT mounted=')
     terminal_frames = log_path.read_text().count('TERMINAL_FRAME ')
@@ -187,26 +216,38 @@ try:
     for x, y in [(300, 300), (800, 30), (1100, 400)]:
         assert pixel(light, x, y) == pixel(restored, x, y), \
             f'light appearance did not restore pane pixel at {(x, y)}'
-    assert rows[0].get_action_iface().do_action(0), 'AT-SPI menu row press refused'
-    eventually(lambda: clipboard() == session_id, 'exact saved session ID copied')
-    eventually(lambda: child('linux.session-actions') is None, 'menu dismissed after choice')
+    assert menu_row(eventually(lambda: menu_with('Copy'), 'restored session menu'),
+                    'Copy').get_action_iface().do_action(1)
+    copy_page = eventually(lambda: menu_with('Threading ID'), 'shared pane-header Copy fold')
+    screenshot('session-header-copy-menu.png')
+    assert menu_row(copy_page, 'Threading ID').get_action_iface().do_action(1)
+    eventually(lambda: clipboard() == session_id.lower(), 'exact Threading ID copied')
+    eventually(lambda: menu() is None, 'menu dismissed after choice')
+    xdo('windowfocus', '--sync', window, 'key', 'q')
+    eventually(lambda: input_log.read_bytes().endswith(b'q'),
+               'header menu returned input focus to the agent pane')
+    initial_input = input_log.read_bytes()
 
     # The production button also answers a native pointer press; arrow/Enter stay with the
     # overlay instead of entering the running synthetic agent's PTY.
+    actions = eventually(lambda: child('linux.page-actions'), 'Actions button after Copy')
     bounds = actions.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
     xdo('mousemove', '--window', window, str(bounds.x + bounds.width // 2),
         str(bounds.y + bounds.height // 2), 'click', '1')
-    eventually(menu, 'pointer opened saved-session Actions')
-    xdo('windowfocus', '--sync', window, 'key', 'Down', 'Return')
-    eventually(lambda: clipboard() == str(project), 'keyboard copied owning project path')
-    eventually(lambda: child('linux.session-actions') is None, 'keyboard choice dismissed menu')
+    opened = eventually(lambda: menu_with('Copy'), 'pointer opened shared session menu')
+    assert menu_row(opened, 'Copy').get_action_iface().do_action(1)
+    copy_page = eventually(lambda: menu_with('Worktree Path'), 'shared Worktree Path row')
+    assert menu_row(copy_page, 'Worktree Path').get_action_iface().do_action(1)
+    eventually(lambda: clipboard() == str(project), 'exact project path copied')
+    eventually(lambda: menu() is None, 'menu dismissed after path choice')
 
+    actions = eventually(lambda: child('linux.page-actions'), 'Actions button after path Copy')
     assert actions.get_action_iface().do_action(0)
-    eventually(menu, 'reopened Actions')
-    xdo('windowfocus', '--sync', window, 'key', 'Escape')
-    eventually(lambda: child('linux.session-actions') is None, 'Escape dismissed menu')
-    assert 'SESSION_ACTION_COPIED copySessionID ' + session_id in log_path.read_text()
-    assert 'SESSION_ACTION_COPIED copyProjectPath ' + session_id in log_path.read_text()
+    eventually(lambda: menu_with('Copy'), 'reopened shared Actions')
+    xdo('windowfocus', '--sync', window, 'key', 'Down', 'Escape')
+    eventually(lambda: menu() is None, 'Escape dismissed menu')
+    assert 'SESSION_VALUE_COPIED copyThreadingID id=' + session_id in log_path.read_text()
+    assert 'SESSION_VALUE_COPIED copyWorktreePath id=' + session_id in log_path.read_text()
     assert input_log.read_bytes() == initial_input, 'menu input reached the live agent PTY'
 
     projects = next(item for item in children()
@@ -219,6 +260,27 @@ try:
     row_menu = eventually(lambda: next((item for item in children()
         if item.get_role_name() == 'list' and item.get_name() == 'Session actions'), None),
         'row menu on live session')
+    screenshot('session-row-menu.png')
+    copy_fold = next(row_menu.get_child_at_index(index)
+                     for index in range(row_menu.get_child_count())
+                     if row_menu.get_child_at_index(index).get_name() == 'Copy')
+    assert copy_fold.get_action_iface().do_action(1)
+    copy_page = eventually(lambda: next((item for item in children()
+        if item.get_role_name() == 'list' and item.get_name() == 'Session actions'
+        and any(item.get_child_at_index(index).get_name() == 'Threading ID'
+                for index in range(item.get_child_count()))), None),
+        'shared Copy fold on saved session')
+    screenshot('session-row-copy-menu.png')
+    threading_id = next(copy_page.get_child_at_index(index)
+                        for index in range(copy_page.get_child_count())
+                        if copy_page.get_child_at_index(index).get_name() == 'Threading ID')
+    assert threading_id.get_action_iface().do_action(1)
+    eventually(lambda: clipboard() == session_id.lower(),
+               'shared Copy fold copied Threading ID')
+    xdo('windowfocus', '--sync', window, 'key', 'shift+F10')
+    row_menu = eventually(lambda: next((item for item in children()
+        if item.get_role_name() == 'list' and item.get_name() == 'Session actions'), None),
+        'row menu reopened after Copy')
     rename = next(row_menu.get_child_at_index(index)
                   for index in range(row_menu.get_child_count())
                   if row_menu.get_child_at_index(index).get_name() == 'Rename Session…')

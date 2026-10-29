@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingDomain
 
 // MARK: - The palette
 
@@ -101,10 +102,7 @@ public enum PromptReturnKey: String, CaseIterable {
     case matchesComposer, sends, startsNewLine
 }
 
-public enum ChatNameMorphStyle: String, CaseIterable {
-    case automatic
-    case shapeMorph, crossfade, slideUp, slideDown, scale, bounce, drop, flip, blur, scramble, typewriter
-}
+public typealias ChatNameMorphStyle = ThreadingDomain.ChatNameMorphStyle
 
 // MARK: - Services the host owns
 

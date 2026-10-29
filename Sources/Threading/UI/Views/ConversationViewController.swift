@@ -4117,8 +4117,8 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // Standard and Fast have live representations. Following an explicit General default
         // resolves to one of those too. Agent's Setting has no generic "restore provider
         // config" control request, so only the record changes until the next launch.
-        guard let resolved = fast
-            ?? AppSettings.shared.startupSpeed(for: session.kind).fastModeOverride
+        guard let resolved = AppSettings.shared.startupSpeed(for: session.kind)
+            .resolve(selected: fast, configured: nil)
         else {
             persist(false)
             appendNotice(ConversationSpeedPresentation.inheritRecordedOnly, kind: .muted)

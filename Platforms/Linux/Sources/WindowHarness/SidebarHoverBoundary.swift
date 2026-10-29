@@ -1,28 +1,11 @@
 import AppKit
 
-// Values from Core/Constants/TerminalConstants.swift's SidebarDefaults. That source also
-// contains unrelated application constants and cannot be linked into this bounded UI host.
-enum SidebarDefaults {
-    static let defaultWidth: CGFloat = 240
-    // Measured AppKit inset-style cell band; see window-chrome.md, "The trailing side".
-    static let insetCellTrailingMargin: CGFloat = 16
-    // Production inset outline at depth zero; checked by SidebarWidthDensityTests.
-    static let insetCellLeadingMargin: CGFloat = 25
-    static let insetDisclosureLeading: CGFloat = 12
-    static let contentTopInset: CGFloat = 4
-    static let emptyStateSpacing: CGFloat = 4
-    static let emptyStateInset: CGFloat = 20
-    static let rowHeight: CGFloat = 28
-    static let projectCompactRowHeight: CGFloat = 30
-    static let headingRowHeight: CGFloat = 32
-    static let indentationPerLevel: CGFloat = 14
-    static let collapsedRepositoriesKey = "sidebarCollapsedRepositories"
-    static let tightIndentationPerLevel: CGFloat = 6
-    static let relaxedDensityWidth: CGFloat = 240
-    static let tightDensityWidth: CGFloat = 180
-    static let tightTrailingCellReclaim: CGFloat = 8
-    static let compactGroupRuleOffset: CGFloat = Design.Spacing.tight
-    static let compactGroupRuleHeight: CGFloat = 1
+/// Geometry of the AppKit inset outline style as measured by the Linux row host. These are
+/// platform frame offsets, separate from the shared sidebar design defaults.
+enum LinuxInsetOutlineMetrics {
+    static let cellTrailingMargin: CGFloat = 16
+    static let cellLeadingMargin: CGFloat = 25
+    static let disclosureLeading: CGFloat = 12
 }
 
 // The installed Linux shell renders the production Threading style. This is the narrow
@@ -59,13 +42,4 @@ extension NSView {
         guard let window else { return false }
         return isPointerCovered(at: window.mouseLocationOutsideOfEventStream)
     }
-}
-
-// The saved-runtime snapshot carries no truthful working state. The shared beam stays inactive
-// until the host can supply an agent workload.
-struct AgentWorkload: Equatable {
-    let workingCount: Int
-    let anyAtTopEffort: Bool
-
-    static let none = AgentWorkload(workingCount: 0, anyAtTopEffort: false)
 }

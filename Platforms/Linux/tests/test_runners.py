@@ -184,12 +184,12 @@ done''')
 fi''')
         self.command("timeout", '[[ "$1" == 30 || "$1" == 60 || "$1" == 120 ]] || exit 91; shift; exec "$@"')
         self.write(self.spike / "package-app.sh", 'touch "$RUNNER_FIXTURE_ROOT/packaged"')
-        # The build gate now runs all three packaged row-layout fixtures before the daemon
+        # The build gate runs the packaged row layouts and Settings contract before the daemon
         # contracts. Keep those invocations in this mock so it reaches the cleanup assertion.
         self.write(artifact_bin / "WindowHarness", '''case "$1" in
     --project-row-layout-fixture|--session-row-layout-fixture|--terminal-row-layout-fixture)
         printf '%s\\n' "$1" >> "$RUNNER_FIXTURE_ROOT/layout-fixtures" ;;
-    --app-event-contract) exit 0 ;;
+    --settings-row-contract|--app-event-contract) exit 0 ;;
     *) exit 92 ;;
 esac''')
 

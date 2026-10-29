@@ -2,7 +2,7 @@
 import AppKit
 @testable import CoreSlice
 
-/// Semantic session-row commands for the Linux host's anchored production menu rows. The
+/// Semantic session-row commands for the shared anchored menu surface. The
 /// session and project identities stay with the open menu; a click revalidates both before a
 /// mutation, even if the outline has recycled the row under the pointer.
 @MainActor
@@ -41,45 +41,22 @@ struct SidebarSessionMenu {
     let snoozeMoments: [SnoozeWallClockMoments.Moment]
     var page: Page = .actions
     var selected = 0
-    var firstVisible = 0
 
     var entries: [ThemedMenuEntry] {
         switch page {
         case .actions:
-            let copyItems = copyEntries
-            var rows: [ThemedMenuEntry] = [
-                .item(ThemedMenuItem(title: isPinned ? "Unpin" : "Pin",
-                    image: ThemedMenuIcon.symbol(isPinned ? "pin.slash" : "pin"),
-                    representedValue: Command.pin.rawValue)),
-                isSnoozed
-                    ? .item(ThemedMenuItem(title: "Unsnooze",
-                        image: ThemedMenuIcon.symbol("bell"),
-                        representedValue: Command.unsnooze.rawValue))
-                    : .item(ThemedMenuItem(title: "Snooze",
-                        image: ThemedMenuIcon.symbol("moon.zzz"),
-                        representedValue: Command.snooze.rawValue,
-                        submenu: snoozeEntries)),
-                .item(ThemedMenuItem(title: "Archive", image: ThemedMenuIcon.symbol("archivebox"),
-                    representedValue: Command.archive.rawValue))
-            ]
-            if isRunning {
-                rows.append(.item(ThemedMenuItem(title: "Close Session",
-                    image: ThemedMenuIcon.symbol("stop.circle"),
-                    representedValue: Command.close.rawValue)))
-            }
-            rows.append(.separator)
+            var configuration = SidebarSessionMenuContent.Configuration()
+            configuration.isPinned = isPinned
+            configuration.isSnoozed = isSnoozed
+            configuration.isRunning = isRunning
+            configuration.snoozeSubmenu = isSnoozed ? [] : snoozeEntries
+            configuration.copy = copyConfiguration
             if !openInApps.isEmpty {
-                rows.append(.item(ThemedMenuItem(title: "Open in",
+                configuration.sections.identityPrefix.append(.item(ThemedMenuItem(title: "Open in",
                     image: ThemedMenuIcon.symbol("arrow.up.forward.app"),
                     representedValue: Command.openIn.rawValue, submenu: openInEntries)))
             }
-            rows.append(.item(ThemedMenuItem(title: "Rename Session…",
-                image: ThemedMenuIcon.symbol("pencil"),
-                representedValue: Command.rename.rawValue)))
-            rows.append(
-                .item(ThemedMenuItem(title: "Copy", image: ThemedMenuIcon.symbol("doc.text"),
-                    representedValue: Command.copy.rawValue, submenu: copyItems)))
-            return rows
+            return SidebarSessionMenuContent.entries(configuration)
         case .openIn: return openInEntries
         case .copy: return copyEntries
         case .snooze: return snoozeEntries
@@ -87,28 +64,14 @@ struct SidebarSessionMenu {
     }
 
     private var snoozeEntries: [ThemedMenuEntry] {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        let presets: [ThemedMenuEntry] = snoozeMoments.enumerated().map { index, moment in
-            let clock = formatter.string(from: moment.date)
-            let title: String
-            let detail: String?
-            switch moment.kind {
-            case .inAnHour: title = "In an hour"; detail = clock
-            case .tomorrowMorning: title = "Tomorrow at \(clock)"; detail = nil
-            case .mondayMorning: title = "Monday at \(clock)"; detail = nil
-            }
-            return .item(ThemedMenuItem(title: title, subtitle: detail,
-                representedValue: Command.snoozeChoice.rawValue + ":\(index)"))
-        }
-        return [.item(ThemedMenuItem(title: "‹  Snooze", representedValue: Command.back.rawValue)),
-                .separator] + presets + [
-                    .separator,
-                    .item(ThemedMenuItem(title: "Custom time…",
-                        image: ThemedMenuIcon.symbol("calendar"),
-                        representedValue: Command.customSnooze.rawValue))
-                ]
+        SidebarSessionMenuContent.snoozeEntries(
+            moments: snoozeMoments,
+            prelude: [
+                .item(ThemedMenuItem(title: "‹  Snooze",
+                                       representedValue: Command.back.rawValue)),
+                .separator
+            ]
+        )
     }
 
     private var openInEntries: [ThemedMenuEntry] {
@@ -120,19 +83,19 @@ struct SidebarSessionMenu {
     }
 
     private var copyEntries: [ThemedMenuEntry] {
-        var rows: [ThemedMenuEntry] = [
+        SidebarSessionMenuContent.copyEntries(copyConfiguration,
+                                               actions: SidebarSessionMenuContent.Actions())
+    }
+
+    private var copyConfiguration: SidebarSessionMenuContent.Copy {
+        var copy = SidebarSessionMenuContent.Copy()
+        copy.hasAgentID = agentSessionID != nil
+        copy.hasWorktreePath = true
+        copy.prelude = [
             .item(ThemedMenuItem(title: "‹  Copy", representedValue: Command.back.rawValue)),
             .separator
         ]
-        if agentSessionID != nil {
-            rows.append(.item(ThemedMenuItem(title: "Agent Session ID",
-                representedValue: Command.copyAgentID.rawValue)))
-        }
-        rows.append(.item(ThemedMenuItem(title: "Threading ID",
-            representedValue: Command.copyThreadingID.rawValue)))
-        rows.append(.item(ThemedMenuItem(title: "Worktree Path",
-            representedValue: Command.copyWorktreePath.rawValue)))
-        return rows
+        return copy
     }
 
     func command(at index: Int) -> Command? {
@@ -168,25 +131,21 @@ struct SidebarSessionMenu {
                   $0.item?.representedValue as? String == Command.close.rawValue
               }) else { return }
         if selected >= closeIndex { selected += 1 }
-        if firstVisible >= closeIndex { firstVisible += 1 }
     }
 
     mutating func openIn() {
         page = .openIn
         selected = 2
-        firstVisible = 0
     }
 
     mutating func openSnooze() {
         page = .snooze
         selected = 2
-        firstVisible = 0
     }
 
     mutating func openCopy() {
         page = .copy
         selected = 2
-        firstVisible = 0
     }
 
     mutating func returnToActions() {
@@ -200,7 +159,6 @@ struct SidebarSessionMenu {
         selected = entries.firstIndex(where: {
             $0.item?.representedValue as? String == command.rawValue
         }) ?? 0
-        firstVisible = 0
     }
 }
 #endif

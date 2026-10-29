@@ -1,3 +1,5 @@
+import ThreadingDomain
+
 /// Which dotted animation represents an in-flight conversation turn.
 ///
 /// Raw values intentionally match `ThinkingOrbs.OrbState` for the fixed
@@ -34,22 +36,9 @@ enum WorkingOrbStyle: String, CaseIterable {
 ///
 /// Raw values mirror `LabelMorph.MorphPreset`; the adapter at the UI boundary
 /// owns the package mapping and the fixed intensity/timing.
-public enum ChatNameMorphStyle: String, CaseIterable {
-    /// The theme's choice (`ThemeTitleMorph`), or Shape Morph when the theme states none. The
-    /// default, so a theme's decode or flip reaches everyone who has not picked a style.
-    case automatic
-    case shapeMorph
-    case crossfade
-    case slideUp
-    case slideDown
-    case scale
-    case bounce
-    case drop
-    case flip
-    case blur
-    case scramble
-    case typewriter
+public typealias ChatNameMorphStyle = ThreadingDomain.ChatNameMorphStyle
 
+extension ChatNameMorphStyle {
     var displayName: String {
         switch self {
         case .automatic: return L10n.string("Theme’s Choice")

@@ -1,0 +1,1 @@
+../../../../Sources/Threading/Core/Session/AttachmentDetection+Recording.swift

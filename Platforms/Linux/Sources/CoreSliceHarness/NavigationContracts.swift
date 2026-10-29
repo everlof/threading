@@ -1,6 +1,8 @@
 @testable import CoreSlice
 import Foundation
 
+private enum TerminalMutationFailure: Error { case commitRefused }
+
 func runNavigationContracts() throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("threading-navigation-\(UUID().uuidString)", isDirectory: true)
@@ -105,7 +107,78 @@ func runNavigationContracts() throws {
                 "indexed launch could not reopen its new row")
     try runArchivedNavigationContract()
     try runProviderArchiveStateContract()
+    try runTerminalMutationContract()
     print("PASS bounded project navigation: indexed recent windows, counts, selection and partial-read fence")
+}
+
+private func runTerminalMutationContract() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("threading-terminal-mutation-\(UUID().uuidString)",
+                              isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    var refuseNextCommit = false
+    let database = try ProjectDatabase(url: root.appendingPathComponent("projects.db"),
+        transactionCommitPreflight: {
+            guard refuseNextCommit else { return }
+            refuseNextCommit = false
+            throw TerminalMutationFailure.commitRefused
+        })
+    defer { database.close() }
+
+    var project = Project(name: "terminal owner", folderURL: root)
+    let first = ProjectTerminal(id: TerminalID(), title: "Shell", customTitle: nil,
+                                currentDirectory: root.path, branch: nil, themeID: nil,
+                                soundOverrides: nil, createdAt: Date())
+    let second = ProjectTerminal(id: TerminalID(), title: "Other", customTitle: nil,
+                                 currentDirectory: root.path, branch: nil, themeID: nil,
+                                 soundOverrides: nil, createdAt: Date())
+    project.terminals = [first, second]
+    try database.save(ProjectsState(projects: [project]))
+    try database.saveSelectedTerminalID(first.id)
+    let wrongOwner = ProjectID()
+    try require(try database.updateTerminal(id: first.id, in: wrongOwner, edit: { terminal in
+        terminal.customTitle = "Wrong"
+        return true
+    }) == nil, "terminal edit accepted a stale owner")
+    try require(try !database.removeTerminal(id: first.id, from: wrongOwner),
+                "terminal removal accepted a stale owner")
+
+    let directory = root.appendingPathComponent("moved").path
+    try require(try database.updateTerminalDirectory(id: first.id, in: project.id,
+        directory: directory, expectedCurrentDirectory: root.path),
+        "directory report was not saved")
+    let renamed = try database.updateTerminal(id: first.id, in: project.id) { terminal in
+        terminal.customTitle = "Renamed"
+        return true
+    }
+    try require(renamed?.changed == true && renamed?.terminal.customTitle == "Renamed",
+                "terminal rename was not saved")
+    try require(renamed?.terminal.currentDirectory == directory,
+                "terminal rename overwrote a newer directory report")
+    let unchanged = try database.updateTerminal(id: first.id, in: project.id) { terminal in
+        terminal.customTitle != "Renamed"
+    }
+    try require(unchanged?.changed == false, "unchanged terminal edit rewrote the project")
+    refuseNextCommit = true
+    do {
+        _ = try database.removeTerminal(id: first.id, from: project.id)
+        throw ContractFailure.failed("refused terminal removal committed")
+    } catch TerminalMutationFailure.commitRefused { }
+    try require(try database.projectRecord(id: project.id)?.terminals.count == 2,
+                "refused terminal removal deleted the durable row")
+    try require(try database.navigationSnapshot(recentSessionLimit: 0,
+        recentTerminalLimit: 0).selectedTerminal?.terminal.id == first.id,
+        "refused terminal removal cleared its selection")
+    try require(try database.removeTerminal(id: first.id, from: project.id),
+                "terminal removal was not saved")
+    let remaining = try database.projectRecord(id: project.id)?.terminals
+    try require(remaining?.map(\.id) == [second.id],
+                "terminal removal changed a sibling or kept the removed terminal")
+    try require(try database.navigationSnapshot(recentSessionLimit: 0,
+        recentTerminalLimit: 0).selectedTerminal == nil,
+        "terminal removal left a dangling selected terminal")
+    print("PASS targeted terminal mutation: owner, current payload, sibling and selection")
 }
 
 private func runArchivedNavigationContract() throws {

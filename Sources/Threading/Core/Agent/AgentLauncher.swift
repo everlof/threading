@@ -227,7 +227,8 @@ enum AgentLauncher {
             || session.kind.supports(.serviceTierFastMode)
         else { return nil }
 
-        guard let fast = session.fastMode ?? defaultSpeed.fastModeOverride else { return nil }
+        guard let fast = defaultSpeed.resolve(selected: session.fastMode, configured: nil)
+        else { return nil }
 
         // Claude's settings-layer switch can move an explicitly selected non-Opus model onto
         // Opus. A speed default must not silently replace a model choice, so a known unsupported
@@ -293,7 +294,8 @@ enum AgentLauncher {
     /// would override a `permissions.defaultMode` or `config.toml` the user set themselves.
     static func permissionMode(for session: AgentSession) -> AgentPermissionMode? {
         guard session.kind.supportsPermissionModes else { return nil }
-        return session.permissionMode ?? AppSettings.shared.defaultPermissionMode
+        return NewChatDefaults.permissionMode(selected: session.permissionMode,
+            appDefault: AppSettings.shared.defaultPermissionMode)
     }
 
     /// Adds the flags that state the mode, in each CLI's own vocabulary.

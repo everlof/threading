@@ -288,32 +288,6 @@ extension NSView {
 
 // MARK: - Derived Content
 
-/// A view holding content **baked** from a theme rather than drawn from it.
-///
-/// The sweep below re-resolves recorded surfaces, layer colours and fonts, then marks the view
-/// dirty — which covers everything resolved *at draw time*. An `NSImage` composed against a role
-/// is not: the pixels were decided when the image was made, and no amount of redrawing revisits
-/// them. A session row's agent mark is plated or not by measuring the mark against the sidebar it
-/// sits on; a project tile is composed the same way. Both were baked once and left.
-///
-/// It survived review because it *appeared* to work: `AppThemeLibrary.apply` pins
-/// `NSApp.appearance` to the theme's mode, so switching between a light theme and a dark one fires
-/// `viewDidChangeEffectiveAppearance` and every row re-derives by accident. Only a light→light or
-/// dark→dark switch — Windows 98 arriving from any other light theme — left the plates deciding
-/// against the previous theme's surface, until something else happened to re-derive the row.
-/// Selecting it did, which is what the report described: *the icon fixes itself once you click it*.
-///
-/// Stated as a hook on the sweep rather than as a notification each view subscribes to, for the
-/// reason the sweep gives for existing at all: the failure mode of a subscription is one view in
-/// the corner keeping the old theme, and that is precisely the bug this is.
-@MainActor
-public protocol ThemeDerivedContent: AnyObject {
-
-    /// Bake again against the theme now in force. Called by the app-theme sweep, and by the
-    /// view's own `viewDidChangeEffectiveAppearance` for a system light/dark flip.
-    func rederiveThemedContent()
-}
-
 // MARK: - Refresh
 
 /// Repaints what is already on screen after the app's theme changes.
@@ -557,8 +531,4 @@ private final class InterfaceThemeObserver: NSObject {
             AppThemeRefresh.systemAppearanceDidChange()
         }
     }
-}
-
-public struct AccessibilityDisplayOptionsDidChange: AppEvent {
-    public static let name = Notification.Name("accessibilityDisplayOptionsDidChange")
 }

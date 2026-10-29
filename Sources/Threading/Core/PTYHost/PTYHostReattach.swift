@@ -257,19 +257,12 @@ enum PTYHostReattach {
         var orphans: [PTYHostSessionIdentity] = []
 
         for summary in holdings.sessions {
-            guard let sessionID = summary.sessionID, isKnown(sessionID) else {
-                orphans.append(summary.id)
-                continue
-            }
-            guard summary.exit == nil else {
-                // An ending is an ending on either channel: the status is recorded and the row
-                // is dormant, whichever transport wrote the bytes before it.
-                ended.append(summary)
-                continue
-            }
-            switch summary.resolvedChannel {
-            case .pty: adopt.append(summary)
-            case .pipes: resume.append(summary)
+            let known = summary.sessionID.map(isKnown) ?? false
+            switch PTYHostHeldDisposition.classify(summary, isKnown: known) {
+            case .adopt: adopt.append(summary)
+            case .resumeFromTranscript: resume.append(summary)
+            case .ended: ended.append(summary)
+            case .orphan: orphans.append(summary.id)
             }
         }
 

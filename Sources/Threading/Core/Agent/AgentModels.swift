@@ -437,14 +437,12 @@ enum AgentModels {
         projectDirectory: String? = nil,
         startupSpeed: AgentStartupSpeed = .agentSetting
     ) -> Bool? {
-        if let selected { return selected }
-        if let appDefault = startupSpeed.fastModeOverride { return appDefault }
-        return defaultFastMode(
+        startupSpeed.resolve(selected: selected, configured: defaultFastMode(
             for: kind,
             model: model,
             account: account,
             projectDirectory: projectDirectory
-        )
+        ))
     }
 
     /// Whether a Claude model can run in fast mode.

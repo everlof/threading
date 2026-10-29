@@ -39,26 +39,19 @@ enum ScheduledTimePresets {
         var calendar = calendar
         calendar.locale = locale
 
-        return SnoozeWallClockMoments.future(from: now, calendar: calendar).map { moment in
+        let moments = SnoozeWallClockMoments.future(from: now, calendar: calendar)
+        return SnoozeWallClockMoments.presentations(for: moments, locale: locale).map { choice in
             let id: String
-            let title: String
-            let detail: String?
-            switch moment.kind {
+            switch choice.moment.kind {
             case .inAnHour:
                 id = PresetDefaults.inAnHourID
-                title = L10n.string("In an hour")
-                detail = time(moment.date, locale: locale)
             case .tomorrowMorning:
                 id = PresetDefaults.tomorrowID
-                title = L10n.format("Tomorrow at %@", time(moment.date, locale: locale))
-                detail = nil
             case .mondayMorning:
                 id = PresetDefaults.mondayID
-                title = L10n.format("Monday at %@", time(moment.date, locale: locale))
-                detail = nil
             }
-            return ScheduledTimePreset(id: id, title: title, detail: detail,
-                                       date: moment.date, anchor: .wallClock)
+            return ScheduledTimePreset(id: id, title: choice.title, detail: choice.detail,
+                                       date: choice.moment.date, anchor: .wallClock)
         }
     }
 

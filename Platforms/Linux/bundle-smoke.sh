@@ -126,6 +126,11 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/native_permission_smoke.py:/native_permission_smoke.py:ro" \
   -v "$PWD/tests/native_activity_smoke.py:/native_activity_smoke.py:ro" \
   -v "$PWD/tests/sidebar_footer_smoke.py:/sidebar_footer_smoke.py:ro" \
+  -v "$PWD/tests/settings_startup_restore_smoke.py:/settings_startup_restore_smoke.py:ro" \
+  -v "$PWD/tests/scratchpad_settings_smoke.py:/scratchpad_settings_smoke.py:ro" \
+  -v "$PWD/tests/settings_popup_smoke.py:/settings_popup_smoke.py:ro" \
+  -v "$PWD/tests/settings_attachment_detection_smoke.py:/settings_attachment_detection_smoke.py:ro" \
+  -v "$PWD/tests/display_pane_bridge_smoke.py:/display_pane_bridge_smoke.py:ro" \
   -v "$PWD/tests/native_background_activity_smoke.py:/native_background_activity_smoke.py:ro" \
   -v "$PWD/tests/archived_navigation_smoke.py:/archived_navigation_smoke.py:ro" \
   -v "$PWD/tests/session_rename_smoke.py:/session_rename_smoke.py:ro" \
@@ -140,6 +145,11 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/add_project_button_smoke.py:/add_project_button_smoke.py:ro" \
   -v "$PWD/tests/actions_smoke.py:/actions_smoke.py:ro" \
   -v "$PWD/tests/session_actions_smoke.py:/session_actions_smoke.py:ro" \
+  -v "$PWD/tests/startup_restore_quit_smoke.py:/startup_restore_quit_smoke.py:ro" \
+  -v "$PWD/tests/startup_restore_background_smoke.py:/startup_restore_background_smoke.py:ro" \
+  -v "$PWD/tests/startup_restore_native_smoke.py:/startup_restore_native_smoke.py:ro" \
+  -v "$PWD/tests/native_retention_smoke.py:/native_retention_smoke.py:ro" \
+  -v "$PWD/tests/session_hover_card_smoke.py:/session_hover_card_smoke.py:ro" \
   -v "$PWD/tests/session_close_unmounted_smoke.py:/session_close_unmounted_smoke.py:ro" \
   -v "$PWD/tests/open_in_smoke.py:/open_in_smoke.py:ro" \
   -v "$PWD/tests/actions_mark_contract.py:/actions_mark_contract.py:ro" \

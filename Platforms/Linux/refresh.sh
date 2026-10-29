@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Re-copy production sources, rebuild, re-sweep, and report what moved.
+# Refresh production source links, rebuild, re-sweep, and report what moved.
 #
 #   ./refresh.sh                # measure the current checkout
 #   ./refresh.sh --accept       # record the current sweep as the new baseline
@@ -9,7 +9,6 @@
 # This command never changes Git history.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
-repository="$(cd ../.. && pwd)"
 
 accept=0
 for argument in "$@"; do
@@ -26,15 +25,9 @@ if [[ ${accept} -eq 1 ]]; then
   exit 0
 fi
 
-echo "=== re-vendoring from the working tree ==="
-./vendor.sh
-moved="$(git -C "${repository}" diff --stat -- "Platforms/Linux/Sources/Harness/Vendored")"
-if [[ -n "${moved}" ]]; then
-  echo "--- vendored sources changed upstream:"
-  echo "${moved}"
-else
-  echo "--- vendored sources unchanged upstream"
-fi
+echo "=== verifying production source links ==="
+./vendor.sh --verify
+echo "source edits are picked up directly through the links"
 
 echo "=== building ==="
 ./build.sh || exit 1

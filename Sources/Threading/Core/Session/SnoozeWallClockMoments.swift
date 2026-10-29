@@ -1,7 +1,7 @@
 import Foundation
 
-/// Calendar moments offered by the session Snooze menu on every desktop host. Labels remain
-/// localised by the caller; the dates are one policy so DST and Sunday deduplication agree.
+/// Calendar moments offered by the session Snooze menu on every desktop host. Dates and their
+/// displayed words are one policy so DST, Sunday deduplication and menu copy agree.
 enum SnoozeWallClockMoments {
     static let morningHour = 9
     enum Kind: Sendable { case inAnHour, tomorrowMorning, mondayMorning }
@@ -9,6 +9,36 @@ enum SnoozeWallClockMoments {
     struct Moment: Sendable {
         let kind: Kind
         let date: Date
+    }
+
+    struct Presentation: Sendable {
+        let moment: Moment
+        let title: String
+        let detail: String?
+    }
+
+    static func presentations(for moments: [Moment], locale: Locale = .current) -> [Presentation] {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return moments.map { moment in
+            let clock = formatter.string(from: moment.date)
+            let title: String
+            let detail: String?
+            switch moment.kind {
+            case .inAnHour:
+                title = L10n.string("In an hour")
+                detail = clock
+            case .tomorrowMorning:
+                title = L10n.format("Tomorrow at %@", clock)
+                detail = nil
+            case .mondayMorning:
+                title = L10n.format("Monday at %@", clock)
+                detail = nil
+            }
+            return Presentation(moment: moment, title: title, detail: detail)
+        }
     }
 
     static func future(from now: Date, calendar: Calendar = .current) -> [Moment] {

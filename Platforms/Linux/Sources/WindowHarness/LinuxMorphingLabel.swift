@@ -1,4 +1,5 @@
 import AppKit
+import CoreSlice
 
 /// Pango glyph renderer behind the production MorphingTitleLabel wrapper.
 /// Linux does not yet provide LabelMorph's Core Animation glyph transitions.
@@ -68,9 +69,7 @@ final class MorphingLabel: NSView {
     }
 }
 
-public enum ChatNameMorphStyle: String {
-    case automatic, shapeMorph, crossfade, slideUp, slideDown, scale, bounce, drop, flip, blur, scramble, typewriter
-}
+public typealias ChatNameMorphStyle = CoreSlice.ChatNameMorphStyle
 
 extension MorphingTitleLabel {
     enum FontRole { case control, controlRegular, emphasizedBody, caption, body }

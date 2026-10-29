@@ -4,16 +4,31 @@ import AppKit
 /// this component owns the label column, adaptive control placement, and card insets.
 @MainActor
 enum SettingsRowStructure {
-    static func make(title: String, subtitle: String?, control: NSView?) -> NSView {
+    static func make(title: String, subtitle: String?, control: NSView?,
+                     helpButton: NSView? = nil) -> NSView {
+        if let control, control.accessibilityLabel()?.isEmpty != false {
+            control.setAccessibilityLabel(title)
+        }
         let name = NSTextField(labelWithString: title)
         name.applyFont(.body)
         name.textColor = Design.Text.label
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         name.lineBreakMode = .byTruncatingTail
 
-        var labels: [NSView] = [name]
+        var labels: [NSView] = [helpButton.map { titleLine(name, helpButton: $0) } ?? name]
         if let subtitle { labels.append(wrappingSubtitle(subtitle)) }
         return assemble(labels, control: control)
+    }
+
+    static func titleLine(_ title: NSView, helpButton: NSView) -> NSView {
+        let line = NSStackView(views: [title, helpButton])
+        line.orientation = .horizontal
+        line.alignment = .centerY
+        line.distribution = .fill
+        let inset = (helpButton as? OpticalInsetProviding)?.opticalHorizontalInset ?? 0
+        line.spacing = max(0, Design.Spacing.small - inset)
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return line
     }
 
     static func assemble(_ labelViews: [NSView], highlighted: [NSView] = [],

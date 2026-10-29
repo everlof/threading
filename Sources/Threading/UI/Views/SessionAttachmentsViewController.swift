@@ -17,83 +17,6 @@ struct SessionAttachmentPreviewTiming {
     var totalNanoseconds: UInt64 = 0
 }
 
-/// The attachment count and its filter are one text line with two font sizes.
-///
-/// `NSStackView` owns hidden-view detachment well, but on macOS it stretches a native label and a
-/// custom baseline-bearing arranged view to the same cross-axis frame even when asked for first-
-/// baseline alignment. That puts the caption's words above the segment titles. This structural
-/// row keeps horizontal stack semantics while constraining the two views from their published
-/// text baselines, and collapses to the caption's own height when the filter has no choice to offer.
-private final class AttachmentHeaderRow: NSView {
-    private let count: NSTextField
-    private let filter: ThemedSegmentedControl
-    private var filterShownConstraints: [NSLayoutConstraint] = []
-    private var filterHiddenConstraints: [NSLayoutConstraint] = []
-
-    init(count: NSTextField, filter: ThemedSegmentedControl, spacing: CGFloat) {
-        self.count = count
-        self.filter = filter
-        super.init(frame: .zero)
-
-        count.translatesAutoresizingMaskIntoConstraints = false
-        filter.translatesAutoresizingMaskIntoConstraints = false
-        // Low horizontally, because the label is what absorbs this row's slack — the same
-        // bargain the NSStackView made, and the reason the filter sits on the trailing edge.
-        // Required here instead pins the row to count + spacing + filter, and the row is pinned
-        // to both of the pane's edges, so the *pane* stops being resizable: the split view
-        // places the divider, Auto Layout puts it straight back, and the fold's corner drag
-        // does nothing. No constraint breaks and nothing is logged.
-        count.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        count.setContentCompressionResistancePriority(.required, for: .horizontal)
-        // Vertical stays required: that is what keeps this one line one line, rather than
-        // letting a tall pane's slack settle here and leave the caption adrift mid-pane.
-        count.setContentHuggingPriority(.required, for: .vertical)
-        addSubview(count)
-        addSubview(filter)
-        setContentHuggingPriority(.required, for: .vertical)
-
-        count.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
-        filterShownConstraints = [
-            count.trailingAnchor.constraint(equalTo: filter.leadingAnchor, constant: -spacing),
-            filter.trailingAnchor.constraint(equalTo: trailingAnchor),
-            filter.topAnchor.constraint(equalTo: topAnchor),
-            filter.bottomAnchor.constraint(equalTo: bottomAnchor),
-            count.firstBaselineAnchor.constraint(equalTo: filter.firstBaselineAnchor),
-            count.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
-            count.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
-        ]
-        filterHiddenConstraints = [
-            count.trailingAnchor.constraint(equalTo: trailingAnchor),
-            count.topAnchor.constraint(equalTo: topAnchor),
-            count.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ]
-        NSLayoutConstraint.activate(filterShownConstraints)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(
-            width: NSView.noIntrinsicMetric,
-            height: filter.isHidden
-                ? count.intrinsicContentSize.height
-                : filter.intrinsicContentSize.height
-        )
-    }
-
-    func setFilterHidden(_ hidden: Bool) {
-        guard filter.isHidden != hidden else { return }
-        NSLayoutConstraint.deactivate(hidden ? filterShownConstraints : filterHiddenConstraints)
-        filter.isHidden = hidden
-        NSLayoutConstraint.activate(hidden ? filterHiddenConstraints : filterShownConstraints)
-        invalidateIntrinsicContentSize()
-        needsLayout = true
-    }
-}
-
 /// A session's inspectable deliverables: two panes, the chronology above its preview, and a
 /// footer naming the selected file with the one action the user last took beside it.
 ///
@@ -208,7 +131,12 @@ final class SessionAttachmentsViewController: NSViewController {
     /// (`AttachmentsListHeight`). Half is the right *opening* answer and the wrong permanent
     /// one: a session with eighteen attachments fills that cap, and the report the row is
     /// pointing at then gets half a pane to be read in whatever it is worth.
-    private var listHeightConstraint: NSLayoutConstraint?
+    private var contentView: SessionAttachmentsContentView {
+        view as! SessionAttachmentsContentView
+    }
+    private var listHeightConstraint: NSLayoutConstraint? {
+        (view as? SessionAttachmentsContentView)?.listHeightConstraint
+    }
 
     private lazy var countLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
@@ -231,8 +159,8 @@ final class SessionAttachmentsViewController: NSViewController {
     }()
     /// The count and the filter as one line. A dedicated structural row owns the baseline because
     /// these two font sizes cannot be aligned by centring or by `NSStackView`'s custom-view path.
-    private lazy var headerRow: AttachmentHeaderRow = {
-        let row = AttachmentHeaderRow(
+    private lazy var headerRow: SessionAttachmentHeaderRow = {
+        let row = SessionAttachmentHeaderRow(
             count: countLabel,
             filter: filterControl,
             spacing: Design.Spacing.small
@@ -240,33 +168,9 @@ final class SessionAttachmentsViewController: NSViewController {
         row.translatesAutoresizingMaskIntoConstraints = false
         return row
     }()
-    private lazy var tableView: ThemedTableView = {
-        let table = ThemedTableView()
-        table.headerView = nil
-        table.rowSizeStyle = .default
-        table.dataSource = self
-        table.delegate = self
-        table.target = self
-        table.doubleAction = #selector(openSelected)
-        table.onQuickLook = { [weak self] row in self?.inspectAttachment(atRow: row) ?? false }
-        // A fully folded chronology has headers but no selectable files.
-        table.allowsEmptySelection = true
-        // Several rows are a batch: dragging one selected row carries every selected row's
-        // file — AppKit asks `pasteboardWriterForRow` per row — and the two places a batch
-        // lands, a composer and a terminal, already take several files in one drop.
-        table.allowsMultipleSelection = true
-        let column = NSTableColumn(identifier: SessionAttachmentsDefaults.columnIdentifier)
-        column.resizingMask = .autoresizingMask
-        table.addTableColumn(column)
-        return table
-    }()
-    private lazy var scrollView: ThemedScrollView = {
-        let scroll = ThemedScrollView()
-        scroll.documentView = tableView
-        scroll.hasVerticalScroller = true
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        return scroll
-    }()
+    private lazy var scrollView = SessionAttachmentListView(frame: .zero)
+    private var tableView: ThemedTableView { scrollView.tableView }
+    private var compactAttachmentRows: Bool?
     private lazy var previewHost: NSView = {
         let host = NSView()
         host.setAccessibilityIdentifier("attachments.preview-host")
@@ -478,9 +382,6 @@ final class SessionAttachmentsViewController: NSViewController {
         band.setAccessibilityIdentifier("attachments.scope-band")
         return band
     }()
-    private var scopeBandConstraints: [NSLayoutConstraint] = []
-    private var footerToPaneBottom: [NSLayoutConstraint] = []
-    private var footerToScopeBand: [NSLayoutConstraint] = []
     private var scopeAdmissionTask: Task<Void, Never>?
     private var scopeAdmissionGeneration = 0
 
@@ -543,32 +444,71 @@ final class SessionAttachmentsViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView()
-        view.wantsLayer = true
+        let content = SessionAttachmentsContentView(
+            header: headerRow,
+            list: scrollView,
+            fold: listFold,
+            preview: previewHost,
+            previewMessage: previewMessage,
+            footer: footerBand,
+            scopeBand: scopeBand,
+            emptyMessage: emptyLabel,
+            listHeightPriority: SessionAttachmentsDefaults.listHeightPriority
+        )
+        content.onWidthChange = { [weak self] in
+            self?.updateAttachmentRowWidthClass()
+            self?.updateListHeight()
+        }
+        view = content
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         setupList()
         setupPreview()
-        setupFooter()
-        setupConstraints()
         refresh()
     }
 
     override func viewDidLayout() {
         super.viewDidLayout()
         tableView.sizeLastColumnToFit()
+        updateAttachmentRowWidthClass()
         updateListHeight()
+    }
+
+    /// The pane owns the list's full width. During a detached layout pass AppKit can report a
+    /// stale clip-content width even though the pane already has its final width. Reserve a
+    /// legacy scroller's width so a non-overlay scrollbar never clips the wide row either.
+    private var attachmentListWidth: CGFloat {
+        let scrollerWidth = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+        return max(0, view.bounds.width - scrollerWidth)
+    }
+
+    /// A pane-width crossing changes the height and constraints of only mounted file rows.
+    /// Recalculate row heights once at the crossing; ordinary resize frames keep the same rows.
+    private func updateAttachmentRowWidthClass() {
+        let compact = attachmentListWidth < SessionAttachmentRowMetrics.compactWidth
+        guard compact != compactAttachmentRows else { return }
+        compactAttachmentRows = compact
+        let rowCount = tableView.numberOfRows
+        guard rowCount > 0 else { return }
+        tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<rowCount))
+        let visible = tableView.rows(in: tableView.visibleRect)
+        guard visible.location != NSNotFound else { return }
+        for row in visible.location..<(visible.location + visible.length) {
+            (tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                as? SessionAttachmentRowView)?.setCompact(compact)
+        }
     }
 
     // MARK: - Setup
 
     private func setupList() {
-        view.addSubview(headerRow)
-        view.addSubview(scrollView)
-        view.addSubview(emptyLabel)
-
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.target = self
+        tableView.doubleAction = #selector(openSelected)
+        tableView.onQuickLook = { [weak self] row in self?.inspectAttachment(atRow: row) ?? false }
         tableView.onContextMenu = { [weak self] row, anchor in
             self?.presentContextMenu(forRow: row, anchor: anchor) ?? false
         }
@@ -593,110 +533,7 @@ final class SessionAttachmentsViewController: NSViewController {
     }
 
     private func setupPreview() {
-        view.addSubview(listFold)
-        previewHost.addSubview(previewMessage)
-        view.addSubview(previewHost)
         applyPreviewTheme()
-    }
-
-    private func setupFooter() {
-        view.addSubview(footerBand)
-        view.addSubview(scopeBand)
-        scopeBand.isHidden = true
-    }
-
-    private func setupConstraints() {
-        let inset = Design.Spacing.inset
-
-        NSLayoutConstraint.activate([
-            headerRow.topAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.topAnchor,
-                constant: Design.Spacing.small
-            ),
-            headerRow.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
-            headerRow.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
-
-            scrollView.topAnchor.constraint(
-                equalTo: headerRow.bottomAnchor,
-                constant: Design.Spacing.small
-            ),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-
-            // Edge to edge, like the footer's own rule below: this is the fold between the
-            // pane's two halves, and a rule that stops short of the pane it divides reads as a
-            // stray line rather than as a boundary.
-            listFold.topAnchor.constraint(equalTo: scrollView.bottomAnchor),
-            listFold.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            listFold.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-
-            // The preview is the layout's one flexible element: it fills whatever stands
-            // between the fold and the footer, which is what makes the two halves *panes*
-            // rather than a stack of bands with the slack pooling under them. Nothing here
-            // states a content height, so nothing here can grow the window (the trap
-            // `listHeightPriority`'s comment records).
-            //
-            // Flush against the fold, with no gap of its own: the divider's band *is* the gap
-            // the pane used to hold here, which is what let the seam become a grip without
-            // anything below it moving.
-            previewHost.topAnchor.constraint(equalTo: listFold.bottomAnchor),
-            previewHost.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
-            previewHost.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
-            previewHost.bottomAnchor.constraint(
-                equalTo: footerBand.topAnchor,
-                constant: -Design.Spacing.small
-            ),
-
-            previewMessage.centerXAnchor.constraint(equalTo: previewHost.centerXAnchor),
-            previewMessage.centerYAnchor.constraint(equalTo: previewHost.centerYAnchor),
-            // The label starts empty and receives every fallback sentence later. Giving it the
-            // preview's readable width here avoids AppKit preserving the empty label's four-point
-            // intrinsic width after the first message arrives; centred alignment keeps short
-            // sentences visually centred while long ones wrap inside the pane.
-            previewMessage.leadingAnchor.constraint(
-                equalTo: previewHost.leadingAnchor,
-                constant: inset
-            ),
-            previewMessage.trailingAnchor.constraint(
-                equalTo: previewHost.trailingAnchor,
-                constant: -inset
-            ),
-
-            footerBand.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            footerBand.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-
-            emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            emptyLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
-            emptyLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset)
-        ])
-
-        // Stated twice because the floor moves: with the scope band installed the footer stops
-        // above it, and one set is active at a time.
-        footerToPaneBottom = [
-            footerBand.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
-        ]
-        footerToScopeBand = [
-            footerBand.bottomAnchor.constraint(equalTo: scopeBand.topAnchor)
-        ]
-        NSLayoutConstraint.activate(footerToPaneBottom)
-
-        scopeBandConstraints = [
-            // Edge to edge, and to the frame rather than the safe area: the band draws the
-            // pane's own fold and states its content's inset from the corner-adapted region
-            // itself. See `PaneFooterView`.
-            scopeBand.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scopeBand.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scopeBand.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ]
-        NSLayoutConstraint.activate(scopeBandConstraints)
-
-        // A list with no rows asks for no height, which is the same sentence said with a zero.
-        let listHeight = scrollView.heightAnchor.constraint(equalToConstant: 0)
-        listHeight.priority = SessionAttachmentsDefaults.listHeightPriority
-        listHeight.isActive = true
-        listHeightConstraint = listHeight
-        updateListHeight()
     }
 
     /// Re-aims `listHeightConstraint` at the rows the list currently holds, capped at its share
@@ -746,7 +583,7 @@ final class SessionAttachmentsViewController: NSViewController {
             : 0
         let oneRow = rows > 0
             ? tableView.rect(ofRow: 0).maxY + padding + listChromeHeight
-            : SessionAttachmentsDefaults.rowHeight + listChromeHeight
+            : SessionAttachmentRowMetrics.height(for: attachmentListWidth) + listChromeHeight
         return (content, oneRow)
     }
 
@@ -990,13 +827,7 @@ final class SessionAttachmentsViewController: NSViewController {
     /// turn it off before they have ever needed it.
     private func updateScopeBand(count: Int) {
         let isShowing = AppSettings.shared.includesAttachmentsOutsideProject
-        let wasHidden = scopeBand.isHidden
-
-        scopeBand.isHidden = count == 0
-        if scopeBand.isHidden != wasHidden {
-            NSLayoutConstraint.deactivate(scopeBand.isHidden ? footerToScopeBand : footerToPaneBottom)
-            NSLayoutConstraint.activate(scopeBand.isHidden ? footerToPaneBottom : footerToScopeBand)
-        }
+        contentView.setScopeBandVisible(count > 0)
         guard !scopeBand.isHidden else { return }
 
         scopeLabel.stringValue = L10n.format("OUTSIDE THIS PROJECT  %lld", Int64(count))
@@ -2752,7 +2583,16 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
         SessionAttachmentThumbnails.requestPosterFrame(for: attachment) { [weak self] _ in
             self?.redrawRow(for: attachment.id)
         }
-        return SessionAttachmentRowView(attachment: attachment, annotationCount: count)
+        let icon = SessionAttachmentThumbnails.thumbnail(for: attachment)
+            ?? NSWorkspace.shared.icon(forFile: attachment.url.path)
+        let badge = count > 0 ? ImageAnnotationCountView(count: count) : nil
+        let view = SessionAttachmentRowView(
+            attachment: attachment,
+            iconImage: icon,
+            annotationBadge: badge
+        )
+        view.setCompact(attachmentListWidth < SessionAttachmentRowMetrics.compactWidth)
+        return view
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
@@ -2760,7 +2600,7 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
         if case .header = listItems[row] {
             return SessionAttachmentsDefaults.turnHeaderHeight
         }
-        return SessionAttachmentsDefaults.rowHeight
+        return SessionAttachmentRowMetrics.height(for: attachmentListWidth)
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
@@ -2788,402 +2628,15 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
 
 // MARK: - Row
 
-/// A real disclosure control hosted as one virtual table row. The section's attachment values
-/// live in the projection above; only headers and expanded files reach this view layer.
-final class SessionAttachmentTurnHeaderView: NSTableCellView {
-    let sectionID: SessionAttachmentTurnSection.ID
-    let disclosure: ThemedDisclosureRow
-
-    init(
-        section: SessionAttachmentTurnSection,
-        isExpanded: Bool,
-        onToggle: @escaping (Bool) -> Void
-    ) {
-        sectionID = section.id
-
-        let title = Self.title(for: section)
-        let count = Self.fileCount(section.attachments.count)
-
-        let titleLabel = NSTextField(labelWithString: title.uppercased())
-        titleLabel.applyFont(.detail(weight: .semibold))
-        titleLabel.textColor = section.isLatest ? Design.Text.label : Design.Text.tertiary
-        titleLabel.lineBreakMode = .byTruncatingTail
-
-        let countLabel = NSTextField(labelWithString: count.uppercased())
-        countLabel.applyFont(.numericDetail())
-        countLabel.textColor = Design.Text.quaternary
-        countLabel.setContentHuggingPriority(.required, for: .horizontal)
-
-        let divider = SeparatorView(.vertical)
-        divider.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph).isActive = true
-
-        let content = NSStackView(views: [titleLabel, divider, countLabel])
-        content.orientation = .horizontal
-        content.alignment = .centerY
-        content.spacing = Design.Spacing.small
-
-        disclosure = ThemedDisclosureRow(
-            content: content,
-            isExpanded: isExpanded,
-            isCollapsible: !section.attachments.isEmpty,
-            density: .compact
+/// The Mac host's checkpoint adapter. The sectioning model stays platform and provider neutral.
+private extension SessionAttachmentTurnBoundary {
+    init(_ checkpoint: GitTurnCheckpoint) {
+        self.init(
+            id: checkpoint.id,
+            ordinal: checkpoint.ordinal,
+            userTurnID: checkpoint.userTurnID,
+            requestedAt: checkpoint.requestedAt
         )
-        super.init(frame: .zero)
-
-        disclosure.onToggle = section.attachments.isEmpty ? nil : onToggle
-        disclosure.setAccessibilityLabel("\(title), \(count)")
-        disclosure.setAccessibilityIdentifier(Self.accessibilityIdentifier(for: section.id))
-
-        let rule = SeparatorView()
-        addSubview(disclosure)
-        addSubview(rule)
-        NSLayoutConstraint.activate([
-            disclosure.topAnchor.constraint(equalTo: topAnchor),
-            disclosure.leadingAnchor.constraint(equalTo: leadingAnchor),
-            disclosure.trailingAnchor.constraint(equalTo: trailingAnchor),
-            disclosure.bottomAnchor.constraint(equalTo: rule.topAnchor),
-            rule.leadingAnchor.constraint(equalTo: leadingAnchor),
-            rule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            rule.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    private static func title(for section: SessionAttachmentTurnSection) -> String {
-        switch section.id {
-        case .upcoming:
-            return L10n.string("Upcoming turn")
-        case .betweenTurns:
-            return L10n.string("Between turns")
-        case .checkpoint:
-            switch section.distanceFromLatest {
-            case 0:
-                return L10n.string("Latest turn")
-            case 1:
-                return L10n.string("Previous turn")
-            case .some(let distance):
-                return L10n.format("%lld turns ago", Int64(distance))
-            case nil:
-                return L10n.string("Previous turn")
-            }
-        }
-    }
-
-    private static func fileCount(_ count: Int) -> String {
-        count == 1 ? L10n.string("1 file") : L10n.format("%lld files", Int64(count))
-    }
-
-    private static func accessibilityIdentifier(
-        for id: SessionAttachmentTurnSection.ID
-    ) -> String {
-        switch id {
-        case .upcoming:
-            return "attachments.turn.upcoming"
-        case .betweenTurns:
-            return "attachments.turn.between"
-        case .checkpoint(let checkpointID):
-            return "attachments.turn.\(checkpointID.uuidString.lowercased())"
-        }
-    }
-}
-
-/// **An `NSTableCellView` rather than a plain `NSView`, and that is a colour decision.**
-///
-/// A plain view in a list is never told that the row under it is selected: AppKit propagates
-/// `interiorBackgroundStyle` to cell views and to nothing else. So every label here went on
-/// inking itself from the chrome's ground after the row had painted an accent under it — which
-/// is how the pane's quietest tier came to draw at 1.20:1 on a selected row, *worse* than the
-/// 1.34:1 it drew at unselected. Adopting the class is how the row gets to say what it painted;
-/// `ThemedTableRowView.contentInk` is what it says.
-final class SessionAttachmentRowView: NSTableCellView, ThemeDerivedContent {
-
-    /// A drag is over this row and would open a comparison against it.
-    ///
-    /// **The row stays the row.** What makes an unfamiliar gesture learnable is the sentence, not
-    /// the highlight — a highlight only answers *here*, which the pointer already said. But the
-    /// first version of this said the sentence by *replacing* the row: thumbnail and name gave
-    /// their place to a saturated accent plate, so the list opened a hole exactly where the
-    /// picture you were aiming at had been, and the plate shouted over the window's own selection
-    /// two rows above it. Two things were wrong at once — the row stopped being legible, and a
-    /// pointer affordance outranked a state the user had chosen.
-    ///
-    /// So only the *secondary* line changes. The thumbnail and the name stay, because which
-    /// picture is under the pointer is the whole question the affordance answers; the path — the
-    /// one line nobody is reading mid-drag — becomes what dropping here would do, in the accent
-    /// that means "the thing you are aiming at" everywhere else in the window.
-    ///
-    /// The wash behind it belongs to the **row**, not here (`ThemedTableRowView.isDropTarget`):
-    /// this cell is inset within its row, so a plate drawn from these bounds stood as tall as the
-    /// selection above it and visibly narrower than it.
-    var isDropTarget = false {
-        didSet {
-            guard isDropTarget != oldValue else { return }
-            pathLabel?.isHidden = isDropTarget
-            dropLabel.isHidden = !isDropTarget
-            needsDisplay = true
-        }
-    }
-
-    /// The line the drop caption takes the place of.
-    private var pathLabel: NSTextField?
-
-    /// The rest of the row's words, held so the ink can be re-asked when the ground moves.
-    private var nameLabel: NSTextField?
-    private var originLabel: NSTextField?
-    private var momentLabel: NSTextField?
-    private var playMarkView: NSImageView?
-
-    /// Selection changes the colour under every word in the row, so every word is asked again.
-    ///
-    /// The ink comes from the row rather than from `Design.Text`, because only the row knows
-    /// whether it painted the theme's accent, AppKit's, a held-back wash, or nothing at all —
-    /// see `ThemedTableRowView.contentInk`. The tiers each label takes are unchanged: the
-    /// hierarchy is the same sentence, measured against the ground it is actually on.
-    override var backgroundStyle: NSView.BackgroundStyle {
-        didSet {
-            guard backgroundStyle != oldValue else { return }
-            applyInk()
-        }
-    }
-
-    private func applyInk() {
-        // Resolved in *this view's* appearance rather than the ambient one, for the reason
-        // `SelectionSurface.dynamic` gives: the ground and the ink underneath are dynamic, and
-        // reading them under whichever appearance happens to be drawing is how a light variant's
-        // ink is measured against a dark variant's ground.
-        effectiveAppearance.performAsCurrentDrawingAppearance { applyResolvedInk() }
-    }
-
-    private func applyResolvedInk() {
-        let ink = (superview as? ThemedTableRowView)?.contentInk ?? .chrome
-        nameLabel?.textColor = ink.label
-        pathLabel?.textColor = ink.tertiary
-        originLabel?.textColor = ink.quaternary
-        momentLabel?.textColor = ink.quaternary
-        playMarkView?.contentTintColor = ink.label
-        // The drop caption says "the thing you are aiming at" in the accent — which is the one
-        // colour it cannot use over a row already filled with that accent. On a selected row the
-        // ground's own brightest ink says it instead, and says it just as loudly.
-        dropLabel.textColor = backgroundStyle == .emphasized ? ink.label : Design.Surface.accent
-    }
-
-    /// The row joins the list already selected when the pane restores a choice, and
-    /// `backgroundStyle` is set before that superview exists. Asking once more on arrival is what
-    /// keeps a restored selection from drawing chrome ink over an accent.
-    override func viewDidMoveToSuperview() {
-        super.viewDidMoveToSuperview()
-        applyInk()
-    }
-
-    /// **The ink on a selected row is baked, so it has to be baked again.**
-    ///
-    /// `Design.Ink` is a struct of resolved colours, not a set of dynamic ones: `Design.Text.on`
-    /// measures black and white against the ground it is *handed*, which is a question no colour
-    /// provider can be asked later. So the value assigned to `textColor` here is the answer for
-    /// the appearance that was current when the row joined the list, and it stays that answer
-    /// through a theme switch and a light/dark flip — the sweep re-resolves recorded surfaces,
-    /// layer colours and fonts, and a baked foreground is none of those.
-    ///
-    /// Caught by rendering the pane in both appearances in one process: three of the four cases
-    /// measured cleanly and the selected row in dark came back at 1.74:1, wearing the ink it had
-    /// been given in light. Exactly the failure `ThemeDerivedContent` exists for — see the note
-    /// on the protocol, and `SessionRowView`, which bakes its agent mark the same way.
-    func rederiveThemedContent() {
-        applyInk()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        applyInk()
-    }
-
-    private lazy var dropLabel: NSTextField = {
-        let label = NSTextField(labelWithString: L10n.string("Drop to compare"))
-        label.applyFont(.caption)
-        label.textColor = Design.Surface.accent
-        label.lineBreakMode = .byTruncatingTail
-        label.isHidden = true
-        label.setAccessibilityElement(false)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
-
-    init(attachment: SessionAttachment, annotationCount: Int = 0) {
-        super.init(frame: .zero)
-
-        let icon = NSImageView()
-        // The picture itself where there is one to show. This list is the panel's visual
-        // history now, and a history of identical file-type glyphs is what it replaced — the
-        // tab strip's row of `photo` marks under titles that truncated to nothing. A PDF, and
-        // anything that will not decode, keeps the file icon rather than showing a blank well.
-        icon.image = SessionAttachmentThumbnails.thumbnail(for: attachment)
-            ?? NSWorkspace.shared.icon(forFile: attachment.url.path)
-        icon.imageScaling = .scaleProportionallyDown
-        icon.translatesAutoresizingMaskIntoConstraints = false
-
-        let name = NSTextField(labelWithString: attachment.name)
-        name.applyFont(.subheading)
-        name.textColor = Design.Text.label
-        name.lineBreakMode = .byTruncatingMiddle
-        name.translatesAutoresizingMaskIntoConstraints = false
-
-        let path = NSTextField(labelWithString: attachment.referenceDetail)
-        path.toolTip = attachment.referenceDetail
-        path.applyFont(.caption)
-        path.textColor = Design.Text.tertiary
-        path.lineBreakMode = .byTruncatingMiddle
-        path.translatesAutoresizingMaskIntoConstraints = false
-
-        // Marked on every row rather than only on the user's, because a mark that appears on one
-        // kind makes its absence carry meaning, and absence is exactly what nobody reads.
-        let origin = NSTextField(labelWithString: attachment.sourceTitle)
-        origin.applyFont(.caption)
-        origin.textColor = Design.Text.quaternary
-        origin.setContentCompressionResistancePriority(.required, for: .horizontal)
-        origin.setContentHuggingPriority(.required, for: .horizontal)
-        origin.translatesAutoresizingMaskIntoConstraints = false
-
-        // When it arrived, in the same quiet voice as the mark it sits above. A chronology whose
-        // rows carry no time is a list whose order the reader has to take on trust — and the
-        // order is the whole reason the images stopped being tabs.
-        let moment = NSTextField(
-            labelWithString: AttachmentMoment.description(of: attachment.referencedAt)
-        )
-        moment.applyFont(.caption)
-        moment.textColor = Design.Text.quaternary
-        moment.setContentCompressionResistancePriority(.required, for: .horizontal)
-        moment.setContentHuggingPriority(.required, for: .horizontal)
-        moment.translatesAutoresizingMaskIntoConstraints = false
-
-        let annotationBadge = annotationCount > 0
-            ? ImageAnnotationCountView(count: annotationCount)
-            : nil
-
-        // A movie's poster frame is a picture of a moment, which is exactly what a screenshot is
-        // — and in a 26-point well nothing else tells the two apart. The mark says which of the
-        // rows in this history can be played, and it is drawn over the frame rather than beside
-        // the name because the well is where the reader already is.
-        let playMark: NSImageView? = attachment.kind == .video ? {
-            let mark = NSImageView()
-            mark.image = NSImage(
-                systemSymbolName: "play.circle.fill",
-                accessibilityDescription: nil
-            )
-            mark.contentTintColor = Design.Text.label
-            mark.symbolConfiguration = NSImage.SymbolConfiguration(
-                pointSize: SessionAttachmentsDefaults.playMarkSize,
-                weight: .semibold
-            )
-            mark.setAccessibilityElement(false)
-            mark.setAccessibilityIdentifier(SessionAttachmentsDefaults.playMarkIdentifier)
-            mark.translatesAutoresizingMaskIntoConstraints = false
-            return mark
-        }() : nil
-
-        addSubview(icon)
-        addSubview(name)
-        addSubview(path)
-        addSubview(origin)
-        addSubview(moment)
-        if let annotationBadge { addSubview(annotationBadge) }
-        if let playMark { addSubview(playMark) }
-        addSubview(dropLabel)
-        pathLabel = path
-        nameLabel = name
-        originLabel = origin
-        momentLabel = moment
-        playMarkView = playMark
-
-        // One element, read as one sentence: four separate labels would be announced as four
-        // unrelated strings with no hint that the last two are the provenance and the moment of
-        // the first.
-        setAccessibilityElement(true)
-        setAccessibilityRole(.staticText)
-        setAccessibilityLabel(
-            L10n.format(
-                "%@, from %@, %@, %@",
-                attachment.name,
-                attachment.sourceTitle,
-                attachment.referenceDetail,
-                moment.stringValue
-            )
-        )
-        for child in [icon, name, path, origin, moment] {
-            child.setAccessibilityElement(false)
-        }
-
-        NSLayoutConstraint.activate([
-            origin.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -Design.Spacing.small
-            ),
-            origin.firstBaselineAnchor.constraint(equalTo: path.firstBaselineAnchor),
-            origin.leadingAnchor.constraint(
-                greaterThanOrEqualTo: path.trailingAnchor,
-                constant: Design.Spacing.small
-            ),
-
-            moment.trailingAnchor.constraint(equalTo: origin.trailingAnchor),
-            moment.firstBaselineAnchor.constraint(equalTo: name.firstBaselineAnchor),
-
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Design.Spacing.small),
-            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: SessionAttachmentsDefaults.iconSize),
-            icon.heightAnchor.constraint(equalToConstant: SessionAttachmentsDefaults.iconSize),
-
-            name.leadingAnchor.constraint(
-                equalTo: icon.trailingAnchor,
-                constant: Design.Spacing.small
-            ),
-            name.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.tight),
-
-            path.leadingAnchor.constraint(equalTo: name.leadingAnchor),
-            path.topAnchor.constraint(equalTo: name.bottomAnchor, constant: Design.Spacing.hairline),
-
-            // Exactly where the path it replaces sat, so a row crossed by the pointer reads as
-            // the same row saying something else — not as the list shifting under the drag.
-            dropLabel.leadingAnchor.constraint(equalTo: path.leadingAnchor),
-            dropLabel.firstBaselineAnchor.constraint(equalTo: path.firstBaselineAnchor),
-            dropLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: origin.leadingAnchor,
-                constant: -Design.Spacing.small
-            )
-        ])
-
-        if let playMark {
-            NSLayoutConstraint.activate([
-                playMark.centerXAnchor.constraint(equalTo: icon.centerXAnchor),
-                playMark.centerYAnchor.constraint(equalTo: icon.centerYAnchor)
-            ])
-        }
-
-        if let annotationBadge {
-            NSLayoutConstraint.activate([
-                annotationBadge.trailingAnchor.constraint(
-                    equalTo: moment.leadingAnchor,
-                    constant: -Design.Spacing.small
-                ),
-                annotationBadge.centerYAnchor.constraint(equalTo: moment.centerYAnchor),
-                name.trailingAnchor.constraint(
-                    lessThanOrEqualTo: annotationBadge.leadingAnchor,
-                    constant: -Design.Spacing.small
-                )
-            ])
-        } else {
-            name.trailingAnchor.constraint(
-                lessThanOrEqualTo: moment.leadingAnchor,
-                constant: -Design.Spacing.small
-            ).isActive = true
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
     }
 }
 
@@ -3376,94 +2829,22 @@ enum AttachmentAction: String, CaseIterable {
     }
 }
 
-// MARK: - Filter
-
-/// Which side's attachments the pane is showing.
-///
-/// Three fixed choices with `All` first, which is why this is a segment rather than a chip: the
-/// set cannot grow, and the value of seeing `Agent` and `You` sitting there unpicked is the whole
-/// point — the question people ask of this pane is "where did the one *I* sent go", and a menu
-/// answers it only after you already know to open it.
-enum AttachmentFilter: CaseIterable {
-    case all
-    case agent
-    case subagents
-    case user
-
-    static func visibleCases(hasSubagents: Bool) -> [Self] {
-        allCases.filter { hasSubagents || $0 != .subagents }
-    }
-
-    var title: String {
-        switch self {
-        case .all: return L10n.string("All")
-        case .agent: return L10n.string("Main agent")
-        case .subagents: return L10n.string("Subagents")
-        case .user: return SessionAttachment.Origin.user.title
-        }
-    }
-
-    func admits(_ attachment: SessionAttachment) -> Bool {
-        switch self {
-        case .all: return true
-        case .agent: return attachment.agentSources.contains { $0.threadID == nil }
-        case .subagents: return attachment.agentSources.contains { $0.threadID != nil }
-        case .user: return attachment.origin == .user
-        }
-    }
-}
-
-extension SessionAttachment.Origin {
-
-    /// "You" rather than "Ours": in a window where the other party is also working on your
-    /// behalf, "ours" names both of them.
-    var title: String {
-        switch self {
-        case .agent: return L10n.string("Agent")
-        case .user: return L10n.string("You")
-        }
-    }
-}
-
-extension SessionAttachment {
-    var sourceTitle: String {
-        let children = agentSources.contains { $0.threadID != nil }
-        guard children else { return origin.title }
-        if origin == .user { return L10n.string("You + subagents") }
-        return agentSources.contains { $0.threadID == nil }
-            ? L10n.string("Main + subagents") : L10n.string("Subagents")
-    }
-
-    /// Keep the compact provenance mark aligned with other rows; task names use the flexible
-    /// detail line, with the full path and ownership retained in its tooltip and accessibility.
-    var referenceDetail: String {
-        let children = agentSources.compactMap { source -> String? in
-            guard let id = source.threadID else { return nil }
-            return "\(source.name ?? String(id.prefix(8))) [\(id.prefix(8))]"
-        }
-        guard !children.isEmpty else { return relativePath }
-        return children.joined(separator: ", ") + " · " + relativePath
-    }
-}
-
 // MARK: - Defaults
 
 enum SessionAttachmentsDefaults {
-    static let columnIdentifier = NSUserInterfaceItemIdentifier("SessionAttachmentsColumn")
-    static let rowHeight: CGFloat = 42
-    @MainActor static var turnHeaderHeight: CGFloat {
-        ThemedDisclosureRow.Density.compact.minimumHeight + Design.Radius.border
-    }
+    static let columnIdentifier = SessionAttachmentListMetrics.columnIdentifier
+    static let rowHeight = SessionAttachmentListMetrics.rowHeight
+    @MainActor static var turnHeaderHeight: CGFloat { SessionAttachmentListMetrics.turnHeaderHeight }
 
     /// One width for both of this pane's menus — the row's and the footer chevron's — because
     /// they carry the same items and a narrower one under the button would read as a different
     /// menu saying the same thing.
     static let menuWidth: CGFloat = 220
-    static let iconSize: CGFloat = 26
+    static let iconSize = SessionAttachmentRowMetrics.iconSize
     /// The play mark over a movie's poster frame. Half the well: readable at a glance and small
     /// enough that the frame underneath is still the thing being shown.
-    static let playMarkSize: CGFloat = 13
-    static let playMarkIdentifier = "attachment.row.play"
+    static let playMarkSize = SessionAttachmentRowMetrics.playMarkSize
+    static let playMarkIdentifier = SessionAttachmentRowMetrics.playMarkIdentifier
     static let maximumPreviewFileBytes = 64 * 1024 * 1024
 
     /// The diagram-source cap — see `SessionAttachmentDefaults.maximumSourcePreviewBytes`.

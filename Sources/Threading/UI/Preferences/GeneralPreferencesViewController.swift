@@ -134,7 +134,7 @@ final class GeneralPreferencesViewController: NSViewController {
 
         for days in SessionRestoreDefaults.windowDayChoices {
             restoreWindowPopUp.addItem(
-                ThemedMenuItem(title: Self.windowTitle(days: days), representedValue: days)
+                ThemedMenuItem(title: SessionRestoreDefaults.windowTitle(days: days), representedValue: days)
             )
         }
         restoreWindowPopUp.selectItem(
@@ -149,7 +149,7 @@ final class GeneralPreferencesViewController: NSViewController {
 
         for limit in SessionRestoreDefaults.limitChoices {
             restoreLimitPopUp.addItem(
-                ThemedMenuItem(title: Self.limitTitle(limit), representedValue: limit)
+                ThemedMenuItem(title: SessionRestoreDefaults.limitTitle(limit), representedValue: limit)
             )
         }
         restoreLimitPopUp.selectItem(
@@ -174,76 +174,33 @@ final class GeneralPreferencesViewController: NSViewController {
         SettingsUI.preferControlWidth(popUp)
     }
 
-    /// "1 day", "3 days", localized by the system rather than by a plural rule of ours.
-    private static func windowTitle(days: Int) -> String {
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.day]
-        formatter.unitsStyle = .full
-        let seconds = Double(days) * SessionRestoreDefaults.secondsPerDay
-        return formatter.string(from: seconds) ?? "\(days)"
-    }
-
-    private static func limitTitle(_ limit: Int) -> String {
-        L10n.format("At most %d", limit)
-    }
-
     private func setupLayout() {
-        let startup = SettingsCard(rows: [
-            SettingsUI.row(title: "Reopen the last session at launch", control: restoreSessionToggle),
-            SettingsUI.row(
-                title: "Bring back at launch",
-                subtitle: "Which sessions are running again when Threading opens.",
-                help: SettingsUI.help(
-                    "Bring back at launch",
-                    "Sessions resume in the background, one at a time, and are already running "
-                        + "when you open them. Everything else stays dormant and resumes when you "
-                        + "open it."
-                ),
-                control: restorePolicyPopUp
-            )
-        ])
-
-        let idleAgents = SettingsCard(rows: [
-            SettingsUI.row(
-                title: "Stop idle agents after",
-                subtitle: "Counted from your latest turn or visit.",
-                help: SettingsUI.help(
-                    "Stop idle agents after",
-                    "Counts from the latest submitted turn or local view. Opening a dormant "
-                        + "conversation resumes it and refreshes this timer."
-                ),
-                control: restoreWindowPopUp
-            ),
-            SettingsUI.row(
-                title: "Keep idle agents running",
-                subtitle: "The most recently used keep running.",
-                help: SettingsUI.help(
-                    "Keep idle agents running",
-                    "Most recent first. Unfinished, non-resumable, visible, or remotely viewed "
-                        + "work is never stopped by this limit."
-                ),
-                control: restoreLimitPopUp
-            )
-        ])
-
         addChild(agentTools)
-        let page = SettingsUI.page(title: "General", sections: [
-            SettingsUI.section("Startup", startup),
-            SettingsUI.section("Idle Agents", idleAgents),
-            SettingsUI.section(
-                "Confirmations",
-                confirmationCard(),
-                help: SettingsUI.help(
-                    "Confirmations",
-                    "Only interruptions you can safely stop are listed. Anything that deletes "
-                        + "something for good, or grants access to a website, a tool, an "
-                        + "extension or another person, always asks."
-                )
-            ),
-            SettingsUI.section("Software Updates", updatesCard()),
-            SettingsUI.section(nil, agentTools.view),
-            SettingsUI.section("This Mac", thisMacCard())
-        ], hostPage: .general)
+        let chooseShell = SettingsUI.button(
+            "Choose…", target: self, action: #selector(browseForShell)
+        )
+        let controls = GeneralSettingsPageStructure.Controls(
+            startup: .init(restoresSession: restoreSessionToggle, policy: restorePolicyPopUp),
+            idleAgents: .init(window: restoreWindowPopUp, limit: restoreLimitPopUp),
+            confirmations: confirmationCard(),
+            softwareUpdates: .init(channel: updateChannelPopUp,
+                                   automaticChecks: automaticUpdateToggle),
+            agentTools: agentTools.view,
+            machine: .init(preventsIdleSleep: preventIdleSleepToggle,
+                           shellPath: SettingsUI.controlGroup([shellField, chooseShell]))
+        )
+        let sections = GeneralSettingsPageStructure.sections(
+            controls: controls,
+            machineTitle: "This Mac",
+            row: { descriptor, control in
+                SettingsUI.row(title: descriptor.title, subtitle: descriptor.subtitle,
+                               help: descriptor.help.map(Self.helpTopic), control: control)
+            },
+            section: { title, help, content in
+                SettingsUI.section(title, content, help: help.map(Self.helpTopic))
+            }
+        )
+        let page = SettingsUI.page(title: "General", sections: sections, hostPage: .general)
 
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -253,6 +210,11 @@ final class GeneralPreferencesViewController: NSViewController {
             page.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             page.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
+    }
+
+    private static func helpTopic(_ help: GeneralSettingsPageStructure.Help) -> HelpTopic {
+        HelpTopic(title: L10n.string(help.title),
+                  paragraphs: help.paragraphs.map { L10n.string($0) })
     }
 
     /// One row per prompt the register marks suppressible, in declaration order: the four that
@@ -309,64 +271,6 @@ final class GeneralPreferencesViewController: NSViewController {
 
     private func updateHiddenNoticesControl() {
         showHiddenNoticesButton?.isEnabled = AppSettings.shared.hiddenNoticeCount > 0
-    }
-
-    /// One switch is the authority for both kinds of passive release traffic. What each check
-    /// reveals is on the Privacy page; this row states what happens after either one finds news.
-    private func updatesCard() -> SettingsCard {
-        SettingsCard(rows: [
-            SettingsUI.row(
-                title: "Updates you receive",
-                subtitle: "Betas arrive earlier and may be rough.",
-                help: SettingsUI.help(
-                    "Updates you receive",
-                    "Stable is the finished release and needs no action. Betas arrive earlier "
-                        + "and may be rough; switching back here returns you to stable at the "
-                        + "next release.",
-                    "Nightly is a separate feed you join by installing a nightly build, and "
-                        + "leave by downloading a stable build yourself, because a nightly's date "
-                        + "version is higher than any release."
-                ),
-                control: updateChannelPopUp
-            ),
-            SettingsUI.row(
-                title: "Check for updates automatically",
-                subtitle: "Once a day, for the app and each installed agent.",
-                help: SettingsUI.help(
-                    "Check for updates automatically",
-                    "Threading checks GitHub for the app and each installed agent's official "
-                        + "release source. App updates use Sparkle after you agree; agent updates "
-                        + "run in a visible terminal only when you choose Update.",
-                    "Off stops both background checks — Help ▸ Check for Updates… still checks "
-                        + "the app."
-                ),
-                control: automaticUpdateToggle
-            )
-        ])
-    }
-
-    /// The machine the agents run on: whether it may sleep under them, and which shell a shell
-    /// session starts.
-    private func thisMacCard() -> SettingsCard {
-        let choose = SettingsUI.button("Choose…", target: self, action: #selector(browseForShell))
-        return SettingsCard(rows: [
-            SettingsUI.row(
-                title: "Keep this Mac awake while agents work",
-                subtitle: "While a turn is running or waiting for your answer.",
-                help: SettingsUI.help(
-                    "Keep this Mac awake while agents work",
-                    "Prevents idle system sleep while an agent turn is active or waiting for "
-                        + "your answer. The display may turn off, and closing a MacBook’s lid can "
-                        + "still put it to sleep."
-                ),
-                control: preventIdleSleepToggle
-            ),
-            SettingsUI.row(
-                title: "Shell path",
-                subtitle: "For shell sessions and project tool discovery.",
-                control: SettingsUI.controlGroup([shellField, choose])
-            )
-        ])
     }
 
     // MARK: - Actions

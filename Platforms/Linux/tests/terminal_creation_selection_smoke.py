@@ -37,6 +37,7 @@ class LaunchGate:
         self.listener.bind(self.path)
         self.listener.listen(1)
         self.listener.settimeout(.1)
+        self.forwarders = []
         if not delayed:
             self.release.set()
         self.thread = threading.Thread(target=self.relay, daemon=True)
@@ -47,13 +48,19 @@ class LaunchGate:
             while not self.stop.is_set():
                 try:
                     client, _ = self.listener.accept()
-                    break
                 except TimeoutError:
                     continue
-            else:
-                return
-            with client, socket.socket(socket.AF_UNIX) as server:
                 self.arrived.set()
+                forwarder = threading.Thread(target=self.forward, args=(client,), daemon=True)
+                self.forwarders.append(forwarder)
+                forwarder.start()
+        except Exception as error:
+            if not self.stop.is_set():
+                self.errors.append(error)
+
+    def forward(self, client):
+        try:
+            with client, socket.socket(socket.AF_UNIX) as server:
                 assert self.release.wait(10), 'fixture never released the daemon handshake'
                 server.connect(endpoint)
                 while not self.stop.is_set():
@@ -73,6 +80,9 @@ class LaunchGate:
         self.listener.close()
         self.thread.join(timeout=2)
         assert not self.thread.is_alive(), 'fixture relay did not stop'
+        for forwarder in self.forwarders:
+            forwarder.join(timeout=2)
+            assert not forwarder.is_alive(), 'fixture connection did not stop'
         assert not self.errors, self.errors
 
 
@@ -132,6 +142,48 @@ def scenario(name, delayed):
         chosen = listed.get_selection_iface().get_selected_child(0)
         return chosen.get_accessible_id() if chosen else None
 
+    def terminal_label():
+        listed = next(item for item in children() if item.get_role_name() == 'list')
+        return next((listed.get_child_at_index(index).get_name()
+                     for index in range(listed.get_child_count())
+                     if listed.get_child_at_index(index).get_accessible_id() == terminal_id), None)
+
+    def terminal_row():
+        listed = next(item for item in children() if item.get_role_name() == 'list'
+                      and item.get_name() == 'Projects')
+        return next((listed.get_child_at_index(index) for index in range(listed.get_child_count())
+                     if listed.get_child_at_index(index).get_accessible_id() == terminal_id), None)
+
+    def terminal_menu():
+        return next((item for item in children() if item.get_role_name() == 'list'
+                     and item.get_name() == 'Terminal actions'), None)
+
+    def rename_prompt():
+        desktop = Atspi.get_desktop(0)
+        for index in range(desktop.get_child_count()):
+            candidate = desktop.get_child_at_index(index)
+            if candidate.get_name() != 'Threading Linux' or candidate.get_process_id() == process.pid:
+                continue
+            frame = candidate.get_child_at_index(0)
+            for child_index in range(frame.get_child_count()):
+                panel = frame.get_child_at_index(child_index)
+                if panel.get_accessible_id() == 'linux.prompt.rename-terminal':
+                    return panel
+        return None
+
+    def menu_item(title):
+        menu = eventually(terminal_menu, 'terminal row menu')
+        return next((menu.get_child_at_index(index) for index in range(menu.get_child_count())
+                     if menu.get_child_at_index(index).get_name() == title), None)
+
+    def open_terminal_menu():
+        row = eventually(terminal_row, 'terminal row before menu')
+        bounds = row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        xdo('mousemove', '--window', window, bounds.x + bounds.width // 2,
+            bounds.y + bounds.height // 2)
+        xdo('click', '--window', window, 3)
+        return eventually(terminal_menu, 'terminal row menu')
+
     def records():
         with sqlite3.connect(store / 'threading.db') as database:
             return [json.loads(payload) for payload, in database.execute('SELECT data FROM project ORDER BY position')]
@@ -180,10 +232,75 @@ def scenario(name, delayed):
             owner = eventually(lambda: next((row for row in sessions()
                                             if row['id'] == 'terminal-' + terminal_id and row['attached']), None),
                                'one attached real daemon child')
+            if not delayed:
+                xdo('windowfocus', '--sync', window, 'type', '--clearmodifiers', 'sleep 6')
+                key('Return')
+                eventually(lambda: 'command running' in (terminal_label() or ''),
+                           'foreground process status from the real daemon')
+                subprocess.run(['import', '-window', window, str(output / 'foreground.png')],
+                               check=True, timeout=5)
+                eventually(lambda: terminal_label() and 'command running' not in terminal_label(),
+                           'foreground status clears when the shell resumes')
             key('ctrl+shift+p')
             eventually(lambda: selected_identity() == expected, 'focus return preserves selected row')
             subprocess.run(['import', '-window', window, str(output / f'{name}.png')], check=True, timeout=5)
             assert next(row for row in sessions() if row['id'] == owner['id'])['pid'] == owner['pid']
+            if not delayed:
+                row = eventually(terminal_row, 'terminal row for hover action')
+                bounds = row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+                previous_frames = log_path.read_text().count('OUTLINE_FRAME')
+                xdo('mousemove', '--window', window, bounds.x + bounds.width - 28 * scale,
+                    bounds.y + bounds.height // 2)
+                eventually(lambda: log_path.read_text().count('OUTLINE_FRAME') > previous_frames,
+                           'hover action repainted')
+                subprocess.run(['import', '-window', window, str(output / 'terminal-action-hover.png')],
+                               check=True, timeout=5)
+                xdo('click', '--window', window, 1)
+                eventually(terminal_menu, 'production terminal action opens shared menu')
+                subprocess.run(['import', '-window', window, str(output / 'terminal-menu.png')],
+                               check=True, timeout=5)
+                assert menu_item('Rename Terminal…').get_action_iface().do_action(1)
+                prompt = eventually(rename_prompt, 'terminal rename prompt')
+                assert prompt.get_name() == 'Rename Terminal'
+                field = next(prompt.get_child_at_index(index)
+                             for index in range(prompt.get_child_count())
+                             if prompt.get_child_at_index(index).get_accessible_id()
+                             == 'linux.prompt.terminal-name')
+                assert field.get_editable_text_iface().set_text_contents('Renamed café 日本語')
+                subprocess.run(['import', '-window', 'root', str(output / 'rename-terminal.png')],
+                               check=True, timeout=5)
+                confirm = next(prompt.get_child_at_index(index)
+                               for index in range(prompt.get_child_count())
+                               if prompt.get_child_at_index(index).get_accessible_id()
+                               == 'linux.prompt.create')
+                assert confirm.get_action_iface().do_action(0)
+                eventually(lambda: records()[0]['terminals'][0].get('customTitle')
+                           == 'Renamed café 日本語', 'terminal rename persisted')
+                eventually(lambda: 'Renamed café 日本語' in (terminal_label() or ''),
+                           'renamed terminal row')
+                open_terminal_menu()
+                assert menu_item('Copy').get_action_iface().do_action(1)
+                assert menu_item('Threading ID').get_action_iface().do_action(1)
+                eventually(lambda: subprocess.check_output(
+                    ['xclip', '-selection', 'clipboard', '-o'], text=True, timeout=5,
+                    stderr=subprocess.DEVNULL).strip()
+                    == terminal_id.lower(), 'terminal identity copied')
+                open_terminal_menu()
+                assert menu_item('Copy').get_action_iface().do_action(1)
+                assert menu_item('Worktree Path').get_action_iface().do_action(1)
+                eventually(lambda: subprocess.check_output(
+                    ['xclip', '-selection', 'clipboard', '-o'], text=True, timeout=5,
+                    stderr=subprocess.DEVNULL).strip()
+                    == str(folder / 'Alpha'), 'current terminal worktree copied')
+                open_terminal_menu()
+                assert menu_item('Close Terminal').get_action_iface().do_action(1)
+                eventually(lambda: records()[0]['terminals'] == [],
+                           'terminal close removed durable row')
+                eventually(lambda: selected_identity() == project_ids[0],
+                           'terminal close selected owning project')
+                eventually(lambda: next((item for item in sessions()
+                    if item['id'] == owner['id'] and item.get('exit') is not None), None),
+                    'terminal close stopped daemon child')
             key('alt+F4')
             assert process.wait(timeout=5) == 0
             print(f'PASS shell creation selection scale={scale} delayed={delayed}: exact child, focus and newer navigation', flush=True)

@@ -24,13 +24,14 @@ final class WorkspaceDormantPane: WorkspacePane {
     init(pageName: String, displayTitle: String, pageIdentity: String,
          icon: NSImage?, supportsResume: Bool, canResume: Bool,
          onReveal: @escaping () -> Void) {
-        heading = "\(displayTitle) ended"
-        detail = canResume
-            ? "The conversation is saved and will pick up where it left off."
-            : supportsResume
-                ? "No saved conversation was found, so this will start fresh."
-                : "Starting again opens a new shell."
-        actionTitle = canResume ? "Resume Session" : "Start Again"
+        let content = DormantSessionPlaceholderContent.agent(
+            displayTitle: displayTitle,
+            supportsResume: supportsResume,
+            canResume: canResume
+        )
+        heading = content.title
+        detail = content.detail
+        actionTitle = content.actionTitle
         chrome = WorkspacePaneChrome(pageName: pageName, pageIdentity: pageIdentity,
             icon: icon, showsSessionActions: true, onReveal: onReveal)
         LinuxSymbols.install()

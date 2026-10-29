@@ -550,6 +550,50 @@ final class ProjectDatabase {
         }
     }
 
+    /// Edits one terminal from its current project payload. The edit and write share a SQLite
+    /// transaction, so a directory report or sibling-terminal change cannot be overwritten by
+    /// an older navigator snapshot. A missing owner or terminal is never recreated.
+    func updateTerminal(id: TerminalID, in projectID: ProjectID,
+                        edit: (inout ProjectTerminal) -> Bool) throws
+        -> (terminal: ProjectTerminal, changed: Bool)? {
+        try database.transaction {
+            guard var project = try projectRecord(id: projectID),
+                  let index = project.terminals.firstIndex(where: { $0.id == id }) else {
+                return nil
+            }
+            let changed = edit(&project.terminals[index])
+            if changed {
+                try database.prepare("UPDATE project SET data = ? WHERE id = ?")
+                    .bind(1, try Self.encodeValidated(project))
+                    .bind(2, projectID.uuidString)
+                    .run()
+            }
+            return (project.terminals[index], changed)
+        }
+    }
+
+    /// Removes an embedded terminal and its selected-navigation scalar atomically. The caller
+    /// tears down the process only after this returns true; a refused write leaves it reachable.
+    func removeTerminal(id: TerminalID, from projectID: ProjectID) throws -> Bool {
+        try database.transaction {
+            guard var project = try projectRecord(id: projectID),
+                  let index = project.terminals.firstIndex(where: { $0.id == id }) else {
+                return false
+            }
+            project.terminals.remove(at: index)
+            try database.prepare("UPDATE project SET data = ? WHERE id = ?")
+                .bind(1, try Self.encodeValidated(project))
+                .bind(2, projectID.uuidString)
+                .run()
+            if try selectedTerminalID() == id {
+                try database.prepare("DELETE FROM app_state WHERE key = ?")
+                    .bind(1, ProjectDatabaseSchema.selectedTerminalKey)
+                    .run()
+            }
+            return true
+        }
+    }
+
     /// Inserts one project row and advances graph membership without reconciling standing rows.
     func addProject(_ project: Project, position: Int) throws {
         try graphTransaction {

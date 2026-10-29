@@ -6,6 +6,18 @@ import Glibc
 /// The opening Speed choice follows the session onto both Linux launch surfaces.
 /// File and account metadata stay on their bounded creation/resume workers.
 enum ComposerSpeedLaunch {
+    /// The launch flag remains nil when the provider owns speed. The app default is explicit
+    /// and sits below the conversation's own choice on both Terminal and Native paths.
+    static func launchOverride(selected: Bool?, kind: AgentKind, model: String?,
+                               catalogue: ComposerModelCatalog) -> Bool? {
+        let chosen = LinuxGeneralSettings.startupSpeed(for: kind)
+            .resolve(selected: selected, configured: nil)
+        guard chosen == true, kind.supports(.liveFastModeControl),
+              let model = model ?? catalogue.defaultModel,
+              !catalogue.supportsFastMode(kind: kind, model: model) else { return chosen }
+        return false
+    }
+
     static func admits(_ fastMode: Bool?, kind: AgentKind, model: String?,
                        catalogue: ComposerModelCatalog) -> Bool {
         fastMode == nil || catalogue.supportsFastMode(kind: kind, model: model)

@@ -9,13 +9,6 @@ struct SessionAttachmentTurnBoundary: Equatable {
     let userTurnID: String
     let requestedAt: Date
 
-    init(_ checkpoint: GitTurnCheckpoint) {
-        id = checkpoint.id
-        ordinal = checkpoint.ordinal
-        userTurnID = checkpoint.userTurnID
-        requestedAt = checkpoint.requestedAt
-    }
-
     init(id: GitTurnCheckpointID, ordinal: Int, userTurnID: String, requestedAt: Date) {
         self.id = id
         self.ordinal = ordinal

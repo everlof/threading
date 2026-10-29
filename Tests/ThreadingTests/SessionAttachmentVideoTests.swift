@@ -866,7 +866,10 @@ final class SessionAttachmentVideoTests: XCTestCase {
         if let appearance {
             host.appearance = NSAppearance(named: appearance)
         }
-        host.applySurface(fill: Design.Surface.panel, radius: .fixed(0))
+        // The shipping DisplayPaneController places this transparent tab over its themed
+        // ground. A panel fill alone has alpha in System, which an off-window bitmap
+        // composites against black and hides its labels.
+        host.applySurface(fill: Design.Surface.ground, radius: .fixed(0), pattern: .backdrop)
         // Load and settle the production controller at its real shell size before the host owns
         // it. Loading an AppKit table at a zero-size root can leave its document view with a
         // zero visible rect even after the outer constraints settle; the ordinary pane fixture

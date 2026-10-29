@@ -617,14 +617,18 @@ final class SessionRowActionsTests: XCTestCase {
     func testTheTerminalMenuOffersTheCopyFold() throws {
         let entries = ProjectSidebarViewController()
             .terminalMenuEntries(for: TerminalID(), row: 0)
+        let actions = entries.compactMap(\.item)
+        XCTAssertNotNil(actions.first { $0.title == L10n.string("Rename Terminal…") }?.onChoose)
+        XCTAssertNotNil(actions.first { $0.title == L10n.string("Close Terminal") }?.onChoose)
         let fold = try XCTUnwrap(
-            entries.compactMap(\.item).first { $0.title == L10n.string("Copy") }?.submenu,
+            actions.first { $0.title == L10n.string("Copy") }?.submenu,
             "the terminal menu lost its Copy fold"
         )
         XCTAssertEqual(
             fold.compactMap { $0.item?.title },
             [L10n.string("Threading ID"), L10n.string("Worktree Path")]
         )
+        XCTAssertTrue(fold.compactMap(\.item).allSatisfy { $0.onChoose != nil })
     }
 
     private func copySubmenu(in entries: [ThemedMenuEntry]) throws -> [ThemedMenuEntry] {

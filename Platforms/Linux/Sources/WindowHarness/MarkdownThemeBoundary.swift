@@ -65,22 +65,25 @@ extension NSView {
 extension Design {
     // Recipes used by the shared conversation/Markdown rows in this fixed-theme host.
     enum FontRole: Equatable {
-        case detail, body, reading, emphasizedBody, subheading, caption, heading
-        case placeholderTitle, welcomeGreeting, controlRegular
+        case body, reading, emphasizedBody, subheading, caption, heading
+        case placeholderTitle, welcomeGreeting, control, controlRegular
+        case detail(weight: NSFont.Weight = .regular)
+        case numericDetail(weight: NSFont.Weight = .regular)
         case code(weight: NSFont.Weight = .regular)
-        static func detail() -> Self { .detail }
 
         func resolved(in surface: Design.Typography.FontSurface = .chrome) -> NSFont {
             switch self {
             case .reading: Design.Typography.reading()
             case .body: Design.Typography.body(surface: surface)
             case .emphasizedBody: .systemFont(ofSize: 13, weight: .semibold)
-            case .detail: Design.Typography.detail()
+            case .detail(let weight): Design.Typography.detail(weight: weight)
+            case .numericDetail(let weight): Design.Typography.numericDetail(weight: weight)
             case .placeholderTitle: .systemFont(ofSize: 15, weight: .medium)
             case .welcomeGreeting: .systemFont(ofSize: 20, weight: .semibold)
             case .subheading: .systemFont(ofSize: 12, weight: .regular)
             case .caption: .systemFont(ofSize: 11, weight: .semibold)
             case .heading: Design.Typography.heading()
+            case .control: Design.Typography.control()
             case .controlRegular: Design.Typography.controlRegular()
             case .code(let weight): .monospacedSystemFont(ofSize: 11, weight: weight)
             }

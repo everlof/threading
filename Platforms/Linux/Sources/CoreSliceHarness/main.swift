@@ -112,7 +112,47 @@ if CommandLine.arguments.contains("--navigation-stress") {
     exit(0)
 }
 
+if CommandLine.arguments.contains("--attachment-detector-contracts") {
+    do { try runAttachmentDetectorContracts() }
+    catch {
+        FileHandle.standardError.write(Data("FAIL: \(error)\n".utf8))
+        exit(1)
+    }
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--attachment-store-contracts") {
+    do { try runAttachmentStoreContracts() }
+    catch {
+        FileHandle.standardError.write(Data("FAIL: \(error)\n".utf8))
+        exit(1)
+    }
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--attachment-observer-contracts") {
+    do { try await runAttachmentObserverContracts() }
+    catch {
+        FileHandle.standardError.write(Data("FAIL: \(error)\n".utf8))
+        exit(1)
+    }
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--attachment-turn-contracts") {
+    do { try runAttachmentTurnContracts() }
+    catch {
+        FileHandle.standardError.write(Data("FAIL: \(error)\n".utf8))
+        exit(1)
+    }
+    exit(0)
+}
+
 do {
+    try runAttachmentDetectorContracts()
+    try runAttachmentStoreContracts()
+    try await runAttachmentObserverContracts()
+    try runAttachmentTurnContracts()
     try runConversationContracts()
     try await runStreamTransportContracts()
     try runHostCommandContracts()
@@ -122,6 +162,7 @@ do {
     try runCreationContracts()
     try runTerminalPlanContracts()
     try runNavigationContracts()
+    try runStartupRestoreContracts()
     try runContracts()
     try runRecoveryContracts()
     try runMigrationContracts()

@@ -278,13 +278,11 @@ final class TerminalRenderOwner: Sendable {
         guard let terminal = currentSession()?.terminal else {
             return Terminal.RecentBufferText(text: "", nextAbsoluteRow: 0)
         }
-        let snapshot = terminal.terminalLock.withLock {
-            terminal.recentBufferTextSnapshot(
-                maximumUTF8Bytes: maximumUTF8Bytes,
-                sinceAbsoluteRow: sinceAbsoluteRow,
-                kind: kind)
-        }
-        return snapshot.text(maximumUTF8Bytes: maximumUTF8Bytes)
+        return terminal.recentLogicalBufferText(
+            maximumUTF8Bytes: maximumUTF8Bytes,
+            sinceAbsoluteRow: sinceAbsoluteRow,
+            kind: kind
+        )
     }
 
     func changeHistorySize(_ newScrollback: Int?) {

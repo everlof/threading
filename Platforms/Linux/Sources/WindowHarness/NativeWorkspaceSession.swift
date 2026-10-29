@@ -25,7 +25,8 @@ enum NativeSessionActivity: Equatable {
 }
 
 /// A saved native conversation in the ordinary workspace. File/account/replay work and durable
-/// updates use one serial worker per retained runtime, within the workspace's eight-runtime cap.
+/// updates use one serial worker per retained runtime. Idle residency is bounded by the shared
+/// process-retention policy, while unfinished work remains protected.
 @MainActor
 final class NativeWorkspaceSession {
     private struct Prepared: Sendable {
@@ -34,6 +35,7 @@ final class NativeWorkspaceSession {
         let directory: String
         let plan: AgentLaunchPlan
         var fastServiceTier: String?
+        let appDefaultPermissionMode: AgentPermissionMode?
         let speedCatalogue: ComposerModelCatalog
         let hiddenModelIDs: Set<String>
         let observedTranscriptURL: URL?
@@ -54,7 +56,10 @@ final class NativeWorkspaceSession {
     private var prepared: Prepared?
     private var stream: (any ConversationStreamSession)?
     private var timeline: ConversationTimeline
+    private var attachmentScanner: LinuxNativeAttachmentScanner?
     private var initialPrompt: String?
+    private var restoreAtStartup: Bool
+    private var waitForHostedStop: Bool
     private(set) var revision = 0
     private(set) var status = "Loading conversation…"
     private(set) var failure: String?
@@ -62,6 +67,14 @@ final class NativeWorkspaceSession {
     var onRow: ((Int, ConversationTimeline.Row, [[String]]?) -> Void)?
     var onStreaming: ((String?) -> Void)?
     var onChange: (() -> Void)?
+    var onRetentionChange: (() -> Void)?
+    var onSnoozeWakeReason: ((SessionWakeReason) -> Void)?
+    private var observedPermissionID: Int?
+    private var observedQuestionIDs: Set<UUID> = []
+    private var lastPendingOutcome: Bool?
+    private var lastRetentionFacts: SessionProcessRetentionCandidate?
+    private var lastCompletedTurns = 0
+    private var completionAwaitingOutcome = false
     /// Fired when the request at the head of the permission queue changes.
     var onPermissionChange: (() -> Void)?
     private struct PendingPermission {
@@ -72,6 +85,9 @@ final class NativeWorkspaceSession {
     /// Requests the provider is blocked on, answered one at a time in arrival order.
     private var permissionQueue: [PendingPermission] = []
     private var permissionSerial = 0
+    /// The posture actually sent to this process. An inherited setting edited while it runs
+    /// cannot change the permission broker until the next launch.
+    private var runningPermissionMode: AgentPermissionMode?
     /// The head of the queue: the one request the pane presents.
     var pendingPermission: (id: Int, request: PermissionRequest)? {
         permissionQueue.first.map { ($0.id, $0.request) }
@@ -82,7 +98,12 @@ final class NativeWorkspaceSession {
     private(set) var questions: [(request: ConversationQuestionRequest, answer: ([String: String]?) -> Void)] = []
     /// The session's own mode, for a runtime that has modes; nil asks for everything else.
     var permissionMode: AgentPermissionMode? {
-        prepared.flatMap { $0.session.kind.supportsPermissionModes ? $0.session.permissionMode : nil }
+        if stream?.isRunning == true { return runningPermissionMode }
+        return prepared.flatMap { prepared in
+            guard prepared.session.kind.supportsPermissionModes else { return nil }
+            return NewChatDefaults.permissionMode(selected: prepared.session.permissionMode,
+                appDefault: prepared.appDefaultPermissionMode)
+        }
     }
     private var pendingRenderBytes = 0
     private var pendingRenderCount = 0
@@ -109,7 +130,10 @@ final class NativeWorkspaceSession {
     var rowsPrepared: Bool { !replaying && pendingRenderCount == 0 }
     // Rows are an immutable value snapshot; none of the worker's copies is mutated by the UI.
     private struct RowSnapshot: @unchecked Sendable { let rows: [ConversationTimeline.Row] }
-    var canSend: Bool { !stopped && !launching && !replaying && failure == nil && prepared != nil && (stream?.canSend ?? true) }
+    var canSend: Bool {
+        !stopped && !waitForHostedStop && !launching && !replaying && !loadingHistory
+            && failure == nil && prepared != nil && (stream?.canSend ?? true)
+    }
     /// Row presentation follows the provider process or its in-flight launch, not whether
     /// this reusable pane remains cached after the provider exits.
     var presentsActiveAgent: Bool {
@@ -121,6 +145,29 @@ final class NativeWorkspaceSession {
     var hasPendingOutcome: Bool {
         stream?.hasActiveTurn == true || backgroundTaskCount > 0
     }
+    var conversationUseAt: Date? { prepared?.session.lastUsedAt }
+    /// Already-owned facts only: retention must never open a transcript or build a pane.
+    func retentionCandidate(lastWarmUseAt: Date, isLocallyVisible: Bool)
+        -> SessionProcessRetentionCandidate? {
+        guard let prepared, !stopped else { return nil }
+        let process: SessionProcessState = launching || replaying || loadingHistory
+            || waitForHostedStop ? .starting
+            : stream?.isRunning == true ? .ready : .dormant
+        let turn: SessionTurnState = stream?.hasActiveTurn == true
+            ? .inFlight(.reported) : .none
+        let blocker: SessionRuntimeBlocker = pendingPermission != nil || !questions.isEmpty
+            ? .awaitingUser : .none
+        let runtime = SessionRuntimeSnapshot(
+            process: process, turn: turn,
+            continuation: backgroundTaskCount > 0 ? .delegated : .none,
+            blocker: blocker, activity: .idle, reportsOwnTurns: true)
+        return SessionProcessRetentionCandidate(
+            sessionID: id, lastWarmUseAt: lastWarmUseAt,
+            isResumable: prepared.session.resumeState.isResumable,
+            isHostBacked: rootProcessIdentifier != nil, runtime: runtime,
+            isLocallyVisible: isLocallyVisible, hasRemoteViewers: false,
+            hasPendingInput: !canSend, hasPendingCheckoutMove: prepared.session.pendingCheckoutMove != nil)
+    }
     var activity: NativeSessionActivity {
         guard !stopped, failure == nil else { return .idle }
         if pendingPermission != nil || !questions.isEmpty { return .awaitingUser }
@@ -129,13 +176,37 @@ final class NativeWorkspaceSession {
         return stream?.isRunning == true && backgroundTaskCount > 0
             ? .readyWithBackgroundWork : .idle
     }
+    /// The selected sidebar row uses the same beam view as macOS. Its facts come from the
+    /// already loaded session catalogue, so repainting a row never reads provider files.
+    var sidebarWorkload: AgentWorkload {
+        // The row's loading mark is useful during history replay, but macOS measures the beam
+        // only for a provider turn that is actually working.
+        guard activity == .working else { return .none }
+        guard let prepared else {
+            return AgentWorkload(workingCount: 1, anyAtTopEffort: false)
+        }
+        let catalogue = prepared.speedCatalogue
+        let option = catalogue.option(for: prepared.session.model ?? catalogue.defaultModel)
+        let inherited = catalogue.defaultEffort.flatMap { effort in
+            option?.supports(reasoningEffort: effort) == true ? effort : nil
+        }
+        let effectiveEffort = prepared.session.reasoningEffort ?? inherited
+            ?? option?.defaultReasoningLevel
+        let atTopEffort = option?.reasoningLevels.last?.effort == effectiveEffort
+            && effectiveEffort != nil
+        return AgentWorkload(workingCount: 1, anyAtTopEffort: atTopEffort)
+    }
     var rootProcessIdentifier: Int32? { stream?.rootProcessIdentifier }
-    var speedChoice: (title: String, selected: Bool?, enabled: Bool)? {
+    var sessionKind: AgentKind? { prepared?.session.kind }
+    var speedChoice: (title: String, symbolName: String, selected: Bool?, enabled: Bool)? {
         guard let prepared,
               prepared.speedCatalogue.supportsFastMode(kind: prepared.session.kind,
                                                         model: prepared.session.model) else { return nil }
-        return (prepared.speedCatalogue.speedTitle(selected: prepared.session.fastMode,
-                                                   kind: prepared.session.kind),
+        let chip = ConversationSpeedMenuContent.chip(
+            effective: LinuxGeneralSettings.effectiveSpeed(selected: prepared.session.fastMode,
+                kind: prepared.session.kind,
+                configured: prepared.speedCatalogue.inheritedFastMode))
+        return (chip.title, chip.symbolName,
                 prepared.session.fastMode, !stopped && !launching && !speedChangeInFlight
                     && !modelChangeInFlight && !effortChangeInFlight
                     && !modeChangeInFlight
@@ -202,9 +273,11 @@ final class NativeWorkspaceSession {
         let kind = prepared.session.kind
         guard kind.supportsPermissionModes else { return nil }
         let selected = prepared.session.permissionMode
-        let inherited = prepared.speedCatalogue.inheritedPermissionMode
+        let inherited = prepared.appDefaultPermissionMode
+            ?? prepared.speedCatalogue.inheritedPermissionMode
         let observed = stream?.isRunning == true ? observedMode : nil
-        let title = (selected ?? inherited ?? observed)?.displayName(for: kind) ?? "Agent's Setting"
+        let title = PermissionModeMenuContent.chipTitle(for: kind, selected: selected,
+            nameableMode: inherited ?? observed)
         return (title, !stopped && !launching && !replaying && !modeChangeInFlight
                 && !modelChangeInFlight && !effortChangeInFlight && !speedChangeInFlight)
     }
@@ -213,31 +286,21 @@ final class NativeWorkspaceSession {
         guard let prepared else { return [] }
         let kind = prepared.session.kind
         guard kind.supportsPermissionModes else { return [] }
-        let inherited = prepared.speedCatalogue.inheritedPermissionMode
+        let inherited = prepared.appDefaultPermissionMode
+            ?? prepared.speedCatalogue.inheritedPermissionMode
         let observed = stream?.isRunning == true ? observedMode : nil
         let lastUsed = inherited == nil ? observed ?? prepared.speedCatalogue.lastUsedPermissionMode : nil
         let selected = prepared.session.permissionMode
-        var rows: [NativeConfigurationChoice] = []
-        if inherited == nil {
-            rows.append(NativeConfigurationChoice(id: nil, title: "Use Agent's Setting",
-                detail: nil, selected: selected == nil))
+        let appliesOnRestart = !(stream?.acceptsConfigurationChange == true
+            && stream is PermissionModeSwitchableConversation)
+        let note = appliesOnRestart ? L10n.string("Applies the next time this chat starts.") : nil
+        return PermissionModeMenuContent.rows(for: kind, selected: selected,
+            governingMode: inherited, reportedMode: lastUsed, note: note).compactMap { entry in
+            guard case .item(let item) = entry else { return nil }
+            let mode = item.representedValue as? AgentPermissionMode
+            return NativeConfigurationChoice(id: mode?.rawValue, title: item.title,
+                detail: item.subtitle, selected: item.isSelected, enabled: item.isEnabled)
         }
-        for mode in AgentPermissionMode.allCases {
-            let isDefault = mode == inherited
-            let detail = [mode.menuDescription(for: kind),
-                mode.caveat(for: kind)].compactMap { $0 }.joined(separator: " ")
-            rows.append(NativeConfigurationChoice(id: isDefault ? nil : mode.rawValue,
-                title: mode.displayName(for: kind)
-                    + (isDefault ? "  (default)" : mode == lastUsed ? "  (last used)" : ""),
-                detail: detail,
-                selected: isDefault ? (selected == nil || selected == mode) : selected == mode))
-        }
-        if !(stream?.acceptsConfigurationChange == true && stream is PermissionModeSwitchableConversation) {
-            rows.append(NativeConfigurationChoice(id: nil,
-                title: "Applies the next time this chat starts.", detail: nil, selected: false,
-                enabled: false))
-        }
-        return rows
     }
 
     var effortChoices: [NativeConfigurationChoice] {
@@ -259,13 +322,16 @@ final class NativeWorkspaceSession {
     }
 
     init(store: String, socket: String, id: SessionID, shell: String,
-         executables: [AgentKind: String], initialPrompt: String? = nil) {
+         executables: [AgentKind: String], initialPrompt: String? = nil,
+         restoreAtStartup: Bool = false, waitForHostedStop: Bool = false) {
         self.store = store
         self.socket = socket
         self.shell = shell
         self.executables = executables
         self.id = id
         self.initialPrompt = initialPrompt
+        self.restoreAtStartup = restoreAtStartup
+        self.waitForHostedStop = waitForHostedStop
         worker = DispatchQueue(label: "codes.threading.linux.native-workspace.\(id.uuidString)", qos: .userInitiated)
         timeline = ConversationTimeline(sessionID: id, chartDecoder: { _, _ in nil })
         PermissionBroker.register(self)
@@ -285,6 +351,8 @@ final class NativeWorkspaceSession {
             observedMode = nil
             observedFileLength = prepared.observedTranscriptStartingLength
             self.prepared = retained
+            attachmentScanner = LinuxNativeAttachmentScanner(
+                sessionID: id, kind: prepared.session.kind)
             for event in prepared.events {
                 retainContextReading(from: event)
                 _ = timeline.apply(event)
@@ -307,13 +375,15 @@ final class NativeWorkspaceSession {
                         self.onRow?(Int.max, .notice("Earlier transcript content was truncated.", kind: .muted), nil)
                     }
                     self.replaying = false
-                    self.status = "Ready"
+                    self.status = self.waitForHostedStop ? "Waiting for prior agent…" : "Ready"
                     self.changed()
                     if let prompt = self.initialPrompt, !prepared.session.hasLaunched {
                         self.initialPrompt = nil
                         _ = self.send(prompt)
                     }
-                    if let prepared = self.prepared, prepared.replaysOverProtocol,
+                    if let prepared = self.prepared,
+                       !self.waitForHostedStop,
+                       (self.restoreAtStartup || prepared.replaysOverProtocol),
                        prepared.session.hasLaunched, prepared.session.resumeState.isResumable {
                         self.launch(prompt: nil)
                     }
@@ -323,16 +393,55 @@ final class NativeWorkspaceSession {
         }
     }
 
+    /// The daemon's pipe child has ended. Resume from the provider transcript through the
+    /// normal saved-session launch; a fresh client cannot rejoin a half-finished wire stream.
+    func resumeAfterHostedStop() {
+        guard waitForHostedStop, !stopped else { return }
+        waitForHostedStop = false
+        restoreAtStartup = true
+        guard !replaying, let prepared,
+              prepared.session.hasLaunched, prepared.session.resumeState.isResumable else {
+            changed()
+            return
+        }
+        launch(prompt: nil)
+    }
+
+    /// A background runtime has no transcript view. Build its retained rows only when a pane
+    /// actually attaches; the worker prepares Markdown and the UI receives ordered row values.
+    func replayCurrentRows() {
+        let snapshot = RowSnapshot(rows: timeline.rows)
+        let truncated = prepared?.truncated == true
+        worker.async { [weak self] in
+            for (index, row) in snapshot.rows.enumerated() {
+                let pages = Self.markdownPages(for: row)
+                let single = RowSnapshot(rows: [row])
+                NativeConversationDelivery.callbacks.receive {
+                    guard let self, !self.stopped else { return }
+                    self.onRow?(index, single.rows[0], pages)
+                }
+            }
+            if truncated {
+                NativeConversationDelivery.callbacks.receive { [weak self] in
+                    self?.onRow?(Int.max,
+                        .notice("Earlier transcript content was truncated.", kind: .muted), nil)
+                }
+            }
+        }
+    }
+
     @discardableResult
     func send(_ text: String) -> Bool {
         guard canSend, prepared != nil, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               text.utf8.prefix(65_537).count <= 65_536 else { return false }
         if stream == nil {
+            noteWork(started: true)
             apply(.userMessage(text))
             launch(prompt: text)
             return true
         }
         guard stream?.send(text) == true else { changed(); return false }
+        noteWork(started: true)
         apply(.userMessage(text))
         status = "Working"
         changed()
@@ -389,6 +498,10 @@ final class NativeWorkspaceSession {
             launchRecordedAt = started.recordedAt
             let stream = makeStream(prepared, child: started.child)
             backgroundTaskCount = 0
+            runningPermissionMode = prepared.session.kind.supportsPermissionModes
+                ? NewChatDefaults.permissionMode(selected: prepared.session.permissionMode,
+                    appDefault: prepared.appDefaultPermissionMode)
+                : nil
             self.stream = stream
             stream.onEvent = { [weak self] in self?.apply($0) }
             stream.onInteractionAvailabilityChange = { [weak self] in self?.interactionChanged() }
@@ -404,6 +517,7 @@ final class NativeWorkspaceSession {
                 guard let self else { return }
                 self.status = "Agent exited (\(status))"
                 self.observedMode = nil
+                self.runningPermissionMode = nil
                 self.observedScanNeeded = false
                 self.settlePermissions(reason: "Denied — the agent exited.")
                 self.retireQuestions()
@@ -411,7 +525,9 @@ final class NativeWorkspaceSession {
                 self.persist { session in session.lastExitCode = status; session.lastActiveAt = Date() }
             }
             stream.start()
-            if let fastMode = prepared.session.fastMode,
+            if let fastMode = ComposerSpeedLaunch.launchOverride(
+                selected: prepared.session.fastMode, kind: prepared.session.kind,
+                model: prepared.session.model, catalogue: prepared.speedCatalogue),
                let claude = stream as? ClaudeStreamSession {
                 claude.setFastMode(fastMode) { [weak self] result in
                     if case .failure(let error) = result {
@@ -426,7 +542,7 @@ final class NativeWorkspaceSession {
                 interactionChanged()
                 return
             }
-            if stream.send(prompt) { status = "Working"; changed() }
+            if stream.send(prompt) { noteWork(started: true); status = "Working"; changed() }
             else { report("The agent refused the opening message.") }
         }
     }
@@ -434,7 +550,10 @@ final class NativeWorkspaceSession {
     /// A provider replaying history accepts a turn once the replay is over; that is when the
     /// conversation is ready.
     private func interactionChanged() {
-        if loadingHistory, stream?.canSend == true {
+        // ACP and Codex accept a queued prompt before their resume handshake finishes. Their
+        // canSend flag alone does not prove an old session has actually been loaded.
+        let waitsForSessionHandshake = stream is ACPStreamSession || stream is CodexStreamSession
+        if loadingHistory, !waitsForSessionHandshake, stream?.canSend == true {
             loadingHistory = false
             status = "Ready"
         }
@@ -457,7 +576,9 @@ final class NativeWorkspaceSession {
               model == nil || prepared.speedCatalogue.option(for: model) != nil,
               model != prepared.session.model else { return }
         let selectedOption = prepared.speedCatalogue.option(for: model ?? prepared.speedCatalogue.defaultModel)
-        let wasFast = prepared.session.fastMode ?? prepared.speedCatalogue.inheritedFastMode ?? false
+        let wasFast = LinuxGeneralSettings.effectiveSpeed(selected: prepared.session.fastMode,
+            kind: prepared.session.kind,
+            configured: prepared.speedCatalogue.inheritedFastMode) ?? false
         let resetFast = wasFast && !prepared.speedCatalogue.supportsFastMode(
             kind: prepared.session.kind, model: model)
         let resetEffort = prepared.session.reasoningEffort.map { effort in
@@ -563,7 +684,10 @@ final class NativeWorkspaceSession {
         }
         guard let resolved = mode else {
             persist(false)
-            appendLocalNotice("This chat keeps the permission mode it is running with. The agent's own setting applies the next time it starts.", kind: .muted)
+            let note = prepared.appDefaultPermissionMode == nil
+                ? "This chat keeps the permission mode it is running with. The agent's own setting applies the next time it starts."
+                : "This chat keeps the permission mode it is running with. The default in Settings ▸ Chats applies the next time it starts."
+            appendLocalNotice(note, kind: .muted)
             return
         }
         switcher.setPermissionMode(resolved) { [weak self] result in
@@ -571,6 +695,7 @@ final class NativeWorkspaceSession {
             switch result {
             case .success:
                 self.observedMode = resolved
+                self.runningPermissionMode = resolved
                 self.requestObservedModeScan()
                 persist(true)
             case .failure(let error):
@@ -640,8 +765,10 @@ final class NativeWorkspaceSession {
         guard choice != prepared.session.fastMode else { return }
         speedChangeInFlight = true
         changed()
-        if let choice, let claude = stream as? FastModeConversation {
-            claude.setFastMode(choice) { [weak self] result in
+        let liveSpeed = LinuxGeneralSettings.startupSpeed(for: prepared.session.kind)
+            .resolve(selected: choice, configured: nil)
+        if let liveSpeed, let claude = stream as? FastModeConversation {
+            claude.setFastMode(liveSpeed) { [weak self] result in
                 guard let self else { return }
                 switch result {
                 case .success: self.saveSpeed(choice)
@@ -691,14 +818,22 @@ final class NativeWorkspaceSession {
                     }
                     else {
                         self.prepared?.session.fastMode = choice
-                        if let choice, self.prepared?.session.kind == .codex,
+                        if self.prepared?.session.kind == .codex,
                            let current = self.prepared {
-                            self.prepared?.fastServiceTier = ComposerSpeedLaunch.codexServiceTier(
-                                choice, model: current.session.model,
-                                catalogue: current.speedCatalogue)
+                            let launchSpeed = ComposerSpeedLaunch.launchOverride(
+                                selected: choice, kind: current.session.kind,
+                                model: current.session.model, catalogue: current.speedCatalogue)
+                            // Provider inheritance has no live reset request. Keep the tier
+                            // already running until relaunch when General also defers to it.
+                            if let launchSpeed {
+                                self.prepared?.fastServiceTier = ComposerSpeedLaunch.codexServiceTier(
+                                    launchSpeed, model: current.session.model,
+                                    catalogue: current.speedCatalogue)
+                            }
                         }
                     }
-                    if choice == nil, hasStream {
+                    if choice == nil, hasStream,
+                       LinuxGeneralSettings.startupSpeed(for: prepared.session.kind) == .agentSetting {
                         self.appendLocalNotice("This chat keeps its current speed. The agent's setting applies the next time it starts.", kind: .muted)
                     } else { self.changed() }
                 }
@@ -717,15 +852,19 @@ final class NativeWorkspaceSession {
         stopped = true
         stream?.terminate()
         stream = nil
+        runningPermissionMode = nil
         endPermissions()
         changed()
     }
 
-    func closeForQuit(by deadline: Date) {
+    func closeForQuit(by deadline: Date, idleExpiresAt: Date? = nil) {
         guard !stopped else { return }
-        if stream?.detachFromBackgroundHost(by: deadline) != true { stream?.terminate() }
+        if stream?.detachFromBackgroundHost(by: deadline, idleExpiresAt: idleExpiresAt) != true {
+            stream?.terminate()
+        }
         stopped = true
         stream = nil
+        runningPermissionMode = nil
         endPermissions()
     }
 
@@ -799,6 +938,11 @@ final class NativeWorkspaceSession {
     }
 
     private func questionsChanged() {
+        let current = Set(questions.map(\.request.id))
+        if !current.subtracting(observedQuestionIDs).isEmpty {
+            onSnoozeWakeReason?(.inputRequested)
+        }
+        observedQuestionIDs = current
         onQuestionsChange?()
         changed()
     }
@@ -811,6 +955,11 @@ final class NativeWorkspaceSession {
     }
 
     private func permissionChanged() {
+        let current = pendingPermission?.id
+        if current != nil && current != observedPermissionID {
+            onSnoozeWakeReason?(.approvalRequested)
+        }
+        observedPermissionID = current
         onPermissionChange?()
         changed()
     }
@@ -892,6 +1041,7 @@ final class NativeWorkspaceSession {
                 self.observedFileLength = length
                 if self.observedMode != mode {
                     self.observedMode = mode
+                    if let mode { self.runningPermissionMode = mode }
                     self.changed()
                 }
                 if self.observedScanNeeded { self.requestObservedModeScan() }
@@ -905,10 +1055,18 @@ final class NativeWorkspaceSession {
     }
 
     private func apply(_ event: StreamEvent) {
+        if case .initialised = event, loadingHistory {
+            loadingHistory = false
+            status = "Ready"
+        }
         if case .backgroundWork(let inFlight) = event {
             backgroundTaskCount = inFlight.count
         }
         retainContextReading(from: event)
+        if !replaying, !loadingHistory, let prepared {
+            let root = URL(fileURLWithPath: prepared.directory, isDirectory: true)
+            attachmentScanner?.note(event, projectRoot: root)
+        }
         let changes = timeline.apply(event)
         for change in changes {
             switch change {
@@ -921,7 +1079,9 @@ final class NativeWorkspaceSession {
                 guard !loadingHistory else { continue }
                 completedTurns += 1
                 status = "Ready"
+                noteWork(started: false)
             case .adoptedSessionID(let id):
+                self.prepared?.session.resumeState = .resumable(id)
                 persist { $0.resumeState = .resumable(id) }
             default: break
             }
@@ -967,7 +1127,26 @@ final class NativeWorkspaceSession {
         }
     }
 
-    private func changed() { revision += 1; onChange?() }
+    private func changed() {
+        let pendingOutcome = hasPendingOutcome
+        if completedTurns > lastCompletedTurns { completionAwaitingOutcome = true }
+        if lastPendingOutcome == true, !pendingOutcome {
+            if completionAwaitingOutcome { onSnoozeWakeReason?(.turnCompleted) }
+            else if failure != nil { onSnoozeWakeReason?(.failed) }
+            completionAwaitingOutcome = false
+        }
+        lastPendingOutcome = pendingOutcome
+        lastCompletedTurns = completedTurns
+        revision += 1
+        let retentionFacts = retentionCandidate(
+            lastWarmUseAt: prepared?.session.lastUsedAt ?? .distantPast,
+            isLocallyVisible: false)
+        if retentionFacts != lastRetentionFacts {
+            lastRetentionFacts = retentionFacts
+            onRetentionChange?()
+        }
+        onChange?()
+    }
     private func report(_ message: String) { failure = message; status = message; changed() }
 
     private nonisolated static func markdownPages(for row: ConversationTimeline.Row) -> [[String]]? {
@@ -1000,6 +1179,14 @@ final class NativeWorkspaceSession {
                 let message = "Could not save conversation state: \(error)"
                 NativeConversationDelivery.callbacks.receive { self?.report(message) }
             }
+        }
+    }
+
+    private func noteWork(started: Bool, at date: Date = Date()) {
+        guard prepared != nil else { return }
+        prepared?.session.noteWork(at: date, startsTurn: started)
+        persist { session in
+            session.noteWork(at: date, startsTurn: started)
         }
     }
 
@@ -1058,17 +1245,22 @@ final class NativeWorkspaceSession {
         let fastServiceTier: String?
         let speedCatalogue: ComposerModelCatalog
         var environment: [String: String] = [:]
-        let mode = session.kind.supportsPermissionModes ? session.permissionMode : nil
+        let appDefaultPermissionMode = LinuxGeneralSettings.defaultPermissionMode
+        let mode = session.kind.supportsPermissionModes
+            ? NewChatDefaults.permissionMode(selected: session.permissionMode,
+                appDefault: appDefaultPermissionMode) : nil
         switch session.kind {
         case .claude:
             speedCatalogue = ComposerModelCatalog.read(provider: .claude,
                 directory: URL(fileURLWithPath: accountPath, isDirectory: true),
                 projectDirectory: directory.path)
             var flags = ClaudeLaunchCommand.streamProtocolFlags()
+            let launchSpeed = ComposerSpeedLaunch.launchOverride(selected: session.fastMode,
+                kind: session.kind, model: session.model, catalogue: speedCatalogue)
             flags.append(contentsOf: try ComposerSpeedLaunch.claudeFlags(
-                session.fastMode, store: store, id: session.id))
+                launchSpeed, store: store, id: session.id))
             let pair = ClaudeLaunchCommand.terminalPair(for: session, executable: executable,
-                permissionMode: session.permissionMode, prompt: nil,
+                permissionMode: mode, prompt: nil,
                 integrationFlags: flags)
             agentCommand = session.hasLaunched ? pair.resume : pair.fresh
             resumeState = .resumable(pair.transcriptID)
@@ -1078,13 +1270,15 @@ final class NativeWorkspaceSession {
                 directory: URL(fileURLWithPath: accountPath, isDirectory: true),
                 projectDirectory: directory.path)
             speedCatalogue = catalogue
+            let launchSpeed = ComposerSpeedLaunch.launchOverride(selected: session.fastMode,
+                kind: session.kind, model: session.model, catalogue: catalogue)
             agentCommand = CodexLaunchCommand.appServer(executable: executable, model: session.model,
                 conversationOverrides: ComposerSpeedLaunch.codexOverrides(
-                    session.fastMode, model: session.model, catalogue: catalogue),
-                permissionMode: session.permissionMode)
+                    launchSpeed, model: session.model, catalogue: catalogue),
+                permissionMode: mode)
             resumeState = session.resumeState
             fastServiceTier = ComposerSpeedLaunch.codexServiceTier(
-                session.fastMode, model: session.model, catalogue: catalogue)
+                launchSpeed, model: session.model, catalogue: catalogue)
         case .grok:
             speedCatalogue = .empty
             agentCommand = ACPLaunchCommand.grok(executable: executable, model: session.model, permissionMode: mode)
@@ -1118,7 +1312,9 @@ final class NativeWorkspaceSession {
             }
             : nil
         return Prepared(session: session, projectID: record.project.id, directory: directory.path,
-            plan: plan, fastServiceTier: fastServiceTier, speedCatalogue: speedCatalogue,
+            plan: plan, fastServiceTier: fastServiceTier,
+            appDefaultPermissionMode: appDefaultPermissionMode,
+            speedCatalogue: speedCatalogue,
             hiddenModelIDs: hiddenModelIDs,
             observedTranscriptURL: observedTranscriptURL,
             observedTranscriptStartingLength: observedTranscriptURL.map { fileLength(at: $0) } ?? 0,

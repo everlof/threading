@@ -1596,13 +1596,10 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     static func closeConfirmation(for session: AgentSession) -> ConfirmationRequest {
         ConfirmationRequest(
             prompt: .closeRunningSession,
-            title: L10n.format("Close “%@”?", session.displayTitle),
-            message: session.kind.supportsResume
-                ? L10n.string(
-                    "The agent will stop. The session stays in the sidebar and can be resumed."
-                )
-                : L10n.string("The shell will stop. The session stays in the sidebar."),
-            confirmTitle: L10n.string("Close Session")
+            title: CloseRunningSessionConfirmationCopy.title(for: session.displayTitle),
+            message: CloseRunningSessionConfirmationCopy.message(
+                supportsResume: session.kind.supportsResume),
+            confirmTitle: CloseRunningSessionConfirmationCopy.confirmTitle
         )
     }
 
@@ -1960,7 +1957,7 @@ enum SessionReportBackRequest {
 /// the answer. Blank lines keep independently-authored parts readable, and an empty field is
 /// simply absent rather than a blank paragraph. The caller derives the sidebar title from the
 /// task alone: reusable text should not make every chat start with the same name.
-enum NewChatOpeningMessage {
+extension NewChatOpeningMessage {
     /// The standing text from Settings for a chat in `project`, composed around `prompt`.
     ///
     /// **Not for a project that runs on a remote host.** That text is written for sessions that
@@ -1978,13 +1975,5 @@ enum NewChatOpeningMessage {
             prefix: settings.newChatOpeningPrefix,
             suffix: settings.newChatOpeningSuffix
         )
-    }
-
-    static func compose(prompt: String?, prefix: String, suffix: String) -> String? {
-        let parts = [prefix, prompt, suffix]
-            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        guard !parts.isEmpty else { return nil }
-        return parts.joined(separator: "\n\n")
     }
 }

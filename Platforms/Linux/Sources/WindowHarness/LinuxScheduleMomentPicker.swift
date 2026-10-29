@@ -16,7 +16,7 @@ enum LinuxScheduleMomentPicker {
         let view = ScheduleMomentPickerView(
             title: L10n.string("Snooze session"),
             note: ScheduleMomentPickerStrings.note(
-                L10n.string("The session keeps running while snoozed."), locale: .current),
+                ScheduleMomentPickerStrings.sessionSnoozeDetail, locale: .current),
             confirmTitle: L10n.string("Snooze"))
         view.appearance = LinuxTheme.appearance
         let size = view.frame.size

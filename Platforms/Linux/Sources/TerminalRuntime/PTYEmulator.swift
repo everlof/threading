@@ -243,6 +243,14 @@ final class PTYEmulator: TerminalDelegate {
                             cursorRow: terminal.buffer.y, title: title, atLiveEnd: atLiveEnd)
         }
     }
+
+    func recentLogicalBufferText(maximumUTF8Bytes: Int, sinceAbsoluteRow: Int) -> Terminal.RecentBufferText {
+        terminal.recentLogicalBufferText(
+            maximumUTF8Bytes: maximumUTF8Bytes,
+            sinceAbsoluteRow: sinceAbsoluteRow,
+            kind: .active
+        )
+    }
     private func color(_ value: Attribute.Color, foreground: Bool) -> UInt32 {
         let resolved: Color
         switch value {

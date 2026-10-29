@@ -137,31 +137,3 @@ enum AttachmentComparisonDrop {
         return urls.filter { AttachmentReferenceDetector.kind(for: $0) == .image }
     }
 }
-
-// MARK: - When it arrived
-
-/// How this pane says *when*, in one place because two surfaces say it: a row's caption and the
-/// menu that names the same file from somewhere else.
-///
-/// Compact but complete on purpose. A time without its calendar date makes attachments from
-/// separate days look contemporaneous, while a date without its time loses the ordering detail
-/// this chronology exists to provide. The numeric date follows the user's locale and always keeps
-/// its year, so the value stays unambiguous across day and year boundaries.
-@MainActor
-enum AttachmentMoment {
-
-    static func description(
-        of date: Date,
-        calendar: Calendar = .autoupdatingCurrent,
-        locale: Locale = .autoupdatingCurrent
-    ) -> String {
-        let format = Date.FormatStyle(
-            locale: locale,
-            calendar: calendar,
-            timeZone: calendar.timeZone
-        )
-        return date.formatted(
-            format.year().month(.twoDigits).day(.twoDigits).hour().minute()
-        )
-    }
-}

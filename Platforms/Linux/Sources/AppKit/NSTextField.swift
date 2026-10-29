@@ -69,7 +69,7 @@ open class NSTextField: NSView {
             selectedTextRange = NSRange(location: 0, length: 0)
             selectionAnchor = nil
             setAccessibilityRole(isEditable ? .textField : .staticText)
-            setAccessibilityLabel(newValue)
+            if !isEditable { setAccessibilityLabel(newValue) }
             let prefix = Array(newValue.utf8.prefix(Self.maximumUTF8Bytes + 1))
             if prefix.count <= Self.maximumUTF8Bytes {
                 preparedUTF8 = prefix
@@ -135,6 +135,7 @@ open class NSTextField: NSView {
         window?.invalidateCursorRects(for: self)
         needsDisplay = true
     }
+    open override func accessibilityValue() -> Any? { stringValue }
     open weak var delegate: NSTextFieldDelegate?
     open func textDidChange(_ notification: Notification) {}
     open func textDidEndEditing(_ notification: Notification) {}

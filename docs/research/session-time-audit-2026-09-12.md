@@ -104,7 +104,7 @@ through the real outline controller without a test-only reload.
 
 ### 6. Restore-running-at-quit uses a different clock from restore-recent — medium priority
 
-[`StartupSessionRelaunch.policyPlan`](../../Sources/Threading/UI/Windows/StartupSessionRelaunch.swift)
+[`StartupSessionRelaunch.policyPlan`](../../Sources/Threading/Core/Session/StartupSessionRelaunchPlan.swift)
 sorts `.runningAtLastQuit` candidates by `lastActiveAt`. Its `.recentlyUsed` branch correctly
 sorts by `lastUsedAt`.
 

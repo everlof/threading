@@ -1,4 +1,8 @@
+#if os(Linux)
+import Crypto
+#else
 import CryptoKit
+#endif
 import Foundation
 import ThreadingExtensionKit
 
@@ -11,42 +15,9 @@ import ThreadingExtensionKit
 /// authoritative, so replacing an image or PDF at the same path updates every preview without
 /// growing a second cache. A file from anywhere else is copied into the store's own directory
 /// instead — see `SessionAttachmentStore` for why that exception exists and where it stops.
-struct SessionAttachment: Equatable, Identifiable {
+struct SessionAttachment: Equatable, Identifiable, Sendable {
 
-    enum Kind: String, Codable, Sendable {
-        case image
-        case pdf
-        case html
-        case archive
-        case document
-        /// Diagram *source* — Graphviz dot, Mermaid. Text, not pixels: the pane previews the
-        /// source itself, since rendering would take a diagram engine the app does not carry.
-        case diagram
-        /// A movie — a screen recording, a simulator capture, a clip an agent produced.
-        ///
-        /// A kind of its own rather than a `.media` registration, because the host *does* carry
-        /// this engine: `VideoDocumentRenderer` plays it with the platform's own audiovisual
-        /// stack. `.media` means "no native preview exists for this"; a movie has one, and filing
-        /// it under the fallback would hide a playable file behind an extension that may never be
-        /// installed.
-        case video
-        /// A document Threading has no *native* preview for: a format an extension registered, or
-        /// an ambiguous one the host's own probe recognized — a bare JSON Lottie is both a `.json`
-        /// and an animation, and only the bytes can say which.
-        ///
-        /// Its native body is a bounded fallback rather than a renderer: UTF-8 source under the
-        /// source-preview ceiling, or an explicit "no preview extension is available". Removing
-        /// the last contribution never closes the built-in surface or leaves blank chrome.
-        case media
-        /// A unified diff: a `display_compare_files` text comparison frozen when it was shown, or
-        /// a `.diff`/`.patch` file handed over deliberately. Drawn as a diff on both the Mac and
-        /// the phone, since a comparison is the one panel surface a paired phone could not see.
-        case diff
-        /// Two of the session's pictures held against each other. The file is a
-        /// `RemoteImageComparisonDTO` naming both rows; the pair is also the row's source key,
-        /// so `comparedAttachmentIDs` answers without reading it.
-        case comparison
-    }
+    typealias Kind = SessionAttachmentKind
 
     /// Which side of the conversation put the file in front of the other.
     ///
@@ -55,7 +26,7 @@ struct SessionAttachment: Equatable, Identifiable {
     /// typed. Everything discovered by scanning is therefore `agent` — the session surfaced it —
     /// and `user` is reserved for a deliberate handoff from the composer, which is the thing
     /// someone means when they ask where the picture they sent went.
-    enum Origin: String, Codable {
+    enum Origin: String, Codable, Sendable {
         case agent
         case user
     }
@@ -265,44 +236,23 @@ final class SessionAttachmentStore {
         let workerNanoseconds: UInt64
     }
 
-    /// Hosted tests exercise the shared store; the user's real database is not theirs to write.
-    // Replaceable for hosted shell fixtures that supply a deterministic clock and scratch custody.
-    static var shared: SessionAttachmentStore = {
-        guard NSClassFromString("XCTestCase") == nil else {
-            // The user's own database and attachment directory are not a test's to write, but
-            // *refusing custody* is not the same as not writing: a store with nowhere to copy to
-            // silently drops every declared file from outside the checkout, so a hosted test
-            // would exercise a store that behaves like neither of the two real ones. Scratch
-            // custody under `$TMPDIR` keeps both halves — the app's data untouched, the code
-            // path real. The scope is read from the same setting for the same reason.
-            let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(
-                "ThreadingTestAttachments/\(ProcessInfo.processInfo.processIdentifier)",
-                isDirectory: true
-            )
-            return SessionAttachmentStore(
-                copiesDirectory: { scratch },
-                referenceRoot: { sessionID in
-                    ProjectStore.shared.workingDirectory(forSessionID: sessionID).map {
-                        URL(fileURLWithPath: $0, isDirectory: true)
-                    }
-                },
-                allowsFilesOutsideProject: { AppSettings.shared.includesAttachmentsOutsideProject }
-            )
+    private struct OutsideProjectStaging: Sendable {
+        let urls: [URL]
+        let sessionID: SessionID
+        let root: URL
+        let context: AttachmentReferenceContext?
+        let referencedAt: Date
+        let copyFile: @Sendable (URL, URL) throws -> Void
+
+        nonisolated func stage() -> StagedCopyBatch {
+            SessionAttachmentStore.stageScannedCopies(urls, in: root, copyFile: copyFile)
         }
-        return SessionAttachmentStore(
-            loadPayload: { StateManager.shared.loadAttachmentsPayload(for: $0) },
-            savePayload: { StateManager.shared.saveAttachmentsPayload($0, for: $1) },
-            retainPersisted: { StateManager.shared.retainAttachments(sessionIDs: $0) },
-            removePersisted: { StateManager.shared.deleteAttachments(for: $0) },
-            copiesDirectory: { StateManager.shared.attachmentCopiesDirectory },
-            referenceRoot: { sessionID in
-                ProjectStore.shared.workingDirectory(forSessionID: sessionID).map {
-                    URL(fileURLWithPath: $0, isDirectory: true)
-                }
-            },
-            allowsFilesOutsideProject: { AppSettings.shared.includesAttachmentsOutsideProject }
-        )
-    }()
+    }
+
+    // Replaceable for hosted shell fixtures that supply a deterministic clock and scratch custody.
+    static var shared: SessionAttachmentStore = makePlatformDefault()
+    private nonisolated static let synchronousHostCustodyWorker = DispatchQueue(
+        label: "threading.attachments.synchronous-host-custody", qos: .utility)
 
     private var attachmentsBySession: [SessionID: [SessionAttachment]] = [:]
     private var withheldBySession: [SessionID: [WithheldAttachmentReference]] = [:]
@@ -311,6 +261,7 @@ final class SessionAttachmentStore {
     private let now: () -> Date
     private let loadPayload: ((SessionID) -> String?)?
     private let savePayload: ((String, SessionID) -> Void)?
+    private let persistPreparedRows: (@Sendable ([SessionAttachment], SessionID) -> Void)?
     private let retainPersisted: ((Set<SessionID>) -> Void)?
     private let removePersisted: ((SessionID) -> Void)?
     private let stageCopy: @Sendable (URL, URL) throws -> Void
@@ -336,6 +287,7 @@ final class SessionAttachmentStore {
         now: @escaping () -> Date = Date.init,
         loadPayload: ((SessionID) -> String?)? = nil,
         savePayload: ((String, SessionID) -> Void)? = nil,
+        persistPreparedRows: (@Sendable ([SessionAttachment], SessionID) -> Void)? = nil,
         retainPersisted: ((Set<SessionID>) -> Void)? = nil,
         removePersisted: ((SessionID) -> Void)? = nil,
         copiesDirectory: (() -> URL)? = nil,
@@ -349,6 +301,7 @@ final class SessionAttachmentStore {
         self.now = now
         self.loadPayload = loadPayload
         self.savePayload = savePayload
+        self.persistPreparedRows = persistPreparedRows
         self.retainPersisted = retainPersisted
         self.removePersisted = removePersisted
         self.copiesDirectory = copiesDirectory
@@ -468,6 +421,67 @@ final class SessionAttachmentStore {
         )
     }
 
+    /// The same scanned door for a host whose UI actor is driven by a synchronous event loop.
+    /// Its worker returns through the host's receipt mailbox, so custody never waits for a
+    /// suspended main-actor task that the loop cannot resume.
+    func recordPreparedScanned(
+        _ insideRows: [SessionAttachment],
+        outsideProject: [URL],
+        sessionID: SessionID,
+        context: AttachmentReferenceContext = .main,
+        delivery: ConversationCallbackDelivery,
+        shouldAdmit: @escaping @MainActor @Sendable () -> Bool = { true },
+        completion: @escaping @MainActor @Sendable () -> Void
+    ) {
+        guard shouldAdmit() else { completion(); return }
+        _ = admitPreparedScanned(insideRows, for: sessionID)
+        let started = DispatchTime.now().uptimeNanoseconds
+        guard let request = prepareOutsideProjectStaging(
+            outsideProject, sessionID: sessionID, context: context,
+            shouldAdmit: shouldAdmit
+        ) else { completion(); return }
+        let firstMainNanoseconds = DispatchTime.now().uptimeNanoseconds - started
+        Self.synchronousHostCustodyWorker.async { [self] in
+            let staged = request.stage()
+            delivery.receive { [self] in
+                _ = self.finishOutsideProjectStaging(
+                    request, staged: staged, shouldAdmit: shouldAdmit,
+                    cancelled: false, firstMainNanoseconds: firstMainNanoseconds)
+                completion()
+            }
+        }
+    }
+
+    /// Widens already refused paths on a synchronous UI host. Only the copied bytes run on the
+    /// worker; the scope is checked again before a row can be published.
+    func admitWithheldFilesOutsideProject(
+        for sessionID: SessionID,
+        delivery: ConversationCallbackDelivery,
+        shouldAdmit: @escaping @MainActor @Sendable () -> Bool = { true },
+        completion: @escaping @MainActor @Sendable () -> Void = {}
+    ) {
+        guard allowsFilesOutsideProject(),
+              let withheld = withheldBySession[sessionID], !withheld.isEmpty else {
+            completion()
+            return
+        }
+        let urls = withheld.map { URL(fileURLWithPath: $0.path) }
+        let started = DispatchTime.now().uptimeNanoseconds
+        guard let request = prepareOutsideProjectStaging(
+            urls, sessionID: sessionID, context: nil, shouldAdmit: shouldAdmit
+        ) else { completion(); return }
+        let firstMainNanoseconds = DispatchTime.now().uptimeNanoseconds - started
+        Self.synchronousHostCustodyWorker.async { [self] in
+            let staged = request.stage()
+            delivery.receive { [self] in
+                _ = self.finishOutsideProjectStaging(
+                    request, staged: staged, shouldAdmit: shouldAdmit,
+                    cancelled: false, firstMainNanoseconds: firstMainNanoseconds)
+                completion()
+            }
+        }
+    }
+
     /// The worker-owned half shared by live scans and the pane's explicit scope widening.
     private func stageAndAdmitOutsideProject(
         _ outsideProject: [URL],
@@ -476,82 +490,84 @@ final class SessionAttachmentStore {
         shouldAdmit: @escaping @MainActor () -> Bool
     ) async -> ScannedRecordResult {
         let firstMainStarted = DispatchTime.now().uptimeNanoseconds
-
-        guard shouldAdmit(), !outsideProject.isEmpty else {
-            return ScannedRecordResult(
-                attachments: [],
-                custodyWorkerNanoseconds: 0,
-                mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
-            )
-        }
-        if let context { attributeExistingReferences(outsideProject, for: sessionID, context: context) }
-        guard allowsFilesOutsideProject() else {
-            if let context { noteWithheld(outsideProject, for: sessionID, context: context) }
-            return ScannedRecordResult(
-                attachments: [],
-                custodyWorkerNanoseconds: 0,
-                mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
-            )
-        }
-
-        loadIfNeeded(sessionID)
-        let timestamp = now()
-        let admissible = Array(
-            outsideProject.suffix(SessionAttachmentDefaults.maximumPerSession)
-        )
-        guard let root = copiesRoot(for: sessionID) else {
-            removeWithheldAttempts(admissible, for: sessionID)
-            return ScannedRecordResult(
-                attachments: [],
-                custodyWorkerNanoseconds: 0,
-                mainActorNanoseconds: DispatchTime.now().uptimeNanoseconds - firstMainStarted
-            )
-        }
-        let firstMainEnded = DispatchTime.now().uptimeNanoseconds
-
-        let stageCopy = stageCopy
-        let stagingTask = Task.detached(priority: .userInitiated) {
-            Self.stageScannedCopies(admissible, in: root, copyFile: stageCopy)
-        }
+        guard let request = prepareOutsideProjectStaging(
+            outsideProject, sessionID: sessionID, context: context,
+            shouldAdmit: shouldAdmit
+        ) else { return .empty }
+        let firstMainNanoseconds = DispatchTime.now().uptimeNanoseconds - firstMainStarted
+        let stagingTask = Task.detached(priority: .userInitiated) { request.stage() }
         let staged = await withTaskCancellationHandler {
             await stagingTask.value
         } onCancel: {
             stagingTask.cancel()
         }
+        return finishOutsideProjectStaging(
+            request, staged: staged, shouldAdmit: shouldAdmit,
+            cancelled: Task.isCancelled, firstMainNanoseconds: firstMainNanoseconds)
+    }
 
+    private func prepareOutsideProjectStaging(
+        _ urls: [URL], sessionID: SessionID,
+        context: AttachmentReferenceContext?,
+        shouldAdmit: @MainActor () -> Bool
+    ) -> OutsideProjectStaging? {
+        guard shouldAdmit(), !urls.isEmpty else { return nil }
+        if let context { attributeExistingReferences(urls, for: sessionID, context: context) }
+        guard allowsFilesOutsideProject() else {
+            if let context { noteWithheld(urls, for: sessionID, context: context) }
+            return nil
+        }
+        loadIfNeeded(sessionID)
+        let admissible = Array(urls.suffix(SessionAttachmentDefaults.maximumPerSession))
+        guard let root = copiesRoot(for: sessionID) else {
+            removeWithheldAttempts(admissible, for: sessionID)
+            return nil
+        }
+        return OutsideProjectStaging(
+            urls: admissible, sessionID: sessionID, root: root,
+            context: context, referencedAt: now(), copyFile: stageCopy)
+    }
+
+    private func finishOutsideProjectStaging(
+        _ request: OutsideProjectStaging, staged: StagedCopyBatch,
+        shouldAdmit: @MainActor () -> Bool, cancelled: Bool,
+        firstMainNanoseconds: UInt64
+    ) -> ScannedRecordResult {
         let secondMainStarted = DispatchTime.now().uptimeNanoseconds
-        guard !Task.isCancelled, shouldAdmit() else {
+        guard !cancelled, shouldAdmit() else {
             discard(staged)
             return ScannedRecordResult(
                 attachments: [],
                 custodyWorkerNanoseconds: staged.workerNanoseconds,
-                mainActorNanoseconds: (firstMainEnded - firstMainStarted)
+                mainActorNanoseconds: firstMainNanoseconds
                     + (DispatchTime.now().uptimeNanoseconds - secondMainStarted)
             )
         }
         guard allowsFilesOutsideProject() else {
             discard(staged)
-            if let context { noteWithheld(outsideProject, for: sessionID, context: context) }
+            if let context = request.context {
+                noteWithheld(request.urls, for: request.sessionID, context: context)
+            }
             return ScannedRecordResult(
                 attachments: [],
                 custodyWorkerNanoseconds: staged.workerNanoseconds,
-                mainActorNanoseconds: (firstMainEnded - firstMainStarted)
+                mainActorNanoseconds: firstMainNanoseconds
                     + (DispatchTime.now().uptimeNanoseconds - secondMainStarted)
             )
         }
 
         let outside = finishStagedCopies(
             staged.copies,
-            attempted: admissible,
-            sessionID: sessionID,
-            root: root,
-            context: context,
-            referencedAt: timestamp
+            attempted: request.urls,
+            sessionID: request.sessionID,
+            root: request.root,
+            context: request.context,
+            referencedAt: request.referencedAt
         )
         return ScannedRecordResult(
             attachments: outside,
             custodyWorkerNanoseconds: staged.workerNanoseconds,
-            mainActorNanoseconds: (firstMainEnded - firstMainStarted)
+            mainActorNanoseconds: firstMainNanoseconds
                 + (DispatchTime.now().uptimeNanoseconds - secondMainStarted)
         )
     }
@@ -736,34 +752,26 @@ final class SessionAttachmentStore {
         projectRoot: URL,
         context: AttachmentReferenceContext
     ) -> [SessionAttachment] {
-        let timestamp = now()
-        let rootPrefix = projectRoot.path.hasSuffix("/")
-            ? projectRoot.path
-            : projectRoot.path + "/"
-        let made: [SessionAttachment] = urls
-            .suffix(SessionAttachmentDefaults.maximumPerSession)
-            .compactMap { url -> SessionAttachment? in
-                guard AttachmentReferenceDetector.contains(url, inside: projectRoot),
-                      let kind = AttachmentReferenceDetector.kind(for: url) else {
-                    return nil
-                }
-                let relativePath = String(url.path.dropFirst(rootPrefix.count))
-                guard !relativePath.isEmpty else { return nil }
-                return SessionAttachment(
-                    sessionID: sessionID,
-                    id: UUID().uuidString.lowercased(),
-                    root: projectRoot,
-                    url: url,
-                    relativePath: relativePath,
-                    sourcePath: url.path,
-                    kind: kind,
-                    origin: .agent,
-                    agentSources: context.sources,
-                    turnID: context.turnID,
-                    referencedAt: timestamp
-                )
-            }
+        let made = SessionAttachmentScannedRowPreparation.insideProject(
+            urls, sessionID: sessionID, projectRoot: projectRoot,
+            context: context, referencedAt: now()
+        )
         return admit(made, for: sessionID)
+    }
+
+    /// A native host whose UI actor owns a synchronous event loop can publish rows prepared on
+    /// a worker without running path probes or a suspended actor task in that event loop.
+    @discardableResult
+    func admitPreparedScanned(_ rows: [SessionAttachment], for sessionID: SessionID)
+        -> [SessionAttachment] {
+        let bounded = Array(rows.suffix(SessionAttachmentDefaults.maximumPerSession))
+        guard bounded.allSatisfy({
+            $0.sessionID == sessionID && !$0.isOutsideProject
+                && AttachmentReferenceDetector.contains($0.url, inside: $0.root)
+        }) else {
+            return []
+        }
+        return admit(bounded, for: sessionID, discardingCopiesOnWorker: true)
     }
 
     /// Only a same-source race reaches this path. The expensive copy already happened; these
@@ -1175,6 +1183,10 @@ final class SessionAttachmentStore {
         withheldBySession[sessionID] ?? []
     }
 
+    func sessionsWithWithheldReferences() -> [SessionID] {
+        withheldBySession.compactMap { $0.value.isEmpty ? nil : $0.key }
+    }
+
     /// Takes custody of what was refused, for the moment the user widens the scope.
     ///
     /// Without this, widening only takes effect for paths printed *again* — the terminal's
@@ -1462,9 +1474,6 @@ final class SessionAttachmentStore {
 
     // MARK: Persistence
 
-    private static let encoder = JSONEncoder()
-    private static let decoder = JSONDecoder()
-
     /// A later provider descriptor can name a child that was initially known only by id. Repair
     /// that metadata without rereading files, changing chronology or recopying attachments.
     func updateAgentSource(_ source: AttachmentAgentSource, for sessionID: SessionID) {
@@ -1496,94 +1505,52 @@ final class SessionAttachmentStore {
     /// fall out the same way as one deleted while it ran.
     private func loadIfNeeded(_ sessionID: SessionID) {
         guard !loadedSessions.contains(sessionID) else { return }
+        // A worker-backed host installs a prepared snapshot later. An early read must not
+        // claim the session was loaded with no rows and make that receipt disappear.
+        guard persistPreparedRows == nil || loadPayload != nil else { return }
         loadedSessions.insert(sessionID)
         guard attachmentsBySession[sessionID] == nil,
               let payload = loadPayload?(sessionID),
-              let document = try? Self.decoder.decode(
-                  PersistedSessionAttachments.self,
-                  from: Data(payload.utf8)
+              let rows = try? SessionAttachmentPersistenceCodec.restore(
+                  payload,
+                  sessionID: sessionID,
+                  referenceRoot: referenceRoot?(sessionID),
+                  copiesRoot: copiesRoot(for: sessionID)
               )
         else { return }
+        attachmentsBySession[sessionID] = rows
+    }
 
-        attachmentsBySession[sessionID] = document.entries.compactMap { entry in
-            guard let root = trustedPersistedRoot(entry.root, for: sessionID) else {
-                return nil
-            }
-            let url = root.appendingPathComponent(entry.relativePath)
-            // A kind this build has no case for — a payload from a newer build — re-derives
-            // from the file itself, the authority every read already trusts. A row unknown both
-            // ways holds nothing this build can show, and drops alone rather than taking the
-            // session's list with it.
-            guard let kind = entry.kind ?? AttachmentReferenceDetector.kind(for: url) else {
-                return nil
-            }
-            return SessionAttachment(
-                sessionID: sessionID,
-                id: entry.id ?? Self.legacyID(
-                    sessionID: sessionID,
-                    root: entry.root,
-                    relativePath: entry.relativePath
-                ),
-                root: root,
-                url: url,
-                relativePath: entry.relativePath,
-                // A payload written before provenance was recorded has no source of its own, and
-                // its own path is the key it was already deduplicated by.
-                sourcePath: entry.sourcePath ?? url.path,
-                kind: kind,
-                origin: entry.origin ?? .agent,
-                agentSources: entry.agentSources,
-                // A payload written before the scope was configurable holds only files that
-                // passed the narrow rule, so absent reads as "inside" rather than as unknown.
-                isOutsideProject: entry.isOutsideProject ?? false,
-                isImmutableSnapshot: entry.isImmutableSnapshot ?? false,
-                turnID: entry.turnID,
-                // Before this field existed, deliberate user handoffs were always recorded just
-                // before the turn they belonged to; agent discoveries happened during a turn.
-                turnPlacement: entry.turnPlacement
-                    ?? ((entry.origin ?? .agent) == .user ? .next : .current),
-                referencedAt: entry.referencedAt
-            )
+    /// Installs a worker-decoded, authority-checked snapshot before this session is read.
+    /// Linux uses this on a worker receipt; repeated or late receipts cannot replace live edits.
+    @discardableResult
+    func installPrepared(_ rows: [SessionAttachment], for sessionID: SessionID) -> Bool {
+        guard !loadedSessions.contains(sessionID) else { return false }
+        let live = attachmentsBySession[sessionID] ?? []
+        let liveIDs = Set(live.map(\.id))
+        let liveSources = Set(live.map(\.sourcePath))
+        let older = rows.filter {
+            !liveIDs.contains($0.id) && !liveSources.contains($0.sourcePath)
         }
+        let merged = Array((older + live).suffix(SessionAttachmentDefaults.maximumPerSession))
+        loadedSessions.insert(sessionID)
+        attachmentsBySession[sessionID] = merged
+        if !live.isEmpty { persist(merged, for: sessionID) }
+        NotificationCenter.default.post(SessionAttachmentsDidChange(sessionID: sessionID))
+        return true
     }
 
     private func persist(_ attachments: [SessionAttachment], for sessionID: SessionID) {
-        guard let savePayload else { return }
-        let entries = attachments.map {
-            PersistedSessionAttachment(
-                id: $0.id,
-                root: $0.root.path,
-                relativePath: $0.relativePath,
-                sourcePath: $0.sourcePath,
-                kind: $0.kind,
-                origin: $0.origin,
-                agentSources: $0.agentSources,
-                isOutsideProject: $0.isOutsideProject ? true : nil,
-                isImmutableSnapshot: $0.isImmutableSnapshot ? true : nil,
-                turnID: $0.turnID,
-                turnPlacement: $0.turnPlacement,
-                referencedAt: $0.referencedAt
-            )
+        if let persistPreparedRows {
+            persistPreparedRows(attachments, sessionID)
+            return
         }
-        guard let data = try? Self.encoder.encode(
-            PersistedSessionAttachments(entries: entries)
-        ) else { return }
-        savePayload(String(decoding: data, as: UTF8.self), sessionID)
+        guard let savePayload else { return }
+        guard let payload = try? SessionAttachmentPersistenceCodec.serialize(attachments) else { return }
+        savePayload(payload, sessionID)
     }
 
     // MARK: Validation
-
-    /// Resolves a persisted root only against live authority. Both legitimate roots are known
-    /// independently of the payload: the session's current checkout and its app-owned custody
-    /// directory. This also makes a moved/deleted managed workspace prune its old references
-    /// instead of retaining authority to a directory the session no longer owns.
-    private func trustedPersistedRoot(_ path: String, for sessionID: SessionID) -> URL? {
-        let candidate = URL(fileURLWithPath: path, isDirectory: true)
-            .standardizedFileURL.resolvingSymlinksInPath()
-        let trusted = [referenceRoot?(sessionID), copiesRoot(for: sessionID)]
-            .compactMap { $0?.standardizedFileURL.resolvingSymlinksInPath() }
-        return trusted.contains(candidate) ? candidate : nil
-    }
 
     /// A file kept as a reference, proven to be a regular supported file inside `root`.
     private func referencedAttachment(
@@ -1733,16 +1700,6 @@ final class SessionAttachmentStore {
             turnPlacement: turnPlacement,
             referencedAt: referencedAt
         )
-    }
-
-    private static func legacyID(
-        sessionID: SessionID,
-        root: String,
-        relativePath: String
-    ) -> String {
-        let value = "\(sessionID.uuidString)|\(root)|\(relativePath)"
-        let digest = SHA256.hash(data: Data(value.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     private static func safeGeneratedName(_ value: String) -> String {
@@ -1941,876 +1898,118 @@ final class SessionAttachmentStore {
     }
 }
 
-// MARK: - Reference Detection
+// MARK: - Persisted document codec
 
-/// Extracts only supported-attachment-shaped paths — images, PDFs, HTML, archives and open
-/// document formats — then lets the filesystem decide whether each one is real.
-enum AttachmentReferenceDetector {
-
-    /// Real files the text named, split by the one question the caller has to answer.
-    ///
-    /// The split is the detector's whole contribution to the scope rule: it reports what it
-    /// found and where, and the store — which knows the user's answer — decides what that means.
-    /// Sorting the two apart here rather than filtering at the call site is what lets a refused
-    /// file still be counted.
-    struct Resolution: Equatable, Sendable {
-        var insideProject: [URL] = []
-        var outsideProject: [URL] = []
-        var resolvedProjectRoot: URL?
-
-        var isEmpty: Bool { insideProject.isEmpty && outsideProject.isEmpty }
-    }
-
-    /// One set per kind, and the kinds joined for the scan. `kind(for:)` maps each set
-    /// explicitly — it used to answer `.image` for anything the list held that was not a PDF or
-    /// HTML, which was correct only while images were the remainder, and one added extension
-    /// away from the pane decoding a zip as a picture.
-    private static let imageExtensions: Set<String> = [
-        "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp"
-    ]
-    /// What the platform's audiovisual stack actually plays, which is a shorter list than the
-    /// one people mean by "video".
-    ///
-    /// `webm`, `mkv` and `avi` are deliberately absent: AVFoundation opens none of them, so
-    /// admitting one would put a row in the pane whose preview could only ever say it cannot be
-    /// played — and would take that file's name off the terminal line where the user can still
-    /// open it in something that can. The gate is the *name* here and playability is confirmed by
-    /// the decoder at preview time, because an extension is a claim and a container is not
-    /// obliged to honour it.
-    private static let videoExtensions: Set<String> = [
-        "mov", "mp4", "m4v"
-    ]
-    private static let archiveExtensions: Set<String> = [
-        "zip", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "7z", "rar"
-    ]
-    private static let documentExtensions: Set<String> = [
-        "odt", "ods", "odp", "docx", "xlsx", "pptx", "rtf"
-    ]
-    /// `.dot` is also the legacy Word-template extension; the filesystem check keeps it honest,
-    /// and a template named in a coding session's output is the rarer reading by far.
-    private static let diagramExtensions: Set<String> = [
-        "dot", "gv", "mmd", "mermaid"
-    ]
-    /// Classified, but deliberately **not** in the scan below. A diff reaches the list as a
-    /// handoff — a frozen comparison, a patch dropped on the composer — while `git format-patch`
-    /// alone prints a column of `.patch` paths that nobody meant as attachments.
-    private static let diffExtensions: Set<String> = ["diff", "patch"]
-    /// The app's own record of a picture comparison; nothing outside it writes one.
-    private static let comparisonExtension = "comparison"
-    /// Extensions a *registration* may claim, plus the ambiguous ones the host probes itself.
-    ///
-    /// Both are in the scan's alternation unconditionally, because the alternation is a compiled
-    /// regular expression and the registered set changes when an extension is enabled. Matching a
-    /// path is cheap; admission is where the real decision happens, and both routes are refused
-    /// there unless the registry or the probe says otherwise.
-    static let registrableExtensions: Set<String> = ["lottie"]
-    private static let extensions =
-        imageExtensions.sorted() + ["pdf", "html", "htm"]
-            + videoExtensions.sorted()
-            + archiveExtensions.sorted() + documentExtensions.sorted()
-            + diagramExtensions.sorted()
-            + registrableExtensions.sorted()
-            + MediaContentProbe.ambiguousExtensions.sorted()
-    /// Longest first, because the alternation is ordered and nothing after it requires a word
-    /// boundary: with `tif` offered before `tiff`, `shot.tiff` matched as `shot.tif`, a file
-    /// that does not exist, and the real one was never recorded.
-    private static let extensionAlternation = extensions
-        .sorted { $0.count > $1.count }
-        .joined(separator: "|")
-
-    /// Quoted and Markdown forms admit spaces. The plain form deliberately does not: prose around
-    /// an unquoted path is otherwise indistinguishable from the path itself.
-    private static let patterns: [NSRegularExpression] = [
-        expression(#"\]\(([^)\r\n]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)\)"#),
-        expression(#"[`"]([^`"\r\n]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)[`"]"#),
-        expression(#"'([^'\r\n]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)'"#),
-        // Try a plain path only at the start of its token. Without this boundary, a token
-        // with no supported suffix retries the entire remainder at every character: a 16 KiB
-        // line took seconds even though it produced no candidates and performed no file I/O.
-        expression(#"(?<![^\s<>"'`()\[\]{}])((?:file://)?[^\s<>"'`()\[\]{}]+\.(?:"# + extensionAlternation + #")(?::\d+(?::\d+)?)?)"#)
-    ].compactMap { $0 }
-
-    /// Every real supported file the text names, sorted by whether it lives in the project.
-    ///
-    /// Containment used to be checked *before* the filesystem, which made an outside path free to
-    /// reject — it was rejected on a string. Reporting one costs a `stat`, because a path in prose
-    /// is not evidence that a file exists and a count of files that are not there would be worse
-    /// than saying nothing. `maximumCandidatesPerScan` is what keeps that bounded: a terminal
-    /// printing thousands of paths is a normal afternoon, and both lists are capped downstream
-    /// anyway, so the work per scan may not scale with what an agent happened to `cat`.
-    static func resolve(
-        text: String,
-        projectRoot: URL,
-        currentDirectory: URL?,
-        fileManager: FileManager = .default
-    ) -> Resolution {
-        let root = projectRoot.standardizedFileURL.resolvingSymlinksInPath()
-        var seen: Set<String> = []
-        var result = Resolution(resolvedProjectRoot: root)
-        // The probe's own ceiling, spent per scan rather than per file: a buffer naming three
-        // hundred `.json` paths is a normal afternoon, and the work a scan may do on them is
-        // ours to bound even though their number is not.
-        var probedCandidates = 0
-
-        for candidate in candidates(in: text) {
-            // A relative candidate is proposed against the working directory before the checkout,
-            // and the checkout still wins when both hold a file of that name: `a.png` printed
-            // from a session that has wandered into `/tmp` means the project's file if there is
-            // one. Only when nothing inside answers does the outside match stand.
-            var outside: URL?
-            var matchedInside = false
-
-            for proposed in proposedURLs(
-                for: candidate,
-                projectRoot: root,
-                currentDirectory: currentDirectory
-            ) {
-                let file = proposed.standardizedFileURL.resolvingSymlinksInPath()
-                var isDirectory: ObjCBool = false
-                // Existence first for an ambiguous candidate, so a path in prose that names no
-                // file cannot spend the probe budget a real one needs.
-                let isAmbiguous = MediaContentProbe.ambiguousExtensions.contains(
-                    file.pathExtension.lowercased()
-                )
-                if isAmbiguous {
-                    guard fileManager.fileExists(atPath: file.path, isDirectory: &isDirectory),
-                          !isDirectory.boolValue,
-                          probedCandidates < MediaContentProbe.maximumCandidatesPerScan else {
-                        continue
-                    }
-                    probedCandidates += 1
-                }
-                guard kind(for: file) != nil,
-                      fileManager.fileExists(atPath: file.path, isDirectory: &isDirectory),
-                      !isDirectory.boolValue else {
-                    continue
-                }
-                if contains(file, inside: root) {
-                    if seen.insert(file.path).inserted { result.insideProject.append(file) }
-                    matchedInside = true
-                    break
-                }
-                if outside == nil { outside = file }
-            }
-
-            if !matchedInside, let outside, seen.insert(outside.path).inserted {
-                result.outsideProject.append(outside)
-            }
-        }
-        return result
-    }
-
-    /// The bound on both halves of a scan's work: matching stops here, and each candidate is
-    /// proposed against at most two roots, so this is also the ceiling on `stat` calls.
-    ///
-    /// Comfortably above what any list can hold (`maximumPerSession`), because a candidate is
-    /// not yet a file — most of them turn out not to exist — while still bounding the pass over
-    /// a buffer whose size is decided by whatever an agent last printed.
-    static let maximumCandidatesPerScan = 512
-
-    /// The kind a file is recorded as, or nil for one the pane has nothing to say about.
-    ///
-    /// Two routes reach `.media`, and the order matters. A **registered** extension is decided by
-    /// its name alone, which is why registrations may not claim a reserved one. An **ambiguous**
-    /// extension is decided by the bytes: a bare Lottie is a `.json`, and admitting `.json` on its
-    /// name would fill the pane with `package.json`. The probe reads a bounded prefix and declines
-    /// when the structure is not inside it, so the answer costs one short read of a file the
-    /// caller was about to `stat` anyway.
-    static func kind(for url: URL) -> SessionAttachment.Kind? {
-        let ext = url.pathExtension.lowercased()
-        if imageExtensions.contains(ext) { return .image }
-        if ext == "pdf" { return .pdf }
-        if ext == "html" || ext == "htm" { return .html }
-        if videoExtensions.contains(ext) { return .video }
-        if archiveExtensions.contains(ext) { return .archive }
-        if documentExtensions.contains(ext) { return .document }
-        if diagramExtensions.contains(ext) { return .diagram }
-        if diffExtensions.contains(ext) { return .diff }
-        if ext == comparisonExtension { return .comparison }
-        if AttachmentMediaTypeRegistry.shared.isRegistered(ext) { return .media }
-        if MediaContentProbe.ambiguousExtensions.contains(ext) {
-            return admissionHint(for: url) != nil ? .media : nil
-        }
-        return nil
-    }
-
-    /// Whether a name claims to be a movie the platform can play.
-    ///
-    /// The composer's question, asked before it spends a decoder on a dropped file. A name is a
-    /// claim and the decoder answers it — a `.mov` that is not one gives up no poster frame and
-    /// falls back to being a path — but the *set* is decided here once, so the composer and the
-    /// attachments pane cannot disagree about which files are movies.
-    static func isMovie(_ url: URL) -> Bool {
-        videoExtensions.contains(url.pathExtension.lowercased())
-    }
-
-    /// The host-owned hint that admits an otherwise ambiguous file, or nil.
-    ///
-    /// Only a hint on the host's small admission list gets a row of its own. Other hints may
-    /// enrich a kind that was already admitted without becoming admission rules themselves.
-    static func admissionHint(for url: URL) -> ExtensionFileContentHint? {
-        guard let hint = MediaContentProbe.hint(for: url),
-              MediaContentProbe.admissionHints.contains(hint) else { return nil }
-        return hint
-    }
-
-    static func contains(_ file: URL, inside root: URL) -> Bool {
-        let rootPath = root.standardizedFileURL.path
-        let filePath = file.standardizedFileURL.path
-        return filePath == rootPath || filePath.hasPrefix(rootPath.hasSuffix("/")
-            ? rootPath
-            : rootPath + "/")
-    }
-
-    /// Path-shaped text, deduplicated, and never more than the scan is allowed to consider.
-    ///
-    /// The cap is enforced *while matching* rather than by trimming the result. `matches(in:)`
-    /// materialises every hit before anything can be discarded, so a terminal holding a thousand
-    /// paths built a thousand `NSTextCheckingResult`s and a thousand bridged `String`s to keep
-    /// the first few hundred — on the main thread, on a debounce, in a window that is drawing.
-    /// Enumerating and stopping is the same answer for a fraction of the work.
-    static func candidates(in text: String) -> [String] {
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        var seen: Set<String> = []
-        var candidates: [String] = []
-
-        for pattern in patterns {
-            guard candidates.count < maximumCandidatesPerScan else { break }
-            pattern.enumerateMatches(in: text, range: range) { match, _, stop in
-                guard let match else { return }
-                let capture = match.numberOfRanges > 1 ? match.range(at: 1) : match.range
-                guard capture.location != NSNotFound,
-                      let swiftRange = Range(capture, in: text) else { return }
-                let candidate = clean(String(text[swiftRange]))
-                guard !candidate.isEmpty, seen.insert(candidate).inserted else { return }
-                candidates.append(candidate)
-                if candidates.count >= maximumCandidatesPerScan { stop.pointee = true }
-            }
-        }
-        return candidates
-    }
-
-    private static func proposedURLs(
-        for candidate: String,
-        projectRoot: URL,
-        currentDirectory: URL?
-    ) -> [URL] {
-        let withoutLocation = candidate.replacingOccurrences(
-            of: #":\d+(?::\d+)?$"#,
-            with: "",
-            options: .regularExpression
+/// The Mac store and Linux's bounded persistence worker use the same document and trust rule.
+/// Callers provide the live roots; a root embedded in SQLite is evidence, never authority.
+enum SessionAttachmentPersistenceCodec {
+    static func restore(
+        _ payload: String,
+        sessionID: SessionID,
+        referenceRoot: URL?,
+        copiesRoot: URL?
+    ) throws -> [SessionAttachment] {
+        let document = try JSONDecoder().decode(
+            PersistedSessionAttachments.self, from: Data(payload.utf8)
         )
-        let decoded = withoutLocation.removingPercentEncoding ?? withoutLocation
-
-        if decoded.lowercased().hasPrefix("file://"),
-           let url = URL(string: decoded), url.isFileURL {
-            return [url]
-        }
-
-        let expanded = NSString(string: decoded).expandingTildeInPath
-        if NSString(string: expanded).isAbsolutePath {
-            return [URL(fileURLWithPath: expanded)]
-        }
-
-        var roots: [URL] = []
-        if let currentDirectory { roots.append(currentDirectory) }
-        roots.append(projectRoot)
-        return roots.map { $0.appendingPathComponent(expanded) }
-    }
-
-    private static func clean(_ value: String) -> String {
-        let unescaped = value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: #"\\ "#, with: " ")
-
-        return String(
-            unescaped.reversed()
-                .drop(while: { ".,;!?".contains($0) })
-                .reversed()
-        )
-    }
-
-    private static func expression(_ pattern: String) -> NSRegularExpression? {
-        // These are compile-time-owned patterns. A failed pattern should make detection inert,
-        // not take down the session displaying untrusted terminal text.
-        try? NSRegularExpression(
-            pattern: pattern,
-            options: [.caseInsensitive]
-        )
-    }
-}
-
-// MARK: - Terminal Observation
-
-/// One bounded read of a terminal's recent text, plus where the next read resumes.
-///
-/// The observer keeps the cursor rather than the terminal, because only the observer knows when a
-/// scan was actually consumed. A disabled or restarted observer resets it and reads the whole
-/// window again.
-struct TerminalScanRead: Sendable {
-    let text: String
-    /// One past the newest row read, in coordinates that survive scrollback trimming.
-    let nextAbsoluteRow: Int
-
-    static let empty = TerminalScanRead(text: "", nextAbsoluteRow: 0)
-}
-
-/// Debounces terminal repaints and inspects SwiftTerm's bounded recent logical buffer.
-///
-/// Reading the emulator buffer avoids treating ANSI cursor commands as path text while retaining
-/// recent scrollback that has moved just above the viewport. A path is recorded only when it
-/// enters the scanned window, so an unrelated later repaint does not keep moving an old file to
-/// the top of the list.
-@MainActor
-final class TerminalAttachmentObserver {
-
-    struct ScanMetrics: Equatable {
-        let bytes: Int
-        let workerNanoseconds: UInt64
-        let custodyWorkerNanoseconds: UInt64
-        let applyNanoseconds: UInt64
-        let found: Int
-        let recorded: Int
-        /// True when the buffer had not moved since the last scan, so no detection ran at all.
-        var wasUnchanged = false
-    }
-
-    /// Everything a scan's answer depends on.
-    ///
-    /// A terminal running a TUI rewrites its screen in place, so `noteOutput` fires constantly
-    /// while the text under the read window stays exactly what it was — 736 scans in one four
-    /// minute trace, most of them over bytes that had already been resolved. Identical inputs
-    /// cannot produce a different resolution, so the regex pass is skipped after the worker
-    /// reads the mutable screen. Nothing about *what* is detected changes.
-    ///
-    /// The row position is part of it deliberately: text can repeat while the buffer advances
-    /// (a spinner, a progress line), and an advance must always be scanned so the read window
-    /// does not stall behind it.
-    private struct ScanFingerprint: Equatable, Sendable {
-        let textHash: Int
-        let byteCount: Int
-        let readThrough: Int
-        let currentDirectory: String?
-        let projectRoot: String
-    }
-
-    private struct PreparedScan: Sendable {
-        let fingerprint: ScanFingerprint
-        let readThrough: Int
-        let bytes: Int
-        /// Nil means the last applied buffer is unchanged.
-        let resolution: AttachmentReferenceDetector.Resolution?
-        let workerNanoseconds: UInt64
-        let span: PerformanceSpan?
-    }
-
-    /// A fleet of live terminals shares one preparation lane. Cancellation retires queued
-    /// work before it reads a buffer; a scan already in a synchronous file API finishes before
-    /// the next starts, rather than adding another thread competing with the event loop.
-    private actor ScanWorker {
-        static let shared = ScanWorker()
-
-        func prepare(
-            since: Int,
-            readText: @Sendable (Int) -> TerminalScanRead,
-            projectRoot: URL,
-            currentDirectory: URL?,
-            previousFingerprint: ScanFingerprint?
-        ) -> PreparedScan? {
-            guard !Task.isCancelled else { return nil }
-            let readSpan = PerformanceRecorder.shared.begin(
-                "attachments.read",
-                category: "attachments",
-                metadata: ["since": String(since)]
-            )
-            let read = readText(since)
-            let scannedBytes = read.text.utf8.count
-            readSpan.end(metadata: [
-                "bytes": String(scannedBytes),
-                "new_rows": String(max(0, read.nextAbsoluteRow - since))
-            ])
-            guard !Task.isCancelled else { return nil }
-            let fingerprint = ScanFingerprint(
-                textHash: read.text.hashValue,
-                byteCount: scannedBytes,
-                readThrough: read.nextAbsoluteRow,
-                currentDirectory: currentDirectory?.path,
-                projectRoot: projectRoot.path
-            )
-            guard fingerprint != previousFingerprint else {
-                return PreparedScan(
-                    fingerprint: fingerprint, readThrough: read.nextAbsoluteRow,
-                    bytes: scannedBytes, resolution: nil, workerNanoseconds: 0, span: nil
-                )
-            }
-            let span = PerformanceRecorder.shared.begin(
-                "attachments.scan",
-                category: "attachments",
-                crossesQueues: true,
-                metadata: ["bytes": String(scannedBytes)]
-            )
-            let started = DispatchTime.now().uptimeNanoseconds
-            let resolution = AttachmentReferenceDetector.resolve(
-                text: read.text,
-                projectRoot: projectRoot,
-                currentDirectory: currentDirectory
-            )
-            let elapsed = DispatchTime.now().uptimeNanoseconds - started
-            guard !Task.isCancelled else {
-                span.end(metadata: ["cancelled": "1"])
+        let trusted = [referenceRoot, copiesRoot]
+            .compactMap { $0?.standardizedFileURL.resolvingSymlinksInPath() }
+        return document.entries.compactMap { entry in
+            let candidate = URL(fileURLWithPath: entry.root, isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath()
+            guard trusted.contains(candidate) else { return nil }
+            let url = candidate.appendingPathComponent(entry.relativePath)
+            // A future kind is re-derived from the file; one unreadable row does not discard
+            // the rest of a compatible document.
+            guard let kind = entry.kind ?? AttachmentReferenceDetector.kind(for: url) else {
                 return nil
             }
-            return PreparedScan(
-                fingerprint: fingerprint, readThrough: read.nextAbsoluteRow,
-                bytes: scannedBytes, resolution: resolution, workerNanoseconds: elapsed,
-                span: span
-            )
-        }
-    }
-
-    typealias Recorder = @MainActor (
-        AttachmentReferenceDetector.Resolution,
-        SessionID,
-        URL,
-        @escaping @MainActor () -> Bool
-    ) async -> SessionAttachmentStore.ScannedRecordResult
-
-    private let sessionID: SessionID
-    private let projectRoot: () -> URL?
-    private let currentDirectory: () -> URL?
-    private let text: @Sendable (Int) -> TerminalScanRead
-    private let isEnabled: () -> Bool
-    private let now: () -> Date
-    private let record: Recorder
-    private var pendingScan: Task<Void, Never>?
-    private var resolutionTask: Task<Void, Never>?
-    private var scanRequestedWhileRunning = false
-    private var lastScan: Date?
-    /// Paths already offered, newest last. Bounded, and deliberately not tied to what is still
-    /// on screen: the point is not to re-announce a hint the user has already read, and the read
-    /// window is now only as deep as the output since the last scan. This also replaced a set
-    /// that grew with every path anywhere in scrollback.
-    private var recentlySeenPaths: [String] = []
-    private var recentlySeenPathSet: Set<String> = []
-    private var lastScannedAbsoluteRow = 0
-    private var scanGeneration = 0
-    private var lastScanFingerprint: ScanFingerprint?
-
-    private(set) var isScanInFlight = false
-    private(set) var lastScanMetrics: ScanMetrics?
-
-    init(
-        sessionID: SessionID,
-        projectRoot: @escaping () -> URL?,
-        currentDirectory: @escaping () -> URL?,
-        text: @escaping @Sendable (Int) -> TerminalScanRead,
-        isEnabled: @escaping () -> Bool = { true },
-        now: @escaping () -> Date = Date.init,
-        record: @escaping Recorder = { resolution, sessionID, root, shouldAdmit in
-            await SessionAttachmentStore.shared.recordScanned(
-                resolved: resolution,
+            return SessionAttachment(
                 sessionID: sessionID,
-                projectRoot: root,
-                shouldAdmit: shouldAdmit
-            )
-        }
-    ) {
-        self.sessionID = sessionID
-        self.projectRoot = projectRoot
-        self.currentDirectory = currentDirectory
-        self.text = text
-        self.isEnabled = isEnabled
-        self.now = now
-        self.record = record
-    }
-
-    deinit {
-        pendingScan?.cancel()
-        resolutionTask?.cancel()
-    }
-
-    /// Scans now when it may, defers only as long as it must.
-    ///
-    /// Waiting for quiet alone was the "attachments arrive when the agent pauses" feel: a busy
-    /// stretch re-arms the debounce on every repaint, so a path printed early in a long build
-    /// surfaced only when the output finally stopped. The first sighting scans immediately and
-    /// sustained output re-scans on a cap; the trailing debounce still reads a burst's last
-    /// lines after they have settled.
-    func noteOutput() {
-        pendingScan?.cancel()
-
-        let timestamp = now()
-        let dueForScan = lastScan.map {
-            timestamp.timeIntervalSince($0) >= SessionAttachmentDefaults.terminalBusyScanInterval
-        } ?? true
-        if dueForScan {
-            scanNow()
-            return
-        }
-
-        let delay = UInt64(SessionAttachmentDefaults.terminalQuietInterval * 1_000_000_000)
-        pendingScan = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: delay)
-            } catch {
-                return
-            }
-            guard let self, !Task.isCancelled else { return }
-            self.pendingScan = nil
-            self.scanNow()
-        }
-    }
-
-    func scanNow() {
-        pendingScan?.cancel()
-        pendingScan = nil
-        lastScan = now()
-        scanGeneration += 1
-        let generation = scanGeneration
-        resolutionTask?.cancel()
-        lastScanMetrics = nil
-        guard isEnabled() else {
-            scanRequestedWhileRunning = false
-            forgetScanHistory()
-            return
-        }
-        guard let root = projectRoot() else {
-            scanRequestedWhileRunning = false
-            return
-        }
-        // Cancelling a task does not interrupt regex or filesystem calls already running.
-        // Keep its slot until it really exits, and retain only one request for the latest
-        // buffer. The generation fence still prevents the retired scan from publishing.
-        guard resolutionTask == nil else {
-            scanRequestedWhileRunning = true
-            return
-        }
-
-        let since = lastScannedAbsoluteRow
-        let current = currentDirectory()
-        let previousFingerprint = lastScanFingerprint
-        isScanInFlight = true
-        let readText = text
-        resolutionTask = Task(priority: .utility) { @MainActor [weak self] in
-            defer { self?.resolutionDidFinish() }
-            let prepared = await ScanWorker.shared.prepare(
-                since: since, readText: readText, projectRoot: root,
-                currentDirectory: current, previousFingerprint: previousFingerprint
-            )
-            guard let prepared else { return }
-            guard let self, generation == self.scanGeneration, !Task.isCancelled else {
-                prepared.span?.end(metadata: ["superseded": "1"])
-                return
-            }
-            guard let resolution = prepared.resolution, let span = prepared.span else {
-                self.lastScanMetrics = ScanMetrics(
-                    bytes: prepared.bytes, workerNanoseconds: 0, custodyWorkerNanoseconds: 0,
-                    applyNanoseconds: 0, found: 0, recorded: 0, wasUnchanged: true
-                )
-                return
-            }
-            await self.finishScan(
-                resolution,
-                scannedBytes: prepared.bytes,
-                workerNanoseconds: prepared.workerNanoseconds,
-                generation: generation,
-                readThrough: prepared.readThrough,
-                fingerprint: prepared.fingerprint,
-                projectRoot: root,
-                span: span
+                id: entry.id ?? legacyID(sessionID: sessionID,
+                                          root: entry.root, relativePath: entry.relativePath),
+                root: candidate,
+                url: url,
+                relativePath: entry.relativePath,
+                sourcePath: entry.sourcePath ?? url.path,
+                kind: kind,
+                origin: entry.origin ?? .agent,
+                agentSources: entry.agentSources,
+                isOutsideProject: entry.isOutsideProject ?? false,
+                isImmutableSnapshot: entry.isImmutableSnapshot ?? false,
+                turnID: entry.turnID,
+                turnPlacement: entry.turnPlacement
+                    ?? ((entry.origin ?? .agent) == .user ? .next : .current),
+                referencedAt: entry.referencedAt
             )
         }
     }
 
-    private func resolutionDidFinish() {
-        resolutionTask = nil
-        isScanInFlight = false
-        guard scanRequestedWhileRunning else { return }
-        scanRequestedWhileRunning = false
-        scanNow()
-    }
-
-    /// Remembers offered paths, newest wins, bounded.
-    private func noteSeen(_ paths: [String]) {
-        for path in paths where recentlySeenPathSet.insert(path).inserted {
-            recentlySeenPaths.append(path)
-        }
-        let overflow = recentlySeenPaths.count - SessionAttachmentDefaults.rememberedScannedPaths
-        guard overflow > 0 else { return }
-        for path in recentlySeenPaths.prefix(overflow) {
-            recentlySeenPathSet.remove(path)
-        }
-        recentlySeenPaths.removeFirst(overflow)
-    }
-
-    /// Forgets both what was offered and how far the buffer was read, so the next scan starts
-    /// from the whole bounded window again.
-    private func forgetScanHistory() {
-        recentlySeenPaths.removeAll()
-        recentlySeenPathSet.removeAll()
-        lastScannedAbsoluteRow = 0
-        // The next scan must run for real: what was offered has been forgotten, so identical
-        // text is no longer a reason to believe the same answer is already applied.
-        lastScanFingerprint = nil
-    }
-
-    private func finishScan(
-        _ resolution: AttachmentReferenceDetector.Resolution,
-        scannedBytes: Int,
-        workerNanoseconds: UInt64,
-        generation: Int,
-        readThrough: Int,
-        fingerprint: ScanFingerprint,
-        projectRoot root: URL,
-        span: PerformanceSpan
-    ) async {
-        guard generation == scanGeneration else {
-            span.end(metadata: ["superseded": "1"])
-            return
-        }
-        guard isEnabled() else {
-            forgetScanHistory()
-            span.end(metadata: ["disabled": "1"])
-            return
-        }
-
-        let applyStarted = DispatchTime.now().uptimeNanoseconds
-        // Both halves are held to the same "newly visible" rule. A path outside the project is
-        // refused rather than listed, but re-offering it on every repaint would still be work,
-        // and would keep re-announcing a hint the user has already read.
-        let newly = AttachmentReferenceDetector.Resolution(
-            insideProject: resolution.insideProject.filter { !recentlySeenPathSet.contains($0.path) },
-            outsideProject: resolution.outsideProject.filter { !recentlySeenPathSet.contains($0.path) },
-            resolvedProjectRoot: resolution.resolvedProjectRoot
-        )
-        let filteredEnded = DispatchTime.now().uptimeNanoseconds
-        let result = if newly.isEmpty {
-            SessionAttachmentStore.ScannedRecordResult.empty
-        } else {
-            await record(newly, sessionID, root) { [weak self] in
-                guard let self else { return false }
-                return self.scanGeneration == generation && self.isEnabled()
-            }
-        }
-        guard generation == scanGeneration else {
-            span.end(metadata: ["superseded": "1"])
-            return
-        }
-        // Admission can suspend while custody is staged. A newer scan may replace this one in
-        // that interval, so neither its cursor nor its deduplication history is committed until
-        // the result has actually been applied.
-        noteSeen((resolution.insideProject + resolution.outsideProject).map(\.path))
-        lastScannedAbsoluteRow = max(lastScannedAbsoluteRow, readThrough)
-        lastScanFingerprint = fingerprint
-        let found = newly.insideProject.count + newly.outsideProject.count
-        lastScanMetrics = ScanMetrics(
-            bytes: scannedBytes,
-            workerNanoseconds: workerNanoseconds,
-            custodyWorkerNanoseconds: result.custodyWorkerNanoseconds,
-            applyNanoseconds: (filteredEnded - applyStarted) + result.mainActorNanoseconds,
-            found: found,
-            recorded: result.attachments.count
-        )
-        span.end(metadata: [
-            "found": String(found),
-            "recorded": String(result.attachments.count),
-            "custody_worker_ms": String(
-                format: "%.3f",
-                Double(result.custodyWorkerNanoseconds) / 1_000_000
+    static func serialize(_ attachments: [SessionAttachment]) throws -> String {
+        let entries = attachments.map {
+            PersistedSessionAttachment(
+                id: $0.id,
+                root: $0.root.path,
+                relativePath: $0.relativePath,
+                sourcePath: $0.sourcePath,
+                kind: $0.kind,
+                origin: $0.origin,
+                agentSources: $0.agentSources,
+                isOutsideProject: $0.isOutsideProject ? true : nil,
+                isImmutableSnapshot: $0.isImmutableSnapshot ? true : nil,
+                turnID: $0.turnID,
+                turnPlacement: $0.turnPlacement,
+                referencedAt: $0.referencedAt
             )
-        ])
+        }
+        let data = try JSONEncoder().encode(PersistedSessionAttachments(entries: entries))
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func legacyID(
+        sessionID: SessionID, root: String, relativePath: String
+    ) -> String {
+        let value = "\(sessionID.uuidString)|\(root)|\(relativePath)"
+        let digest = SHA256.hash(data: Data(value.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
 
-// MARK: - Terminal Transcript Observation
-
-/// Recovers assistant prose that a full-screen agent TUI painted as already-wrapped grid rows.
-///
-/// The ordinary terminal observer remains necessary for shell output, providers whose transcript
-/// is not readable, and paths printed before a turn ends. It can join emulator-owned soft wraps,
-/// but no emulator can infer that two independently painted rows came from one provider message.
-/// Claude and Codex transcripts retain that message intact, so their completed terminal turns get
-/// one bounded, background tail scan through the same provider normalization Native Chat replays.
-///
-/// A turn boundary schedules stability retries because the hook and the transcript writer are two
-/// processes: the hook can arrive while the final record is still being flushed. Resolutions are
-/// deduplicated within the turn before returning to the main actor, so retries neither recopy an
-/// outside file nor move an existing row repeatedly.
-@MainActor
-final class TerminalTranscriptAttachmentObserver {
-
-    typealias TranscriptURLLookup = @Sendable () -> URL?
-
-    private let sessionID: SessionID
-    private let kind: AgentKind
-    private let projectRoot: () -> URL?
-    private let currentDirectory: () -> URL?
-    private let transcriptURL: () -> URL?
-    private let transcriptLookup: () -> TranscriptURLLookup?
-    private let isEnabled: () -> Bool
-    private let context: () -> AttachmentReferenceContext
-    private let isChild: Bool
-    private let store: SessionAttachmentStore
-    private var activeScan: Task<Void, Never>?
-    private var pendingInput: (
-        generation: Int, transcript: URL?, lookup: TranscriptURLLookup?, message: String?, force: Bool
-    )?
-    private var isInvalidated = false
-    private var transcriptSignature: AttachmentDetectionWorker.TranscriptSignature?
-
-    private var generation = 0
-    private var pendingScans: [Task<Void, Never>] = []
-    private var pathsRecordedThisTurn: Set<String> = []
-
-    init(
+/// Converts a worker-checked detector result into the same mutable reference rows on both
+/// desktop hosts. File-kind probes stay on the caller's worker for native Linux output.
+enum SessionAttachmentScannedRowPreparation {
+    static func insideProject(
+        _ urls: [URL],
         sessionID: SessionID,
-        kind: AgentKind,
-        projectRoot: @escaping () -> URL?,
-        currentDirectory: @escaping () -> URL?,
-        transcriptURL: @escaping () -> URL?,
-        transcriptLookup: @escaping () -> TranscriptURLLookup? = { nil },
-        isEnabled: @escaping () -> Bool = { true },
-        context: @escaping () -> AttachmentReferenceContext = { .main },
-        isChild: Bool = false,
-        store: SessionAttachmentStore = .shared
-    ) {
-        self.sessionID = sessionID
-        self.kind = kind
-        self.projectRoot = projectRoot
-        self.currentDirectory = currentDirectory
-        self.transcriptURL = transcriptURL
-        self.transcriptLookup = transcriptLookup
-        self.isEnabled = isEnabled
-        self.context = context
-        self.isChild = isChild
-        self.store = store
-    }
-
-    deinit {
-        pendingScans.forEach { $0.cancel() }
-        activeScan?.cancel()
-    }
-
-    /// Starts a new bounded scan generation for the turn that just settled.
-    ///
-    /// `lastAssistantMessage` is a provider-supplied fast path where a hook carries one. It is
-    /// still combined with the transcript rather than treated as complete: a turn may contain
-    /// several assistant text blocks around tool calls.
-    func noteTurnFinished(lastAssistantMessage: String? = nil) {
-        pendingScans.forEach { $0.cancel() }
-        pendingScans.removeAll(keepingCapacity: true)
-        generation += 1
-        pendingInput = nil
-        transcriptSignature = nil
-        pathsRecordedThisTurn.removeAll(keepingCapacity: true)
-
-        guard !isInvalidated, isEnabled() else { return }
-        let thisGeneration = generation
-        // Capture the provider identity before a terminating process clears its per-launch
-        // caches. The file itself remains live for the delayed stability reads.
-        let transcript = transcriptURL()
-        // Codex's hook normally supplies the exact immutable rollout path. If hooks are absent,
-        // capture a value-only lookup now and perform its account-tree enumeration off-main.
-        let lookup = transcript == nil ? transcriptLookup() : nil
-
-        for delay in TranscriptAttachmentDefaults.stabilityDelays {
-            let nanoseconds = UInt64(max(delay, 0) * 1_000_000_000)
-            let work = Task { @MainActor [weak self] in
-                do {
-                    try await Task.sleep(nanoseconds: nanoseconds)
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                self?.scan(
-                    generation: thisGeneration,
-                    transcript: transcript,
-                    transcriptLookup: lookup,
-                    lastAssistantMessage: lastAssistantMessage,
-                    force: true
-                )
+        projectRoot: URL,
+        context: AttachmentReferenceContext,
+        referencedAt: Date
+    ) -> [SessionAttachment] {
+        let rootPrefix = projectRoot.path.hasSuffix("/")
+            ? projectRoot.path
+            : projectRoot.path + "/"
+        return urls.suffix(SessionAttachmentDefaults.maximumPerSession).compactMap { url in
+            guard AttachmentReferenceDetector.contains(url, inside: projectRoot),
+                  let kind = AttachmentReferenceDetector.kind(for: url) else {
+                return nil
             }
-            pendingScans.append(work)
-        }
-    }
-
-    func invalidate() {
-        isInvalidated = true
-        generation += 1
-        pendingInput = nil
-        pendingScans.forEach { $0.cancel() }
-        activeScan?.cancel()
-    }
-
-    /// Reuses the current generation for live child output. One scan can be active, with one
-    /// latest rescan request; repeated polling neither accumulates work nor reorders old files.
-    func noteTranscriptChanged() {
-        scan(generation: generation, transcript: transcriptURL(),
-             transcriptLookup: transcriptLookup(), lastAssistantMessage: nil)
-    }
-
-    private func scan(
-        generation expectedGeneration: Int,
-        transcript: URL?,
-        transcriptLookup: TranscriptURLLookup?,
-        lastAssistantMessage: String?,
-        force: Bool = false
-    ) {
-        guard !isInvalidated, generation == expectedGeneration, isEnabled(),
-              let root = projectRoot() else { return }
-        guard activeScan == nil else {
-            pendingInput = (expectedGeneration, transcript, transcriptLookup,
-                            lastAssistantMessage ?? pendingInput?.message, force || pendingInput?.force == true)
-            return
-        }
-        let current = currentDirectory()
-        let attribution = context()
-        let kind = kind
-        let isChild = isChild
-        let previousSignature = force ? nil : transcriptSignature
-        activeScan = Task { [weak self] in
-            let prepared = await AttachmentDetectionWorker.shared.transcriptReferences(
-                at: transcript, lookup: transcriptLookup, kind: kind, isChild: isChild,
-                lastAssistantMessage: lastAssistantMessage, projectRoot: root,
-                currentDirectory: current, previousSignature: previousSignature
-            )
-            guard let self else { return }
-            defer {
-                self.activeScan = nil
-                if let pending = self.pendingInput {
-                    self.pendingInput = nil
-                    self.scan(generation: pending.generation, transcript: pending.transcript,
-                              transcriptLookup: pending.lookup, lastAssistantMessage: pending.message,
-                              force: pending.force)
-                }
-            }
-            guard !Task.isCancelled, self.generation == expectedGeneration, self.isEnabled() else { return }
-            self.transcriptSignature = prepared.signature
-            let resolution = prepared.resolution
-            let fresh = AttachmentReferenceDetector.Resolution(
-                insideProject: resolution.insideProject.filter {
-                    self.pathsRecordedThisTurn.insert($0.path).inserted
-                },
-                outsideProject: resolution.outsideProject.filter {
-                    self.pathsRecordedThisTurn.insert($0.path).inserted
-                },
-                resolvedProjectRoot: resolution.resolvedProjectRoot
-            )
-            if self.pathsRecordedThisTurn.count > SessionAttachmentDefaults.rememberedScannedPaths {
-                self.pathsRecordedThisTurn = Set((resolution.insideProject + resolution.outsideProject).map(\.path))
-            }
-            guard !fresh.isEmpty else { return }
-            _ = await self.store.recordScanned(
-                resolved: fresh, sessionID: self.sessionID, projectRoot: root,
-                context: attribution,
-                shouldAdmit: { [weak self] in
-                    guard let self else { return false }
-                    return self.generation == expectedGeneration && self.isEnabled()
-                }
+            let relativePath = String(url.path.dropFirst(rootPrefix.count))
+            guard !relativePath.isEmpty else { return nil }
+            return SessionAttachment(
+                sessionID: sessionID,
+                id: UUID().uuidString.lowercased(),
+                root: projectRoot,
+                url: url,
+                relativePath: relativePath,
+                sourcePath: url.path,
+                kind: kind,
+                origin: .agent,
+                agentSources: context.sources,
+                turnID: context.turnID,
+                referencedAt: referencedAt
             )
         }
     }
-
 }
 
 // MARK: - Defaults

@@ -9,7 +9,7 @@ import time
 
 import gi
 gi.require_version('Atspi', '2.0')
-from gi.repository import Atspi
+from gi.repository import Atspi, GLib
 
 
 binary, host, daemon, endpoint, fixture, evidence = sys.argv[1:]
@@ -98,30 +98,43 @@ def worktree_prompt(branch, process):
 
 def application(process):
     desktop = Atspi.get_desktop(0)
-    for index in range(desktop.get_child_count()):
-        child = desktop.get_child_at_index(index)
-        if child.get_name() == 'Threading Linux' and child.get_process_id() == process.pid:
-            return child
+    return child_matching(desktop, lambda child:
+                          child.get_name() == 'Threading Linux'
+                          and child.get_process_id() == process.pid)
+
+
+def child_matching(parent, predicate):
+    # AT-SPI can retire a child between count and lookup while the window swaps panes.
+    # The caller's eventually() still requires the exact requested live child.
+    try:
+        for index in range(parent.get_child_count()):
+            child = parent.get_child_at_index(index)
+            if child is not None and predicate(child):
+                return child
+    except GLib.GError:
+        return None
     return None
 
 
 def child_by_id(parent, identity):
-    return next((parent.get_child_at_index(index)
-                 for index in range(parent.get_child_count())
-                 if parent.get_child_at_index(index).get_accessible_id() == identity), None)
+    return child_matching(parent, lambda child: child.get_accessible_id() == identity)
 
 
 def row_named(menu, name):
-    return next((menu.get_child_at_index(index)
-                 for index in range(menu.get_child_count())
-                 if menu.get_child_at_index(index).get_name() == name), None)
+    return child_matching(menu, lambda row: row.get_name() == name)
 
 
 def project_rows(frame, count):
-    for index in range(frame.get_child_count()):
-        listed = frame.get_child_at_index(index)
-        if listed.get_role_name() == 'list' and listed.get_child_count() == count:
-            return [listed.get_child_at_index(row) for row in range(count)]
+    try:
+        for index in range(frame.get_child_count()):
+            listed = frame.get_child_at_index(index)
+            if listed is None or listed.get_role_name() != 'list' or listed.get_child_count() != count:
+                continue
+            rows = [listed.get_child_at_index(row) for row in range(count)]
+            if all(row is not None for row in rows):
+                return rows
+    except GLib.GError:
+        return None
     return None
 
 
@@ -144,11 +157,9 @@ try:
                                         str(process.pid), '--name', '^Threading experiment - '),
                             'window', process).splitlines()[0]
         xdo('windowfocus', '--sync', window)
-        frame = app.get_child_at_index(0)
-        panel = eventually(lambda: next((frame.get_child_at_index(index)
-            for index in range(frame.get_child_count())
-            if frame.get_child_at_index(index).get_role_name() == 'panel'), None),
-            'composer panel', process)
+        frame = eventually(lambda: app.get_child_at_index(0), 'frame', process)
+        panel = eventually(lambda: child_matching(frame, lambda child:
+            child.get_role_name() == 'panel'), 'composer panel', process)
         chip = eventually(lambda: child_by_id(panel, 'linux.composer.project'),
                           'location chip', process)
         editor = eventually(lambda: child_by_id(panel, 'linux.composer.editor'),
@@ -230,12 +241,10 @@ try:
                                        env=dict(os.environ, HOME=str(home), THREADING_LINUX_HEAD_TRACE='1'),
                                        stdout=log, stderr=log)
         app = eventually(lambda: application(process), 'restarted app', process)
-        frame = app.get_child_at_index(0)
+        frame = eventually(lambda: app.get_child_at_index(0), 'restarted frame', process)
         eventually(lambda: project_rows(frame, 2), 'repository fold restored', process)
-        panel = eventually(lambda: next((frame.get_child_at_index(index)
-            for index in range(frame.get_child_count())
-            if frame.get_child_at_index(index).get_role_name() == 'panel'), None),
-            'restarted composer', process)
+        panel = eventually(lambda: child_matching(frame, lambda child:
+            child.get_role_name() == 'panel'), 'restarted composer', process)
         chip = eventually(lambda: child_by_id(panel, 'linux.composer.project'),
                           'restarted location chip', process)
         editor = eventually(lambda: child_by_id(panel, 'linux.composer.editor'),
@@ -262,23 +271,20 @@ try:
 
         rows = eventually(lambda: project_rows(frame, 7),
                           'new checkout revealed under repository', process)
-        root_create = rows[0].get_child_at_index(0)
+        root_create = eventually(lambda: rows[0].get_child_at_index(0),
+                                 'repository Create action', process)
         assert root_create.get_accessible_id().startswith('sidebar.project.create.')
         assert root_create.get_action_iface().do_action(0)
-        sidebar_menu = eventually(lambda: next((frame.get_child_at_index(index)
-            for index in range(frame.get_child_count())
-            if frame.get_child_at_index(index).get_role_name() == 'list'
-            and frame.get_child_at_index(index).get_name() == 'New in Repository'), None),
+        sidebar_menu = eventually(lambda: child_matching(frame, lambda child:
+            child.get_role_name() == 'list' and child.get_name() == 'New in Repository'),
             'repository creation menu', process)
         assert row_named(sidebar_menu, 'New Chat…').get_action_iface().do_action(1)
-        eventually(lambda: next((frame.get_child_at_index(index)
-            for index in range(frame.get_child_count())
-            if frame.get_child_at_index(index).get_name() == 'New Chat providers'), None),
+        eventually(lambda: child_matching(frame, lambda child:
+            child.get_name() == 'New Chat providers'),
             'repository chat providers', process)
         xdo('key', 'Escape')
-        sidebar_menu = eventually(lambda: next((frame.get_child_at_index(index)
-            for index in range(frame.get_child_count())
-            if frame.get_child_at_index(index).get_name() == 'New in Repository'), None),
+        sidebar_menu = eventually(lambda: child_matching(frame, lambda child:
+            child.get_name() == 'New in Repository'),
             'repository menu restored after providers', process)
         create = eventually(lambda: row_named(sidebar_menu, 'New Worktree…'),
                             'repository worktree command', process)

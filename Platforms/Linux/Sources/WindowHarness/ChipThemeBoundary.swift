@@ -4,7 +4,6 @@ import AppKit
 // styles are not present in the checked Linux theme export yet.
 extension Design.Size {
     static let choiceHeight: CGFloat = 26
-    static let fieldHeight: CGFloat = 30
 }
 
 extension Design.Symbol {
@@ -42,17 +41,24 @@ extension ThemedControl {
 }
 
 @MainActor
+protocol LinuxThemedMenuSession: AnyObject {
+    func dismiss()
+}
+
+@MainActor
 public enum ThemedMenuPresenter {
-    // The Linux composer installs choicePresentationProvider. Other callers have no presenter
-    // yet; refuse the open rather than claiming a session or selecting an invisible row.
+    typealias PresentationProvider = (ThemedMenuPresentation, NSView, Int?,
+        @escaping (Int, ThemedMenuItem) -> Void, @escaping () -> Void) -> AnyObject?
+    static var presentationProvider: PresentationProvider?
+
     public static func present(_ presentation: ThemedMenuPresentation, from source: NSView,
                                selectedEntryIndex: Int?,
                                onChoose: @escaping (Int, ThemedMenuItem) -> Void,
                                onDismiss: @escaping () -> Void) -> AnyObject? {
-        nil
+        presentationProvider?(presentation, source, selectedEntryIndex, onChoose, onDismiss)
     }
 
     public static func dismiss(_ session: AnyObject?) {
-        precondition(session == nil, "Linux ChipView cannot own an AppKit menu session")
+        (session as? LinuxThemedMenuSession)?.dismiss()
     }
 }

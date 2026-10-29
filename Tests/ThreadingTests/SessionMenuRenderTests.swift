@@ -90,7 +90,76 @@ final class SessionMenuRenderTests: HostedStoreTestCase {
         XCTAssertEqual(written, Render.appearances.count)
         try renderAccountDestinations(to: directory)
         try renderRestartInShell(to: directory, session: session)
+        try renderSnoozeInShell(to: directory)
+        let terminal = try XCTUnwrap(store.addTerminal(to: project.id))
+        try renderTerminalMenuInShell(to: directory, terminalID: terminal.id)
         print("Rendered the session action menu to \(directory.path)")
+    }
+
+    private func renderTerminalMenuInShell(to directory: URL, terminalID: TerminalID) throws {
+        let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1120, height: 800))
+        let sidebar = controller.sidebarViewController
+        sidebar.mountInitialTreeIfNeeded()
+        let root = try XCTUnwrap(window.contentView)
+        let prior = AppThemePalette.current
+        defer { AppThemePalette.set(prior) }
+        AppThemePalette.set(.system)
+        for (name, appearance) in Render.appearances {
+            root.appearance = NSAppearance(named: appearance)
+            root.layoutSubtreeIfNeeded()
+            let token = ThemedMenuPresenter.present(
+                ThemedMenuPresentation(entries: sidebar.terminalMenuEntries(
+                    for: terminalID, row: 0), minimumWidth: SidebarDefaults.menuWidth),
+                from: sidebar.view, selectedEntryIndex: nil,
+                onChoose: { _, _ in }, onDismiss: {}
+            )
+            defer { ThemedMenuPresenter.dismiss(token) }
+            AppThemeRefresh.repaint(root)
+            root.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+            root.cacheDisplay(in: root.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                to: directory.appendingPathComponent("session-menu-terminal-shell-\(name).png")
+            )
+        }
+    }
+
+    private func renderSnoozeInShell(to directory: URL) throws {
+        let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(NSSize(width: 1120, height: 800))
+        let sidebar = controller.sidebarViewController
+        sidebar.mountInitialTreeIfNeeded()
+        let root = try XCTUnwrap(window.contentView)
+        let prior = AppThemePalette.current
+        defer { AppThemePalette.set(prior) }
+        AppThemePalette.set(.system)
+
+        let openedAt = try XCTUnwrap(Calendar.current.date(from: DateComponents(
+            year: 2026, month: 10, day: 26, hour: 10, minute: 0
+        )))
+        let entries = SidebarSessionMenuContent.snoozeEntries(
+            moments: SnoozeWallClockMoments.future(from: openedAt)
+        )
+        for (name, appearance) in Render.appearances {
+            root.appearance = NSAppearance(named: appearance)
+            root.layoutSubtreeIfNeeded()
+            let token = ThemedMenuPresenter.present(
+                ThemedMenuPresentation(entries: entries, minimumWidth: SidebarDefaults.menuWidth),
+                from: sidebar.view, selectedEntryIndex: nil,
+                onChoose: { _, _ in }, onDismiss: {}
+            )
+            AppThemeRefresh.repaint(root)
+            root.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(root.bitmapImageRepForCachingDisplay(in: root.bounds))
+            root.cacheDisplay(in: root.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
+                to: directory.appendingPathComponent("session-menu-snooze-shell-\(name).png")
+            )
+            ThemedMenuPresenter.dismiss(token)
+        }
     }
 
     private func renderRestartInShell(to directory: URL, session: AgentSession) throws {

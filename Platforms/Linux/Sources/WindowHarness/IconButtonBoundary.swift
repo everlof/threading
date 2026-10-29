@@ -2,16 +2,19 @@ import AppKit
 
 // Only the neighboring theme and menu contracts needed to mount unchanged ThemedControl and
 // ThemedIconButton. WindowHarness consumes a checked production theme snapshot.
-@MainActor public protocol ThemedComponent: AnyObject {}
-@MainActor public protocol SystemChromeBoundary: AnyObject {
-    func permitsSystemChrome(_ view: NSView) -> Bool
-}
 
 @MainActor public enum SurfaceBevel { case automatic, sunken, none }
 @MainActor public enum AppThemePalette {
     public enum ColorRole { case selection }
     public struct Material {
         public let bevel: Bevel? = nil
+        /// Use the production card's complete one-bit glyph vocabulary until the Linux
+        /// symbol provider carries every mark the Mac popover can request.
+        public let popoverStyle = PopoverStyle()
+    }
+    public struct PopoverStyle {
+        public enum GlyphStyle { case system, classic }
+        public let glyphStyle: GlyphStyle = .classic
     }
     public struct Bevel {
         public enum Style { case hard, soft }
@@ -55,20 +58,6 @@ public struct AppThemeDidChange: AppEvent {
 public struct ProfileDidChange: AppEvent {
     public static let name = Notification.Name("profileDidChange")
 }
-public struct AccessibilityDisplayOptionsDidChange: AppEvent {
-    public static let name = Notification.Name("accessibilityDisplayOptionsDidChange")
-}
-
-#if !THREADING_WINDOW_HARNESS && !THREADING_PANE_HEADER_HARNESS
-@MainActor public protocol OpticalInsetProviding {
-    var opticalHorizontalInset: CGFloat { get }
-    func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat
-}
-#endif
-@MainActor public protocol ThemedMenuPresentationObserving {
-    func themedMenuPresentationDidChange(isPresented: Bool)
-}
-public enum ThemedMenuAnchor { case pointer(NSPoint), control }
 #if !THREADING_WINDOW_HARNESS
 // The window host links the production ControlRow; the narrower harnesses keep this shape.
 @MainActor public protocol ControlRowMember { func adopt(_ metrics: ControlRowMetrics) }

@@ -14,7 +14,8 @@ enum { MAX_VISIBLE_ROWS = 32, MAX_ROW_NAME = 512, MAX_ROW_ID = 64,
        MAX_SESSION_MENU_ROWS = 8, MAX_COMPOSER_MENU_ROWS = 128,
        MAX_ATTACHMENT_TILES = 32, MAX_ATTACHMENT_NAME = 256,
        MAX_COMPOSER_TEXT = 64 * 1024,
-       MAX_COMPOSER_EDITS = 16, MAX_COMPOSER_ID = 128 };
+       MAX_COMPOSER_EDITS = 16, MAX_COMPOSER_ID = 128,
+       MAX_SETTINGS_CONTROLS = 96, MAX_SETTINGS_ID = 128 };
 enum { PROJECT_CONTROL_NONE, PROJECT_CONTROL_CREATE, PROJECT_CONTROL_ACTIONS };
 
 typedef struct {
@@ -82,6 +83,17 @@ static char conversationContextIdentity[MAX_COMPOSER_ID];
 static int conversationContextVisible;
 static AccessibleNode *conversationConfigurationChips[3], *conversationConfigurationMenu;
 static AccessibleNode *attachmentList;
+static AccessibleNode *settingsPanel;
+static int settingsPanelVisible, settingsFocusSlot = -1;
+static struct {
+    int count;
+    AtkRectangle bounds;
+    struct {
+        char id[MAX_SETTINGS_ID], name[MAX_ROW_NAME], description[MAX_ROW_NAME];
+        int role, enabled, checked, focused;
+        AtkRectangle bounds;
+    } controls[MAX_SETTINGS_CONTROLS];
+} settingsPending;
 static int attachmentScope;
 static char attachmentOwner[MAX_COMPOSER_ID];
 static int conversationConfigurationVisible[3], conversationConfigurationFocused[3];
@@ -230,6 +242,12 @@ static AtkStateSet *node_state(AtkObject *object) {
     }
     if (node == promptSuppression && node->selected)
         atk_state_set_add_state(states, ATK_STATE_CHECKED);
+    if (settingsPanel && atk_object_get_parent(object) == ATK_OBJECT(settingsPanel)) {
+        atk_state_set_add_state(states, ATK_STATE_FOCUSABLE);
+        if (node == focused) atk_state_set_add_state(states, ATK_STATE_FOCUSED);
+        if (atk_object_get_role(object) == ATK_ROLE_CHECK_BOX && node->selected)
+            atk_state_set_add_state(states, ATK_STATE_CHECKED);
+    }
     if (node == conversationSpeedChip) {
         atk_state_set_add_state(states, ATK_STATE_EXPANDABLE);
         if (conversationSpeedMenuVisible) atk_state_set_add_state(states, ATK_STATE_EXPANDED);
@@ -388,7 +406,8 @@ static void refresh_focus(void) {
             set_focused(next);
             return;
         }
-        AccessibleNode *rightPane = placeholderVisible ? placeholder : (AccessibleNode *)terminal;
+        AccessibleNode *rightPane = settingsPanelVisible ? settingsPanel :
+            placeholderVisible ? placeholder : (AccessibleNode *)terminal;
         AccessibleNode *content = tw_workspace_sidebar_width(hostWindow)
             ? (tw_workspace_sidebar_focused(hostWindow) ? list : rightPane)
             : g_ptr_array_index(frame->children, 0);
@@ -407,6 +426,9 @@ static void refresh_focus(void) {
                 ? conversationConfigurationChips[2]
                 : conversationSpeedVisible && conversationSpeedFocused ? conversationSpeedChip : content;
         }
+        else if (content == settingsPanel && settingsFocusSlot >= 0 &&
+                 (guint)settingsFocusSlot < settingsPanel->children->len)
+            next = g_ptr_array_index(settingsPanel->children, (guint)settingsFocusSlot);
         else if (content == placeholder && composerEditorVisible) {
             if (composerFocusKind == 1 && composerChipVisible[0]) next = composerProjectChip;
             else if (composerFocusKind == 2 && composerChipVisible[1]) next = composerProviderChip;
@@ -428,7 +450,8 @@ static void show_content(AccessibleNode *content) {
     const int workspace = tw_workspace_sidebar_width(hostWindow) != 0;
     const int titleVisible = workspace && pageTitleVisible &&
         (!placeholderVisible || tw_workspace_terminal_top_inset_value(hostWindow) > 0);
-    AccessibleNode *rightPane = placeholderVisible ? placeholder : (AccessibleNode *)terminal;
+    AccessibleNode *rightPane = settingsPanelVisible ? settingsPanel :
+        placeholderVisible ? placeholder : (AccessibleNode *)terminal;
     const guint baseCount = workspace ? 2 + titleVisible : 1;
     const guint count = baseCount + actionsVisible + addProjectVisible + settingsVisible
         + pageActionsVisible + 2 * openInVisible + sessionMenuVisible;
@@ -472,6 +495,113 @@ static void show_content(AccessibleNode *content) {
     }
     activeList = workspace || content == list ? list : NULL;
     refresh_focus();
+}
+
+static AtkRole settings_role(int role) {
+    switch (role) {
+    case 1: return ATK_ROLE_PUSH_BUTTON;
+    case 2: return ATK_ROLE_CHECK_BOX;
+    case 3: return ATK_ROLE_COMBO_BOX;
+    case 4: return ATK_ROLE_ENTRY;
+    case 5: return ATK_ROLE_MENU_ITEM;
+    default: return ATK_ROLE_UNKNOWN;
+    }
+}
+
+int tw_accessibility_settings_begin(TWWindow *window, int x, int y, int width, int height) {
+    settingsPending.count = 0;
+    settingsPending.bounds = (AtkRectangle){x, y, width, height};
+    return bridgeReady && window == hostWindow && settingsPanel;
+}
+
+int tw_accessibility_settings_add(TWWindow *window, const char *id, const char *name,
+                                  const char *description, int role, int enabled, int checked,
+                                  int isFocused, int x, int y, int width, int height) {
+    if (!bridgeReady || window != hostWindow || !settingsPanel || !id || !id[0] ||
+        !name || !name[0] || !description || settings_role(role) == ATK_ROLE_UNKNOWN ||
+        width <= 0 || height <= 0 || settingsPending.count >= MAX_SETTINGS_CONTROLS ||
+        strnlen(id, MAX_SETTINGS_ID) >= MAX_SETTINGS_ID ||
+        strnlen(name, MAX_ROW_NAME) >= MAX_ROW_NAME ||
+        strnlen(description, MAX_ROW_NAME) >= MAX_ROW_NAME ||
+        !g_utf8_validate(id, -1, NULL) || !g_utf8_validate(name, -1, NULL) ||
+        !g_utf8_validate(description, -1, NULL)) return 0;
+    for (int i = 0; i < settingsPending.count; i++)
+        if (strcmp(settingsPending.controls[i].id, id) == 0) return 0;
+    int slot = settingsPending.count++;
+    g_strlcpy(settingsPending.controls[slot].id, id, MAX_SETTINGS_ID);
+    g_strlcpy(settingsPending.controls[slot].name, name, MAX_ROW_NAME);
+    g_strlcpy(settingsPending.controls[slot].description, description, MAX_ROW_NAME);
+    settingsPending.controls[slot].role = role;
+    settingsPending.controls[slot].enabled = !!enabled;
+    settingsPending.controls[slot].checked = !!checked;
+    settingsPending.controls[slot].focused = !!isFocused;
+    settingsPending.controls[slot].bounds = (AtkRectangle){x, y, width, height};
+    return 1;
+}
+
+void tw_accessibility_settings_end(TWWindow *window) {
+    if (!bridgeReady || window != hostWindow || !settingsPanel ||
+        settingsPending.bounds.width <= 0 || settingsPending.bounds.height <= 0) return;
+    int same = settingsPanel->children->len == (guint)settingsPending.count;
+    for (int i = 0; same && i < settingsPending.count; i++) {
+        AccessibleNode *node = g_ptr_array_index(settingsPanel->children, (guint)i);
+        same = node->id && strcmp(node->id, settingsPending.controls[i].id) == 0 &&
+            atk_object_get_role(ATK_OBJECT(node)) == settings_role(settingsPending.controls[i].role);
+    }
+    if (!same) {
+        set_focused(NULL);
+        clear_children(settingsPanel);
+        for (int i = 0; i < settingsPending.count; i++) {
+            AccessibleNode *node = new_component(settings_role(settingsPending.controls[i].role),
+                                                 settingsPending.controls[i].name);
+            node->id = g_strdup(settingsPending.controls[i].id);
+            atk_object_set_accessible_id(ATK_OBJECT(node), node->id);
+            node->row = i;
+            add_child(settingsPanel, node);
+            g_object_unref(node);
+        }
+        generation++;
+    }
+    settingsPanel->bounds = settingsPending.bounds;
+    settingsFocusSlot = -1;
+    for (int i = 0; i < settingsPending.count; i++) {
+        AccessibleNode *node = g_ptr_array_index(settingsPanel->children, (guint)i);
+        set_name_if_changed(node, settingsPending.controls[i].name);
+        set_description_if_changed(node, settingsPending.controls[i].description);
+        node->bounds = settingsPending.controls[i].bounds;
+        if (node->enabled != settingsPending.controls[i].enabled) {
+            node->enabled = settingsPending.controls[i].enabled;
+            atk_object_notify_state_change(ATK_OBJECT(node), ATK_STATE_ENABLED, node->enabled);
+            atk_object_notify_state_change(ATK_OBJECT(node), ATK_STATE_SENSITIVE, node->enabled);
+        }
+        if (node->selected != settingsPending.controls[i].checked) {
+            node->selected = settingsPending.controls[i].checked;
+            if (settingsPending.controls[i].role == 2)
+                atk_object_notify_state_change(ATK_OBJECT(node), ATK_STATE_CHECKED, node->selected);
+        }
+        if (settingsPending.controls[i].focused) settingsFocusSlot = i;
+    }
+    settingsPanelVisible = 1;
+    show_content(list);
+}
+
+void tw_accessibility_settings_hide(TWWindow *window) {
+    if (!bridgeReady || window != hostWindow || !settingsPanel || !settingsPanelVisible) return;
+    settingsPanelVisible = 0;
+    settingsFocusSlot = -1;
+    set_focused(NULL);
+    clear_children(settingsPanel);
+    show_content(list);
+}
+
+int tw_accessibility_settings_control_identity(int slot, char *id, int capacity) {
+    if (!bridgeReady || !settingsPanelVisible || !settingsPanel || !id || capacity < MAX_SETTINGS_ID ||
+        slot < 0 || (guint)slot >= settingsPanel->children->len) return 0;
+    AccessibleNode *node = g_ptr_array_index(settingsPanel->children, (guint)slot);
+    if (node->retired || !node->enabled || !node_mounted(ATK_OBJECT(node)) ||
+        node->row != slot || !node->id) return 0;
+    strcpy(id, node->id);
+    return 1;
 }
 
 void tw_accessibility_workspace_changed(TWWindow *window) {
@@ -520,6 +650,10 @@ static int attachment_button_slot(AccessibleNode *button) {
 
 static gint action_count(AtkAction *action) {
     AccessibleNode *node = (AccessibleNode *)action;
+    if (node->retired) return 0;
+    if (settingsPanel && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(settingsPanel))
+        return settingsPanelVisible && !node->retired && node->enabled &&
+            node_mounted(ATK_OBJECT(node)) ? 1 : 0;
     if (attachment_button_slot(node) >= 0) return 1;
     if (attachmentList && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(attachmentList))
         return 0;
@@ -570,6 +704,9 @@ static gint action_count(AtkAction *action) {
 }
 static const gchar *action_name(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
+    if (node->retired) return NULL;
+    if (settingsPanel && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(settingsPanel))
+        return index == 0 && action_count(action) ? "press" : NULL;
     if (attachment_button_slot(node) >= 0) return index == 0 ? "press" : NULL;
     if (attachmentList && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(attachmentList))
         return NULL;
@@ -598,6 +735,18 @@ static const gchar *action_name(AtkAction *action, gint index) {
 }
 static gboolean action_do(AtkAction *action, gint index) {
     AccessibleNode *node = (AccessibleNode *)action;
+    if (node->retired) return FALSE;
+    if (settingsPanel && atk_object_get_parent(ATK_OBJECT(node)) == ATK_OBJECT(settingsPanel)) {
+        if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
+        SDL_Event event = {0};
+        event.type = eventType;
+        event.user.code = 22;
+        event.user.data1 = (void *)(intptr_t)node->row;
+        event.user.data2 = (void *)(uintptr_t)generation;
+        int pushed = SDL_PushEvent(&event);
+        navigation_trace_enqueue(&event, pushed);
+        return pushed == 1;
+    }
     if (node == promptCancel || node == promptCreate || node == promptClear ||
         node == promptSuppression) {
         if (index != 0 || !action_count(action) || eventType == UINT32_MAX) return FALSE;
@@ -842,12 +991,18 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
         *x = 0; *y = 0; *width = windowWidth; *height = windowHeight;
     } else if (object == ATK_OBJECT(placeholder)) {
         *x = tw_workspace_sidebar_width(hostWindow); *y = 0;
-        *width = windowWidth > *x ? windowWidth - *x : 0; *height = windowHeight;
+        const int contentWidth = windowWidth - *x - tw_workspace_display_width(hostWindow);
+        *width = contentWidth > 0 ? contentWidth : 0; *height = windowHeight;
     } else if (object == ATK_OBJECT(terminal)) {
         *x = tw_workspace_sidebar_width(hostWindow);
         *y = tw_workspace_terminal_top_inset_value(hostWindow);
-        *width = windowWidth > *x ? windowWidth - *x : 0;
+        const int contentWidth = windowWidth - *x - tw_workspace_display_width(hostWindow);
+        *width = contentWidth > 0 ? contentWidth : 0;
         *height = windowHeight > *y ? windowHeight - *y : 0;
+    } else if (object == ATK_OBJECT(settingsPanel) ||
+               (settingsPanel && atk_object_get_parent(object) == ATK_OBJECT(settingsPanel))) {
+        *x = node->bounds.x; *y = node->bounds.y;
+        *width = node->bounds.width; *height = node->bounds.height;
     } else if (object == ATK_OBJECT(promptPanel) || object == ATK_OBJECT(promptTitle) ||
                object == ATK_OBJECT(promptMessage) || object == ATK_OBJECT(promptCancel) ||
                object == ATK_OBJECT(promptCreate) || object == ATK_OBJECT(promptClear) ||
@@ -930,6 +1085,13 @@ static int component_rectangle(AtkObject *object, AtkCoordType coordinates,
                object == ATK_OBJECT(composerSpeedChip)) ||
               object == ATK_OBJECT(composerMenuList))) {
         *x -= tw_workspace_sidebar_width(hostWindow);
+    }
+    else if (coordinates == ATK_XY_PARENT && settingsPanel &&
+             (object == ATK_OBJECT(settingsPanel) ||
+              atk_object_get_parent(object) == ATK_OBJECT(settingsPanel))) {
+        AccessibleNode *parent = (AccessibleNode *)atk_object_get_parent(object);
+        if (parent == settingsPanel) { *x -= parent->bounds.x; *y -= parent->bounds.y; }
+        else *x -= tw_workspace_sidebar_width(hostWindow);
     }
     else if (coordinates == ATK_XY_PARENT && node->projectControl) {
         AccessibleNode *row = (AccessibleNode *)atk_object_get_parent(object);
@@ -1471,6 +1633,11 @@ void tw_accessibility_open(TWWindow *window) {
     settingsButton = new_component(ATK_ROLE_PUSH_BUTTON, "Settings");
     settingsButton->id = g_strdup("sidebar.settings");
     atk_object_set_accessible_id(ATK_OBJECT(settingsButton), settingsButton->id);
+    settingsPanel = new_component(ATK_ROLE_PANEL, "Settings");
+    settingsPanel->id = g_strdup("settings.panel");
+    atk_object_set_accessible_id(ATK_OBJECT(settingsPanel), settingsPanel->id);
+    settingsPanelVisible = 0;
+    settingsFocusSlot = -1;
     pageTitleButton = new_component(ATK_ROLE_PUSH_BUTTON, "Page title");
     pageTitleButton->id = g_strdup("linux.page-title");
     atk_object_set_accessible_id(ATK_OBJECT(pageTitleButton), pageTitleButton->id);
@@ -1616,6 +1783,7 @@ void tw_accessibility_close(void) {
     clear_children(conversationSpeedMenu);
     clear_children(conversationConfigurationMenu);
     clear_children(attachmentList);
+    clear_children(settingsPanel);
     clear_children(promptPanel);
     clear_children((AccessibleNode *)terminal);
     clear_children(frame);
@@ -1627,6 +1795,7 @@ void tw_accessibility_close(void) {
     g_clear_object(&actionsButton);
     g_clear_object(&addProjectButton);
     g_clear_object(&settingsButton);
+    g_clear_object(&settingsPanel);
     g_clear_object(&pageTitleButton);
     g_clear_object(&pageActionsButton);
     g_clear_object(&openInPrimaryButton);
@@ -1660,6 +1829,7 @@ void tw_accessibility_close(void) {
     g_clear_object(&attachmentList);
     g_clear_object(&composerEditor);
     actionsVisible = addProjectVisible = settingsVisible = pageTitleVisible = pageActionsVisible = 0;
+    settingsPanelVisible = 0;
     openInVisible = sessionMenuVisible = 0;
     placeholderVisible = placeholderActionVisible = composerEditorVisible = composerEditorFocused = 0;
     promptVisible = promptFocusKind = 0;
@@ -2650,7 +2820,7 @@ int tw_accessibility_add_row(TWWindow *window, const char *id, const char *name,
     if (!bridgeReady) return 0;
     int originX, originY, windowWidth, windowHeight;
     tw_window_geometry(window, &originX, &originY, &windowWidth, &windowHeight);
-    if (tw_workspace_sidebar_width(window) && !tw_navigator_menu_visible(window))
+    if (tw_workspace_sidebar_width(window) && !tw_navigator_menu_accepts_input(window))
         windowWidth = tw_workspace_sidebar_width(window);
     if (!id || !name || pending.count >= MAX_VISIBLE_ROWS
         || strnlen(id, MAX_ROW_ID) == MAX_ROW_ID
@@ -2876,16 +3046,12 @@ void tw_accessibility_conversation_speed(TWWindow *window, const char *identity,
         add_child((AccessibleNode *)terminal, conversationSpeedChip);
         if (menuVisible) {
             add_child((AccessibleNode *)terminal, conversationSpeedMenu);
-            const char *names[] = {"Follow Agent Setting", "Standard", "Fast"};
-            const char *details[] = {"Applies the next time this chat starts.",
-                                     "Normal speed and usage", "1.5x speed, increased usage"};
             for (int index = 0; index < 3; index++) {
-                AccessibleNode *row = new_component(ATK_ROLE_LIST_ITEM, names[index]);
+                AccessibleNode *row = new_component(ATK_ROLE_LIST_ITEM, "");
                 char id[64];
                 snprintf(id, sizeof(id), "linux.conversation.speed.option.%d", index);
                 row->id = g_strdup(id);
                 atk_object_set_accessible_id(ATK_OBJECT(row), row->id);
-                set_description_if_changed(row, details[index]);
                 row->row = index;
                 add_child(conversationSpeedMenu, row);
                 g_object_unref(row);
@@ -2920,6 +3086,15 @@ void tw_accessibility_conversation_speed(TWWindow *window, const char *identity,
         }
     }
     refresh_focus();
+}
+void tw_accessibility_conversation_speed_row(TWWindow *window, int index,
+                                              const char *title, const char *detail) {
+    if (!bridgeReady || window != hostWindow || !conversationSpeedMenuVisible ||
+        index < 0 || index >= 3 || !title || !g_utf8_validate(title, -1, NULL) ||
+        (detail && !g_utf8_validate(detail, -1, NULL))) return;
+    AccessibleNode *row = g_ptr_array_index(conversationSpeedMenu->children, index);
+    set_name_if_changed(row, title);
+    set_description_if_changed(row, detail ? detail : "");
 }
 int tw_accessibility_conversation_speed_identity(int row, char *identity, int capacity) {
     if (!bridgeReady || !conversationSpeedVisible || !identity || capacity < MAX_COMPOSER_ID ||

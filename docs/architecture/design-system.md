@@ -71,6 +71,13 @@ The footer is mounted through `SidebarNavigatorContentView` on both desktop host
 ends at the production `PaneFooterView`'s top edge. `SidebarFooterControls` configures the
 Settings button once, including its symbol and accessibility identity. Linux supplies its action
 and SDL accessibility bridge while macOS supplies its other global footer actions.
+Linux's General and Chats Settings AT-SPI nodes are a bounded projection of the same mounted
+`SettingsPageView` controls and `ThemedMenuSurfaceView` rows that draw the page. The host reads
+their role, row label, value, help, enabled state and clipped bounds after layout, retains node
+identity while a page is mounted, and routes a press back to that view's accessibility action.
+The AppKit shim keeps editable text content as the field's value rather than replacing its row
+label. A dismissed menu retires its AT-SPI rows before another action can reach them. This
+projection adds no second Settings view or row constructor.
 
 The Linux and macOS session rows now mount the same `SidebarSessionTrailingSlot`, which builds
 the status column and two-control hover stack with one set of constraints. Its anchored menu
@@ -112,6 +119,19 @@ The row menu now uses the same Snooze wall-clock moments as macOS. Its Linux hos
 persisted visibility overlay, one process-wide deadline map, worker-side expiry reconciliation,
 and exact-session wake receipts. The shared menu rows draw the choices; no snooze timer or
 database read is attached to a recycled row. Several other session actions remain open.
+`SidebarSessionMenuContent` now builds both desktop hosts' standing Pin, Snooze, Archive,
+conditional Close, Rename and Copy rows and their group boundaries. Mac supplies its additional
+service entries and action closures; Linux supplies paged submenu navigation and revalidates the
+session before routing a command. Its Snooze builder owns the choice order and Custom time row;
+`SnoozeWallClockMoments.presentations` supplies the labels and time detail to that builder and
+the scheduled-message model. Only Linux's Back prelude and the hosts' deadline actions differ.
+Both still mount the same `ThemedMenuSurfaceView`, and Linux's
+symbol shim renders the common Copy and identifier marks. `SidebarTerminalMenuContent` similarly
+owns the common terminal row action menu; the hosts retain their own terminal services.
+The saved-session pane-header Actions button now opens that same Linux session menu model and
+command route, anchored to the button's constrained rectangle in full-window coordinates.
+The navigator overlay already spans the window, so no second menu surface or second clipboard
+contract is needed. The header's separate Open In chooser remains its own bounded menu.
 The custom-time picker now shares the Mac day/time options, row content, and the exact
 `NSStackView`/`NSLayoutConstraint` declaration in `ScheduleMomentPickerLayout`. The Linux host
 supplies the outer SDL sheet size and event route; the AppKit shim sizes each table document to
@@ -225,15 +245,19 @@ The host owns the modal event loop and durable work; the Linux bridge publishes 
 constrained field, title and button bounds through AT-SPI. Appearance stays in the component
 boundary while repository and session behavior remain host-owned.
 The Linux compatibility target now compiles the production `ThemedCheckbox` and `ThemedToggle`
-for the checked Threading material, including the switch's timer-driven interaction.
+for the checked Threading material. The switch's Linux timer sends one frame through the SDL
+owner's receipt mailbox at a time: the SDL loop does not pump a Cocoa RunLoop timer, and an
+unpaced timer can queue stale frames behind a slow render. Settings wakes that owner when an
+accessibility action changes a control, so its persisted state is also repainted immediately.
 `SettingsAdaptiveControlRow`, `SettingsCard`, and `SettingsPageCanvasLayout` are shared Design
 sources. The Linux Settings detour mounts the General confirmation toggles inside that constrained
 canvas and returns to the previous pane through Done or the Settings shortcut. The Close prompt
 offers its remembered checkbox; both it and Settings write the same persisted preference. The
 host owns routing, focus and persistence while the components own their internal layout. The
-existing project sidebar still surrounds this initial Settings pane; the Mac Settings sidebar and
-its other destinations remain to be ported. The Linux `NSView.layoutSubtreeIfNeeded()` shim runs
-the solved tree's `layout()` callbacks and re-solves callback-changed constraints before geometry
+existing project sidebar still surrounds Settings; Chats is mounted through the shared page
+structures, while the remaining Mac Settings destinations need host behavior. The Linux
+`NSView.layoutSubtreeIfNeeded()` shim runs the solved tree's `layout()` callbacks and re-solves
+callback-changed constraints before geometry
 is read or pixels are drawn, as AppKit does for the adaptive row.
 
 `ThemedControl` supplies accessibility hit testing for its drawn, cell-free controls. AppKit's
@@ -433,6 +457,7 @@ Components so far:
 | `SeparatorView` | A hairline rule, replacing `NSBox(boxType: .separator)`. `frameGap(to:forInkGap:)` and `applyOpticalSpacing(in:precededBy:followedBy:inkGap:)` keep an authored gap between the rule and visible content on either axis: the adjacent `OpticalInsetProviding` control owns its invisible padding, while bare content keeps the full gap. |
 | `PointerClaiming` / `PointerClaim` | What a view tells the pointer, declared rather than registered. `restingPointer` is the cursor over everything the view covers — `.arrow` for opaque chrome, which `ThemedControl` and `BackdropOverlay` default to, and `nil` **only** for a view that is genuinely see-through and means what is behind it to answer. `pointerClaims` names the parts that differ, most specific first; they may overlap each other and are carved in one place, so AppKit's undefined case cannot be constructed. It exists because claiming nothing is not claiming the arrow: cursor rectangles are a *window's* list, and a view that registers none inherits the claim behind it — a terminal's I-beam, a text view's, an `NSTextField`'s over its own controls. Registration is `registerPointerClaims()`, invalidation is `refreshPointerClaims()` (the base classes call it from `layout()`, since AppKit re-asks only when the *view's* geometry moved), and `resolvedPointerClaims()` is what a test reads. `addCursorRect` and `NSCursor.…set()` are build-lint errors outside the seam. See the three 2026-08-21 notes below. |
 | `HoverTrackingView` / `HoverPopoverScheduler` | The pointer bridge and timing policy for hover-presented detail. A `ThemedControl` anchor reports its already-shared state through `onHoverChange`; a feature does not install a competing tracking area over it. The surface root reports crossing into the popover, while the scheduler owns dwell, crossing grace, and cancellation. |
+| `SessionInfoCardView` | The one session hover-card body on macOS and Linux. `SessionInfoPopoverViewController` supplies Mac facts and `LinuxSessionInfoAdapter` supplies already loaded Linux facts; neither lays out its own rows. The launch outcome ledger and dormancy wording are shared. Hosts own session identity, dwell, placement and dismissal. Mac keeps its extension content hook and `ThemedPopover` chrome; the Linux SDL overlay draws the shared body as a noninteractive surface so clicks reach the sidebar. The card is constructed only after the hover deadline. |
 | `ThemedStatusReceiptButton` | A complete check receipt inside a bounded card column. It takes already-localized semantic fragments, wraps only between whole fragments, and grows by full text lines instead of truncating provider outcomes. It owns the ordinary themed-control contract — hover plate, robust press/release, keyboard focus and activation, accessibility, live ink, and optical insets — while the source-control model remains the sole owner of outcome wording and order. |
 | `ThemedStatusProgressRing` | A compact semantic ring for bounded successful/non-blocking/active/attention counts. It draws non-blocking results as the neutral track and overlays positive, warning and negative slices; adjacent text must name every non-zero exact outcome so hue is never the only signal. |
 | `ThemeSwatchView` | A palette chip; the one place `NSColorWell` still lives. |
@@ -717,6 +742,12 @@ answers `.none`, `.shared` or `.separate` per panel, and only `.separate` — so
 row wears that app's own icon — pays for two columns. This is the rule Win32 has always used
 (`ThemedMenuMetrics.resolved` keeps the historical grammars on their own authored anatomy:
 Platinum and Workbench reserve both columns unconditionally, Win98 exactly one).
+
+`selectedEntryIndex` identifies a persisted choice and draws its check; it is not the keyboard
+cursor. Linux hosts once passed their highlighted index to the shared surface for ordinary action
+menus. This put a check on Rename Terminal and reserved a mark gutter even though no command was
+selected. Hosts now set `ThemedMenuItem.isSelected` for actual choices and call
+`ThemedMenuSurfaceView.highlight(_:)` separately for keyboard and pointer navigation.
 
 **Icons on an action menu are structure, not decoration.** The session's menu is the longest in
 the app — past thirty rows on a shared, running session — and read as an unbroken wall of words
@@ -4307,6 +4338,21 @@ longer behind the row's "?"** over both "titles only" and "keep every word but q
 
 `GeneralSettingsRenderTests` renders all five pages that were General, and `AppSettingDefinitionTests`
 pins every page's row order, so a row that drifts back onto General shows up in both.
+
+The macOS and Linux Chats pages now mount the same `ChatsSettingsPageStructure` section views.
+It fixes the New Chats, Opening Message, Attachments, Scratchpad order and builds the captions
+and section help once; hosts supply cards backed by their own services. Linux mounts the
+Attachments card now that native prose and live PTY output reach the shared detector. The same
+`AttachmentSettingsStructure` owns the rows, titles and help on both hosts. Linux supplies the
+backed per-agent detection controls and outside-project scope control. Both scanners pass
+outside-project candidates to the same store custody and read gate as macOS; the SDL host uses
+a receipt callback to return from the worker without suspending its UI loop. Before-action
+browser capture still needs host behavior before its control can be shown. The settings and
+scanner choices remain host-owned user preferences; extensions do not replace this control
+surface. Linux advances active shared `ThemedToggle` controls on the SDL owner's animation
+deadline, so consecutive presses settle through the same loop that presents their pixels;
+macOS keeps the control's display link.
+New Chats, Opening Message and Scratchpad use shared row builders too.
 
 
 ## Portable decorative gradient motion

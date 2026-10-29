@@ -74,13 +74,13 @@ enum PermissionModePresentation {
     /// different things — one followed Settings, the other pinned today's value. Marking the
     /// mode where it already stands says both, in one place, in the same glance that reads what
     /// the mode does.
-    static var defaultSuffix: String { L10n.string("  (default)") }
+    static var defaultSuffix: String { PermissionModeMenuContent.defaultSuffix }
 
     /// A mode nothing configured, named because this agent ran in it before. Qualified apart
     /// from a configured one for the reason `ClaudeAccountLastRunPermissionMode` states: it is
     /// where the agent got to last time, not a setting anyone wrote. The model menu's
     /// `(last used)` says the same thing about the same kind of evidence.
-    static var lastUsedSuffix: String { L10n.string("  (last used)") }
+    static var lastUsedSuffix: String { PermissionModeMenuContent.lastUsedSuffix }
 
     /// How the marked row qualifies where its mode came from.
     static func suffix(for source: ResolvedPermissionMode.Source) -> String {
@@ -96,8 +96,9 @@ enum PermissionModePresentation {
         for kind: AgentKind,
         inherited: ResolvedPermissionMode
     ) -> String {
-        let title = mode.displayName(for: kind)
-        return mode == inherited.mode ? "\(title)\(suffix(for: inherited.source))" : title
+        PermissionModeMenuContent.rowTitle(mode, for: kind,
+            governingMode: inherited.governingMode,
+            reportedMode: inherited.governingMode == nil ? inherited.mode : nil)
     }
 
     /// Names the mode that will actually apply, not only the one chosen on this surface.
@@ -116,7 +117,8 @@ enum PermissionModePresentation {
         selected: AgentPermissionMode?,
         inherited: ResolvedPermissionMode
     ) -> String {
-        (selected ?? inherited.nameableMode)?.displayName(for: kind) ?? agentSettingTitle
+        PermissionModeMenuContent.chipTitle(for: kind, selected: selected,
+            nameableMode: inherited.nameableMode)
     }
 
     /// What a chip's tooltip adds: the value is in the chip, and this says whose value it is.
@@ -211,71 +213,14 @@ enum PermissionModePresentation {
         timing: Timing,
         onChoose: ((AgentPermissionMode?) -> Void)? = nil
     ) -> [ThemedMenuEntry] {
-        var rows: [ThemedMenuEntry] = []
-
-        // The one answer a row may stand in for: a mode something will state again on its own.
-        // Everything else — a report, or no answer at all — leaves inherit as its own row, so
-        // that choosing a posture always records that posture.
-        let inheritable = inherited.governingMode
-
-        if inheritable == nil {
-            rows.append(.item(ThemedMenuItem(
-                title: agentSettingRowTitle,
-                representedValue: nil,
-                isSelected: selected == nil,
-                onChoose: onChoose.map { choose in { choose(nil) } }
-            )))
-        }
-
-        for mode in AgentPermissionMode.allCases {
-            // The marked row *is* the inherit row, so it answers nil and takes the checkmark
-            // for a session that has chosen nothing as well as for one that chose this mode —
-            // both run it, and a menu that marked only one of them would be reporting a
-            // difference the session cannot act on.
-            let isDefault = mode == inheritable
-            // The description rides as the subtitle rather than a hover tooltip, so what a
-            // mode actually permits is read in the same glance that chooses it.
-            rows.append(.item(ThemedMenuItem(
-                title: rowTitle(mode, for: kind, inherited: inherited),
-                subtitle: [mode.menuDescription(for: kind), mode.caveat(for: kind)]
-                    .compactMap { $0 }
-                    .joined(separator: " "),
-                representedValue: isDefault ? nil : mode,
-                isSelected: isDefault ? (selected == nil || selected == mode) : mode == selected,
-                onChoose: onChoose.map { choose in { choose(isDefault ? nil : mode) } }
-            )))
-        }
-
-        // A row that answers nothing, because the sentence is about the whole menu rather than
-        // about any one mode in it.
-        if let note = note(for: timing) {
-            rows.append(.separator)
-            rows.append(.item(ThemedMenuItem(title: note, isEnabled: false)))
-        }
-
-        return rows
+        PermissionModeMenuContent.rows(for: kind, selected: selected,
+            governingMode: inherited.governingMode,
+            reportedMode: inherited.governingMode == nil ? inherited.mode : nil,
+            note: note(for: timing), onChoose: onChoose)
     }
 }
 
 // MARK: - Conversation Speed Presentation
-
-/// The per-conversation speed choice shared by the opening and reply composers.
-///
-/// A typed choice rather than a `Bool?` in a menu: nil is a real answer (follow General), and
-/// `representedValue` cannot otherwise distinguish that row from one with no value at all.
-enum ConversationSpeedChoice: CaseIterable, Equatable {
-    case followGeneral
-    case standard
-    case fast
-
-    var fastMode: Bool? {
-        switch self {
-        case .followGeneral: nil
-        case .standard: false
-        case .fast: true
-        }
-    }
-}
 
 /// One vocabulary and one set of rows for speed before and after a conversation exists.
 enum ConversationSpeedPresentation {
@@ -283,7 +228,7 @@ enum ConversationSpeedPresentation {
     /// draws this same `bolt.fill` only while fast mode is on, so a chip that wears it beside
     /// the word "Standard" says the opposite of what it means — and contradicts the card in the
     /// same window, which shows no mark for exactly that state.
-    static let fastSymbol = "bolt.fill"
+    static let fastSymbol = ConversationSpeedMenuContent.fastSymbol
 
     /// Everything that is not Fast takes the dial, which names the choice rather than one of its
     /// answers — the job `brain` does for effort and `hand.raised` for permission mode, neither
@@ -291,16 +236,14 @@ enum ConversationSpeedPresentation {
     /// Standard is the ordinary state, and a crossed-out mark is a second thing to learn about
     /// it rather than a plainer way to say it. `gauge` rather than a second dial of our own:
     /// it is what the phone's speed menu has always drawn beside Standard.
-    static let ordinarySymbol = "gauge"
+    static let ordinarySymbol = ConversationSpeedMenuContent.ordinarySymbol
 
-    static var followGeneralTitle: String { L10n.string("Follow General Setting") }
-    static var followGeneralDetail: String {
-        L10n.string("Uses the speed chosen in Settings ▸ Chats.")
-    }
-    static var standardTitle: String { L10n.string("Standard") }
-    static var fastTitle: String { L10n.string("Fast") }
-    static var standardDetail: String { L10n.string("Normal speed and usage") }
-    static var fastDetail: String { L10n.string("1.5× speed, increased usage") }
+    static var followGeneralTitle: String { ConversationSpeedMenuContent.followGeneralTitle }
+    static var followGeneralDetail: String { ConversationSpeedMenuContent.followGeneralDetail }
+    static var standardTitle: String { ConversationSpeedMenuContent.standardTitle }
+    static var fastTitle: String { ConversationSpeedMenuContent.fastTitle }
+    static var standardDetail: String { ConversationSpeedMenuContent.standardDetail }
+    static var fastDetail: String { ConversationSpeedMenuContent.fastDetail }
 
     /// Whether choosing inheritance can be applied to the process on this surface.
     enum Timing: Equatable {
@@ -311,10 +254,7 @@ enum ConversationSpeedPresentation {
     /// The mark and the words the chip shows, from one resolution rather than two that agree by
     /// inspection. The symbol is a fact about the value here, so a caller that could ask for
     /// them separately is a caller that could pair a bolt with "Standard" again.
-    struct ChipContent: Equatable {
-        let symbolName: String
-        let title: String
-    }
+    typealias ChipContent = ConversationSpeedMenuContent.ChipContent
 
     /// What the chip says the session will use.
     ///
@@ -344,14 +284,7 @@ enum ConversationSpeedPresentation {
             projectDirectory: projectDirectory,
             startupSpeed: AppSettings.shared.startupSpeed(for: kind)
         )
-        switch effective {
-        case true: return ChipContent(symbolName: fastSymbol, title: fastTitle)
-        case false: return ChipContent(symbolName: ordinarySymbol, title: standardTitle)
-        case nil: return ChipContent(
-            symbolName: ordinarySymbol,
-            title: L10n.string("Agent's Setting")
-        )
-        }
+        return ConversationSpeedMenuContent.chip(effective: effective)
     }
 
     /// The words alone, for callers that are not configuring the chip.
@@ -381,32 +314,12 @@ enum ConversationSpeedPresentation {
         kind: AgentKind,
         timing: Timing
     ) -> [ThemedMenuEntry] {
-        var followDetail = followGeneralDetail
-        if timing == .whileRunning,
-           AppSettings.shared.startupSpeed(for: kind) == .agentSetting {
-            followDetail += " " + L10n.string("Applies the next time this chat starts.")
-        }
+        let followDetail = ConversationSpeedMenuContent.followGeneralDetail(
+            startupSpeed: AppSettings.shared.startupSpeed(for: kind),
+            whileRunning: timing == .whileRunning)
 
-        return [
-            .item(ThemedMenuItem(
-                title: followGeneralTitle,
-                subtitle: followDetail,
-                representedValue: ConversationSpeedChoice.followGeneral,
-                isSelected: selected == nil
-            )),
-            .item(ThemedMenuItem(
-                title: standardTitle,
-                subtitle: standardDetail,
-                representedValue: ConversationSpeedChoice.standard,
-                isSelected: selected == false
-            )),
-            .item(ThemedMenuItem(
-                title: fastTitle,
-                subtitle: fastDetail,
-                representedValue: ConversationSpeedChoice.fast,
-                isSelected: selected == true
-            ))
-        ]
+        return ConversationSpeedMenuContent.rows(selected: selected,
+            inheritTitle: followGeneralTitle, inheritDetail: followDetail)
     }
 
     /// A provider-owned setting has no generic live reset request. Record inheritance now and
@@ -851,31 +764,22 @@ extension ProjectSidebarViewController {
                 }
             ]
         }
-        var entries: [ThemedMenuEntry] = []
-
-        entries.append(action(
-            session.isPinned ? L10n.string("Unpin") : L10n.string("Pin"),
-            symbol: session.isPinned ? "pin.slash" : "pin"
-        ) { [weak self] in self?.togglePinnedClicked() })
-        entries.append(snoozeEntry(for: session))
-        // The sidebar only ever lists unarchived sessions, so this is always "Archive";
-        // restoring one happens from Settings, where the archived sessions live.
-        entries.append(action(L10n.string("Archive"), symbol: "archivebox") { [weak self] in
-            self?.archiveClicked()
-        })
-
-        if AgentRuntime.shared.isRunning(sessionID: sessionID) {
-            entries.append(action(
-                L10n.string("Close Session"),
-                symbol: "stop.circle",
-                shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.closeSession)
-            ) { [weak self] in
-                self?.closeSessionClicked()
-            })
-        }
+        var configuration = SidebarSessionMenuContent.Configuration()
+        configuration.isPinned = session.isPinned
+        configuration.isSnoozed = session.isSnoozed(at: Date())
+        configuration.isRunning = AgentRuntime.shared.isRunning(sessionID: sessionID)
+        configuration.snoozeSubmenu = configuration.isSnoozed ? [] : snoozeEntries(for: session)
+        configuration.closeShortcut = ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.closeSession)
+        configuration.renameShortcut = ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.renameSession)
+        configuration.actions.pin = { [weak self] in self?.togglePinnedClicked() }
+        configuration.actions.unsnooze = { SessionSnoozeCenter.shared.unsnooze(sessionID) }
+        configuration.actions.archive = { [weak self] in self?.archiveClicked() }
+        configuration.actions.close = { [weak self] in self?.closeSessionClicked() }
+        configuration.actions.rename = { [weak self] in self?.renameSessionClicked() }
 
         if !session.usesNativeUI, session.kind.supports(.terminalUI) {
-            entries.append(action(L10n.string("Restart Terminal"), symbol: "arrow.clockwise") { [weak self] in
+            configuration.sections.beforeGroups.append(action(
+                L10n.string("Restart Terminal"), symbol: "arrow.clockwise") { [weak self] in
                 guard let self else { return }
                 self.delegate?.projectSidebar(self, restartTerminal: sessionID)
             })
@@ -885,42 +789,33 @@ extension ProjectSidebarViewController {
         // groups: side chats, then the appearance-and-conduct pair plus the folded options,
         // then identity-and-housekeeping. The fold takes what is set once and left alone;
         // Theme and Permission Mode stay top-level because they are reached for repeatedly.
-        appendGroupSeparator(&entries)
-        entries.append(contentsOf: sideChatEntries(for: session))
+        configuration.sections.sideChats = sideChatEntries(for: session)
 
-        appendGroupSeparator(&entries)
-        entries.append(sessionThemeEntry(for: sessionID))
+        configuration.sections.appearance.append(sessionThemeEntry(for: sessionID))
         // Beside Theme rather than beside Mute: both of these are presentation — how this chat
         // looks, how it sounds — while Mute is delivery and lives in the fold below.
-        entries.append(sessionSoundEntry(for: sessionID))
+        configuration.sections.appearance.append(sessionSoundEntry(for: sessionID))
         if let permissionMode = permissionModeEntry(for: session) {
-            entries.append(permissionMode)
+            configuration.sections.appearance.append(permissionMode)
         }
-        entries.append(sessionOptionsEntry(for: session))
+        configuration.sections.appearance.append(sessionOptionsEntry(for: session))
 
-        appendGroupSeparator(&entries)
         if let checkoutMove = checkoutMoveEntry(for: session) {
-            entries.append(checkoutMove)
+            configuration.sections.identityPrefix.append(checkoutMove)
         }
         // A session's folder is its project's checkout, so this is the same offer the project
         // row makes, made where the user already is. It leads the identity group because it is
         // the one item here that leaves the app.
         if let project = projectStore.executionProject(forSessionID: sessionID),
            let openIn = OpenInMenu.submenuEntry(for: .folder(project.folderURL)) {
-            entries.append(openIn)
+            configuration.sections.identityPrefix.append(openIn)
         }
-        entries.append(action(
-            L10n.string("Rename Session…"),
-            symbol: "pencil",
-            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.renameSession)
-        ) { [weak self] in
-            self?.renameSessionClicked()
-        })
         // Absent rather than disabled when the agent is mid-turn or has no naming tool: a
         // greyed row here would be one more thing to read in a menu that already reads long,
         // and the reason it is unavailable is not something a disabled item could say.
         if canAskAgentToRename(sessionID) {
-            entries.append(action(L10n.string("Rename with Agent"), symbol: "sparkles") {
+            configuration.sections.afterRename.append(action(
+                L10n.string("Rename with Agent"), symbol: "sparkles") {
                 [weak self] in
                 self?.askAgentToRenameClicked()
             })
@@ -928,27 +823,29 @@ extension ProjectSidebarViewController {
         // Everything about this chat that is needed *elsewhere* — an id to resume by, a path
         // to grep — folded behind one Copy item; see `sessionCopyEntry`.
         let copyProject = projectStore.executionProject(forSessionID: sessionID)
-        entries.append(sessionCopyEntry(
+        configuration.copyEntry = sessionCopyEntry(
             for: session,
             project: copyProject,
             transcriptURL: copyProject.flatMap { SessionTranscript.url(for: session, in: $0) }
-        ))
+        )
         if AppSettings.shared.remoteAccessEnabled {
-            entries.append(action(L10n.string("Share Chat…"), symbol: "square.and.arrow.up") {
+            configuration.sections.identityTail.append(action(
+                L10n.string("Share Chat…"), symbol: "square.and.arrow.up") {
                 [weak self] in
                 self?.shareSessionClicked()
             })
             if RemoteAccessCoordinator.shared.hasSessionShares(sessionID) {
-                entries.append(action(L10n.string("Stop Sharing Chat"), symbol: "eye.slash") {
+                configuration.sections.identityTail.append(action(
+                    L10n.string("Stop Sharing Chat"), symbol: "eye.slash") {
                     [weak self] in
                     self?.stopSharingSessionClicked()
                 })
             }
         }
-        if let move = moveToAccountEntry(for: session) { entries.append(move) }
-        if let cont = continueWithProviderEntry(for: session) { entries.append(cont) }
+        if let move = moveToAccountEntry(for: session) { configuration.sections.identityTail.append(move) }
+        if let cont = continueWithProviderEntry(for: session) { configuration.sections.identityTail.append(cont) }
         let isManager = ControlGrantStore.shared.isManager(sessionID)
-        entries.append(action(
+        configuration.sections.identityTail.append(action(
             isManager ? L10n.string("Revoke Manager Role") : L10n.string("Make Manager"),
             symbol: isManager ? "person.3.sequence.fill" : "person.3",
             shortcut: ShortcutOverrideStore.shared.shortcut(
@@ -956,14 +853,14 @@ extension ProjectSidebarViewController {
             )
         ) { [weak self] in self?.toggleManagerRoleClicked() })
 
-        appendGroupSeparator(&entries)
-        entries.append(action(L10n.string("Delete Session"), symbol: "trash") { [weak self] in
+        configuration.sections.destructive.append(action(
+            L10n.string("Delete Session"), symbol: "trash") { [weak self] in
             self?.deleteSessionClicked()
         })
 
         // The row's own identity, lowercased to match the sanitized snapshot IDs extensions
         // already hold.
-        entries.append(contentsOf: extensionCommandEntries(
+        configuration.sections.destructive.append(contentsOf: extensionCommandEntries(
             placement: .sessionRow,
             context: ExtensionCommandContext(
                 projectID: projectStore.project(forSessionID: sessionID)?
@@ -971,7 +868,7 @@ extension ProjectSidebarViewController {
                 sessionID: sessionID.uuidString.lowercased()
             )
         ))
-        return entries
+        return SidebarSessionMenuContent.entries(configuration)
     }
 
     /// Checkout ownership is shared by the row, its context menu and the pane header because all
@@ -1126,40 +1023,25 @@ extension ProjectSidebarViewController {
     /// Snooze sits beside Pin and Archive because all three change how a row is found, while
     /// only Archive files or closes anything. The shared builder gives row, context, and pane
     /// header the same Snooze/Unsnooze contract.
-    private func snoozeEntry(for session: AgentSession) -> ThemedMenuEntry {
-        if session.isSnoozed(at: Date()) {
-            return action(L10n.string("Unsnooze"), symbol: "bell") {
-                SessionSnoozeCenter.shared.unsnooze(session.id)
-            }
-        }
-
-        var submenu = ScheduledTimePresets.wallClock(now: Date()).map { preset in
-            ThemedMenuEntry.item(ThemedMenuItem(
-                title: preset.title,
-                subtitle: preset.detail,
-                onChoose: {
-                    SessionSnoozeCenter.shared.snooze(session.id, until: preset.date)
-                }
-            ))
-        }
-        submenu.append(.separator)
-        submenu.append(action(L10n.string("Custom time…"), symbol: "calendar") { [weak self] in
-            guard let self else { return }
-            ScheduleMomentPickerViewController.present(
-                over: self,
-                title: L10n.string("Snooze session"),
-                informativeText: L10n.string("The session keeps running while snoozed."),
-                confirmTitle: L10n.string("Snooze")
-            ) { deadline in
-                guard let deadline else { return }
+    private func snoozeEntries(for session: AgentSession) -> [ThemedMenuEntry] {
+        SidebarSessionMenuContent.snoozeEntries(
+            moments: SnoozeWallClockMoments.future(from: Date()),
+            onChoose: { deadline in
                 SessionSnoozeCenter.shared.snooze(session.id, until: deadline)
+            },
+            onCustom: { [weak self] in
+                guard let self else { return }
+                ScheduleMomentPickerViewController.present(
+                    over: self,
+                    title: L10n.string("Snooze session"),
+                    informativeText: ScheduleMomentPickerStrings.sessionSnoozeDetail,
+                    confirmTitle: L10n.string("Snooze")
+                ) { deadline in
+                    guard let deadline else { return }
+                    SessionSnoozeCenter.shared.snooze(session.id, until: deadline)
+                }
             }
-        })
-        return .item(ThemedMenuItem(
-            title: L10n.string("Snooze"),
-            image: ThemedMenuIcon.symbol("moon.zzz"),
-            submenu: submenu
-        ))
+        )
     }
 
     /// Everything about a chat that is needed *elsewhere*, folded behind one Copy item: the
@@ -1184,35 +1066,20 @@ extension ProjectSidebarViewController {
         project: Project?,
         transcriptURL: URL?
     ) -> ThemedMenuEntry {
-        var submenu: [ThemedMenuEntry] = []
-        // Two glyphs across four rows, and that is the point: the pair that are *identifiers*
-        // share one mark and the pair that are *paths on disk* share the other, so the fold's
-        // two kinds are told apart before any of the four titles is read.
-        if session.resumeState.transcriptID != nil {
-            submenu.append(action(L10n.string("Agent Session ID"), symbol: "number") {
-                [weak self] in
-                self?.copyAgentSessionIDClicked()
-            })
-        }
-        submenu.append(action(L10n.string("Threading ID"), symbol: "number") { [weak self] in
-            self?.copyThreadingIDClicked()
-        })
+        var copy = SidebarSessionMenuContent.Copy()
+        copy.hasAgentID = session.resumeState.transcriptID != nil
+        copy.hasWorktreePath = project != nil
+        copy.hasTranscriptPath = transcriptURL != nil
+        var actions = SidebarSessionMenuContent.Actions()
+        actions.copyAgentID = { [weak self] in self?.copyAgentSessionIDClicked() }
+        actions.copyThreadingID = { [weak self] in self?.copyThreadingIDClicked() }
         if let project {
-            let path = project.folderPath
-            submenu.append(action(L10n.string("Worktree Path"), symbol: "folder") {
-                Self.copyToPasteboard(path)
-            })
+            actions.copyWorktreePath = { Self.copyToPasteboard(project.folderPath) }
         }
         if let transcriptURL {
-            submenu.append(action(L10n.string("Transcript Path"), symbol: "folder") {
-                Self.copyToPasteboard(transcriptURL.path)
-            })
+            actions.copyTranscriptPath = { Self.copyToPasteboard(transcriptURL.path) }
         }
-        return .item(ThemedMenuItem(
-            title: L10n.string("Copy"),
-            image: ThemedMenuIcon.symbol("doc.on.doc"),
-            submenu: submenu
-        ))
+        return SidebarSessionMenuContent.copyEntry(copy, actions: actions)
     }
 
     /// The one pasteboard write every Copy row shares — cleared first, so a failed set never
@@ -1220,14 +1087,6 @@ extension ProjectSidebarViewController {
     static func copyToPasteboard(_ string: String, pasteboard: NSPasteboard = .general) {
         pasteboard.clearContents()
         pasteboard.setString(string, forType: .string)
-    }
-
-    /// Starts a new group. Skips where the previous group contributed nothing — most of the
-    /// middle items are conditional, and two separators in a row read as a missing item rather
-    /// than an empty group.
-    private func appendGroupSeparator(_ entries: inout [ThemedMenuEntry]) {
-        guard let last = entries.last, last.isItem else { return }
-        entries.append(.separator)
     }
 
     /// The set-once configuration, folded behind one item: Interface, Claude Remote Control,

@@ -114,6 +114,8 @@ int tw_worker_wake(uint64_t identity);
 // Kind60 presses a mounted attachment's Remove button. action is 1 opening or 2 native;
 // text is the exact tile UUID, revalidated by the active composer before removal.
 // Kind61 activates one modal text-prompt button through AT-SPI; action 0 cancels, 1 confirms.
+// Kind63 routes the third workspace region in pane-local pixels. Actions 0/1/2/3/4/5/7
+// are move/down/drag/up/exit/secondary-down/wheel; scrollingDeltaX/Y carry wheel notches.
 typedef struct {
     int kind, x, y, width, height;
     char text[1024];
@@ -166,6 +168,11 @@ int tw_present_placeholder(TWWindow *, const uint8_t *rgba, int width, int heigh
 int tw_workspace_reset_terminal(TWWindow *);
 // Replace one bounded pane texture, then compose both. The pixels use pane-local coordinates.
 int tw_present_pane(TWWindow *, const uint8_t *rgba, int width, int height, int sidebar);
+// Reserve a third workspace region to the right of the terminal. Width zero closes it;
+// an open region is 280–640 pixels and leaves at least 320 pixels for the terminal.
+int tw_workspace_set_display_width(TWWindow *, int width);
+int tw_workspace_display_width(TWWindow *);
+int tw_present_display_pane(TWWindow *, const uint8_t *rgba, int width, int height);
 // Replace one already laid out sidebar mark without rasterizing the whole AppKit tree.
 // The caller batches one or more updates and then calls tw_repaint once.
 int tw_update_sidebar_region(TWWindow *, const uint8_t *rgba,
@@ -176,9 +183,10 @@ int tw_present_terminal_header(TWWindow *, const uint8_t *rgba, int width, int h
 // origin is right-pane-local; hiding also unmounts its accessibility menu.
 int tw_present_session_menu(TWWindow *, const uint8_t *rgba, int width, int height, int x, int y);
 void tw_hide_session_menu(TWWindow *);
-int tw_present_navigator_menu(TWWindow *, const uint8_t *rgba, int width, int height, int x, int y);
+int tw_present_navigator_menu(TWWindow *, const uint8_t *rgba, int width, int height, int x, int y,
+                              int interactive);
 void tw_hide_navigator_menu(TWWindow *);
-int tw_navigator_menu_visible(TWWindow *);
+int tw_navigator_menu_accepts_input(TWWindow *);
 // App-only header button. Height0 hides; disabled buttons remain visible but cannot activate.
 void tw_actions_button(TWWindow *, const char *label, int enabled,
                        int x, int y, int width, int height);
@@ -253,6 +261,15 @@ void tw_accessibility_end_list(TWWindow *);
 void tw_accessibility_empty_list_message(TWWindow *, const char *message);
 void tw_accessibility_show_terminal(TWWindow *, const char *name);
 void tw_accessibility_show_conversation(TWWindow *, const char *name);
+// Project the mounted shared Settings controls. Roles: button, checkbox, popup, text field, menu item.
+// Entries are bounded and retain their AT-SPI identity while the same page is mounted.
+int tw_accessibility_settings_begin(TWWindow *, int x, int y, int width, int height);
+int tw_accessibility_settings_add(TWWindow *, const char *id, const char *name,
+                                  const char *description, int role, int enabled, int checked,
+                                  int focused, int x, int y, int width, int height);
+void tw_accessibility_settings_end(TWWindow *);
+void tw_accessibility_settings_hide(TWWindow *);
+int tw_accessibility_settings_control_identity(int slot, char *id, int capacity);
 // Publish only visible attachment tiles, at most 32. scope is 1 opening or 2 native.
 // The host owns the UUID and must revalidate it when a queued Remove action arrives.
 void tw_accessibility_attachments_begin(TWWindow *, int scope, const char *owner);
@@ -271,6 +288,9 @@ void tw_accessibility_conversation_speed(TWWindow *, const char *identity,
                                           int x, int y, int width, int height,
                                           int menuX, int menuY, int menuWidth, int menuHeight,
                                           int selected, int highlighted);
+// Publish the labels from the mounted shared menu, not a second C-side vocabulary.
+void tw_accessibility_conversation_speed_row(TWWindow *, int index,
+                                              const char *title, const char *detail);
 int tw_accessibility_conversation_speed_identity(int row, char *identity, int capacity);
 // Model, effort, and mode chips and their currently mounted, six-row choice page.
 void tw_accessibility_conversation_configuration_chip(TWWindow *, const char *identity,

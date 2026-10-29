@@ -17,8 +17,10 @@ binary, host, daemon, endpoint, fixture, evidence, *selected = sys.argv[1:]
 provider = selected[0] if selected else 'codex'
 mode = selected[1] if len(selected) > 1 else 'baseline'
 assert provider in ('codex', 'claude')
-assert mode in ('baseline', 'speed-terminal', 'speed-native', 'speed-live',
-                'configuration-live', 'remember-native', 'context', 'attachment', 'checkout')
+assert mode in ('baseline', 'speed-terminal', 'speed-native', 'speed-live', 'speed-general',
+                'speed-general-native', 'permission-general', 'permission-general-native',
+                'configuration-live', 'remember-native', 'context', 'attachment', 'checkout',
+                'opening-terminal', 'opening-native')
 scale = int(os.environ.get('THREADING_LINUX_UI_SCALE', '1'))
 inherited_mode = os.environ.get('THREADING_TEST_INHERITED_MODE') == '1'
 last_used_mode = os.environ.get('THREADING_TEST_LAST_USED_MODE') == '1'
@@ -217,6 +219,17 @@ def capture(name):
     subprocess.run(['import', '-window', window, str(output / name)], check=True, timeout=5)
 
 
+def click_settings_anchor(label, kind=None):
+    qualifier = f' kind={kind}' if kind else r' value=\w+'
+    pattern = rf'{label}{qualifier} x=([\d.]+) y=([\d.]+) width=([\d.]+) height=([\d.]+)'
+    x, y, width, height = map(float, eventually(
+        lambda: re.findall(pattern, window_log.read_text()), label)[-1])
+    window_height = int(re.search(r'^HEIGHT=(\d+)$',
+        xdo('getwindowgeometry', '--shell', window), re.MULTILINE).group(1))
+    xdo('mousemove', '--window', window, round(240 + x + width / 2),
+        round(window_height - y - height / 2), 'click', 1)
+
+
 try:
     (root / 'daemon').mkdir()
     with (output / 'daemon.log').open('w') as log:
@@ -251,14 +264,18 @@ try:
         eventually(lambda: location.get_name() == 'Project: Project › feature', 'sibling branch')
         project = sibling
         capture('native-checkout-selected.png')
-    if provider == 'claude':
-        identity = eventually(lambda: control('linux.composer.provider'), 'Identity chip')
+    identity = eventually(lambda: control('linux.composer.provider'), 'Identity chip')
+    eventually(lambda: identity.get_name() == 'Identity: Claude Code',
+               'fresh composer follows the shared Claude default')
+    provider_name = 'Claude Code' if provider == 'claude' else 'Codex'
+    if identity.get_name() != f'Identity: {provider_name}':
         assert identity.get_action_iface().do_action(0)
         menu = eventually(lambda: control('linux.composer.choices'), 'Identity menu')
         row = next(menu.get_child_at_index(i) for i in range(menu.get_child_count())
-                   if menu.get_child_at_index(i).get_name() == 'Claude Code')
+            if menu.get_child_at_index(i).get_name() == provider_name)
         assert row.get_action_iface().do_action(0)
-        eventually(lambda: identity.get_name() == 'Identity: Claude Code', 'Claude identity')
+        eventually(lambda: identity.get_name() == f'Identity: {provider_name}',
+                   f'{provider_name} identity')
     permission_chip = eventually(lambda: control('linux.composer.permissions'), 'opening permission chip')
     inherited_title = ('Manual' if provider == 'codex' else 'Plan') if inherited_mode else "Agent's Setting"
     eventually(lambda: permission_chip.get_name() == f'Permissions: {inherited_title}',
@@ -289,6 +306,161 @@ try:
             for i in range(opening_modes.get_child_count()))
     capture('opening-mode-menu.png')
     xdo('key', 'Escape')
+    if mode in ('opening-terminal', 'opening-native'):
+        xdo('windowsize', window, 1120 * scale, 760 * scale)
+        xdo('windowmove', window, 0, 0)
+        settings = eventually(lambda: control('sidebar.settings'), 'Settings footer')
+        assert settings.get_action_iface().do_action(0)
+        eventually(lambda: 'SETTINGS_OPENED' in window_log.read_text(), 'Settings opened')
+        click_settings_anchor('SETTINGS_PAGE_ANCHOR')
+        eventually(lambda: 'SETTINGS_POPUP_OPENED rows=2' in window_log.read_text(),
+                   'Settings destinations')
+        xdo('key', 'Down')
+        eventually(lambda: 'SETTINGS_POPUP_HIGHLIGHTED entry=1' in window_log.read_text(),
+                   'Chats highlighted')
+        xdo('windowfocus', '--sync', window, 'key', 'Return')
+        eventually(lambda: 'SETTINGS_PAGE_SELECTED value=Chats' in window_log.read_text(),
+                   'Chats page')
+        click_settings_anchor('SETTINGS_OPENING_ANCHOR', 'prefix')
+        xdo('type', '--clearmodifiers', '--delay', '5', 'Review carefully.')
+        eventually(lambda: 'SETTINGS_OPENING_CHANGED kind=prefix bytes=17' in window_log.read_text(),
+                   'prefix field accepted text', timeout=60)
+        click_settings_anchor('SETTINGS_OPENING_ANCHOR', 'suffix')
+        xdo('type', '--clearmodifiers', '--delay', '5', 'Answer briefly.')
+        eventually(lambda: 'SETTINGS_OPENING_CHANGED kind=suffix bytes=15' in window_log.read_text(),
+                   'suffix field accepted text', timeout=60)
+        capture('opening-settings.png')
+        xdo('windowsize', window, 660 * scale, 760 * scale)
+        eventually(lambda: 'SETTINGS_FRAME 420x719' in window_log.read_text(),
+                   'narrow Opening Message layout')
+        capture('opening-settings-narrow.png')
+        xdo('mousemove', '--window', window, 500, 590)
+        xdo('click', '--repeat', '12', '--delay', '80', 5)
+        eventually(lambda: float(re.findall(
+            r'SETTINGS_OPENING_ANCHOR kind=suffix x=[\d.]+ y=([\d.-]+)',
+            window_log.read_text())[-1]) > 0,
+            'narrow suffix reachable by scrolling')
+        capture('opening-settings-narrow-scrolled.png')
+        xdo('windowsize', window, 1120 * scale, 760 * scale)
+        xdo('windowfocus', '--sync', window, 'key', 'ctrl+comma')
+        eventually(lambda: 'SETTINGS_CLOSED' in window_log.read_text(), 'Settings closed')
+        eventually(lambda: 'SETTINGS_OPENING_CHANGED kind=prefix bytes=17' in window_log.read_text()
+                   and 'SETTINGS_OPENING_CHANGED kind=suffix bytes=15' in window_log.read_text(),
+                   'both opening fields persisted')
+        xdo('windowsize', window, 1120 * scale, 480 * scale)
+        if mode == 'opening-terminal':
+            editor = eventually(lambda: control('linux.composer.editor'), 'opening editor')
+            assert editor.get_editable_text_iface().set_text_contents('Fix it.')
+            action = eventually(lambda: control('linux.placeholder.action'), 'Start Session')
+            assert action.get_action_iface().do_action(0)
+            launch = eventually(lambda: json.loads((project / 'surface-launch.json').read_text())
+                                if (project / 'surface-launch.json').exists() else None,
+                                'terminal launch')
+            assert launch['args'][-1] == 'Review carefully.\n\nFix it.\n\nAnswer briefly.', launch
+            with sqlite3.connect(store / 'threading.db') as database:
+                sessions = [json.loads(row[0]) for row in database.execute('SELECT data FROM session')]
+            assert len(sessions) == 1 and sessions[0]['title'] == 'Fix it.', sessions
+            print(f'PASS {provider} opening message: Settings text and terminal launch')
+            sys.exit(0)
+    if mode in ('speed-general', 'speed-general-native'):
+        settings = eventually(lambda: control('sidebar.settings'), 'Settings footer')
+        assert settings.get_action_iface().do_action(0)
+        eventually(lambda: 'SETTINGS_OPENED' in window_log.read_text(), 'Settings opened')
+        click_settings_anchor('SETTINGS_PAGE_ANCHOR')
+        eventually(lambda: 'SETTINGS_POPUP_OPENED rows=2' in window_log.read_text(),
+                   'Settings destinations')
+        xdo('key', 'Down')
+        xdo('key', 'Return')
+        eventually(lambda: 'SETTINGS_PAGE_SELECTED value=Chats' in window_log.read_text(),
+                   'Chats page')
+        click_settings_anchor('SETTINGS_SPEED_ANCHOR', provider)
+        eventually(lambda: 'SETTINGS_POPUP_OPENED rows=3' in window_log.read_text(),
+                   'startup speed menu')
+        xdo('key', 'Down')
+        xdo('key', 'Return')
+        eventually(lambda: f'SETTINGS_STARTUP_SPEED_CHANGED kind={provider} value=standard'
+                   in window_log.read_text(), 'General Standard choice')
+        xdo('windowfocus', '--sync', window, 'key', 'ctrl+comma')
+        eventually(lambda: 'SETTINGS_CLOSED' in window_log.read_text(), 'composer restored')
+        speed = eventually(lambda: control('linux.composer.speed'), 'Speed chip')
+        eventually(lambda: speed.get_name() == 'Speed: Standard',
+                   'General Standard inherited in composer')
+        assert speed.get_action_iface().do_action(0)
+        menu = eventually(lambda: control('linux.composer.choices'), 'Speed menu')
+        speed_names = [menu.get_child_at_index(i).get_name() for i in range(3)]
+        assert speed_names == ['Follow General Setting', 'Standard', 'Fast'], speed_names
+        assert menu.get_child_at_index(0).get_state_set().contains(Atspi.StateType.SELECTED)
+        xdo('key', 'Escape')
+        if mode == 'speed-general':
+            editor = eventually(lambda: control('linux.composer.editor'), 'opening editor')
+            assert editor.get_editable_text_iface().set_text_contents('General speed brief')
+            action = eventually(lambda: control('linux.placeholder.action'), 'Start Session')
+            assert action.get_action_iface().do_action(0)
+            launch = eventually(lambda: json.loads((project / 'surface-launch.json').read_text())
+                                if (project / 'surface-launch.json').exists() else None,
+                                'terminal launch with General Standard')
+            args = launch['args']
+            if provider == 'codex':
+                assert 'service_tier="default"' in args, args
+            else:
+                settings_file = Path(args[args.index('--settings') + 1])
+                assert json.loads(settings_file.read_text()) == {'fastMode': False}
+            with sqlite3.connect(store / 'threading.db') as database:
+                sessions = [json.loads(row[0]) for row in database.execute('SELECT data FROM session')]
+            assert len(sessions) == 1 and sessions[0].get('fastMode') is None, sessions
+            print(f'PASS {provider} General Standard: composer, launch, inherited session record')
+            sys.exit(0)
+    if mode in ('permission-general', 'permission-general-native'):
+        settings = eventually(lambda: control('sidebar.settings'), 'Settings footer')
+        assert settings.get_action_iface().do_action(0)
+        eventually(lambda: 'SETTINGS_OPENED' in window_log.read_text(), 'Settings opened')
+        click_settings_anchor('SETTINGS_PAGE_ANCHOR')
+        eventually(lambda: 'SETTINGS_POPUP_OPENED rows=2' in window_log.read_text(),
+                   'Settings destinations')
+        xdo('key', 'Down')
+        xdo('key', 'Return')
+        eventually(lambda: 'SETTINGS_PAGE_SELECTED value=Chats' in window_log.read_text(),
+                   'Chats page')
+        click_settings_anchor('SETTINGS_NEW_CHAT_ANCHOR', 'permission')
+        eventually(lambda: 'SETTINGS_POPUP_OPENED rows=7' in window_log.read_text(),
+                   'default permission menu')
+        xdo('key', 'Down')
+        xdo('key', 'Down')
+        xdo('key', 'Return')
+        eventually(lambda: 'SETTINGS_DEFAULT_PERMISSION_CHANGED value=plan'
+                   in window_log.read_text(), 'Plan default')
+        xdo('windowfocus', '--sync', window, 'key', 'ctrl+comma')
+        eventually(lambda: 'SETTINGS_CLOSED' in window_log.read_text(), 'Settings closed')
+        permission_chip = eventually(lambda: control('linux.composer.permissions'),
+                                     'opening inherited Plan chip')
+        eventually(lambda: permission_chip.get_name() == 'Permissions: Plan',
+                   'app default on composer')
+        capture('opening-general-permission.png')
+        assert permission_chip.get_action_iface().do_action(0)
+        menu = eventually(lambda: control('linux.composer.choices'), 'inherited Plan menu')
+        assert any(menu.get_child_at_index(i).get_name() == 'Plan  (default)'
+                   for i in range(menu.get_child_count()))
+        xdo('key', 'Escape')
+        if mode == 'permission-general':
+            editor = eventually(lambda: control('linux.composer.editor'), 'opening editor')
+            assert editor.get_editable_text_iface().set_text_contents('General permission brief')
+            action = eventually(lambda: control('linux.placeholder.action'), 'Start Session')
+            assert action.get_action_iface().do_action(0)
+            launch = eventually(lambda: json.loads((project / 'surface-launch.json').read_text())
+                                if (project / 'surface-launch.json').exists() else None,
+                                'terminal launch with General Plan')
+            args = launch['args']
+            if provider == 'codex':
+                assert args[args.index('--ask-for-approval') + 1] == 'never', args
+                assert args[args.index('--sandbox') + 1] == 'read-only', args
+                assert 'approvals_reviewer="user"' in args, args
+            else:
+                assert args[args.index('--permission-mode') + 1] == 'plan', args
+            with sqlite3.connect(store / 'threading.db') as database:
+                sessions = [json.loads(row[0]) for row in database.execute('SELECT data FROM session')]
+            assert len(sessions) == 1 and sessions[0].get('permissionMode') is None, sessions
+            print(f'PASS {provider} General Plan: composer, terminal launch, inherited record')
+            sys.exit(0)
     if mode in ('speed-terminal', 'speed-native', 'speed-live', 'configuration-live'):
         speed = eventually(lambda: control('linux.composer.speed'), 'Speed chip')
         assert speed.get_name() == 'Speed: Fast', speed.get_name()
@@ -296,7 +468,7 @@ try:
         speed_menu = eventually(lambda: control('linux.composer.choices'), 'Speed menu')
         assert speed_menu.get_name() == 'Speed'
         assert [speed_menu.get_child_at_index(i).get_name() for i in range(3)] == [
-            'Follow Agent Setting', 'Standard', 'Fast']
+            'Follow General Setting', 'Standard', 'Fast']
         capture('speed-menu.png')
         speed_index = 1 if mode == 'speed-terminal' else 2
         assert speed_menu.get_child_at_index(speed_index).get_action_iface().do_action(0)
@@ -368,7 +540,7 @@ try:
     capture('interface-menu.png')
     assert menu.get_child_at_index(1).get_action_iface().do_action(0)
     eventually(lambda: chip.get_name() == 'Interface: Native (Experimental)', 'native choice')
-    prompt = 'Fresh native brief 日本語 café 👩🏽‍🚀'
+    prompt = 'Fix it.' if mode == 'opening-native' else 'Fresh native brief 日本語 café 👩🏽‍🚀'
     assert editor.get_editable_text_iface().set_text_contents(prompt)
     eventually(lambda: action.get_state_set().contains(Atspi.StateType.ENABLED), 'submit enabled')
     capture('native-choice.png')
@@ -376,7 +548,9 @@ try:
     eventually(lambda: 'NATIVE_CREATION_COMMITTED ' in window_log.read_text(), 'durable creation')
     turns = project / 'surface-turns.jsonl'
     eventually(lambda: turns.exists() and turns.read_text().strip(), 'opening provider turn')
-    assert [json.loads(line)['prompt'] for line in turns.read_text().splitlines()] == [prompt]
+    expected_prompt = ('Review carefully.\n\nFix it.\n\nAnswer briefly.'
+                       if mode == 'opening-native' else prompt)
+    assert [json.loads(line)['prompt'] for line in turns.read_text().splitlines()] == [expected_prompt]
     eventually(lambda: 'CONVERSATION_FRAME ' in window_log.read_text(), 'native conversation pane')
     eventually(lambda: any('turns=1 prepared=true' in line and line.endswith('status=Ready')
                            for line in window_log.read_text().splitlines()
@@ -385,11 +559,35 @@ try:
     with sqlite3.connect(store / 'threading.db') as database:
         sessions = [json.loads(row[0]) for row in database.execute('SELECT data FROM session')]
     assert len(sessions) == 1 and sessions[0]['nativeUI'] and sessions[0]['kind'] == provider, sessions
+    if mode == 'opening-native':
+        assert sessions[0]['title'] == 'Fix it.', sessions
     if mode == 'checkout':
         assert sessions[0]['branch'] == 'feature', sessions
     assert sessions[0].get('permissionMode') is None, sessions
     launch_args = json.loads((project / 'surface-launch.json').read_text())['args']
-    if provider == 'codex':
+    if mode == 'speed-general-native':
+        assert sessions[0].get('fastMode') is None, sessions
+        if provider == 'codex':
+            assert 'service_tier="default"' in launch_args, launch_args
+            assert json.loads(turns.read_text().splitlines()[0])['serviceTier'] == 'default'
+        else:
+            settings_file = Path(launch_args[launch_args.index('--settings') + 1])
+            assert json.loads(settings_file.read_text()) == {'fastMode': False}
+        speed = eventually(lambda: control('linux.conversation.speed'), 'native inherited Speed chip')
+        assert speed.get_name() == 'Speed: Standard', speed.get_name()
+        capture('native-general-standard.png')
+    if mode == 'permission-general-native':
+        if provider == 'codex':
+            assert launch_args[launch_args.index('--ask-for-approval') + 1] == 'never', launch_args
+            assert launch_args[launch_args.index('--sandbox') + 1] == 'read-only', launch_args
+            assert 'approvals_reviewer="user"' in launch_args, launch_args
+        else:
+            assert launch_args[launch_args.index('--permission-mode') + 1] == 'plan', launch_args
+        permission = eventually(lambda: control('linux.conversation.mode'),
+                                'native inherited Plan chip')
+        assert permission.get_name() == 'Mode: Plan', permission.get_name()
+        capture('native-general-permission.png')
+    elif provider == 'codex':
         assert '--ask-for-approval' not in launch_args, launch_args
         assert launch_args[launch_args.index('--sandbox') + 1] == 'workspace-write', launch_args
         assert not any(argument.startswith('approvals_reviewer=') for argument in launch_args), launch_args
@@ -409,6 +607,16 @@ try:
             controls = [json.loads(line) for line in (project / 'surface-control.jsonl').read_text().splitlines()]
             assert any('apply_flag_settings' in json.dumps(control) for control in controls), controls
     capture('native-first-turn.png')
+    if mode == 'opening-native':
+        xdo('type', '--clearmodifiers', '--delay', '5', 'Next.')
+        xdo('key', 'Return')
+        replies = eventually(lambda: [json.loads(line)['prompt']
+            for line in turns.read_text().splitlines()]
+            if len(turns.read_text().splitlines()) == 2 else None,
+            'second provider turn without standing text')
+        assert replies == [expected_prompt, 'Next.'], replies
+        print(f'PASS {provider} opening message: Settings text, first turn only')
+        sys.exit(0)
     if mode == 'attachment':
         image = project / 'native picture.png'
         subprocess.run(['convert', '-size', '120x80', 'xc:#db493f', str(image)], check=True)
@@ -764,8 +972,8 @@ try:
         assert speed.get_name() == 'Speed: Fast', speed.get_name()
         assert speed.get_action_iface().do_action(0)
         menu = eventually(lambda: control('linux.conversation.speed.choices'), 'native Speed menu')
-        assert [menu.get_child_at_index(i).get_name() for i in range(3)] == [
-            'Follow Agent Setting', 'Standard', 'Fast']
+        reply_speed_names = [menu.get_child_at_index(i).get_name() for i in range(3)]
+        assert reply_speed_names == ['Follow General Setting', 'Standard', 'Fast'], reply_speed_names
         assert menu.get_child_at_index(2).get_state_set().contains(Atspi.StateType.SELECTED)
         capture('native-speed-menu.png')
         assert menu.get_child_at_index(1).get_action_iface().do_action(0)

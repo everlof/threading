@@ -4529,58 +4529,40 @@ extension ProjectSidebarViewController {
     }
 
     func terminalMenuEntries(for terminalID: TerminalID, row: Int) -> [ThemedMenuEntry] {
-        var entries: [ThemedMenuEntry] = [
-            .item(ThemedMenuItem(
-                title: L10n.string("Rename Terminal…"),
-                onChoose: pinnedAction(row) { $0.renameClicked() }
-            )),
-            // The same fold the chat rows carry, holding the two facts a terminal can state:
-            // the id that names it to Threading, and the project that owns it. Captured
-            // by id, not row-resolved — an id does not move when the tree reloads under the
-            // open menu. The worktree is resolved on the click rather than at build, because
-            // from the store on the click so a project move or rename cannot leave stale data in
-            // a menu that was already open.
-            .item(ThemedMenuItem(title: L10n.string("Copy"), submenu: [
-                .item(ThemedMenuItem(
-                    title: L10n.string("Threading ID"),
-                    onChoose: {
-                        Self.copyToPasteboard(terminalID.uuidString.lowercased())
-                    }
-                )),
-                .item(ThemedMenuItem(
-                    title: L10n.string("Worktree Path"),
-                    onChoose: { [weak self] in
-                        guard let project = self?.projectStore
-                            .homeProject(forTerminalID: terminalID) else { return }
-                        Self.copyToPasteboard(project.folderPath)
-                    }
-                ))
-            ])),
-            terminalThemeEntry(for: terminalID),
-            terminalSoundEntry(for: terminalID),
-        ]
+        // Capture the terminal identity, while resolving its owning project on the click: a
+        // move under an open menu must copy the current path. The shared content owns the fold.
+        let actions = SidebarTerminalMenuContent.Actions(
+            rename: pinnedAction(row) { $0.renameClicked() },
+            copyThreadingID: {
+                Self.copyToPasteboard(terminalID.uuidString.lowercased())
+            },
+            copyWorktreePath: { [weak self] in
+                guard let project = self?.projectStore
+                    .homeProject(forTerminalID: terminalID) else { return }
+                Self.copyToPasteboard(project.folderPath)
+            },
+            close: pinnedAction(row) { $0.closeTerminalClicked() }
+        )
+        var sharing: [ThemedMenuEntry] = []
         if AppSettings.shared.remoteAccessEnabled {
-            entries.append(.item(ThemedMenuItem(
+            sharing.append(.item(ThemedMenuItem(
                 title: L10n.string("Share Terminal…"),
                 image: ThemedMenuIcon.symbol("square.and.arrow.up"),
                 onChoose: pinnedAction(row) { $0.shareTerminalClicked() }
             )))
             if RemoteAccessCoordinator.shared.hasTerminalShares(terminalID) {
-                entries.append(.item(ThemedMenuItem(
+                sharing.append(.item(ThemedMenuItem(
                     title: L10n.string("Stop Sharing Terminal"),
                     image: ThemedMenuIcon.symbol("eye.slash"),
                     onChoose: pinnedAction(row) { $0.stopSharingTerminalClicked() }
                 )))
             }
         }
-        entries.append(contentsOf: [
-            .separator,
-            .item(ThemedMenuItem(
-                title: L10n.string("Close Terminal"),
-                onChoose: pinnedAction(row) { $0.closeTerminalClicked() }
-            ))
-        ])
-        return entries
+        return SidebarTerminalMenuContent.entries(
+            actions: actions,
+            theme: terminalThemeEntry(for: terminalID),
+            sounds: terminalSoundEntry(for: terminalID),
+            sharing: sharing)
     }
 
     /// Everything a project offers — its right-click and its `⋯` button alike. Sessions are

@@ -11,6 +11,7 @@ enum ComposerNativeCreation {
         let kind: AgentKind
         let accountHandle: AccountHandle
         let permissionMode: AgentPermissionMode?
+        let title: String?
         let model: String?
         let reasoningEffort: String?
         let fastMode: Bool?
@@ -21,6 +22,7 @@ enum ComposerNativeCreation {
     struct Receipt: Sendable {
         let projectID: ProjectID
         let row: AgentSessionRowPresentation
+        let branch: String?
         let sessionCount: Int
     }
 
@@ -61,14 +63,16 @@ enum ComposerNativeCreation {
                 kind: request.kind, accountHandle: request.accountHandle,
                 model: request.model, reasoningEffort: request.reasoningEffort,
                 fastMode: request.fastMode,
-                usesNativeUI: true, permissionMode: request.permissionMode, id: request.id)
+                usesNativeUI: true, permissionMode: request.permissionMode,
+                title: request.title, id: request.id)
             else { throw WindowFailure("Unsupported native conversation configuration.") }
             session.branch = checkout?.branch
             try database.addSession(session, to: project.id, position: project.sessionCount,
                                     selectNewSession: true)
             let row = AgentSessionRowPresentation(session: session, usesAgentTitle: true,
                 untitledTitle: AgentDefaults.untitledSessionName)
-            return Receipt(projectID: project.id, row: row, sessionCount: project.sessionCount + 1)
+            return Receipt(projectID: project.id, row: row, branch: session.branch,
+                           sessionCount: project.sessionCount + 1)
         }
     }
 }

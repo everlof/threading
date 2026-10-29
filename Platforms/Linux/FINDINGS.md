@@ -9707,3 +9707,1600 @@ beside the Linux renders. Linux's New Worktree panel still measures 400×203 ver
 400×200. Linux text intrinsic sizing shifts content below the title by about three pixels;
 that remains a text-metrics shim task. General settings composition, floating menu shells,
 terminal menu/spinner and saved-runtime beam remain in the shared-view audit.
+
+## 269. Sidebar values come from the same source, and the selected beam receives live facts, 2026-10-25
+
+The Linux host's copies of `AgentWorkload`, `SidebarDefaults` and `ProjectIconDefaults` have been
+removed. Their production declarations now live in individually linkable sources; Linux links
+those exact files, and `ThreadingDesignKit` links the extracted sidebar defaults for native
+plugins. The Linux-only inset-outline offsets have a separate platform name. The shared-view
+source check verifies all four links, preventing a local copy from silently taking their place.
+
+The already shared `SidebarHoverRowView` and `AgentActivityBeamView` now receive the selected
+native session's active-turn workload. Loading still has its separate status mark, as on Mac.
+The top-effort flag is derived from that session's
+already loaded model catalogue, so a visible-row refresh makes no provider file read. Other rows
+receive `.none`, as in the Mac controller. This closes the always-inactive placeholder for native
+conversations. The checked Linux snapshot is `AppThemeStyles.threading`, a styled theme, so the
+shared beam correctly stays hidden on both platforms; the Linux palette shim no longer claims it
+is the System theme. Terminal-backed agent turns still lack a truthful Linux activity signal,
+and a future Linux System-theme beam host would draw a static ring rather than BorderBeamKit's
+motion.
+
+The source check now detects duplicate `Design.Spacing` and `Design.Size` values in Linux shims;
+it caught and eliminated overlapping `hairline`, `tight` and `fieldHeight` declarations.
+The source/structure checks and Python runner contracts pass. A Docker engine was unavailable
+for compiling or rendering this Linux change at this checkpoint. General Settings composition,
+menu interaction, terminal actions/status and the remaining page-level differences are open.
+An inventory of the nonfixture Linux view constructors and all local view subclasses found no
+additional standalone control implementation; the remaining constructors assemble the page and
+menu boundaries already listed in the README. That source audit does not establish pixel parity.
+
+## 270. The pane-header menu mounts the macOS surface, 2026-10-25
+
+`ThemedMenuSurfaceView` and its section heading moved unchanged in appearance from the macOS
+presenter into a linked Design source. Mac still creates that view through its presenter; Linux
+now mounts the same class for pane-header session actions and Open In choices. It owns the panel,
+document, row layout, scrolling and highlights. The Linux `NSView` shim now posts a bounds-change
+notification when requested and can retire an accessibility subtree, satisfying the source
+view's AppKit contract. SDL still transports its bitmap and input.
+
+The first Open In Xvfb run caught a mismatch after scrolling: the shared surface still retained
+partly clipped rows, while the native ATK bridge rejected them. The host now uses only fully
+visible rows for both publication and activation. A real 1400×900 then 900×480 Xvfb journey
+selected a later Open In app, walked the saved-session submenu to Fixture H, rejected a stale
+checkout and exited normally. Its `open-in-choices.png` and `open-in-session-scrolled.png` were
+inspected under `out/open-in-one-view-long/`. The ordinary test's 20-second timeout expired on
+the saved-session submenu in the Lima VM, where sidebar frames took about 0.9–2.3 seconds; the
+same unmodified assertions passed with only that wait extended to 90 seconds in a temporary
+copy. The Mac Debug app and the Linux `WindowHarness` both build with the extracted source.
+
+The remaining navigator, composer and conversation menus still mount the shared panel/document
+but not the full shared menu surface or interaction session. General Settings composition,
+terminal row actions/status, System-theme beam motion and other page-level differences remain.
+
+## 271. Sidebar session actions and bounded Speed use the production surface, 2026-10-25
+
+The sidebar session menu no longer creates a second set of row views, separators, or clipped
+document pages. Its four semantic pages mount the exact `ThemedMenuSurfaceView` source as the Mac
+presenter. Selection follows the shared surface into the scroll viewport. The host keeps the
+saved-session identity, command revalidation and native accessibility transport. It publishes
+only fully visible rows, using their original entry indexes for activation. Open In apps remain
+explicitly capped at 64, so the shared view has a bounded number of children. The unused
+`firstVisible` state left the semantic menu model.
+
+The three-entry Speed choice in a native conversation also mounts this production surface. Its
+host keeps the provider setting and keyboard routing. The Linux `WindowHarness` build passes.
+The real native Codex Speed Xvfb/AT-SPI journey passes, including durable selection and provider
+turns. The real Open In journey passes again after the sidebar migration, including keyboard
+scrolling to Fixture H and command launch. The ordinary test's 20-second saved-session wait is
+too short under this Lima VM's slow sidebar rasterization, so the same assertions ran with that
+wait extended to 90 seconds in a temporary copy. Rendered open and scrolled sidebar menus were
+inspected under `out/one-view-session-shared/`.
+
+The Mac component gallery now has an interactive story for the extracted menu surface and its
+section header. A selected Mac menu-layout test ran three tests successfully. The broader
+`ThemedControlTests` class encountered a pre-existing component-gallery coverage failure: its
+source scan listed 25 missing component stories, 23 of them unrelated to this extraction. The
+two new menu components now have a story and catalogue entries; the remaining 23 are outside
+this migration. The full class was stopped while a long all-theme render continued, so it is
+not a passing test result.
+
+Navigator account menus, opening-composer choice menus, and conversation configuration menus
+still own separate viewport and interaction logic. The unbounded option
+menus cannot move wholesale to the eager surface without first keeping their visible-child
+bound. General Settings, terminal row actions/status and theme-specific artwork remain open.
+
+## 272. Navigator Actions mount the shared menu surface, 2026-10-25
+
+The navigator's fixed command menus — project Actions, Add Project, project/repository Create,
+and New Chat providers — no longer construct separate production row views or a local panel
+document. Their visible command page mounts `ThemedMenuSurfaceView`; the host keeps command
+availability, project identity, keyboard paging and AT-SPI slots. The Add Project separator
+stays in the same visible position. The fixed `NavigatorActions.Command` inventory bounds the
+view regardless of project catalogue size. A retained surface preserves row identity through a
+pointer press, highlight and release.
+
+The real 1120×480 Xvfb project Actions journey passed its pixel checks, exact-project pointer
+and keyboard entry, AT-SPI geometry, header action, context menu, and press-drag-release into
+Open shell. The open-menu capture was inspected under `out/one-view-actions-shared/`.
+The separate project-row Create journey also passed, including manager refusal, nested provider
+choice and an exact target terminal.
+
+## 273. Account choices use the same surface and the legacy row host is gone, 2026-10-25
+
+The navigator account picker now gives its bounded visible page to `ThemedMenuSurfaceView`.
+The shared surface keeps its rows through pointer gestures; the host still owns account identity,
+selection and native accessibility. `RetainedMenuRows` and `Specimen.mountMenuRows` were deleted:
+all three navigator menus now mount one production surface directly over the standing outline.
+There is no second Linux document owner in the navigator.
+
+At 1120×480, the Mac menu layout's 360-point maximum yields 12 visible 28-point account rows.
+The old test's 15-row full-column expectation described the retired Linux document, so its
+expected visible range and anchored coordinates were changed while retaining exact row bounds,
+selection, scroll and pointer assertions. The real Xvfb journey passed with 32 account identities.
+The first and last page captures were inspected under `out/one-view-account-shared-3/`.
+
+## 274. Native-conversation configuration uses the production menu surface, 2026-10-25
+
+The reply composer's model, mode and effort menus now give their bounded six-row visible page
+to the exact `ThemedMenuSurfaceView` used by the Mac presenter. The provider's selected value,
+virtual page, menu identity and AT-SPI publication remain with the Linux host. The shared view
+owns row construction, scrolling, highlight, clipping and panel drawing. The real Codex
+configuration journey passed through Xvfb and AT-SPI without changed assertions, including
+model paging, mode and effort selection, persisted choices and subsequent provider turns.
+The rendered model menu was inspected at `out/one-view-conversation-shared/native-model-menu.png`.
+
+## 275. Opening-composer choices use the production menu surface, 2026-10-25
+
+The opening composer's project, identity, permission, surface and Speed choices now mount the
+same menu surface, with at most six visible rows constructed for a virtual choice page. The
+separate model/effort **grid** remains `ModelEffortPickerContentView` in the production
+`ThemedMenuPanelView`; it is a different component from a row menu. The host still supplies
+session launch identity and option availability. The real Codex baseline Xvfb/AT-SPI journey
+passed without changed assertions, including opening menu navigation, session creation and
+provider turns. The opening mode menu render was inspected under
+`out/one-view-opening-baseline/`. All nine real model/effort-grid scenarios also passed,
+including 512 models, stale catalogue refusal, hidden-model persistence and remembered account
+choices. That grid is unchanged by the row-menu migration; its rendered keyboard choice was
+inspected under `out/one-view-opening-models/`.
+
+The first full checkout journey caught a missing host invalidation when `Switch Project…`
+replaced checkout rows with project rows: the new shared surface existed, but no new bitmap or
+AT-SPI list was published. `WorkspacePlaceholderPane` now invalidates when its menu identity or
+frame changes. The rerun passed checkout and project navigation, preserved the draft, launched
+in the selected sibling worktree, created worktrees from both composer and repository menus,
+followed a live HEAD change and retained the exact project routing. The rendered checkout menu,
+selected sibling, prompt and final navigator were inspected under
+`out/one-view-opening-checkout-robust/`. During the reruns, AT-SPI briefly returned a nil or
+retired child while a pane changed. The checkout test's polling helpers now retry that transient
+tree state while still requiring the same live rows and action outcomes; the final journey
+passed with only the default wait raised from 20 to 90 seconds in a temporary copy for this
+loaded Lima VM.
+
+The shared-view checker now refuses host construction of a second menu panel or document
+throughout the Linux window sources. Its single explicit panel exception is the opening model
+grid. It also verifies the linked production `ThemedMenuSurfaceView` in both Linux and
+`ThreadingDesignKit`, so new ordinary menus cannot quietly return to local row construction.
+The scan covers every Linux source target for direct host panel/document construction and every
+`Design` token extension in the window shims. It finds zero WindowHarness-to-Mac duplicate class
+names, zero Linux-only shared-source view leaves, zero duplicate Design shim values and zero host menu
+construction violations. This is a source-ownership check, not a claim that the remaining
+Settings, terminal-row and conversation page compositions already match macOS.
+
+The macOS `session-menu` evidence test passed in its real AppKit shell and rendered 17 images.
+The two existing baselines compare as changed because this run's images are 920×1640 while the
+stored references are 460×820, and the current menu has a `Restart Terminal` command the old
+reference lacks. Their current, baseline and diff images were inspected. No baseline was
+accepted; the other 15 images have no stored references. The extraction itself kept the same
+Mac surface source and the targeted component-gallery source scan passed.
+
+## 276. Terminal foreground status uses the shared row, 2026-10-25
+
+The Linux PTY client now consumes the daemon's `foreground` frame, compares its process group
+with the admitted shell PID, and publishes one locked busy fact only when it changes. Exit,
+reconnect, failure and stop clear that fact. A foreground report received during an attached
+terminal's replay becomes visible when replay completes, without redrawing on later output.
+The visible outline row and saved-terminal picker
+give it to `SidebarTerminalRowAssembly`. The assembly now owns the lazy `ThemedSpinner`, its
+theme ground and the action/status crossfade on both macOS and Linux; the Mac row no longer has
+a separate spinner implementation. Its status geometry defaults moved into Design, linked
+unchanged into Linux. Hidden or idle rows do not construct a status view. The
+visible AT-SPI terminal label states “command running” from the same fact.
+Moving the spinner's five constraint sites into Design lowered the Mac feature-owned constraint
+count from 3,065 to 3,060; the enforced baseline now records that reduction.
+
+The real Xvfb/AT-SPI shell-creation journey ran a foreground `sleep` command through the
+production PTY daemon. It observed the status appear, captured the running terminal in
+`out/terminal-status-current/foreground.png`, and observed the status clear when the shell
+resumed. Both normal and delayed-creation scenarios passed at 1× and 2×; both foreground
+captures were inspected. The terminal action button
+remains unavailable on Linux until its commands are routed; the remaining menu and page-level
+parity work in README is still open.
+
+The macOS Debug app build passed after the ratchet update. Targeted
+`scripts/ui-evidence.sh --only sidebar-session-rows` passed its four app-hosted tests and
+rendered 50 images. The terminal-working selected row in light and dark appearance was
+inspected at `.build/ui-evidence-reports/20261025-225334-85807/`; both use the same shared
+status slot and selected-ground ink as the Linux captures. All 50 are new to the evidence
+baseline, so no pixel baseline was approved or claimed.
+The focused `SidebarRowRenderTests.testATerminalWorkingStatusTradesPlacesWithItsAction`
+app-hosted test passed (1/1, zero failures) after the extraction, covering busy, hover,
+pointer exit and return to the shell.
+
+## 277. Linux mounts the production terminal row itself, 2026-10-26
+
+The ordinary outline and saved-terminal picker no longer build terminal content, icon, action
+slot, ink and spinner through a Linux `SidebarTerminalRowAssembly` call. Their recycled host
+cell now mounts the exact linked `ProjectTerminalRowView`; only the outer cell's viewport,
+selection silhouette and SDL input boundary remain host-owned. The product row accepts typed
+identity, a bounded snapshot title, runtime status and a platform icon through one common
+configure path. Its macOS model adapter still derives title and sound tooltip from the full
+project store. `SidebarRowDefaults.mountCellContent` pins the inner row to the outer transport
+cell, keeping these structural constraints in Design and the Linux structure ratchet unchanged.
+
+The 400→160→400-point layout fixture passed while retaining the same production row and its
+content/action instances. Real Xvfb/AT-SPI shell creation, exact selection and foreground
+status passed at 1× and 2× in both normal and delayed daemon-handshake scenarios. The current
+foreground captures under `out/terminal-one-view-{1x,2x}/` were inspected. The source checker
+verifies the production file link and now refuses a new Linux host construction of
+`SidebarTerminalRowAssembly`. The macOS Debug app build passed with the shared configure path.
+The terminal action is still disabled pending command routing.
+
+## 278. Exact source links replace the remaining vendored Swift copies, 2026-10-26
+
+The wider duplicate audit found 142 regular `CoreSlice` files and nine `Harness/Vendored`
+fixture files whose bodies were copies of production Swift. The core manifest itself listed
+`ConversationContextAttachment.swift` twice, so a refresh had silently overwritten the first
+copy. Both vendor scripts now rebuild those directories as relative links to the exact production
+sources and verify link destinations, missing sources, duplicate names and unrecorded files.
+The duplicate manifest entry is gone. This keeps the established target membership while making
+one edited source body feed macOS and Linux immediately.
+
+`scripts/check_linux_shared_views.py` now hashes all nonlinked Linux Swift sources against
+`Sources/Threading` and rejects an exact copy anywhere in Linux `Sources/`. The sweep found zero
+remaining copied production Swift files. The Linux `WindowHarness` and diagnostic `Harness` both
+built after the link conversion; the UI structure and shared-view gates passed. The macOS
+targeted sidebar evidence passed four app-hosted tests and produced 50 reviewable images; the
+selected working terminal row was visually inspected in light and dark appearance. These images
+are new to the baseline, so no baseline acceptance was claimed. The focused macOS
+`SidebarRowRenderTests.testATerminalWorkingStatusTradesPlacesWithItsAction` passed (1/1)
+after the common terminal-row configuration change.
+
+## 279. The mounted terminal row owns its actions, 2026-10-26
+
+The Linux outline enables the exact linked `ProjectTerminalRowView` action button. SDL supplies
+pointer, keyboard and secondary-click transport; the production row supplies the button, hover
+state and anchor. The terminal's semantic Rename, Copy and Close pages mount the same
+`ThemedMenuSurfaceView` as the Mac sidebar, without a second menu panel or row assembly.
+Rename uses the themed text prompt and an exact-project SQLite transaction. Copy Threading ID
+uses the immutable identity; Copy Worktree Path reopens the owner on a worker when chosen. Close
+first atomically removes the embedded record and selected identity, then stops the daemon child.
+A failed stop is reported separately from the committed row removal. The same host helper now
+returns both archived sessions and closed terminals to the standing composer.
+
+The source and rendered-menu audit found that Linux had been passing its keyboard cursor as
+`selectedEntryIndex` to the shared menu surface. That parameter draws a checkmark and reserves
+its mark column; it does not denote keyboard highlight. Ordinary action menus now pass no
+selected entry, while choice menus mark their actual value with `ThemedMenuItem.isSelected` and
+all menus call `highlight(_:)` for navigation. The before/after terminal menu captures show the
+spurious check and gutter removed. This applies to navigator, account, opening-composer and
+conversation menus too; the pane header's preferred Open In app remains a genuine selected entry.
+
+The real X11/AT-SPI terminal journey passed at 1× and 2× in normal and delayed-handshake
+scenarios. It opened the production action, renamed to Unicode text, copied both values,
+verified the saved record and clipboard, closed the terminal, selected its project and observed
+the daemon child's exit. Its 1×/2× hover, open-menu and prompt captures under
+`out/terminal-menu-final-{1x,2x}/` were inspected. The session rename regression passed; the
+unmounted session Close regression passed after the ad hoc runner supplied the daemon executable
+at the sibling path its fixture expects. After the final shared placeholder extraction, the 1×
+terminal journey and installed session Rename and archived-navigator Snooze/Unsnooze/Pin/Archive
+journeys passed again. The keyboard session-menu image at
+`out/session-menu-after-selection-fix.png` was inspected for the same false-check regression.
+The 32-account picker then passed its 12-mounted-row, geometry, keyboard-scroll and pointer
+journey; `out/account-picker-last-after-selection-fix.png` shows only the keyboard highlight on
+the last row while the active default account is outside that visible page. The original
+15-second fixture deadline expired after the VM had drawn 27 of 32 keyboard selections, so the
+31-step wait now allows 45 seconds without changing its functional or geometry assertions.
+The Mac Debug app build and the targeted
+`sidebar-session-rows` evidence passed (four tests, 50 new images); the selected working terminal
+row was inspected in light and dark. No baseline was accepted. The shared-view scanner reports
+zero named duplicate classes, copied production Swift files, local menu assembly and local
+terminal-row assembly. macOS still offers terminal Theme, Sounds and conditional Share commands
+that this Linux menu does not yet route. General Settings and conversation page composition also
+remain short of the production controllers.
+
+## 280. General Settings now mounts the production pop-up control, 2026-10-26
+
+The General Settings comparison found a missing platform primitive before its larger page
+composition gap: macOS uses `ThemedPopUp` for real settings, while Linux could not compile that
+control or present its menu. Linux now links the exact production `ThemedPopUp.swift` and mounts
+the same `ThemedMenuSurfaceView` inside its existing Settings window. The Linux presenter shim
+provides a session for positioning, dismissal, pointer routing and keyboard choice. A
+fixture-only three-choice row, gated by `THREADING_LINUX_SETTINGS_POPUP_FIXTURE=1`, exercises
+this path without displaying a preference that has no Linux service. The source checker reports
+nine valid shared view links, zero duplicate named classes and zero copied production Swift
+sources. The Linux theme shim also uses one `AppThemePalette.Material` type for both `AppTheme`
+and `Design`; the prior duplicate material property definitions were removed.
+
+`SessionRestorePolicy` and its defaults moved unchanged from `AppSettings.swift` to a single
+core source linked by both targets. This prepares the startup setting but does not give Linux
+session restoration behavior or the remaining General sections. Those services and the whole
+production General controller still need adapters before the pages can be called 1:1.
+
+The Linux `WindowHarness` and macOS Debug app both built. The focused macOS
+`GeneralSettingsRenderTests` passed 13/13 tests; the 420-point light General capture in
+`.build/general-settings-render/` was inspected and still shows the six production sections.
+The real X11/AT-SPI Settings fixture
+opened the production pop-up and chose its second item with Down and Return; its open and chosen
+captures under `out/settings-popup-verified/` were inspected. The source, theme, main-actor
+latency, UI structure and CoreSlice link gates passed. The internal bitmap reflects the new
+keyboard highlight on the first refresh, but X11 screenshot capture did not show it until a
+second repaint; therefore the immediate visible keyboard highlight remains unverified. The
+terminal's adopted-grid attachment test passed with the original SDL presentation path. A
+trial changing SDL's surface-flush order broke that test and was removed.
+
+## 281. Shared menu and decision types, and an editable question field, 2026-10-26
+
+A broader top-level type audit found three declarations of `ChatNameMorphStyle`: one in the app,
+one in the design package's host seam and one in Linux's morph-label boundary. Its stored raw
+values now have a single enum in `ThreadingDomain`; the three hosts use typealiases. The exact
+`ControlPermissionDecision` enum likewise moved out of the macOS control contract and Linux's
+permission-card boundary into one CoreSlice source. Linux's fail-closed remote permission
+projection remains a separate service adapter, because that behavior differs by platform.
+
+`ThemedMenuAnchor` and `ThemedMenuPresentationObserving` moved unchanged from the macOS menu
+presenter into one Design source linked by macOS, `ThreadingDesignKit` and the Linux window host.
+The diagnostic icon, subagent, pane-header and page-title harnesses link that same source through
+their existing fixture boundaries. The identical `ThemeDerivedContent` hook and
+`AccessibilityDisplayOptionsDidChange` event also moved from the theme refresh implementation
+and Linux boundary into one shared contract source. The shared-source check now guards thirteen
+production UI/contract links, eight fixture contract links and both extracted model enums; it
+reports zero copied production files, named duplicate view classes and redeclared shared models.
+The CoreSlice verifier reports 145 direct links.
+
+The real native-permission journey exposed an AppKit shim mismatch unrelated to permission
+decisions: Linux's `NSTextField.init(frame:)` begins read-only, so the production
+`ThemedTextField(string:)` built the second question's answer well without an editable field.
+The Design control now states `isEditable = true` in its setup on both hosts. The complete native
+X11/AT-SPI journey then passed automatic policy, deny, allow-for-session, tool-row expansion,
+the two-page question and edited Unicode answer. Its inspected
+`out/native-permission-shared-decision-final/question-answer.png` shows the text in the actual
+conversation card. Linux `WindowHarness`, the macOS Debug app, all 21 `ThreadingDomain` tests
+and all 10 `ThreadingDesignKit` tests passed after the extractions. A focused macOS run of
+`ThemeTitleMorphTests` and `GeneralSettingsRenderTests` passed 21/21 tests; its 420-point light
+General render was inspected. The narrow Linux fixture
+targets could not build independently because they currently lack other required view/theme
+symbols such as `BackdropThemedControl`; the shipping `WindowHarness` and linked source built.
+The final macOS Debug build and source, theme, main-actor latency, UI-structure, vendor-link and
+whitespace gates passed. A broader declaration check now inventories 26 reviewed host type
+shims, including theme, backdrop, permission, window services and diagnostic fixtures. Any new
+top-level name collision fails the checker until the contract is shared or the host-specific role
+is reviewed.
+These allowed shims do not imply that their behavior or artwork is already 1:1.
+
+## 282. One theme boundary and backdrop event contract, 2026-10-26
+
+The next declaration audit found four more identical contracts in Linux boundaries. The
+`ThemedComponent` and `SystemChromeBoundary` protocols now live in one Design source linked by
+the app, `ThreadingDesignKit`, the Linux window host and the four narrow diagnostic targets.
+`OpticalInsetProviding` already had a production source linked by the shipping Linux host; the
+remaining fixture-only declaration was removed and those targets now link that source too.
+`WindowBackdropDidChange` moved from the macOS backdrop implementation into one source linked
+by the app, design package and Linux host, replacing Linux's payload-free duplicate. The Linux
+theme and backdrop services remain host shims, while their shared consumer contracts have one
+declaration. The checker now guards 18 shared source links and 16 diagnostic contract links;
+its top-level collision inventory has 22 reviewed host shims rather than 26.
+
+The shipping Linux `WindowHarness` built in the active ARM64 Lima container, and the 10
+`ThreadingDesignKit` tests passed. This refactor changes declarations, not the rendered page;
+General's missing services and the remaining full-page 1:1 work remain open.
+
+## 283. Shared General page composition, 2026-10-26
+
+The macOS General controller's six groups, row order, titles, subtitles and help copy moved into
+`GeneralSettingsPageStructure`, a production Design source now linked by the Linux window host.
+The controller supplies its real controls, help renderer, extension host page and settings
+actions; the Linux host supplies its real confirmation controls and the same page structure.
+The Linux pop-up fixture remains a test-only section. Linux still lacks the restore, idle-agent,
+updater, tools and machine preference services, so its other groups remain absent rather than
+showing controls whose actions would not work. The shared source gives those future adapters one
+place to enter the page.
+
+The macOS Debug app and Linux `WindowHarness` built. The native X11 Settings pop-up journey
+passed and `out/general-composition/settings-popup-chosen.png` was inspected: the real General
+header, test-only pop-up and Confirmations card render in the expected hierarchy. The shared
+shipping Settings path also passed `sidebar_footer_smoke.py` through AT-SPI press, close shortcut
+and pointer press. Its complete 1600×900 2× capture at
+`out/general-composition/shipping-full/settings-from-accessibility.png` was inspected; the
+General header, Done button, card edges, text and toggles all fit inside the window.
+The shared-source checker now guards 19 direct production links and still reports zero duplicate
+named view classes or copied production bodies. The macOS UI-evidence run passed: all four
+General captures
+at 420 and 1124 points in light and dark appearance were pixel-identical to the captures from
+before the composition move in `.build/general-settings-render-morph/`. The 420-point light page
+was also visually inspected; all six sections remain present and correctly arranged. All 13
+`GeneralSettingsRenderTests` passed against the built app. No baseline was approved because the
+evidence catalogue currently has no checked-in baseline for this entry.
+
+## 284. Functional Startup row through the shared General composition, 2026-10-26
+
+The selected-session preference key and default now live with the shared restore policy.
+macOS continues to use its descriptor; Linux supplies a persistence shim and the same
+`GeneralSettingsPageStructure` Startup row. Linux's store snapshot clears saved agent and
+terminal activation when the switch is off. The host synchronizes the preference on a utility
+queue and waits for that write on clean close, because a rapid close after changing the switch
+otherwise reopened the terminal despite the visible toggle state. The new X11 smoke clicked
+the production control across three launches and verified off opens the project,
+on reattaches the existing daemon child, and no extra child starts. The Startup card was
+inspected in the native 1120×480 screenshot at
+`out/startup-restore/startup-enabled.png`; its caption, row, switch and following Confirmations
+card stay inside the real workspace shell.
+The macOS Debug app built, and the targeted `general-settings-layout` evidence run rendered
+all four 420/1124-point light/dark General images. Their decoded RGBA pixels were identical
+to the pre-Startup-shim captures in `general-shared-composition`; the render test passed.
+The Linux shared-view checker reported zero named view duplicates and 19 valid production
+links, and the main-actor latency gate stayed clean.
+
+Linux still lacks the bounded background relaunch service for “Bring back at launch”, so that
+row is omitted there. General's Idle Agents, Software Updates, Agent Tools and Machine service
+groups are also still absent. The Settings pane's controls are rasterized and pointer/keyboard
+accessible through the SDL route, but the AT-SPI bridge currently exposes the sidebar Settings
+button rather than the individual controls in this pane.
+
+## 285. One terminal-row action menu composition, 2026-10-26
+
+The macOS and Linux terminal rows now obtain Rename, Copy and Close from the same
+`SidebarTerminalMenuContent` Design source. It owns their order, localized labels, copy fold,
+command identities and separator. The Mac sidebar supplies its existing actions and inserts
+Theme, Sounds and conditional sharing entries through this composition. Linux supplies its
+identity-checked command router and a paged Copy view as a host interaction shim; the menu's
+standing surface is the shared `ThemedMenuSurfaceView`. The shared-source checker now guards the
+new source link and both host call sites, reporting 20 production links, zero named view
+duplicates and zero terminal-menu composition violations.
+
+The ARM64 Linux window host built and `terminal_creation_selection_smoke.py` passed both its
+immediate and delayed navigation journeys. It opened the production menu, renamed the terminal,
+copied its Threading ID and current worktree path, and closed it while retaining exact child
+identity. The native X11 image at `out/terminal-menu-shared/terminal-menu.png` was inspected:
+the menu crosses the sidebar edge cleanly, the Copy row has a submenu indicator, and the
+shared separator precedes Close. The macOS Debug app and the targeted menu render test passed.
+New light and dark terminal-menu captures in the real macOS product shell were inspected:
+Rename, Copy, Theme, Sounds, conditional Share and Close keep their order and visual groups.
+All 17 pre-existing session-menu captures were decoded and compared with the previous report;
+every pixel was identical. The focused Mac action test also confirmed the shared Rename,
+Close and Copy items still carry their commands. No new baseline was approved.
+
+The next duplicated menu content is the Linux `SidebarSessionMenu` versus macOS
+`sessionActionEntries`: Pin, Snooze, Archive, conditional Close, Rename and Copy are constructed
+independently, and macOS has additional live services. Theme, Sounds and Share also still need
+Linux services before those terminal rows can be offered there. The active 1:1 goal remains
+open for those routes, General's remaining groups and the larger conversation surface.
+
+## 286. One standing session-row menu composition, 2026-10-26
+
+The macOS and Linux session rows now build their standing Pin, Snooze, Archive, conditional
+Close, Rename and Copy actions with one `SidebarSessionMenuContent` source. It owns row labels,
+glyph names, the Copy fold, group separators and common order. macOS supplies callbacks,
+shortcuts and its side-chat, appearance, identity, manager and deletion services. Linux supplies
+its checked command route, bounded Open In catalogue and paged submenu interaction. Both mount
+the existing shared `ThemedMenuSurfaceView`. The Mac row, right-click context entrance and pane
+header continue to use one `sessionActionEntries` builder; the Copy service closure is formed
+once through `sessionCopyEntry`. The Linux symbol shim now renders the shared Copy and identifier
+marks instead of trapping when the common menu asks for them.
+
+The ARM64 Linux host built, and the real X11 saved-session journey passed through opening the
+row menu, copying its Threading ID, renaming, closing, showing the dormant pane and resuming.
+The `session-row-menu.png` and `session-row-copy-menu.png` captures in
+`out/session-menu-shared/` were inspected in the production shell. The shared-view audit reports
+21 linked production sources, zero named duplicate view classes, and zero session-menu
+composition violations. The macOS Debug app built, and the session-menu evidence test passed.
+All 17 pre-existing Mac menu captures were pixel-identical to the preceding report on the
+final render pass after the Copy adapter simplification; the light and dark captures were
+inspected. All 38 focused Mac session-row action tests passed. No evidence baseline was
+approved.
+
+The common menu composition does not add Linux services for Mac-only actions. The Linux pane
+header still opens a separate two-command Actions menu where Mac opens this full session menu.
+Terminal Theme, Sounds and Share, the rest of General Settings, and the larger conversation pane
+also remain open for 1:1 parity. These menu rows are built only when a menu opens, and the Linux
+Open In list retains its 64-app bound.
+
+## 287. Pane-header Actions uses the session-row menu, 2026-10-26
+
+Linux's selected saved-session pane header no longer builds its own two-command Actions menu.
+Its existing `PageTitleView` Actions button opens the same `SidebarSessionMenu` state,
+`SidebarSessionMenuContent` composition, `ThemedMenuSurfaceView` and identity-checked command
+router as the session row. The host supplies only the anchor: it converts the constrained
+header button's rectangle into the navigator overlay's full-window coordinates. The overlay
+already spans both panes, so no new drawing surface or duplicate input route was added. The
+button's selected state follows the menu, and dismissal restores the focus that was active
+before opening it. `WorkspacePaneChrome` now owns only its separate Open In chooser menu.
+This reuses the existing host-only pane and menu contract: Threading still owns the selected
+session identity, command admission, clipboard mutation and focus.
+
+The ARM64 `WindowHarness` built. In the real X11 shell, `session_actions_smoke.py` opened the
+full menu from the pane header and from the row, copied the Threading ID and worktree path,
+changed theme with the menu open, then renamed, closed and resumed the same saved session.
+It also verified that menu input never reached the live PTY and that a key reached it after
+the header menu closed. The final `session-actions-open.png` and
+`session-header-copy-menu.png` captures in `out/pane-header-shared-menu-final/` were inspected:
+the menu anchors at the header button, uses the shared icons and separator, and stays clear of
+the sidebar divider. `open_in_smoke.py` passed for the remaining split Open In control,
+virtualized desktop-app choices, exact project path and stale-checkout refusal. Its
+`open-in-choices.png` capture was inspected. The shared-view checker reports zero named view
+duplicates and zero pane-header session-menu violations; the gate now rejects a renewed
+`SessionMenuCommand` or two-row header session menu.
+
+Mac-only session services such as Theme, Sounds, Permission Mode and Share are still absent on
+Linux until their behavior exists there. General Settings' remaining sections, the larger
+conversation surface and presenter interaction parity also remain active 1:1 work.
+
+## 288. One Snooze submenu composition, 2026-10-26
+
+The follow-up source audit found a smaller duplicate inside the newly shared session menu:
+macOS and Linux each formatted the wall-clock Snooze rows and appended the same Custom time
+action independently. `SidebarSessionMenuContent.snoozeEntries` now owns their titles, time
+detail, order, separator, calendar glyph and command identity. Both hosts feed it the same
+`SnoozeWallClockMoments` source. macOS provides the existing deadline and custom-sheet actions;
+Linux prepends its Back row for its paged presenter and keeps the identity-checked command
+router. The shared-view checker now requires both callers to use this builder.
+
+The ARM64 Linux `WindowHarness` and macOS Debug app built. The real X11 saved-session journey
+passed through the pane-header Snooze page and Back, Copy, rename, Close and resume. Its
+`out/shared-snooze-menu/session-header-snooze-menu.png` capture was inspected in the production
+shell: the three future moments, highlighted row, separator and Custom time action are visible
+at the header anchor. The Mac session-menu evidence test now also captures a deterministic
+Snooze menu in the shipping window for light and dark appearance. Its directed app-hosted test
+passed (1/1); both new captures were inspected, and the other 19 session-menu images were
+decoded and found pixel-identical to the previous report. No baseline was approved. The
+shared-view, UI-structure, theme-boundary, main-actor-latency and whitespace gates passed.
+
+This removes the duplicated Snooze menu construction; it does not add the Mac-only session
+services or the Linux background relaunch service needed for General Settings' restore policy.
+
+## 289. The startup restore judgement and Snooze words are shared, 2026-10-26
+
+The General Settings parity investigation found that the Linux page already mounts the shared
+`SettingsPageView` and `GeneralSettingsPageStructure`, and both Linux composers already mount
+the production `PromptView`. The missing General rows are service gaps. The first service
+boundary, launch restoration, used to put its policy and outcomes in the macOS window file.
+`StartupSessionRelaunch.plan` and `SessionRestorationOutcome` now live in one Foundation-only
+Core source linked into Linux `CoreSlice`; Mac keeps only its in-memory ledger, paced timer and
+window-sized fallback beside its controller. `SessionRestoreDefaults.secondsPerDay` moved to
+the shared policy defaults. The Linux core harness executes the real planner against last-quit,
+daemon-held, selected, archived, recently-used and disabled cases instead of inventing another
+planner. The Linux window does not yet run that plan: it still needs a recorded live set,
+bounded background runtime launch and the host-specific process lifecycle before the General
+policy row may be offered honestly.
+
+The same audit found wall-clock Snooze labels duplicated between `ScheduledTimePresets` and the
+shared menu builder. `SnoozeWallClockMoments.presentations` now supplies the localized title and
+time detail to both. The UI owner still supplies the menu shape and host actions. The shared
+view checker now requires both consumers to call the common presentation function. The Linux
+`CoreSliceHarness` passed the new policy contract, the ARM64 `WindowHarness` built, and the
+real X11 saved-session menu journey exercised the resulting Snooze page. The focused Mac
+restoration and timestamp run passed 30/30 tests; the scheduled-time preset run passed 24/24.
+The Mac session-menu evidence test passed in the app shell. Both new light and dark Snooze
+captures were inspected, and all 21 decoded menu images were pixel-identical to the preceding
+run. No evidence baseline was approved. The shared-view, UI-structure, theme-boundary,
+main-actor-latency, core-vendor and whitespace gates passed.
+
+## 290. Linux records its live agents at clean quit, 2026-10-26
+
+The next restore-service slice moved the policy, legacy migration and window/count preference
+keys into shared `SessionRestoreDefaults`; the Linux settings adapter reads and clamps those
+same values. The new Linux host store adapter reads the complete session graph on a worker,
+builds the production `StartupSessionRelaunch` plan, and exposes exact-record consume and
+clean-quit writes. A daemon survey returns all live agent IDs in one protocol round trip; a
+failed survey is unknown, not evidence that no child exists. The close path captures bounded
+local runtimes before they detach, combines them with the daemon list on a worker, filters
+identities to non-archived sessions in this store, and awaits that write after the UI loop ends.
+An empty quit that has not spent the previous record leaves it intact. The background plan is
+not yet invoked by the window; no General policy row is shown for it.
+
+The ARM64 Linux window built. A real-database contract passed policy migration, shared bounds,
+selected-session exclusion, stale-record refusal, exact consume, foreign-daemon filtering and
+quick-quit preservation. The real X11 saved-session Actions journey passed after the close-path
+change. A separate real-daemon X11 journey kept one agent child alive through two graphical
+launches and verified that both quits recorded its identity without spawning another child.
+The focused macOS restore and setting-definition run passed 34/34 tests. The new quit journey
+is part of the installable bundle's runtime smoke lane.
+
+## 291. Linux consumes and paces the shared startup plan, 2026-10-26
+
+The normal workspace launch now reads the exact saved plan on the utility worker after mounting
+its selected runtime. It refuses to spend or launch the plan when the daemon survey fails, and
+consumes only the record it read. The SDL wait includes the next one-second relaunch deadline;
+without that deadline, the event loop could sleep indefinitely despite a nonempty plan. CLI
+agents resume through `GraphicalTerminal.openAgent`, which rechecks daemon ownership and the
+saved conversation. Native agents retain `NativeWorkspaceSession` without constructing a hidden
+`WorkspaceConversationPane`; selecting one mounts the production pane and replays its retained
+rows. The runtime, rather than the pane, observes permission, question, completion and failure
+wake reasons, so Snooze works while its view is absent. An unfinished queue is carried into the
+next clean-quit record, including when an exact consume result is still in flight.
+That handoff uses a receipt retained by the serial store worker: a rejected consume cannot
+carry stale unlaunched IDs across another writer's newer record. Sessions whose provider binary
+is unavailable remain owed for the next launch rather than disappearing from the record.
+
+The ARM64 Linux window builds. The real-daemon X11 quick-quit journey still passes. A new
+real-daemon graphical journey seeded two stopped, resumable Claude sessions, consumed their
+saved last-quit record, started the two children at least 0.7 seconds apart, and recorded both
+again at clean quit. That journey is included in the installable bundle smoke lane. An
+additional real X11 journey restored a saved native Cursor ACP stream with no mounted
+conversation pane, observed its provider `session/load`, and retained its identity at clean
+quit. The focused macOS restoration and setting-definition suite passed 34/34 tests. The
+native background-activity journey reached and rendered the real conversation pane, whose
+idle frame was inspected; this slow Xvfb run lost an AT-SPI frame reference during its later
+status-row assertion, so that later status transition remains unverified in this run. The shared
+view checker reports no named duplicate classes, Linux-only shared-source view leaves or
+duplicate Design shim values. The General policy control remains hidden: Linux still has an
+eight-runtime ceiling versus the Mac policy's configurable limit up to 32, and it does not yet
+present the shared per-session restoration outcomes to users.
+
+## 292. The selected saved agent resumes visibly after daemon loss, 2026-10-26
+
+macOS restores the last selected session through its ordinary sidebar selection even when no
+daemon child remains. Linux had treated a missing child as a reason to discard that selection,
+leaving the pane idle while the background policy might independently relaunch the same agent.
+The Linux snapshot now carries the selected agent's startup action: attach when the daemon
+still holds it, resume when its recorded process is absent or exited. CLI selection uses the
+existing `GraphicalTerminal.openAgent` worker, which rechecks daemon ownership and transcript
+admission. Native selection keeps the one production `WorkspaceConversationPane` and starts
+its `NativeWorkspaceSession` through the same saved-runtime path. The background planner
+excludes this selected ID, so selection and the paced plan cannot both launch it.
+
+The real-daemon X11 journey first restarted two stopped Claude sessions in the background,
+then stopped both, selected one in the store and reopened the window. The selected session
+rendered its terminal while the other resumed through the background plan; each provider ID
+started exactly once. The selected native Cursor journey received `session/load`, mounted one
+conversation pane and made no background launch for the same ID. Its real 1120×480 shell
+capture was inspected. The existing selected-live-child quit journey still verifies that two
+window relaunches attach to one daemon child. The Linux window built after the change.
+
+The remaining daemon-held native case needs the macOS `PTYHostReattachPlan` distinction between
+PTY and pipe channels: macOS stops a held pipe child before resuming its provider transcript,
+because a fresh request/response client cannot rejoin a half-complete stream. Linux's current
+ID-only survey treats that child as held and skips it; the selected native pane can then show
+history without a connected stream. This is the next host-lifecycle parity step.
+
+## 293. Native pipe handoff uses the shared daemon classification, 2026-10-26
+
+The Mac host's PTY/pipe/ended/orphan decision now lives in one Core source,
+`PTYHostHeldDisposition.swift`; Linux links that same file. Linux's startup worker lists the
+daemon's session summaries once, preserves PTY children for reattachment, and stops live pipe
+children before a native provider resumes from its transcript. A selected native session holds
+its one production conversation pane while the stop runs, so the old and new provider processes
+cannot write at the same time. If the child disappears between the first window survey and the
+worker survey, the successful second survey releases that wait. A failed daemon survey still
+does not authorize another process.
+
+The ARM64 Linux window builds. A real X11 two-launch fixture left a Cursor ACP pipe child
+alive with the daemon after the first close, then selected the saved conversation for the next
+launch. It observed exactly two provider starts with different PIDs, the old PID gone when the
+replacement started, `session/load` on the replacement, one visible conversation pane, no
+background launch for the selected ID, and the durable quit record. The rendered 1120×480 selected shell
+was inspected at `out/startup-restore/held-native.png`. The quit, paced CLI, unseen native,
+selected native, and held-native graphical cases passed together; the selected and held-native
+cases passed again after closing the survey race. The startup-store contract and Core source
+link verification passed. The shared-view checker still finds zero named duplicate classes and
+zero Linux-only shared-source view leaves; theme and main-actor latency gates are clean.
+
+The General policy row and per-session restoration outcomes remain absent from Linux. Linux's
+runtime cap is still eight where the Mac preference allows 32, so exposing that row is not yet
+honest 1:1 behavior. The UI parity audit continues beyond this host lifecycle fix.
+
+## 294. The shared Startup policy row reaches Linux, 2026-10-26
+
+Linux already read the production `SessionRestorePolicy` and used the shared
+`StartupSessionRelaunch.plan`, but its General page hid “Bring back at launch”. The page now
+passes a Linux `ThemedPopUp` adapter into the one `GeneralSettingsPageStructure`, with the same
+three policy choices and persisted keys as macOS. No second page composition or popup view was
+introduced. The ordinary selected-session switch remains the first row.
+
+The old eight-runtime admission guard was also applied to the startup queue. Once eight saved
+agents had been restored, the SDL loop stopped scheduling the next deadline, leaving a consumed
+plan half-finished. Startup now follows the shared plan's own bounded set and one-second
+stagger; manual admission still has its separate eight-runtime cap. A real X11 fixture seeded
+nine resumable Claude sessions, observed nine distinct provider resumes at least 0.7 seconds
+apart, and found all nine IDs in the durable quit record. The popup fixture chose “Recently
+used”, reopened the app with that setting retained, and rendered the selected choice. The
+1120×480 chosen and reopened screenshots were inspected under `out/settings-policy/`.
+
+The ARM64 Linux window built. The shared-view, theme-boundary and main-actor latency gates
+remained clean, and the focused macOS PTY reattach suite passed 11/11. Linux still lacks the
+Idle Agents retention controls and per-session restoration explanation UI, and manual runtime
+admission is capped at eight. Those are distinct remaining parity tasks.
+
+## 295. Release ownership and package verification, 2026-10-26
+
+The Debug Linux window built, but the first Swift 6.3.2 Release build exposed captures of
+task-local runtime dictionaries and pending composer/import decisions by main-actor callbacks.
+The window now keeps those facts in two main-actor-owned host registries. A later optimizer
+ownership assertion occurred when the small specimen wrapper inlined
+`configureProductionTerminal` into `mountTerminalContent`. A narrow `@inline(never)` boundary
+on that existing production-row configuration method makes the final Release build pass without
+copying the row or its presentation defaults.
+
+`package-app.sh` built the ARM64 archive and `.deb` from the current dirty source tree, with
+revision `8276631140a708a85b3df9e915f2dcc9c33b7a69` recorded in the bundle manifest.
+The package's Release binaries passed the Settings-row and startup-store contracts and real
+X11 journeys for the saved policy popup, nine paced Claude resumes, daemon-held native ACP
+handoff, and closing an unmounted daemon child back to its saved row. The Mac PTY reattach
+suite passed 11/11; the shared-view, theme and main-actor latency gates stayed clean.
+
+The full Swift-free Ubuntu install smoke did not start because the local Docker daemon was
+unavailable at its socket. The package build and direct Release-binary journeys above passed;
+installation and upgrade behavior remain unverified for this iteration.
+
+## 296. Shared idle-agent retention reaches the native Linux host, 2026-10-26
+
+The macOS retention coordinator had mixed its policy and runtime facts with Mac-only process
+ownership. The unchanged policy and fact definitions now live in
+`SessionProcessRetentionPolicy.swift` and `SessionRuntimeFacts.swift`, linked into Linux's
+CoreSlice alongside `SessionActivityState.swift`. Linux supplies an edge/deadline adapter over
+its already-owned native runtime facts, with one timer for the next deadline. Neither a hidden
+conversation view nor a database pass is required to decide which idle process remains warm.
+Native sessions no longer share the separate eight-slot manual CLI-terminal guard. The shared
+`AgentSession.noteWork` rule updates durable native turn and visit recency, so the retention
+ordering uses the same meaning as macOS.
+
+The first six-session X11 run exposed an ACP lifecycle race: `canSend` became true before the
+`session/load` reply, so a process still restoring history looked idle and two were stopped
+before their transcript had loaded. The native host now classifies history loading as starting
+and waits for the provider's initialized event before admitting sends or idle retirement. In
+the passing real-window run, all six saved Cursor ACP sessions received `session/load`; exactly
+two idle provider PIDs were retired, four stayed alive, no hidden conversation pane mounted,
+and the clean-quit record contained those four. The quit worker subtracts deliberately retired
+IDs from its daemon survey to close the stop-versus-record race.
+
+The one `GeneralSettingsPageStructure` now receives Linux popup shims for both Idle Agents
+choices. Their labels and the restore-window wording come from shared defaults; Linux supplies
+only the English day-count formatting that swift-corelibs-foundation lacks. The real Settings
+journey selected two days and at most eight, relaunched, and read both saved values. The current
+Release package and a `.deb` installed in Swift-free Ubuntu passed the Settings-row and
+startup-store contracts plus both native X11 journeys. Their chosen-settings screenshots were
+byte-identical at 1120×480 and were visually inspected. macOS focused tests passed 8/8 for
+retention, 7/7 for work recency, and 17/17 for startup restoration. The theme and main-actor
+latency gates passed; the shared-view checker reported zero named duplicate classes, zero copied
+production sources, and 21 shared view links. The new retention journey is in the installed
+bundle smoke lane; the entire bundle suite and upgrade journey were not rerun here.
+
+The checker cannot establish semantic 1:1 parity. Manual CLI-terminal admission still has an
+eight-runtime cap, Linux does not yet show the per-session restoration explanation hover card,
+and normal native quit still records daemon-held pipe children that must stop and resume on the
+next launch. Software Updates, Agent Tools, Machine settings, and other macOS surfaces remain
+separate parity work.
+
+## 297. One session hover-card body and one launch ledger, 2026-10-26
+
+The macOS hover card's row layout and wording now live in one production
+`SessionInfoCardView` under Design. The old Mac `SessionInfoPopoverViewController` only gathers
+Mac facts and mounts that view; Linux links the same source and supplies its cached sidebar,
+branch, runtime and restoration facts through a host adapter. The launch outcome ledger moved
+from Mac window code into shared Core so both hosts explain a dormant saved session using the
+same plan and sentences. Linux constructs the card only after the shared hover dwell, with no
+transcript scan or hidden conversation view. The customization gate keeps session identity,
+hover timing, placement and dismissal host-owned; the Mac extension hook still owns optional
+card content.
+
+The first X11 image exposed a real layout failure: fixed 14-point icon slots also required the
+glyphs' smaller intrinsic widths, leaving Linux's constraint solver with a zero-height card.
+Removing the conflicting required hugging and compression priorities in the shared view gave
+the card a measured 129-point body. The next journey rendered the card but could not select
+the row: SDL treated every navigator overlay as an interactive menu and swallowed outside
+clicks. The bridge now accepts an explicit interactive flag. A hover card paints through that
+overlay while mouse and keyboard input follow the ordinary row route; the accessibility row
+bounds use the same distinction.
+
+The final Debug X11 journey rendered a 153-pixel panel, selected its saved row with the card
+visible, then opened it with Return. Its screenshot was inspected. The macOS Debug app built,
+and 64 focused hover, restoration and remote-host tests passed. The shared-view checker now
+guards all four new source links (25 total), with zero duplicate view classes or copied
+production sources. `package-app.sh` built a dirty-revision ARM64 Release archive and `.deb`.
+The `.deb` installed in a fresh Swift-free Ubuntu 24.04 container, where the same real-window
+hover and click journey passed; its screenshot was inspected. The whole bundle and upgrade
+suite was not rerun for this change.
+
+Linux still omits Mac-only hover facts such as handoff, roles, worktree drift, custom sound,
+conduct and remote execution host. It also lacks extension-authored card content, Mac popover
+chrome and complete SF Symbol artwork. Those are presentation and fact-provider parity gaps;
+the card body itself has one source.
+
+## 298. Saved branch and handoff reach the shared hover card, 2026-10-26
+
+Both hosts now format handoff provenance with `SessionPopoverDefaults.handoffLine` in the
+shared Design source. The Linux navigation snapshot carries the saved session's branch and
+bounded handoff line to its card adapter. This preserves the branch where a dormant chat ran,
+even if the checkout has since moved. The terminal and native creation receipts also carry
+the branch captured at admission, so a newly created row does not need a UI-thread store read.
+
+The Debug X11 journey seeded a valid Claude-to-Codex handoff and a saved branch in a durable
+session, then showed both lines above the dormant restoration reason in the real window. Its
+194-pixel card screenshot was inspected, and clicking through the open card and opening the
+selected row still passed. The shared-view audit reported 25 valid links with no duplicate
+view classes or copied production sources. The macOS Debug build passed 38 focused
+`SessionRowActionsTests` and its architecture checks. `package-app.sh` built the ARM64
+Release archive and `.deb`; the package installed in a fresh Swift-free Ubuntu 24.04
+container and passed the same X11 card, click-through and keyboard journey. Its screenshot
+was inspected. The existing terminal and native composer checkout journeys also passed
+against the updated Debug host, covering both branch-bearing creation receipts. The full
+bundle and upgrade suites were not rerun for this change. Roles,
+worktree drift, sound, conduct, remote host, extension content, popover chrome and full
+SF Symbol artwork remain separate parity gaps.
+
+## 299. Linked worktree name uses the navigator's existing Git fact, 2026-10-26
+
+The Linux session card now supplies `worktree` from `LinuxGitCheckout.worktreeName`. Repository
+identity and worktree name are parsed together once on the checkout-discovery worker and
+stored in its catalogue, so hovering a row does no Git I/O or path parsing. The shared
+card's existing branch row composes the saved branch and linked worktree name, as it does
+on macOS.
+
+The Debug X11 journey now creates a real linked worktree, seeds a session with a different
+saved branch, and checks that the hover card shows both facts above the restoration reason.
+The 194-pixel rendered card was inspected; clicking through it and opening the selected row
+still passed. Observed execution drift remains a separate missing fact: this change names
+the checkout that owns the chat, not a different location where its agent might be working.
+
+The 5,100-project repository-outline fixture passed after its runner was repaired to compile
+`CoreSlice` for `@testable` access and link the production `CheckoutBranchDisplay` type.
+The shared-view checker now guards that link plus the other two navigator fixture links:
+19 valid fixture contracts, 25 shared source links, and no named duplicate view classes.
+`package-app.sh` built a fresh ARM64 Release `.deb` from the refactored code. It installed
+in a new Swift-free Ubuntu 24.04 container and passed the same real X11 hover, click-through
+and keyboard journey; the installed screenshot was inspected. The full bundle and upgrade
+suites were not rerun for this change.
+
+## 300. One permission-mode menu policy for both desktops, 2026-10-26
+
+The macOS session menu and both composer chips already used `PermissionModePresentation`,
+but Linux's opening and reply hosts independently assembled the same six mode rows. The
+production `PermissionModeMenuContent` now owns row order, subtitles, default and last-used
+qualifiers, inherit-row collapse, selected state, timing note and chip title. Mac passes its
+`ResolvedPermissionMode` authority; Linux passes its separately discovered configured,
+remembered and live values. Linux adapters only translate the shared menu entries to each
+host's bounded interaction model. The source is linked into `WindowHarness`, and
+`check_linux_shared_views.py` rejects a local row builder at all three host call sites.
+
+The macOS fast plan passed 43 focused permission-mode tests and the architecture gates.
+The Linux Debug host built and four real X11 composer/conversation journeys passed: Claude
+last-used, configured-over-last-used, observed live, and Codex configured default. The
+rendered opening and reply menus were inspected, including the inherited Plan row and
+last-used Auto row. A fresh ARM64 Release `.deb` was installed in Swift-free Ubuntu 24.04;
+the Claude last-used journey passed there and its reply-menu screenshot was inspected.
+The shared-view audit reports 26 production links and zero duplicate named views, copied
+sources or permission-menu composition violations. The full bundle and upgrade suites were
+not rerun for this change.
+
+## 301. One speed menu and a measured opening-menu check column, 2026-10-26
+
+The macOS opening and reply composers used `ConversationSpeedPresentation`, while Linux's two
+composers separately built the same Standard and Fast rows, descriptions, selected states and
+chip symbol. `ConversationSpeedMenuContent` now owns those three rows and the chip vocabulary
+in one production Design source linked to Linux. Each host supplies the inheritance row's
+meaning: Mac follows Settings ▸ Chats General; Linux follows the agent because its app-wide
+speed preference is not available yet. The shared-view checker now rejects a local speed-row
+builder at either Linux host or the Mac wrapper. Two new Linux-facing strings were added to
+the localization catalogue so the shared source passes the macOS localization boundary.
+
+The first real X11 opening-menu image showed the inherited row's explanation truncated.
+`WorkspacePlaceholderPane` had measured its menu rows without their selected mark or image,
+then mounted them with both. It now measures the same semantic columns it renders. The
+re-rendered menu shows the complete explanation; the generic fix also widens other selected
+composer menus when they need the check column. The macOS fast plan passed 62 focused tests.
+Linux Debug passed Codex and Claude live-speed journeys through both composers, plus a Codex
+terminal speed journey after the width correction. Their opening and reply renders were
+inspected. The final ARM64 Release `.deb` installed in fresh Swift-free Ubuntu 24.04 and
+passed the Codex live-speed journey; both installed speed menus were inspected. The source
+audit reports 27 valid shared links, zero copied production sources, zero named duplicate
+views and zero speed-menu composition violations. The full bundle and upgrade suites were
+not rerun for this change.
+
+## 302. One startup-speed policy and New Chats row structure, 2026-10-26
+
+The Linux opening and reply chips previously treated an unset chat speed as the provider's
+setting because the host had no Settings ▸ Chats speed preference. The macOS
+`AgentStartupSpeed` value is now one CoreSlice-linked source. Its priority rule resolves the
+chat choice, then the app choice, then the provider setting. The provider's setting remains
+lazy to read. The New Chats row order, copy and help text likewise live in one Design source
+used by both desktop hosts; Linux links it and supplies its two backed speed controls. The
+Mac page keeps its other rows and sections. The host Settings detour selects General or Chats
+while both destinations mount the same `SettingsPageView`, `SettingsCard`, row and themed popup
+classes. Under the customization-surface gate, Settings navigation, preference persistence,
+provider capability checks and launch flags remain host-owned; this adds no extension surface.
+
+Linux now persists separate Claude and Codex startup speeds under the same keys as macOS.
+Opening and reply menus both say Follow General Setting. Terminal creation and resume, Native
+preparation and live Claude controls apply an explicit app Standard or Fast below a chat
+override, while the saved chat record stays nil when it inherits. The opening and reply
+chips resolve the same priority. A known unsupported Claude model stays Standard when an app
+Fast default is selected. The host reads provider files only on its existing bounded workers.
+The later Native regression exposed a second speed-menu vocabulary in the Linux C AT-SPI
+bridge: its first accessible row still said “Follow Agent Setting” after the visible row
+followed General. The bridge now receives every title and description from the mounted
+`ThemedMenuSurfaceView`; its C projection retains only identity, bounds and selection. The
+source checker rejects another hardcoded speed label there. The same journey caught an
+inheritance transition that cleared a running Codex Standard tier when General also deferred
+to the agent; the current turn now keeps its tier until the next launch, matching macOS.
+The shared running-chat note now fits the menu, whose width is measured from its rendered
+rows rather than fixed in the Linux host.
+
+The Mac fast plan passed 59 focused tests, then 90 after the final resolver cleanup. Chats
+rendered at wide and 420-point widths in light and dark; wide light, narrow light and narrow
+dark images were inspected. Linux Debug passed the real X11 Settings persistence journey and
+Codex and Claude General Standard launch journeys on both Terminal and Native; the Settings
+page and Codex Native reply images were inspected. A fresh ARM64 Release `.deb` was installed
+in Swift-free Ubuntu 24.04, where the Settings persistence journey and both Terminal launch
+journeys passed again. The final package was reinstalled there after the AT-SPI and menu-width
+changes; Settings persistence and the Codex Native live-speed journey passed, including a
+second agent turn. Its Settings and Native menu images were inspected. The last Mac fast plan
+passed 90 focused tests after the shared note changed. The shared-view checker now
+guards 30 source links and both New Chats row consumers, with zero duplicate named view
+classes, copied production sources or composition violations. Theme, localization and
+main-actor latency gates passed. The full bundle and upgrade suites were not rerun.
+
+## 303. New Chats agent and permission defaults share the Mac rows, 2026-10-28
+
+The Linux Settings ▸ Chats page had only the two startup-speed rows. With both CLIs present,
+its composer chose Codex because that identity happened to be first in the list, while the Mac
+default was Claude Code. A new shared `NewChatDefaults` CoreSlice source now owns the two
+persistence keys and the conversation-over-app permission priority. Both desktop hosts build
+the New Chats agent, permission and speed rows from `NewChatsSettingsStructure`, and build the
+permission pop-up's seven choices from that source. Linux offers its two implemented agents;
+if the saved provider is not installed, its composer uses an available one. The chosen provider
+becomes the app default only after a new session commits, as on Mac.
+
+Linux leaves a chat's permission field nil when it inherits the app default. Terminal creation
+and resume and Native preparation put the resolved mode on the actual Claude or Codex launch
+line. The Native permission broker holds the posture sent to the running process until a live
+mode change or the next launch, so changing Settings while a chat runs cannot silently change
+its local answers. That running snapshot is nil for providers without shared permission modes.
+The Settings page and session launch remain host-owned; this adds no new
+extension presentation seam.
+
+The Mac fast plan passed 55 focused setting, permission and render tests. Its Chats page was
+rendered at wide and 420-point widths in light and dark; wide and narrow light images were inspected.
+Linux Debug passed real X11 New Chats choice, persistence and fresh-composer checks; its Chats
+and composer images were inspected. Codex and Claude passed General Plan launch journeys on
+Terminal and Native, with inherited durable session records; the Codex Native image was
+inspected. The shared-view checker reports 31 valid source links and no named duplicate views,
+copied production sources or New Chats composition violations. Theme, localization and
+main-actor latency gates passed. The final ARM64 Release `.deb` was installed in Swift-free
+Ubuntu 24.04. Its New Chats persistence and fresh-composer journey, Claude Terminal General
+Plan launch, and Codex Native General Plan launch all passed. The exact final package was
+installed after the provider-capability guard; its Settings and Codex Native journeys passed
+again. The installed Settings page at full and narrow widths and the Codex Native image were
+inspected. The full bundle and upgrade suites were not rerun.
+
+## 304. One Opening Message and task-only session title, 2026-10-28
+
+The Linux Chats page previously omitted macOS's Opening Message fields, and its fresh-agent
+paths sent only the typed task. Both desktop hosts now build those four rows from the same
+`OpeningMessageSettingsStructure` source. The two preference keys and byte limit live in
+`NewChatDefaults`; the older suffix keeps its historical `newChatOpeningMessage` key. The
+prefix/task/suffix joining rule is one CoreSlice-linked `NewChatOpeningMessage` source. Terminal
+and Native launches snapshot that composed first turn while retaining the raw task for composer
+identity checks. Later native turns and restored sessions do not apply the standing text again.
+
+The Mac names a new chat from the task before adding standing text. Linux's new records were
+unnamed, so the title rule now lives in one `SessionPromptTitle` source shared by both hosts.
+Linux saves that task-only provisional title on Terminal and Native admission. The session
+record, Settings persistence and admission remain host-owned; this surface adds no extension
+component under the customization-surface gate.
+
+The real X11 journey found that the Settings fields mounted correctly but SDL did not enable
+text input when their AppKit field editor received focus. The host now routes committed text,
+composition and keys to that editor and synchronizes native editor focus with the actual
+responder. A second failure was the Foundation timer: the Linux SDL loop does not pump it.
+The host uses its existing bounded poll only while a field has an unsettled 400 ms write,
+then flushes on the deadline, field change, Settings close and app exit. Preference reads reject
+text over the shared 1 MiB limit.
+
+The Mac fast plan passed 55 focused Opening Message, settings and render tests, then 44 title
+and side-chat tests after extraction. The Chats page rendered in light and dark at 1124 and 420
+points; the 420-point light image was inspected. Linux Debug passed real X11 Codex Terminal,
+Codex Native and Claude Terminal journeys. Codex and Claude Native each proved the composed
+first provider turn, task-only saved title and an unmodified second turn. The Linux Settings
+screenshots were inspected at wide and 420-point content widths; the narrow page scrolls to
+reveal the suffix field. The saved plist contains both exact values after exit. The shared-view
+checker reports 34 valid source links, zero duplicate named view classes, zero Linux-only
+shared-source leaves and zero copied production sources. Theme, localization and main-actor
+latency gates passed. The ARM64 Release `.deb` was installed in a Swift-free Ubuntu 24.04
+runtime. The installed Codex Native journey passed Settings persistence, exact composed first
+turn, task-only title and an unmodified second turn; the installed Claude Terminal journey
+passed Settings persistence and exact launch arguments. The installed wide, narrow-scrolled and
+native first-turn screenshots in `out/opening-installed-evidence/` were inspected. The full
+bundle and upgrade suites were not rerun for this change.
+
+## 305. One Scratchpad Settings row and portable location rule, 2026-10-28
+
+Mac and Linux now mount the same `ScratchpadSettingsStructure` row for the folder path, Choose
+and Use Default controls. The constants and path normalization/display rule live in shared
+CoreSlice sources, `ScratchpadDefaults` and `ScratchpadLocation`; the Mac workspace service and
+Linux database helper keep their platform-specific file and project ownership. The Settings row
+is host-only: Threading owns the destination choice, user files, durable project identity and
+the operation's success or failure.
+
+Linux's Chats page can choose a parent folder through the native GTK picker, then move the
+Scratchpad into its `Scratchpad` child. The move runs outside SDL's UI thread in LinuxHost, checks
+for collisions, updates the exact saved project, and persists the WindowHarness preference only
+after the rename and database update succeed. A window closing after the helper starts does not
+kill the transaction. On the next launch, the saved Scratchpad project path repairs a stale UI
+preference. Use Default returns the folder to `~/Threading/Scratchpad`; the original project id
+and notes remain. The folder is still created lazily.
+
+The focused Mac Scratchpad and Chats-render tests passed. The 1124- and 420-point Chats light
+renders were inspected. Linux Debug passed a real X11/GTK choose, relocation, restart and
+Use Default journey; its wide default, moved and returned images were inspected. The CLI also
+passed relocation and return while retaining notes and project identity. The Linux view checker
+reports 37 valid shared source links and zero duplicate named view classes or copied production
+sources. Theme, localization and main-actor latency gates passed. The ARM64 Release `.deb` was
+installed in a Swift-free Ubuntu 24.04 runtime. Its X11/GTK journey passed choosing a folder,
+moving existing notes, preserving project identity, restarting, returning to the default location,
+and choosing a location before the first Scratchpad is created. The installed wide default, moved,
+returned and narrow scrolled screenshots in `out/scratchpad-installed-evidence/` were inspected.
+The full bundle and upgrade suites were not rerun for this change.
+
+## 306. Shared Chats help button and in-window Linux popover, 2026-10-28
+
+Linux now compiles the unchanged `HelpPopoverButton.swift` from `UI/Design/`. Its `HelpTopic`,
+glyph, explanatory content, optical insets and keyboard action are the same source Mac mounts.
+The Linux AppKit `NSViewController` shim supplies structural loading; the Linux
+`ThemedPopover`/`HostPopoverFactory` shims supply the SDL window's anchoring, focus return,
+Escape and outside-click dismissal. The panel's content inset and themed surface are built by
+`HelpPopoverPanelStructure` in the shared design source, leaving window placement in the host.
+
+`SettingsRowStructure.titleLine` now places the title and help mark once for both hosts,
+including Scratchpad and ordinary settings rows. `NewChatsSettingsStructure.Help.topic`,
+`OpeningMessageSettingsStructure.sectionHelpTopic` and `ScratchpadSettingsStructure.helpTopic`
+own the same localized explanations. Linux's Chats page mounts three New Chats row marks, the
+Opening Message caption mark and the Scratchpad row mark. The panel remains host-only: Threading
+owns its explanatory copy, accessibility truth, focus and dismissal.
+
+The focused Mac `GeneralSettingsRenderTests` and `HelpPopoverButtonTests` passed. Their 1124-
+and 420-point Chats light renders were inspected. Linux Debug's real X11/SDL journey opened
+and dismissed New Chats, Opening Message and Scratchpad help panels; wide panel images were
+inspected. The shared-view checker reports 38 valid source links, no named duplicate view
+classes or copied production sources. The UI structure ceiling stays at 74 Linux constraint
+sites after panel constraints moved into the shared design component. The ARM64 Release `.deb`
+was installed in a Swift-free Ubuntu 24.04 runtime. Its X11/SDL journey passed opening and
+Escape-closing all three tested help topics, choosing and returning the Scratchpad folder,
+retaining notes and project identity across restart, and choosing a location before first use.
+The installed New Chats, Opening Message, wide and narrow Scratchpad help screenshots in
+`out/chats-help-installed-evidence/` were inspected; the narrow panel stays inside the workspace
+and the entire Scratchpad row is visible after scrolling. Attachments parity, AT-SPI publication
+of Settings controls, and the full bundle/upgrade suite remain open.
+
+## 307. Settings accessibility projects the shared view tree, 2026-10-28
+
+The Linux Settings pane already mounted the shared `SettingsPageView`, row structures,
+`ThemedPopUp` and `HelpPopoverButton`, but AT-SPI still exposed the terminal behind it. Adding
+a second accessibility-only Settings form would have repeated the very UI this port is meant
+to share. `WorkspaceSettingsPane` now walks the mounted and clipped AppKit controls after layout,
+publishing at most 96 visible buttons, toggles, popups, text fields and shared menu rows through
+the SDL/ATK bridge. Their row labels, values, help, enabled state, bounds and stable identifiers
+come from those views. AT-SPI presses return to each view's existing accessibility action;
+editable fields receive focus through the same field editor as a pointer click. When no AT-SPI
+bus is active, the bridge skips the view walk.
+
+The live journey found two shim defects. Linux `NSTextField.stringValue` replaced an editable
+field's accessible label with its current text, including the empty string, so Opening Message
+fields were visible but unnamed and absent from the projection. Editable text now keeps its
+row label and reports the content as its value; the shared row and Opening Message builders
+provide their titles when the control has no nonempty label. Retired menu rows also fell
+through ATK's generic row action count after being removed. Retired nodes now refuse action
+count, names and dispatch. A Settings page or menu change therefore cannot leave an old
+control actionable. While a popup is open, the underlying controls are disabled in AT-SPI.
+
+The focused Mac `GeneralSettingsRenderTests` and `HelpPopoverButtonTests` passed 23/23 tests.
+Linux Debug passed real X11/AT-SPI opening from the sidebar, toggle changes, popup selection,
+stale-action refusal, Chats navigation, field focus and text entry. The installed ARM64 `.deb`
+passed the same Settings journey in a Swift-free Ubuntu 24.04 runtime and the independent
+launch-restore persistence journey passed off/on changes across relaunch. The installed General
+popup and focused Chats screenshots in `out/settings-a11y-installed/` were inspected. The
+shared-view checker reports 38 source links and zero named duplicate classes; theme,
+localization and main-actor latency gates passed. Full AT-SPI editable-text operations,
+Attachments Settings, the remaining Mac Settings pages and the full bundle/upgrade suite remain
+parity work.
+
+## 308. Chats Settings sections now have one source, 2026-10-28
+
+macOS and Linux still assembled the Chats Settings captions, order and help as separate view
+trees even though New Chats, Opening Message and Scratchpad already used shared row builders.
+`ChatsSettingsPageStructure` now mounts those sections from one Design source on both hosts,
+with each host supplying its backed cards. macOS also passes its Attachments card into this
+same sequence. Linux omits that card while it lacks the scanner and panel the switches would
+control. Its host no longer constructs Chats section wrappers, and the shared-source checker
+rejects new host-local Chats section assembly. The source is symlinked into the Linux product,
+not copied.
+
+The macOS `GeneralSettingsRenderTests` and `OpeningMessageCoalescingTests` passed 16/16 cases.
+Linux Debug built the shared source and passed the real X11/AT-SPI Settings popup, Chats field
+focus and native rendering journey. The fresh macOS render in `out/chats-shared-mac/` and Linux
+screenshot (`out/chats-shared-sections/settings-chats-accessible.png`) were inspected: New Chats,
+Opening Message and Scratchpad keep their caption and card geometry in both shells. The
+420-point light macOS render is pixel-identical to its pre-refactor image. The ARM64 Release
+bundle and `.deb` built successfully. Installed in a Swift-free Ubuntu 24.04 runtime, the new
+package passed the real Settings/AT-SPI popup, Chats field and native-render journey, then
+the launch-restore toggle's off/on persistence and live reattach journey with the PTY daemon.
+The installed Chats screenshot is in `out/chats-shared-installed/`. The static audit reports
+39 valid shared source links,
+zero duplicate view classes or copied production sources; the theme gate and diff check passed.
+The repository's UI-evidence report generator consumed the fresh four-image macOS Chats export
+at `.build/ui-evidence-reports/chats-shared-focused/report/`. All four are marked `new` because
+there is no checked-in Chats baseline; no baseline was accepted or changed.
+
+## 309. Dormant session and lifecycle copy no longer diverge, 2026-10-28
+
+A second audit compared long user-visible literals across the macOS UI and the Linux window
+host. The selected dormant agent pane already mounted the exact shared `SessionPlaceholderView`,
+but the two hosts separately chose its title, recovery explanation and button label. The shared
+source now supplies `DormantSessionPlaceholderContent` from the host's resume facts, preserving
+the distinct last-failed-attempt explanation on macOS. Linux's existing page header, SDL
+viewport, AT-SPI projection and action routing remain host shims around that same view.
+
+The close-running-session confirmation now gets its title, message and action title from one
+`CloseRunningSessionConfirmationCopy` value in the shared confirmation model. AppKit and the
+Linux text-prompt shim present that value through their own dialog transport. The snooze
+picker's standing explanation now lives in `ScheduleMomentPickerStrings` and is used by both
+hosts. The shared-source checker verifies these links and rejects reintroduced host-local
+copies. Its source audit reports 42 valid shared links, zero named duplicate classes, zero
+copied production sources and zero session-copy violations.
+
+The focused macOS confirmation and terminal-restart tests passed 14/14. Linux Debug built the
+shared sources. During the installed saved-session journey, AT-SPI exposed the Settings panel
+over a visibly running terminal. The bridge had used one `settingsVisible` flag for both the
+always-available sidebar Settings button and the currently mounted Settings page; C accepted
+the two tentative declarations as one variable. The bridge now tracks `settingsPanelVisible`
+separately, so the right-pane accessibility tree follows the actual presented pane while the
+sidebar button retains its independent availability.
+
+After that fix, the ARM64 Release `.deb` built and installed in a Swift-free Ubuntu 24.04
+runtime. The real X11/AT-SPI Settings popup and Chats field journey passed, followed by the
+saved-session Actions journey: live terminal, shared Snooze and Copy menus, rename, close
+confirmation and suppression, daemon exit, dormant placeholder and Start Again. Its inspected
+rendered evidence is in `out/shared-session-copy-final/`, including
+`session-close-confirm.png` and `session-close-dormant.png`. The source audit reports zero named
+duplicate classes and 42 valid shared source links; theme, localization, main-actor latency and
+diff checks passed. Attachments settings and scanner behavior are still a Mac/Linux parity gap.
+
+## 310. Attachments Settings row structure is shared, 2026-10-28
+
+The Mac Attachments card still built its three groups of rows in the host controller. Its
+runtime detection rows, outside-project file policy, and before-action page capture now come
+from `AttachmentSettingsStructure` in Design. The macOS controller supplies only the existing
+backed toggles and their actions. Linux links the exact same source through the AppKit shim;
+the Chats page does not mount the card until the output scanner, attachment panel, and browser
+capture behavior are available there. The shared-source checker rejects a return to local
+row copy and reports 43 valid shared source links, zero named duplicate classes and zero Chats
+Settings composition violations.
+
+The focused macOS `GeneralSettingsRenderTests` passed 13/13, including every agent kind's
+reachable detection row. A retained four-state Chats export in
+`out/attachment-settings-structure-mac/` was inspected and is pixel-identical to the prior
+export at both widths in light and dark appearance. Linux Debug compiled the shared source,
+and the ARM64 Release `.deb` packaged it. The installed Settings and saved-session journeys
+already passed in §309 after the AT-SPI visibility fix; Linux still has no Attachments card
+until its scanner, file custody and panel are real.
+
+## 311. Attachment detector uses one Core source, 2026-10-28
+
+The macOS attachment path detector was embedded in `SessionAttachmentStore.swift`, which made
+the exact scanner unavailable to Linux even though its regex, containment and file-kind rules
+are portable. `AttachmentReferenceDetector` and `SessionAttachmentKind` now live in separate
+production Core files; `SessionAttachment.Kind` remains an alias so the Mac store and panel use
+the same type. Linux links those exact files plus the production media probe and extension file
+registry through CoreSlice. The semantic `ThreadingExtensionKit` product is a direct Linux
+package dependency, not a copied list of supported media types.
+
+`CoreSliceHarness --attachment-detector-contracts` passed on Linux with real files: project
+precedence over the current directory, a symlink escaping the project, a full `.tiff` suffix,
+and the 512-candidate ceiling. The source checker reports 47 valid shared source links and
+zero duplicate classes. The store, terminal observer, custody and visible panel were the next
+pieces of the same path.
+
+## 312. One attachment store and document format link on both hosts, 2026-10-28
+
+The portable `SessionAttachmentStore` now links into Linux CoreSlice unchanged. Its Mac terminal
+observers moved into `TerminalAttachmentObservers.swift`; the store retains the scanned and
+declared admission paths, custody staging, scope read gate, persistence, pruning and remote-read
+validation. `PersistedSessionAttachment` and `PersistedSessionAttachments` moved out of the
+larger panel document source into a standalone model file. Mac and Linux therefore compile the
+same attachment payload format. Linux uses Swift Crypto for the store's SHA-256 identity; Mac
+continues to use CryptoKit. Platform default configuration lives in separate Mac and Linux
+shims; Linux's default singleton is narrow and unpersisted until the host wires its database,
+project root and custody directory.
+
+The Linux CoreSlice harness passed a real-file store contract for in-project references, an
+outside symlink, withheld outside files, custody on widening, hiding on narrowing, reload from
+the same payload and deletion pruning. The full CoreSlice contract run passed. The source audit
+reports 50 valid shared links, zero named duplicate classes and zero copied production sources.
+The Linux host has not yet connected terminal observation or durable persistence to this store,
+and no Attachments pane is mounted.
+
+## 313. Terminal attachment observers are shared Core, 2026-10-28
+
+The existing `TerminalAttachmentObserver`, `TerminalTranscriptAttachmentObserver` and
+`AttachmentDetectionWorker` now link into Linux CoreSlice from their production sources. The
+terminal observer takes a bounded text-reader callback, so the host can provide a SwiftTerm
+buffer through a shim without reimplementing its debounce, worker lane, fingerprint or
+generation fence. The transcript worker keeps the Mac provider replay and stability retry path
+available to Linux as the same implementation. Swift on Linux required default access to the
+main-actor `SessionAttachmentStore.shared` inside the actor-isolated initializer and recording
+method; the optional parameter keeps call sites and behavior the same.
+
+The Linux CoreSlice harness passed a real terminal-row scan, then proved that an unchanged
+buffer skips a second resolution. The full contract run passed, and the source audit reports
+52 valid shared links with zero named duplicate classes or copied production sources. Linux
+still needs a bounded SwiftTerm buffer adapter, backed store configuration and a mounted pane.
+
+## 314. SwiftTerm logical-row capture is shared across terminal hosts, 2026-10-28
+
+`Terminal.recentLogicalBufferText` now owns the synchronized bounded snapshot and post-lock
+Unicode conversion. The macOS `TerminalRenderOwner` calls it, and Linux `PTYEmulator` exposes
+the same result. This preserves the 4,096-row and 262,144-cell inspection caps and the
+absolute-row cursor without copying Apple terminal code into the Linux renderer. The Linux
+observer still needs a callback from the live host to this reader.
+
+The SwiftTerm Mac `RecentBufferTextTests` passed 16 cases (three opt-in stress cases skipped).
+The Linux PTY host smoke passed its real terminal journey, including a bounded logical-row read
+after scrollback advanced. The focused Mac attachment detector/store suite passed 48 cases
+(one stress case skipped) after the observer actor-isolation adjustment.
+
+Linux Debug built `WindowHarness` with the shared observer, and an ARM64 Release `.deb` packaged
+the complete CoreSlice and SwiftTerm reader. The package installed in Swift-free Ubuntu 24.04;
+its real project-row and shared Settings-row layout contracts passed. Theme, main-actor latency,
+shared-source and diff checks passed after the extraction.
+
+## 315. Attachment pane shell now has one Design owner, 2026-10-28
+
+`SessionAttachmentsContentView` now owns the real Mac pane's fixed header, list, fold, flexible
+preview, footer and optional scope-band constraints. `SessionAttachmentsViewController` mounts
+that view and supplies its existing controls, data, actions and preview renderers. Linux links
+the exact Design source and a native fixture mounts it through the AppKit shim; the fixture
+passed list/fold/preview and hidden/visible/hidden scope-band relayout. The host constructs no
+second pane layout. This is a host-owned shell; `attachments.preview@1` still reaches only the
+selected preview body.
+
+Moving the constraints out of feature code lowered the UI-structure count from 3,051 to 3,018,
+and the ratchet was lowered accordingly. The Linux host constraint count remains 74. The
+shared-source audit reports 53 valid links and zero named duplicate classes or copied sources.
+Linux still has no mounted Attachments pane, so this is a shared shell ready for the remaining
+store, terminal callback, list and preview work rather than a claim of visual parity.
+
+The focused Mac `SessionAttachmentsLayoutTests` passed 50 cases (one opt-in stress case skipped).
+Linux Debug and the ARM64 Release `.deb` built the shared shell, and the package installed in
+Swift-free Ubuntu 24.04. Its attachment-shell and Settings-row layout contracts passed. Theme,
+architecture, main-actor latency, source audit and diff checks passed without raising a ceiling.
+
+The macOS `attachment-video-playback` UI evidence test passed and emitted 24 captures of the
+real controller at regular, compact and narrow sizes in System, Neo Brutalism and Cyberpunk.
+The first System Light capture exposed a test-fixture error: it composited the transparent pane
+over an off-window black bitmap. The fixture now supplies the same themed ground as the shipping
+`DisplayPaneController`; the rerun passed, and the System Light list, turn groups, preview,
+footer and empty state are legible. The themed and narrow captures were also inspected. The
+report at `.build/ui-evidence-reports/attachment-shared-shell-ground/report/` classifies all
+24 captures as new because this entry has no accepted baseline; none was accepted by this run.
+
+## 316. Attachment header alignment shares the same Design source, 2026-10-28
+
+The Mac attachment count/filter row was still a private `NSView` subclass inside the feature
+controller. `SessionAttachmentHeaderRow` now lives beside the shared pane shell in Design and
+takes the host's filter as an `NSView`. Mac passes its existing themed segmented control;
+Linux's native fixture passes a shim text view and exercises both filter visibility states.
+The baseline alignment and intrinsic-height collapse are therefore owned once, with the host
+still choosing the filter's labels, state and actions.
+
+The Linux Debug `WindowHarness` build and attachment-shell fixture passed. The focused Mac
+`SessionAttachmentsLayoutTests` passed 50 cases, with one opt-in stress case skipped. The UI
+structure ratchet fell again: feature platform views 122 → 121 and constraint sites 3,018 →
+3,005; Linux host constraints remain 74. The shared-source audit still reports 53 valid links,
+zero named duplicate classes and zero copied production sources.
+
+The ARM64 Release `.deb` built and installed in Swift-free Ubuntu 24.04; its shared attachment
+shell/header and Settings-row contracts passed there. The macOS real-pane UI evidence rerun
+passed and produced 24 captures. System Light turn groups and empty state, System Dark compact
+mode, and the narrow Cyberpunk pane were inspected without layout regressions. The report at
+`.build/ui-evidence-reports/attachment-shared-header/report/` marks all 24 as new because no
+baseline exists for this catalogue entry; this run did not accept baselines.
+
+## 317. Attachment file rows have one Design owner, 2026-10-28
+
+`SessionAttachmentRowView` moved from the Mac feature controller into a standalone Design source
+linked unchanged by Linux. The same source now holds the row's date and provenance text, file
+labels, selection-aware ink, comparison-drop caption, play mark, constraint geometry and
+accessibility sentence. The Mac table delegate supplies its existing cached thumbnail or file
+icon and optional annotation badge; those platform resources remain host-owned. Linux mounts
+the exact view through the AppKit shim in its attachment fixture, which checks solved layout,
+the accessible file sentence and drop-target path replacement/restoration. No second Linux row
+implementation was added.
+
+The UI-structure ratchet dropped from 121 to 120 feature platform views and from 3,005 to
+2,980 feature constraint sites; Linux host constraints remain 74. The shared-source audit
+reports 54 valid links, zero named duplicate classes and zero copied production sources.
+Mac `SessionAttachmentsLayoutTests` and `SessionAttachmentVideoTests` passed 70 cases together,
+with one opt-in stress case skipped. Linux Debug built the shared row and its fixture passed.
+The ARM64 Release `.deb` also built and installed in Swift-free Ubuntu 24.04; the installed
+attachment shell/header/row and Settings-row contracts passed. The real Mac pane's UI evidence
+test passed and emitted 24 captures. System Light turn groups and empty state, Neo Brutalism
+playback, and the narrow Cyberpunk pane were inspected with the same geometry and legible
+selection as before the extraction. The report at
+`.build/ui-evidence-reports/attachment-shared-row/report/` marks all 24 captures as new because
+this catalogue entry has no accepted baseline; this run did not accept any baseline.
+
+## 318. Attachment turn chronology and disclosure have one source, 2026-10-28
+
+`GitTurnCheckpointID` now has one small Core source, separate from the Mac git-review model.
+`SessionAttachmentTurnSectioning` moved from the Mac view folder to shared Core; the Mac pane
+converts its durable checkpoint record to the provider-neutral boundary at its controller edge.
+The grouping rules, stable section identities and pre-view collapse therefore compile unchanged
+in Linux CoreSlice. `SessionAttachmentTurnHeaderView` moved from that controller to Design and is
+linked directly into Linux WindowHarness. It owns the chronological title, file count, shared
+`ThemedDisclosureRow`, separator, accessible label and disclosure identity. Linux supplies only
+its existing AppKit and theme font-role shims. The Mac table remains the list host; Linux has not
+yet mounted a backed list or pane.
+
+The Linux CoreSlice contract checks exact queued-turn identity against a misleading timestamp,
+the empty latest header, upcoming placement and collapse before row construction. The native
+WindowHarness fixture lays out the shared disclosure and routes its toggle through the shim.
+Both Debug contracts passed. The source audit reports 57 valid shared links, zero named duplicate
+classes and zero copied production sources. The feature UI ratchet dropped from 120 to 119
+platform view sites and from 2,980 to 2,971 constraint sites; Linux host constraints stay 74.
+
+The ARM64 Release `.deb` built and installed in Swift-free Ubuntu 24.04. The installed
+`WindowHarness` passed the attachment shell, row and turn disclosure layout fixture and the
+Settings-row contract. The CoreSlice turn contract ran in the Debug harness because the
+distribution intentionally ships only the application host and PTY binaries.
+
+The focused Mac turn-sectioning, attachment-layout and video suite passed 75 cases, with one
+opt-in stress case skipped, after running with the render-output environment supplied by
+`scripts/test.sh`. An earlier build was interrupted by the process guard while a concurrent
+ARM64 compile was active; another run saw transient thumbnail-cache assertions, and a direct
+`test-without-building` run without `THREADING_RENDER_OUT` tried to write two test PNGs at the
+read-only filesystem root. Both thumbnail cases passed in isolation and in the final full
+focused run. These intermediate failures did not change the shared turn implementation.
+
+The real Mac `attachment-video-playback` UI evidence run passed and produced 24 captures in
+`.build/ui-evidence-reports/attachment-shared-turn/report/`. The System Light expanded,
+collapsed and empty states, Neo Brutalism's empty-latest collapsed state, and the System Dark
+upcoming/between state were inspected: chronological labels, count, disclosure and selection
+remain legible. The narrow Cyberpunk capture retains the same cramped file metadata seen in
+the prior row-extraction report; the turn-header move did not introduce it. All 24 captures
+are marked new because this catalogue entry has no accepted baseline; no baseline was accepted.
+
+## 319. Attachment chronology table and viewport have one Design owner, 2026-10-28
+
+`SessionAttachmentListView` now constructs the production `ThemedTableView`, single autoresizing
+column, selection capacity and `ThemedScrollView` viewport in one Design source. Mac's
+`SessionAttachmentsViewController` keeps its data source, file actions, drag and Quick Look
+callbacks; Linux links the same list class and its AppKit shim now states the two missing table
+properties, default row sizing and empty selection. The Linux attachment fixture mounts a real
+table inside the shared pane shell with shared sectioning, turn headers, file rows and themed
+selection chrome. It checks the empty latest turn, file-only selection, collapse before row
+construction and re-expansion. The Linux Debug build and fixture passed. This is still a
+fixture: the product host needs persistence, terminal observation and the mounted pane.
+
+The focused Mac turn-sectioning, attachment-layout and video suite passed 75 cases, with one
+opt-in format stress case skipped and no failures. The real Mac `attachment-video-playback`
+evidence run passed and wrote 24 captures to
+`.build/ui-evidence-reports/attachment-shared-list/report/`. The System Light expanded,
+collapsed and empty panes and the narrow Cyberpunk Dark pane were inspected. Geometry and
+behavior match the previous capture; the already-present cramped metadata in the narrow pane
+remains a layout issue. The report has no accepted baseline, so these captures are marked new.
+The ARM64 Release `.deb` built and its installed attachment and Settings fixtures passed in
+Swift-free Ubuntu 24.04. The shared-view audit reports 58 valid production links, no copied
+production sources or duplicate view classes, and no attachment-list mount violations. Theme,
+main-actor latency, UI structure, core-source-link and whitespace gates passed.
+
+## 320. Shared attachment rows keep exact dates in a narrow panel, 2026-10-28
+
+The earlier narrow Cyberpunk capture showed a full, required-width date crossing into the
+filename. `SessionAttachmentRowView` now has a compact constraint set below 280 points and a
+72-point table row: name and path keep the first two lines, while the complete moment sits below
+them. The wide constraint set and its original one-line date remain intact. Mac's list delegate
+switches row heights only when crossing that width and updates mounted cells; Linux's fixture
+mounts the same view through its AppKit shim and checks the compact geometry at 200 points.
+
+The Linux Debug build and attachment fixture passed. A focused Mac layout test passed against
+the real table. The real Mac `attachment-video-playback` evidence test passed again with 24
+captures at `.build/ui-evidence-reports/attachment-compact-row-final/report/`. The expanded
+System Light pane and narrow Cyberpunk Dark pane were inspected: the wide date is complete and
+the narrow metadata no longer overlaps the filename. These are new captures without an
+accepted baseline. The shared-view and theme-boundary audits and main-actor latency gate passed.
+The ARM64 Release `.deb` built and its installed attachment and Settings fixtures passed in
+Swift-free Ubuntu 24.04. The UI-structure, core-source-link and whitespace gates also passed.
+
+## 321. Linux attachment documents use the shared store and codec, 2026-10-28
+
+`LinuxAttachmentPersistence` now backs `SessionAttachmentStore.shared` in the workspace with
+the existing per-session SQLite attachment row. A serial utility worker loads, validates and
+decodes each selected agent session before the SDL window opens or through a bounded receipt
+while the window runs. It encodes and saves later changes on that worker. The shared codec keeps
+the Mac document shape, legacy ID migration and live-root authority check. A failed or future
+document never enables writes, and each write checks the existing row again before replacement.
+Early in-memory references merge with the checked snapshot and the merged result is saved; an
+early read does not mark an unloaded session empty. The worker queue drains asynchronously after
+the SDL window closes.
+
+The Linux Debug `WindowHarness` build, attachment-persistence fixture and shared attachment
+shell fixture passed. The persistence fixture covers save/reload identity, an early live row
+racing the saved snapshot, and refusal to overwrite a future-version document. The main-actor
+latency, theme-boundary and shared-view audits passed. Mac `SessionAttachmentStoreTests` passed.
+The ARM64 Release `.deb` and its installed persistence, attachment-shell and Settings fixtures
+passed in Swift-free Ubuntu 24.04. Production output observers, the display pane and Chats
+controls remain open.
+
+## 322. Attachment rows remeasure when the pane gets its width, 2026-10-28
+
+The shared row's compact height exposed a Mac lifecycle error: a detached pane first asked its
+table for heights at zero width, then kept those 72-point heights after its 353-point frame was
+set. One file opened in a two-row-tall list and a tall pane unnecessarily scrolled. Reading a
+different width source alone did not fix the table's cached answer. The shared
+`SessionAttachmentsContentView` now reports an actual frame-width change to its host; the Mac
+controller invalidates cached row heights and recomputes the list cap at that edge. It uses the
+pane's own width with room for a legacy scrollbar, so the first width is stable before the clip
+view completes layout. Linux links the same content view and keeps its host boundary.
+
+The full Mac `SessionAttachmentsLayoutTests` suite passed 51 cases with one opt-in stress skip.
+The real Mac `attachment-video-playback` evidence test passed and produced 24 captures at
+`.build/ui-evidence-reports/attachment-persistence-width-final/report/`. The expanded System
+Light and narrow Cyberpunk Dark captures were inspected: wide rows have complete dates and the
+narrow rows keep their date below the clipped filename without overlap. All captures are new
+against the current baseline set; no baseline was accepted. The Linux Debug and ARM64 Release
+attachment-shell fixtures passed, as did installed persistence, shell and Settings fixtures in
+Swift-free Ubuntu 24.04. Main-actor latency, theme-boundary, UI-structure, shared-view,
+core-source-link and whitespace checks passed.
+
+## 323. Completed native output reaches the shared attachment store, 2026-10-28
+
+`LinuxNativeAttachmentScanner` is a host adapter, not a second detector or view. It takes
+completed assistant text from the native stream and calls the same bounded Core resolver and
+inside-project row preparation that macOS uses. One utility worker handles the fleet; at most
+eight scans per runtime wait for a UI receipt. A bounded deferred transcript tail preserves
+completed messages while that worker is full. This matters for Codex: its turn-finished receipt
+normally has no prose, so retaining only the latest deferred event would drop paths from earlier
+finished assistant messages. Text deltas and tool results remain outside the scan policy.
+
+The Linux attachment SQLite loader now reads the exact session record and document in one
+worker connection and derives its trusted root from `session.workingDirectory(in: project)`.
+Using the selected project's folder rejects valid references from an automation or managed
+checkout on the next launch. The persistence fixture puts its project and execution checkout in
+different directories, then verifies scanned save/reload, early live-row merging, ten rapid
+assistant messages, and refusal to overwrite a future-format document. The Linux Debug
+`WindowHarness` build and fixture passed; Mac `SessionAttachmentStoreTests` passed 45 cases with
+one opt-in skip and no failures. The ARM64 Release `.deb` built and its fixture passed. Its
+installed persistence and shared attachment-shell fixtures passed in Swift-free Ubuntu 24.04.
+The shared-view audit reports 58 production source links, no duplicate named view classes or
+copied sources. The theme, UI-structure, main-actor latency, source-link and whitespace gates
+passed. Terminal output observation, outside-project scan policy, Settings control wiring and
+the mounted pane remain.
+
+## 324. Live Linux PTY output uses the shared attachment detector, 2026-10-28
+
+`GraphicalTerminal` coalesces live agent-output notices to one UI receipt per runtime. Its
+terminal worker supplies SwiftTerm's synchronized, 256 KiB logical-row suffix to a fleet-wide
+utility scan lane; replay bytes do not announce a new live scan. The Linux host adapter keeps one
+active scan and one pending request per session, scans on the first output, on a quiet edge or at
+the shared two-second busy cap, and remembers a bounded set of already offered source paths.
+Result preparation uses `AttachmentReferenceDetector` and
+`SessionAttachmentScannedRowPreparation`, then admits through the shared store on the SDL owner
+thread. A session's checked SQLite load provides the execution root, including separate
+checkouts; the host re-scans a terminal after a late load receipt.
+
+The Debug `WindowHarness` build and attachment-persistence fixture passed. That fixture feeds a
+long path through the real Linux SwiftTerm emulator, verifies its joined logical-row text enters
+the shared persisted attachment list, and checks repeated text does not move the row. It injects
+that bounded read into the adapter, so the PTY daemon's live callback to SDL remains a separate
+end-to-end check. The ARM64 Release `.deb` and its fixture passed; the installed persistence and
+shared shell fixtures passed in Swift-free Ubuntu 24.04. The shared-view, theme-boundary and
+main-actor-latency gates passed. Terminal-turn transcript recovery, outside-project scope and
+Settings control wiring remain open at this point.
+
+## 325. The shared Chats attachment card gates both Linux scanners, 2026-10-28
+
+Linux Chats now mounts the same `AttachmentSettingsStructure` card as macOS. The shared
+structure still owns row order, titles and help. The host supplies five `ThemedToggle` controls
+through its AppKit shim and persists their opt-out set under the same shared preference key as
+macOS. The checked SQLite load also retains the agent kind beside the execution root; a failed
+or future-format document does not activate that scope. The terminal coordinator refuses output
+for a disabled kind, and both terminal and Native scanners check the choice again before
+admitting an in-flight result. A Linux-only copy of the Settings rows was not introduced. The
+shared-view checker now rejects a Linux Chats page that omits the Attachments card or rebuilds
+its rows locally.
+
+The ARM64 Debug build and attachment fixture passed, including disabled and re-enabled Native
+output. The Release `.deb` built and its persistence and shared attachment-shell fixtures
+passed. Installed in Swift-free Ubuntu 24.04, those fixtures and the real X11/AT-SPI Settings
+journey passed: Codex's toggle was pressed through the mounted control, persisted over process
+restart and rendered in both positions. The 1120×900 enabled/disabled captures under
+`Platforms/Linux/out/attachment-settings-evidence/` were inspected; all five rows and the
+following Scratchpad section are visible without overlap. Mac
+`GeneralSettingsRenderTests` passed 13 tests and the wide light and narrow dark Chats renders
+were inspected. Shared-view (0 named duplicate classes, 58 production links), theme-boundary,
+UI-structure, main-actor-latency and whitespace gates passed.
+
+The outside-project scope and before-action browser capture controls remain omitted on Linux:
+their Mac behaviors are not backed yet. The mounted attachment pane, terminal-turn transcript
+recovery and a PTY-daemon-to-SDL callback fixture remain open. Settings remains a host-owned
+user choice; extensions receive no replacement or authority over attachment admission.
+
+## 326. Outside-project attachment custody follows the shared store, 2026-10-28
+
+Linux now mounts the shared Chats outside-project scope row. Its preference uses the same key as
+macOS. Native and PTY scans pass outside candidates to `SessionAttachmentStore`, whose existing
+staging, withheld-reference and read-gate machinery owns copying and publication on both hosts.
+The Linux adapter returns custody results through the SDL receipt mailbox; a one-job coordinator
+widens previously withheld paths when the switch turns on and checks the current generation and
+scope before publication. Narrowing hides copied outside rows immediately while retaining their
+bytes for later reveal. The persistence fixture covers narrow withholding, widening, narrowing,
+reveal, native and terminal scans, SQLite reload and future-document refusal.
+
+The shared `ThemedToggle` now receives Linux animation ticks from the SDL owner loop while macOS
+keeps its display driver. Two quick Settings changes previously allowed an X11 capture to land
+before the second switch's final frame. The installed Settings smoke now waits for the actual
+on/off track pixels after pressing Codex and outside-project controls in quick succession. The
+final ARM64 Release `.deb`, persistence and shared shell fixtures passed. The installed package
+passed the X11/AT-SPI journey in Swift-free Ubuntu 24.04; its captured outside track is orange
+on and pale off after restart and a second press. Mac `SessionAttachmentStoreTests` passed 45
+cases with one opt-in skip. In `ThemedControlTests`, the toggle and accessibility tests passed;
+the full class still has one Component Gallery inventory failure for 29 shared Design components
+without stories. Theme boundary, main-actor latency, UI-structure, shared-view and whitespace
+gates passed; the shared-view audit found no named duplicate view classes or copied production
+sources. Before-action browser capture, the mounted attachment pane and terminal-turn transcript
+recovery remain open.
+
+## 327. The native workspace reserves a third region for the shared attachment shell, 2026-10-28
+
+The SDL workspace bridge now retains a separate bounded texture to the right of its terminal.
+The terminal header, body and session menu are cropped at that region's edge, and terminal
+accessibility bounds end there too. Opening or closing the region changes the window's minimum
+and maximum width so the terminal keeps its existing 320–1280-pixel range. The bridge has no
+attachment-specific UI: the native fixture renders the exact shared
+`SessionAttachmentsContentView`, `SessionAttachmentListView`, turn headers, rows and
+`PaneFoldDivider` through the AppKit shim. The shared fold keeps its drawing, drag, reset,
+keyboard and accessibility behavior on both desktop hosts. Its diagonal corner grip remains
+macOS-only until the SDL split seam gains the corresponding host route.
+
+The 1120×700 X11 fixture shows the shared shell in a 350-pixel third pane, with sidebar and
+terminal pixels bounded on either side. The Debug capture was inspected and its border pixels
+passed the native smoke. The final ARM64 Release `.deb` built; the shared shell fixture passed
+from its package tree. Installed in Swift-free Ubuntu 24.04, that package passed the X11
+three-region pixel smoke, and the installed capture was inspected. Theme-boundary,
+main-actor-latency, UI-structure, shared-view and whitespace gates passed; the shared-view
+audit reports zero duplicate named view classes, zero copied production sources and 58 valid
+shared source links. The third region is not yet mounted in the ordinary Linux workspace:
+the production host still needs list selection, preview, pointer routing, AT-SPI nodes and
+session tab behavior. Terminal-turn transcript recovery and before-action browser capture also
+remain parity work.
+
+## 328. The attachment fold uses one shared control, 2026-10-28
+
+The Linux attachment-shell and X11 fixtures now mount `PaneFoldDivider` from the same Design
+source as macOS. The AppKit shim supplies pointer deltas and the splitter role, orientation and
+increment/decrement actions; only the macOS `ThemedSplitView` corner coupling is conditional.
+The shared fold takes the same seven-point band and draws its themed one-pixel rule. Its fixture
+exercises pointer drag, arrow-key travel, double-click reset and accessibility adjustment.
+The X11 pixel smoke also checks that the line occupies one physical row.
+
+The ARM64 Debug `WindowHarness` built, its attachment-shell fixture passed, and the native
+three-region X11 smoke passed. The 1120×700 capture was inspected. The shared-view audit found
+59 valid shared links, zero duplicate named classes and zero copied production sources;
+theme-boundary and whitespace gates passed. ARM64 Release packaging passed, and the installed
+`.deb` passed the three-region X11 pixel smoke in a Swift-free Ubuntu 24.04 container. The
+focused Mac fold test is still running. Production mounting and pointer routing for the third
+pane remain open.
+
+## 329. The attachment filter is one shared control and policy, 2026-10-28
+
+`AttachmentFilter` now lives in `UI/Design/` rather than the macOS attachment controller, and
+Linux links that exact source beside the production `ThemedSegmentedControl`. The Linux AppKit
+shim provides AppKit's left/right function-key constants and the selected house-theme status
+role; the control's drawing, constraints, pointer, keyboard and accessibility code is shared.
+The attachment-shell fixture uses the same three visible choices as macOS, checks filtering,
+accessible selection and arrow movement, and the native X11 fixture renders that real control
+in the third workspace region. The ARM64 Debug `WindowHarness` builds, its structural fixture
+passes, and the 1120×700 X11 capture was inspected. Its smoke verifies the region boundaries,
+three segments and the fold's one-pixel rule at the rendered position. Production mounting,
+list/preview interaction and third-region accessibility remain open. The theme-boundary gate
+passed, and the shared-view audit found 61 valid source links, no duplicate named view classes
+and no copied production sources.
+The focused macOS test is still in its repository boundary-script phase; compilation of the
+newly extracted filter source and Mac interaction remain unverified at this checkpoint.
+
+## 330. The third pane owns its pointer route, 2026-10-28
+
+The SDL workspace bridge now routes move, left press/drag/release, right press, exit and wheel
+events to the display pane in local coordinates. A drag that starts there stays captured when
+the pointer crosses into the terminal. The native fixture dispatches those events into the
+actual shared attachment view tree through the AppKit shim and redraws its retained texture.
+The bridge clears capture and hover when the region closes or the window loses focus.
+
+The ARM64 Debug `WindowHarness` build and X11 journey passed. The 1120×700 rendered evidence
+shows the shared segmented filter changing from All to Main agent after a real SDL click; the
+selected image was inspected. The journey also checks the three region bounds, pane-local wheel
+event and a fold drag/release across the terminal boundary. `DISPLAY_FILTER_PRESENTED` confirms
+the selected frame was rendered before capture. Mac's focused test rerun was interrupted during
+Xcode's build phase to honor the requested pause, so Mac compilation of the extracted filter is
+still unverified. The production workspace has not mounted this attachment pane or dispatched
+its pointer events yet; list/preview interactions, keyboard and AT-SPI routing remain to do.

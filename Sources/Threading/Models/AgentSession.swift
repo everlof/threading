@@ -498,6 +498,12 @@ struct AgentSession: Codable, Identifiable {
     Self.conversationRecency(lastActiveAt: lastActiveAt, lastTurnAt: lastTurnAt, lastWorkAt: lastWorkAt)
   }
 
+  /// A durable work boundary. Process launch and transcript replay do not call this.
+  mutating func noteWork(at date: Date, startsTurn: Bool) {
+    if startsTurn { lastTurnAt = date }
+    lastWorkAt = date
+  }
+
   /// Latest observed work boundary or accepted steering input. Process lifecycle and replay
   /// never advance this value. `lastTurnAt` remains the start of the latest turn.
   var lastWorkAt: Date?

@@ -45,12 +45,6 @@ extension AppTheme.Material {
     }
 }
 
-extension AppThemePalette.Material {
-    var buttonStyle: AppTheme.Material.ButtonStyle { .init() }
-    var controlGlow: AppTheme.Glow? { nil }
-    var glow: AppTheme.Glow? { nil }
-}
-
 extension AppThemePalette {
     static func color(_ role: ButtonThemeRole) -> NSColor {
         switch role {
@@ -84,10 +78,6 @@ extension Design.Motion {
     static let immediate: TimeInterval = 0
     static let drop = CAMediaTimingFunction(controlPoints: 0.55, 0, 1, 0.45)
     static let lift = CAMediaTimingFunction(controlPoints: 0, 0, 0.58, 1)
-}
-
-struct WindowBackdropDidChange: AppEvent {
-    static let name = Notification.Name("windowBackdropDidChange")
 }
 
 @MainActor

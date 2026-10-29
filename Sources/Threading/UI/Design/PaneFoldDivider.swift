@@ -70,7 +70,9 @@ final class PaneFoldDivider: ThemedControl {
     /// The split view whose seam this drag is also moving, held from the press that began in a
     /// corner until the hand lets go. Nil for a drag that began anywhere else along the band,
     /// which is every drag on a fold with no pane edge under either of its ends.
+    #if !os(Linux)
     private var heldSplitView: ThemedSplitView?
+    #endif
 
     /// Whether the seam is lit for the keyboard — see `KeyboardFocusOrigin`.
     ///
@@ -130,12 +132,19 @@ final class PaneFoldDivider: ThemedControl {
     /// longer has to be trimmed around them by hand: a claim wins the ground it shares with a
     /// later one, and `PointerClaiming` carves the rest. See `PointerClaiming`.
     override var pointerClaims: [PointerClaim] {
+        #if os(Linux)
+        // The SDL workspace owns its outer split; its AppKit tree has no split-view ancestor.
+        [PointerClaim(bounds, .resizeUpDown)]
+        #else
         [ThemedSplitView.Side.leading, .trailing].compactMap { side in
             cornerRect(on: side).map { PointerClaim($0, Self.cornerCursor(on: side)) }
         } + [PointerClaim(bounds, .resizeUpDown)]
+        #endif
     }
 
     // MARK: - The Corner
+
+    #if !os(Linux)
 
     /// The corner's own square at one end of the band, or nil where there is no seam beside it.
     ///
@@ -188,6 +197,7 @@ final class PaneFoldDivider: ThemedControl {
         guard #available(macOS 15.0, *) else { return .crosshair }
         return .frameResize(position: side == .leading ? .topLeft : .topRight, directions: .all)
     }
+    #endif
 
     // MARK: - Focus
 
@@ -226,6 +236,7 @@ final class PaneFoldDivider: ThemedControl {
         }
         isDragging = true
 
+        #if !os(Linux)
         // Resolved at the press and held for the whole drag, not re-asked per event: the seam
         // moves out from under the pointer as it goes, and a corner re-tested mid-drag would let
         // go of the thing the hand is still moving.
@@ -235,6 +246,7 @@ final class PaneFoldDivider: ThemedControl {
            split.holdSeam(beside: self, on: side) {
             heldSplitView = split
         }
+        #endif
     }
 
     /// Tracked through the ordinary drag events rather than a tracking loop: the pointer leaves
@@ -245,7 +257,9 @@ final class PaneFoldDivider: ThemedControl {
     /// it, which is what makes the corner safe to be generous with: aiming at it costs nothing.
     override func mouseDragged(with event: NSEvent) {
         guard isEnabled, isDragging else { return }
+        #if !os(Linux)
         heldSplitView?.moveHeldSeam(by: event.deltaX)
+        #endif
         onDrag?(event.deltaY)
     }
 
@@ -262,24 +276,38 @@ final class PaneFoldDivider: ThemedControl {
     }
 
     private func releaseHeldSeam() {
+        #if !os(Linux)
         heldSplitView?.releaseSeam()
         heldSplitView = nil
+        #endif
     }
 
     // MARK: - Keyboard
 
     override func keyDown(with event: NSEvent) {
-        guard isEnabled, let key = event.charactersIgnoringModifiers?.unicodeScalars.first else {
+        guard isEnabled else {
             super.keyDown(with: event)
             return
         }
 
         let step = event.modifierFlags.contains(.shift) ? Layout.fineStep : Layout.coarseStep
+        #if os(Linux)
+        switch event.keyCode {
+        case 126: onDrag?(-step)
+        case 125: onDrag?(step)
+        default: super.keyDown(with: event)
+        }
+        #else
+        guard let key = event.charactersIgnoringModifiers?.unicodeScalars.first else {
+            super.keyDown(with: event)
+            return
+        }
         switch Int(key.value) {
         case NSUpArrowFunctionKey: onDrag?(-step)
         case NSDownArrowFunctionKey: onDrag?(step)
         default: super.keyDown(with: event)
         }
+        #endif
     }
 
     // MARK: - Accessibility

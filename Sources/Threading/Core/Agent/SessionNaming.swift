@@ -32,21 +32,7 @@ enum SessionNaming {
     /// A default name derived from what the user asked: the first line, capped, or nil when
     /// the text is empty or one of the blocks the CLIs inject ahead of the user's own words.
     static func promptTitle(from prompt: String) -> String? {
-        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              !ImportDefaults.injectedPrefixes.contains(where: { trimmed.hasPrefix($0) })
-        else { return nil }
-
-        // `\.isNewline` rather than `"\n"`: `\r\n` is a single grapheme cluster, so splitting a
-        // `String` on `"\n"` does not divide CRLF text at all. A prompt pasted from a
-        // Windows-authored source then had no "first line" — the whole thing became the title,
-        // newlines and all, capped mid-sentence.
-        let firstLine = trimmed
-            .split(whereSeparator: \.isNewline)
-            .first
-            .map(String.init) ?? trimmed
-        return String(firstLine.prefix(ImportDefaults.titleLimit))
-            .trimmingCharacters(in: .whitespaces)
+        SessionPromptTitle.from(prompt)
     }
 
     // MARK: - Placeholder and Noise Detection

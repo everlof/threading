@@ -498,16 +498,7 @@ enum SettingsUI {
     /// asks for has that padding subtracted out of it — rule 9 of the theme boundary, said once
     /// here rather than at every row that grows a "?".
     private static func titleLine(_ title: NSView, help: HelpTopic) -> NSView {
-        let button = HelpPopoverButton(topic: help)
-        let line = NSStackView(views: [title, button])
-        line.orientation = .horizontal
-        line.alignment = .centerY
-        line.distribution = .fill
-        line.spacing = max(0, Design.Spacing.small - button.opticalHorizontalInset)
-        // The title yields to the mark rather than pushing it out of the row, the same contract
-        // `row(title:subtitle:control:)` states one screen down.
-        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        return line
+        SettingsRowStructure.titleLine(title, helpButton: HelpPopoverButton(topic: help))
     }
 
     /// Two things on a row's trailing edge as one control — a reading and the button that acts on
