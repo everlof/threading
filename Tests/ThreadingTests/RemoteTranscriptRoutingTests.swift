@@ -66,12 +66,12 @@ final class RemoteTranscriptRoutingTests: HostedStoreTestCase {
 
     /// A remote conversation uses the host's own login, so there is no account on this Mac to move it
     /// to; and its checkout is a folder there, so there is no checkout here to move it into.
-    func testMigrationAndCheckoutMovesRefuseARemoteSession() throws {
+    func testMigrationAndCheckoutMovesRefuseARemoteSession() async throws {
         let remoteProject = try project(remote: true)
         let session = try XCTUnwrap(ProjectStore.shared.addSession(to: remoteProject.id, kind: .claude))
         XCTAssertFalse(SessionMigration.canMigrate(session, in: remoteProject))
         if let other = AgentAccountDiscovery.accounts(for: .claude).first(where: { $0.handle != session.accountHandle }) {
-            guard case .failure(let error) = SessionMigration.move(sessionID: session.id, to: other) else {
+            guard case .failure(let error) = await SessionMigration.move(sessionID: session.id, to: other) else {
                 return XCTFail("a remote conversation moved between this Mac's accounts")
             }
             XCTAssertEqual(error.code, .remoteHost)

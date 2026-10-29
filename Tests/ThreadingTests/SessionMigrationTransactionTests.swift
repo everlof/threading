@@ -19,23 +19,20 @@ final class SessionMigrationTransactionTests: XCTestCase {
     }
 
     @MainActor
-    func testCommitPromotesTheCandidateAndRetiresThePreviousTargetCopy() throws {
+    func testCommitPromotesTheCandidateAndRetiresThePreviousTargetCopy() async throws {
         let source = root.appendingPathComponent("source/session.jsonl")
         let destination = root.appendingPathComponent("target/session.jsonl")
         try write("new complete transcript", to: source)
         try write("older target transcript", to: destination)
-        var commits = 0
-
-        let copiedByteCount = try TranscriptCopyTransaction.install(
+        let copiedByteCount = try await TranscriptMigrationWorker.shared.install(
             source: source,
             destination: destination,
-            recoveryJournalURL: recoveryJournal
+            includesSubagents: false,
+            journalURL: recoveryJournal
         ) {
-            commits += 1
-            return true
+            true
         }
 
-        XCTAssertEqual(commits, 1)
         XCTAssertEqual(copiedByteCount, Data("new complete transcript".utf8).count)
         XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "new complete transcript")
         XCTAssertEqual(try String(contentsOf: source, encoding: .utf8), "new complete transcript")
@@ -44,21 +41,23 @@ final class SessionMigrationTransactionTests: XCTestCase {
     }
 
     @MainActor
-    func testRefusedCommitRestoresThePreviousTargetCopyExactly() throws {
+    func testRefusedCommitRestoresThePreviousTargetCopyExactly() async throws {
         let source = root.appendingPathComponent("source/session.jsonl")
         let destination = root.appendingPathComponent("target/session.jsonl")
         try write("candidate transcript", to: source)
         try write("standing target transcript", to: destination)
 
-        XCTAssertThrowsError(
-            try TranscriptCopyTransaction.install(
+        do {
+            _ = try await TranscriptMigrationWorker.shared.install(
                 source: source,
                 destination: destination,
-                recoveryJournalURL: recoveryJournal
+                includesSubagents: false,
+            journalURL: recoveryJournal
             ) {
                 false
             }
-        ) { error in
+            XCTFail("A refused store commit must roll back the transcript")
+        } catch {
             XCTAssertEqual(error as? TranscriptCopyTransactionError, .commitRefused)
         }
 
@@ -72,26 +71,102 @@ final class SessionMigrationTransactionTests: XCTestCase {
     }
 
     @MainActor
-    func testRefusedCommitRemovesACandidateWhenNoTargetCopyExisted() throws {
+    func testRefusedCommitRemovesACandidateWhenNoTargetCopyExisted() async throws {
         let source = root.appendingPathComponent("source/session.jsonl")
         let destination = root.appendingPathComponent("target/session.jsonl")
         try write("candidate transcript", to: source)
 
-        XCTAssertThrowsError(
-            try TranscriptCopyTransaction.install(
+        do {
+            _ = try await TranscriptMigrationWorker.shared.install(
                 source: source,
                 destination: destination,
-                recoveryJournalURL: recoveryJournal
+                includesSubagents: false,
+            journalURL: recoveryJournal
             ) {
                 false
             }
-        ) { error in
+            XCTFail("A refused store commit must roll back the transcript")
+        } catch {
             XCTAssertEqual(error as? TranscriptCopyTransactionError, .commitRefused)
         }
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
         XCTAssertTrue(try scratchFiles(beside: destination).isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: recoveryJournal.path))
+    }
+
+    @MainActor
+    func testAccountBundleCopiesSubagentsBeforeCommitAndKeepsTheSource() async throws {
+        let source = root.appendingPathComponent("source/session.jsonl")
+        let destination = root.appendingPathComponent("target/session.jsonl")
+        let sourceChildren = ClaudeTranscript.subagentsDirectory(forRoot: source)
+        let targetChildren = ClaudeTranscript.subagentsDirectory(forRoot: destination)
+        try write("parent history", to: source)
+        try write("panel history", to: sourceChildren.appendingPathComponent("agent-panel.jsonl"))
+        try write("old parent", to: destination)
+        try write("stale panel", to: targetChildren.appendingPathComponent("agent-stale.jsonl"))
+
+        let bytes = try await TranscriptMigrationWorker.shared.install(
+            source: source, destination: destination, includesSubagents: true,
+            journalURL: recoveryJournal
+        ) {
+            XCTAssertTrue(Thread.isMainThread)
+            XCTAssertEqual(try? String(contentsOf: destination, encoding: .utf8), "parent history")
+            XCTAssertEqual(try? String(contentsOf: targetChildren.appendingPathComponent("agent-panel.jsonl"),
+                                      encoding: .utf8), "panel history")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: targetChildren.appendingPathComponent("agent-stale.jsonl").path))
+            return true
+        }
+        XCTAssertEqual(bytes, Data("parent history".utf8).count)
+        XCTAssertEqual(try String(contentsOf: sourceChildren.appendingPathComponent("agent-panel.jsonl"),
+                                  encoding: .utf8), "panel history")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recoveryJournal.path))
+    }
+
+    @MainActor
+    func testRefusedBundleCommitRestoresParentAndChildrenTogether() async throws {
+        let source = root.appendingPathComponent("source/session.jsonl")
+        let destination = root.appendingPathComponent("target/session.jsonl")
+        let sourceChildren = ClaudeTranscript.subagentsDirectory(forRoot: source)
+        let targetChildren = ClaudeTranscript.subagentsDirectory(forRoot: destination)
+        try write("new parent", to: source)
+        try write("new child", to: sourceChildren.appendingPathComponent("agent-new.jsonl"))
+        try write("old parent", to: destination)
+        try write("old child", to: targetChildren.appendingPathComponent("agent-old.jsonl"))
+        do {
+            _ = try await TranscriptMigrationWorker.shared.install(
+                source: source, destination: destination, includesSubagents: true,
+                journalURL: recoveryJournal
+            ) { false }
+            XCTFail("A refused account change must roll back the entire bundle")
+        } catch {
+            XCTAssertEqual(error as? TranscriptCopyTransactionError, .commitRefused)
+        }
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "old parent")
+        XCTAssertEqual(try String(contentsOf: targetChildren.appendingPathComponent("agent-old.jsonl"),
+                                  encoding: .utf8), "old child")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: targetChildren.appendingPathComponent("agent-new.jsonl").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recoveryJournal.path))
+    }
+
+    @MainActor
+    func testInvalidSubagentBundleCannotReplaceTheParent() async throws {
+        let source = root.appendingPathComponent("source/session.jsonl")
+        let destination = root.appendingPathComponent("target/session.jsonl")
+        try write("new parent", to: source)
+        try write("old parent", to: destination)
+        try write("not a directory", to: ClaudeTranscript.subagentsDirectory(forRoot: source))
+        do {
+            _ = try await TranscriptMigrationWorker.shared.install(
+                source: source, destination: destination, includesSubagents: true,
+                journalURL: recoveryJournal
+            ) { XCTFail("Invalid child storage must refuse before the store commit"); return true }
+            XCTFail("Invalid child storage was accepted")
+        } catch {
+            XCTAssertEqual(error as? TranscriptCopyTransactionError, .sourceNotRegular)
+        }
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "old parent")
+        XCTAssertTrue(try scratchFiles(beside: destination).isEmpty)
     }
 
     @MainActor
@@ -206,6 +281,60 @@ final class SessionMigrationTransactionTests: XCTestCase {
                 .pendingRecovery
             )
         }
+    }
+
+    @MainActor
+    func testLaunchRecoveryRestoresAParentPromotedBeforeItsChildren() throws {
+        let destination = root.appendingPathComponent("target/session.jsonl")
+        let children = ClaudeTranscript.subagentsDirectory(forRoot: destination)
+        let rootNonce = UUID().uuidString.lowercased()
+        let childNonce = UUID().uuidString.lowercased()
+        let candidate = scratchURL(nonce: rootNonce, suffix: "candidate", beside: destination)
+        let backup = scratchURL(nonce: rootNonce, suffix: "previous", beside: destination)
+        let childCandidate = scratchURL(nonce: childNonce, suffix: "candidate", beside: children)
+        let childBackup = scratchURL(nonce: childNonce, suffix: "previous", beside: children)
+        try write("old parent", to: destination)
+        try write("new parent", to: candidate)
+        try write("old child", to: children.appendingPathComponent("agent.jsonl"))
+        try write("new child", to: childCandidate.appendingPathComponent("agent.jsonl"))
+        try TranscriptCopyRecovery.begin(destination: destination, candidate: candidate, backup: backup,
+            nonce: rootNonce, companions: [.init(version: 1, nonce: childNonce,
+                destinationPath: children.path, candidatePath: childCandidate.path,
+                backupPath: childBackup.path, hadDestination: true)],
+            journalURL: recoveryJournal, fileManager: .default)
+        try FileManager.default.moveItem(at: destination, to: backup)
+        try FileManager.default.moveItem(at: candidate, to: destination)
+
+        guard case .restoredPrevious = TranscriptCopyRecovery.recoverPending(journalURL: recoveryJournal)
+        else { return XCTFail("A partially promoted bundle must restore its previous generation") }
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "old parent")
+        XCTAssertEqual(try String(contentsOf: children.appendingPathComponent("agent.jsonl"), encoding: .utf8), "old child")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recoveryJournal.path))
+    }
+
+    @MainActor
+    func testLargeBundleCopiesWithoutBlockingTheMainActor() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["THREADING_TRANSCRIPT_MIGRATION_STRESS"] == "1")
+        let source = root.appendingPathComponent("source/session.jsonl")
+        let destination = root.appendingPathComponent("target/session.jsonl")
+        try write("parent history", to: source)
+        let children = ClaudeTranscript.subagentsDirectory(forRoot: source)
+        try FileManager.default.createDirectory(at: children, withIntermediateDirectories: true)
+        let childData = Data(repeating: 65, count: 256 * 1_024)
+        for index in 0..<64 {
+            try childData.write(to: children.appendingPathComponent("agent-\(index).jsonl"))
+        }
+        var heartbeat = false
+        Task { @MainActor in heartbeat = true }
+        let started = Date()
+        _ = try await TranscriptMigrationWorker.shared.install(source: source, destination: destination,
+            includesSubagents: true, journalURL: recoveryJournal) {
+                XCTAssertTrue(heartbeat)
+                return true
+            }
+        let targetChildren = ClaudeTranscript.subagentsDirectory(forRoot: destination)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: targetChildren.path).count, 64)
+        print("transcript-migration-stress bytes=16777216 children=64 seconds=\(Date().timeIntervalSince(started))")
     }
 
     @MainActor

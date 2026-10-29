@@ -262,28 +262,30 @@ final class SupervisionCommandService {
         }
 
         let launch: @MainActor (AgentAccount?) -> Void = { [weak self] destination in
-            guard let self else { return completion(.failure("The manager command ended before launch.")) }
-            if let destination, destination.handle != target.accountHandle {
-                if let refusal = self.control.admitMove(targetID, from: actor) {
-                    return completion(.failure(refusal.toolWords))
+            Task { @MainActor in
+                guard let self else { return completion(.failure("The manager command ended before launch.")) }
+                if let destination, destination.handle != target.accountHandle {
+                    if let refusal = self.control.admitMove(targetID, from: actor) {
+                        return completion(.failure(refusal.toolWords))
+                    }
+                    switch await action.move(targetID, destination, sessionID) {
+                    case .success: break
+                    case .failure(let failure): return completion(.failure(failure.words))
+                    }
                 }
-                switch action.move(targetID, destination, sessionID) {
-                case .success: break
-                case .failure(let failure): return completion(.failure(failure.words))
+                guard action.resume(targetID) else {
+                    return completion(.failure("“\(target.displayTitle)” could not be resumed in the background."))
                 }
-            }
-            guard action.resume(targetID) else {
-                return completion(.failure("“\(target.displayTitle)” could not be resumed in the background."))
-            }
-            let account = destination ?? AgentAccountDiscovery.account(
-                for: target.kind,
-                handle: target.accountHandle
-            )
-            let statement = "Resumed “\(target.displayTitle)” as \(account?.displayName ?? target.accountHandle.name), model \(target.model ?? "default")."
-            let brief = (arguments.brief ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !brief.isEmpty else { return completion(.success(statement)) }
-            self.control.send(brief, to: targetID, from: actor) { outcome in
-                completion(.success(statement + " " + self.sendWords(outcome)))
+                let account = destination ?? AgentAccountDiscovery.account(
+                    for: target.kind,
+                    handle: target.accountHandle
+                )
+                let statement = "Resumed “\(target.displayTitle)” as \(account?.displayName ?? target.accountHandle.name), model \(target.model ?? "default")."
+                let brief = (arguments.brief ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !brief.isEmpty else { return completion(.success(statement)) }
+                self.control.send(brief, to: targetID, from: actor) { outcome in
+                    completion(.success(statement + " " + self.sendWords(outcome)))
+                }
             }
         }
 
@@ -484,13 +486,18 @@ final class SupervisionCommandService {
             switch result {
             case .failure(let failure): completion(.failure(failure.words))
             case .success(let resolved):
-                switch action.move(targetID, resolved.account, sessionID) {
-                case .failure(let failure): completion(.failure(failure.words))
-                case .success(let source):
-                    let reason = resolved.ranking.map {
-                        " Best chose its \($0.decidingWindowName) window."
-                    } ?? ""
-                    completion(.success("Moved “\(target.displayTitle)” from \(source) to \(resolved.account.displayName); it remains dormant.\(reason)"))
+                Task { @MainActor in
+                    if let refusal = self.control.admitMove(targetID, from: actor) {
+                        return completion(.failure(refusal.toolWords))
+                    }
+                    switch await action.move(targetID, resolved.account, sessionID) {
+                    case .failure(let failure): completion(.failure(failure.words))
+                    case .success(let source):
+                        let reason = resolved.ranking.map {
+                            " Best chose its \($0.decidingWindowName) window."
+                        } ?? ""
+                        completion(.success("Moved “\(target.displayTitle)” from \(source) to \(resolved.account.displayName); it remains dormant.\(reason)"))
+                    }
                 }
             }
         }

@@ -32,6 +32,20 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         super.tearDown()
     }
 
+    func testLaunchExpiresAnOldAutomaticMoveInsteadOfReplayingItsObservation() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let coordinator = makeCoordinator()
+        _ = coordinator.reconcileObservedExecution(sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            phase: .executing(observedAt: Date()), policy: .allowSameRepository)
+        XCTAssertNotNil(store.session(withID: session.id)?.pendingCheckoutMove)
+        coordinator.resumePendingMovesAtLaunch()
+        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+        XCTAssertFalse(coordinator.isHoldingInput(sessionID: session.id))
+    }
+
     func testValidationUsesCanonicalWorktreeIdentity() throws {
         let project = try XCTUnwrap(store.addProject(folderURL: main))
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
@@ -767,45 +781,83 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         )
     }
 
+    private func makeWindowCoordinator(
+        checkout: SessionCheckoutCoordinator, tracker: SessionExecutionLocusTracker,
+        policy: SessionCheckoutAuthorityPolicy, toast: @escaping (ToastRequest) -> Void = { _ in }
+    ) -> SessionCoordinator {
+        let suite = "checkout-window-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.sessionCheckoutAuthorityPolicy = policy
+        return SessionCoordinator(
+            sidebar: ProjectSidebarViewController(projectStore: store),
+            container: TerminalContainerViewController(recovery: true),
+            environment: AppEnvironment(projectStore: store,
+                agentRuntime: AgentRuntime(currentSessionProjection: .projectStore(store)),
+                settings: settings, eventLog: EventLog(directory: root.appendingPathComponent("Logs"))),
+            onPresentationChanged: {}, checkoutCoordinator: checkout,
+            executionLocusTracker: tracker, toastPresenter: toast
+        )
+    }
+
     // MARK: - Damping observed execution
 
-    /// A goal continuation may not have reached the activity tracker yet. Its live Git child's
-    /// cwd must queue ownership without restarting the process that is creating that worktree.
-    func testLiveChildCannotMoveAnApparentlyIdleChatBeforeItsTurnBoundary() throws {
+    /// Crosses the production event admission seam with mixed parent/reviewer activity.
+    /// No authority policy turns a descendant's cwd into intent to move the parent.
+    func testToolVisitsOfferAMoveWithoutChangingOwnershipUnderEveryPolicy() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        for policy in SessionCheckoutAuthorityPolicy.allCases {
+            let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+            let coordinator = makeCoordinator()
+            let tracker = SessionExecutionLocusTracker(projects: store)
+            let offered = expectation(description: "reviewer activity offers a move")
+            let window = makeWindowCoordinator(checkout: coordinator, tracker: tracker, policy: policy) { receipt in
+                if receipt.identifier == "sidebar.toast.execution-drift.offer" { offered.fulfill() }
+            }
+            tracker.observeProcessWorkingDirectories([main.path, sibling.path], sessionID: session.id)
+            wait(for: [offered], timeout: 3)
+            withExtendedLifetime(window) {}
+            coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
+            XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
+            XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+            XCTAssertFalse(coordinator.isHoldingInput(sessionID: session.id))
+        }
+    }
+
+    func testSubagentLifecycleCannotMoveTheParentThroughTheWindowRoute() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let coordinator = makeCoordinator()
+        let tracker = SessionExecutionLocusTracker(projects: store)
+        let offered = expectation(description: "child lifecycle offers a move")
+        let window = makeWindowCoordinator(checkout: coordinator, tracker: tracker, policy: .allowSameRepository) {
+            if $0.identifier == "sidebar.toast.execution-drift.offer" { offered.fulfill() }
+        }
+        tracker.observe(try XCTUnwrap(HookLifecycleReport(sessionID: session.id,
+            event: .subagentStopped, payload: ["cwd": sibling.path, "agent_id": "reviewer"])))
+        wait(for: [offered], timeout: 3)
+        withExtendedLifetime(window) {}
+        coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
+        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+    }
+
+    func testToolVisitCannotUndoAnExplicitMoveAfterTheReversalDwell() throws {
         let project = try XCTUnwrap(store.addProject(folderURL: main))
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
-        let coordinator = SessionCheckoutCoordinator(
-            projects: store,
-            runtime: AgentRuntime(currentSessionProjection: .projectStore(store)),
-            runtimeSnapshot: { _ in .test(activity: .idle) }
-        )
-        let tracker = SessionExecutionLocusTracker(projects: store)
-        let queued = expectation(description: "live child queued a fenced move")
-        let token = NotificationCenter.default.observe(SessionExecutionDriftDidChange.self) { event in
-            guard event.sessionID == session.id,
-                  case .siblingCheckout(let checkout) = tracker.drift(forSessionID: session.id)
-            else { return }
-            XCTAssertTrue(event.phase.requiresTurnBoundary(after: nil))
-            guard case .queued = coordinator.reconcileObservedExecution(
-                sessionID: session.id, checkout: checkout, phase: event.phase,
-                policy: .allowSameRepository
-            ) else { return XCTFail("Expected a queued move") }
-            queued.fulfill()
-        }
-        defer { NotificationCenter.default.removeObserver(token) }
-
-        tracker.observeProcessWorkingDirectories([sibling.path], sessionID: session.id)
-        wait(for: [queued], timeout: 3)
-        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
-        XCTAssertEqual(store.session(withID: session.id)?.pendingCheckoutMove?.phase, .pendingBoundary)
-        XCTAssertTrue(coordinator.isHoldingInput(sessionID: session.id))
-
-        let moved = expectation(description: "real turn boundary commits the move")
-        coordinator.finishPendingMove(sessionID: session.id) { succeeded in
-            XCTAssertTrue(succeeded)
-            moved.fulfill()
-        }
-        wait(for: [moved], timeout: 3)
+        var clock = Date()
+        let coordinator = makeCoordinator(clock: { clock })
+        _ = coordinator.requestMove(sessionID: session.id, checkoutPath: sibling.path,
+            authorityBasis: .explicitUserRequest, reason: "Move to my chosen checkout",
+            policy: .allowExplicitRequests)
+        clock = clock.addingTimeInterval(SessionCheckoutDefaults.reversalDwell * 2)
+        let result = coordinator.reconcileExecutionObservation(.init(
+            sessionID: session.id, phase: .executing(observedAt: clock),
+            drift: .siblingCheckout(try observed(main, branch: "main", name: "main")),
+            source: .descendantProcess), policy: .allowSameRepository)
+        guard case .approvalRequired = result else { return XCTFail("A visit cannot undo an explicit move") }
+        coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
         XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: sibling.path))
     }
 
@@ -822,9 +874,8 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
 
         clock = clock.addingTimeInterval(1)
         coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
-        guard case .queued = coordinator.reconcileObservedExecution(
-            sessionID: session.id, checkout: checkout, phase: phase,
-            policy: .alwaysAsk, approval: true
+        guard case .queued = coordinator.acceptObservedCheckout(
+            sessionID: session.id, checkout: checkout, phase: phase
         ) else { return XCTFail("Expected the approved move") }
         XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: sibling.path))
         XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
@@ -888,30 +939,33 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: sibling.path))
     }
 
-    func testDeferredObservedMoveIsDroppedWhenBackgroundWorkReturnsHome() throws {
+    func testReturnHomeEventCancelsDeferredMoveThroughTheProductionRoute() throws {
         let project = try XCTUnwrap(store.addProject(folderURL: main))
-        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
         let coordinator = makeCoordinator()
-        _ = coordinator.reconcileObservedExecution(
-            sessionID: session.id,
-            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
-            phase: .executing(observedAt: Date()),
-            policy: .allowSameRepository
-        )
-        coordinator.finishPendingMove(
-            sessionID: session.id,
-            backgroundWork: [BackgroundTask(id: "child", kind: .delegated)]
-        ) { XCTAssertTrue($0) }
-
-        _ = coordinator.reconcileObservedExecution(
-            sessionID: session.id,
-            checkout: try observed(main, branch: "main", name: "main"),
-            phase: .executing(observedAt: Date()),
-            policy: .allowSameRepository
-        )
+        let tracker = SessionExecutionLocusTracker(projects: store)
+        let queued = expectation(description: "lifecycle observation queued")
+        let home = expectation(description: "home observation reconciled")
+        let window = makeWindowCoordinator(checkout: coordinator, tracker: tracker, policy: .allowSameRepository)
+        let token = NotificationCenter.default.observe(SessionExecutionDriftDidChange.self) { event in
+            guard event.sessionID == session.id else { return }
+            switch event.drift {
+            case .siblingCheckout: queued.fulfill()
+            case .none: home.fulfill()
+            case .unrelated: break
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+        tracker.observe(try XCTUnwrap(HookLifecycleReport(sessionID: session.id,
+            event: .turnStarted, payload: ["cwd": sibling.path])))
+        wait(for: [queued], timeout: 3)
+        coordinator.finishPendingMove(sessionID: session.id,
+            backgroundWork: [BackgroundTask(id: "child", kind: .delegated)]) { XCTAssertTrue($0) }
+        tracker.observeProcessWorkingDirectories([main.path], sessionID: session.id)
+        wait(for: [home], timeout: 3)
         coordinator.finishPendingMove(sessionID: session.id) { XCTAssertTrue($0) }
-
-        XCTAssertEqual(identity(ofProjectFor: session.id), GitInfo.worktreeIdentity(for: main.path))
+        withExtendedLifetime(window) {}
+        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
         XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
     }
 

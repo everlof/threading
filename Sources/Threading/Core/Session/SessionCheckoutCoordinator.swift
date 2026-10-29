@@ -225,6 +225,9 @@ final class SessionCheckoutCoordinator {
         approval: Bool? = nil,
         waitForCurrentTurnBoundary: Bool = false
     ) -> SessionCheckoutMoveRequestResult {
+        guard !SessionMigration.isMoving(sessionID) else {
+            return .failed("The conversation is moving between accounts.")
+        }
         if authorityBasis == .observedExecution, deferredObservedMoves[sessionID] != nil {
             return .denied
         }
@@ -278,6 +281,38 @@ final class SessionCheckoutCoordinator {
             }
             return .queued(pending)
         }
+    }
+
+    /// The observed-location button is a user instruction, with the same boundary accounting
+    /// as a menu/tool move. A button pressed after the observed turn ended must not wait again.
+    func acceptObservedCheckout(
+        sessionID: SessionID, checkout: ObservedCheckout, phase: SessionExecutionObservationPhase
+    ) -> SessionCheckoutMoveRequestResult {
+        requestMove(sessionID: sessionID, checkoutPath: checkout.root,
+            authorityBasis: .explicitUserRequest,
+            reason: "The user selected Move Chat for the observed checkout.", approval: true,
+            waitForCurrentTurnBoundary: phase.requiresTurnBoundary(after: lastTurnBoundaryAt[sessionID]))
+    }
+
+    /// Shared by the window's event route and integration fixtures. Tool descendants are
+    /// observational only: reviews and temporary commands cannot choose the parent's checkout.
+    func reconcileExecutionObservation(
+        _ event: SessionExecutionDriftDidChange,
+        policy: SessionCheckoutAuthorityPolicy = AppSettings.shared.sessionCheckoutAuthorityPolicy
+    ) -> SessionCheckoutMoveRequestResult {
+        guard case .siblingCheckout(let checkout) = event.drift else {
+            deferredObservedMoves[event.sessionID] = nil
+            if let pending = projects.session(withID: event.sessionID)?.pendingCheckoutMove,
+               pending.authorityBasis == .observedExecution,
+               settlements[event.sessionID] == nil {
+                _ = cancelPendingMove(sessionID: event.sessionID)
+            }
+            return .denied
+        }
+        return reconcileObservedExecution(
+            sessionID: event.sessionID, checkout: checkout, phase: event.phase,
+            policy: event.source == .descendantProcess ? .alwaysAsk : policy
+        )
     }
 
     /// Reconciles one observed drift into checkout ownership.
@@ -397,6 +432,13 @@ final class SessionCheckoutCoordinator {
     func resumePendingMovesAtLaunch(
         completion: @escaping @MainActor @Sendable () -> Void = {}
     ) {
+        // A previous process's observation is not an instruction for a new runtime. This also
+        // retires descendant-based automatic requests saved by older versions of Threading.
+        let observedIDs = projects.projects.flatMap(\.sessions).filter {
+            $0.pendingCheckoutMove?.authorityBasis == .observedExecution
+                && $0.pendingCheckoutMove?.phase != .failed
+        }.map(\.id)
+        for sessionID in observedIDs { _ = cancelPendingMove(sessionID: sessionID) }
         let pendingIDs: [SessionID] = Array(projects.projects.lazy.flatMap(\.sessions).compactMap { session -> SessionID? in
             guard let move = session.pendingCheckoutMove, move.phase != .failed else { return nil }
             return session.id
@@ -825,7 +867,7 @@ final class SessionCheckoutCoordinator {
     }
 
     func isHoldingInput(sessionID: SessionID) -> Bool {
-        inputFences.contains(sessionID)
+        SessionMigration.isMoving(sessionID) || inputFences.contains(sessionID)
             || projects.session(withID: sessionID)?.pendingCheckoutMove != nil
     }
 

@@ -450,22 +450,26 @@ This mirrors the logic in `~/repo/claudex` (`CredentialStore`, `HandoffLauncher`
 client-side file the CLI replays each turn, not server state bound to the originating account.
 *Verified empirically*: a Claude transcript copied into another account's config dir resumed
 with full context under that account. So a move is: copy the transcript into the target
-account's directory and re-point `accountHandle`. The destination is the source path with its
-**account-directory prefix swapped** — the layout under a config dir (`projects/<slug>/` for
-Claude, dated `sessions/` for Codex) is identical between accounts, so one prefix swap serves
-both agents. It is **non-destructive** (the original stays, so a move reverses), stops any live
-process first (it belongs to the old account and is still writing the file), and Threading never
-touches a token — the official CLI authenticates under whichever account, so this is
-portability, not credential reuse.
+account's directory and re-point `accountHandle`. Claude's destination uses the checkout where
+the session will resume; Codex keeps its
+account-relative global layout. A Claude move includes the parent JSONL and its adjacent
+`<session-id>/subagents` directory, so a resumed panel agent can find its own history after an
+account switch. Source child histories take precedence, while target-only histories survive a
+return to a previously used account. Originals remain in place.
 
-Replacing a transcript that already exists in the target account is crash-recoverable. Before
-the first same-volume rename, `TranscriptCopyTransaction` writes one private recovery record under
-Threading's Application Support containing the exact destination, candidate and previous-copy
-paths. The next launch reads that one record before any conversation can start: an absent target
-with a surviving previous copy is restored, a record left before the first rename is cleared, and
-an already promoted copy with ambiguous store-commit state is preserved and reported rather than
-guessed at. There is deliberately one fixed record instead of a scan through provider transcript
-trees, so launch work is constant and a later move cannot overwrite unresolved recovery evidence.
+`TranscriptMigrationWorker` admits one copy at a time. Copying, history merging and recursive
+cleanup run on its serial actor; only the account-row commit returns to the main actor. The
+session is fenced against input and relaunch until completion, and an overlapping checkout move
+is refused. For a live local terminal, the worker waits up to five seconds for its outgoing PID to
+exit before reading history; a writer that remains alive refuses the copy. Mac, phone, manager and usage-limit actions await this same transaction before
+resuming or reporting success.
+
+Parent and child candidates are prepared before either destination changes. One private recovery
+record contains the exact two destinations, candidates and previous-copy paths before promotion;
+version 1 records remain readable. A refused account-row commit restores both previous copies.
+Launch recovery restores a partially promoted version-2 bundle as one generation. If the whole
+bundle was promoted and the store commit is ambiguous, recovery preserves both generations and
+reports the condition instead of guessing. Recovery never scans account transcript trees.
 
 The paired iPhone does not implement a second migration. Its owner-only Chat Settings route sends
 one catalog account handle to the Mac, and the application composition root invokes this same

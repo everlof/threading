@@ -2155,6 +2155,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     // MARK: - Public Methods
 
     func launch() {
+        guard !SessionMigration.isMoving(sessionID) else { return }
         guard !stream.isRunning, !isLaunching else { return }
 
         // The native surface's half of the same line `AgentSessionViewController.launch` holds:

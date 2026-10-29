@@ -667,7 +667,8 @@ built in the new worktree. Hook-capable runtimes also send `cwd`, but that field
 same durable runtime root rather than a tool-local `cd`; it remains the cheapest signal when it
 does move and unknown when absent. The complementary signal is the live descendant tree beneath
 the agent process. A child cwd is kernel state, so it covers raw `git worktree add` followed by
-ordinary commands without understanding the command language or requiring a Threading tool.
+ordinary commands without understanding the command language. It offers the existing move
+control rather than treating that tool visit as authority to move the parent.
 
 `SessionExecutionLocusTracker` reconciles both sources. An unchanged lifecycle path still costs one
 dictionary comparison. Terminal output does no process work: `SessionExecutionProcessObserver`
@@ -676,15 +677,24 @@ then retains at most the newest eight descendants per session for cwd reads. Exp
 to ten working sessions; even the stress case of every live session producing output keeps one
 shared table walk and eight syscalls per session. Roots are disjoint, parentage is built once, and
 the main actor only receives the bounded path values. Only changed external values are resolved to
-Git checkouts, and an observation acts only when every same-repository descendant names one unique
-sibling. The reported directory is routinely several levels inside a checkout, so classification
+Git checkouts. A descendant sample naming one sibling is display evidence and may offer **Move
+Chat**, but never automatically changes ownership under any authority policy. A reviewer or a
+one-off command is still a descendant; its cwd cannot state where the parent should resume.
+Subagent lifecycle hooks carry the same observational authority as child-process samples.
+The reported directory is routinely several levels inside a checkout, so classification
 resolves it to that checkout's **root** before anything else: `validate` refuses any other path as
 `targetNotCheckoutRoot`. Managed workspaces are excluded before resolution because their separate
 worktree is intentional.
 
-Drift reconciles through `SessionCheckoutCoordinator` like every other move, under a third
-authority basis. `observed_execution` is not a reuse of `agent_initiated`: an agent's move is a
-decision a model made and can be asked to justify, while this one is an inference Threading drew
+Lifecycle-reported drift reconciles through `SessionCheckoutCoordinator` like every other move,
+under a third authority basis. `SessionExecutionDriftDidChange` carries the drift and its source,
+and the window uses `reconcileExecutionObservation` for both sibling and return-home events.
+Descendant evidence always requires the existing Move Chat action, including under
+`allowSameRepository`; selecting it creates an explicit user request and rechecks the current
+ownership epoch and target. An explicit checkout choice therefore survives temporary tool visits.
+
+The lifecycle authority basis `observed_execution` is not a reuse of `agent_initiated`: an agent's
+move is a decision a model made and can be asked to justify, while this one is an inference Threading drew
 from a lifecycle report, and it is the only basis that can be granted with nobody having requested
 anything. Under the default `allowExplicitRequests`, an observed same-repository checkout follows
 automatically after the active turn's final checkpoint; `alwaysAsk` preserves a confirmation for
@@ -696,8 +706,12 @@ fence before it can replace the runtime. An inferred move is released from its i
 retried at the next clean turn boundary, provided the chat still belongs to the original
 checkout. The retry retains the authorized target's identities for ordinary revalidation;
 following a newly observed target still obeys the authority policy. A requested move stays
-queued. Recovery, retry and launch paths without a provider task list respect the runtime's
-continuation; an authoritative empty list can clear the preceding turn's continuation.
+queued. A return-home observation cancels a deferred automatic move through the same event route;
+the old observation is not permission to move at a much later clean boundary. A nonfailed
+automatic request expires at app launch, when its runtime evidence no longer exists; requested
+moves retain their durable fence, and failed moves retain explicit Retry/Cancel recovery.
+Retry paths without a provider task list respect the runtime's continuation; an authoritative
+empty list can clear the preceding turn's continuation.
 
 Everything that is *not* moved still has to stop lying, since some drift can never move — a chat
 working outside its own repository is refused as `differentRepository`, correctly — and an offer
@@ -763,7 +777,8 @@ running, not a chat. Every such line since the fix shipped has been one.
 `GitWorktree.suggestedLocation`'s, so a repository's worktrees group on disk — and carries
 `createsBranch`, because Git spells "new branch" and "existing branch" differently. But an agent
 or user may also create any ordinary worktree with Git. Once this chat actually executes there,
-the descendant observer discovers the checkout, the same coordinator fences and moves ownership,
+the descendant observer discovers the checkout and offers Move Chat. The user's selection or an
+explicit `set_session_checkout` request uses the same coordinator to fence and move ownership,
 and the sidebar adopts it as an ordinary project. Instructions improve the atomic case; they are
 not the mechanism that keeps the model honest.
 

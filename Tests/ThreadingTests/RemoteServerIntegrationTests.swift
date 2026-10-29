@@ -5708,7 +5708,7 @@ private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
     func moveRemoteSession(
         _ sessionID: SessionID,
         to accountHandle: AccountHandle
-    ) -> Result<Void, RemoteSessionAccountMoveFailure> {
+    ) async -> Result<Void, RemoteSessionAccountMoveFailure> {
         accountMoves.append((sessionID: sessionID, accountHandle: accountHandle))
         return accountMoveResult
     }

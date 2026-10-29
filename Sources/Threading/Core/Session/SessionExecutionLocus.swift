@@ -68,6 +68,12 @@ enum SessionExecutionObservationPhase: Equatable, Sendable {
     }
 }
 
+/// A child cwd proves where a tool worked, not where the parent should resume.
+enum SessionExecutionObservationSource: String, Sendable {
+    case lifecycle
+    case descendantProcess = "descendant_process"
+}
+
 // MARK: - Session Execution Locus Tracker
 
 /// Reconciles what agents report about their working directory against the checkouts that own
@@ -108,6 +114,7 @@ final class SessionExecutionLocusTracker {
     private var lastProcessPathSignature: [SessionID: String] = [:]
 
     private var drifts: [SessionID: SessionExecutionDrift] = [:]
+    private var observationSources: [SessionID: SessionExecutionObservationSource] = [:]
 
     /// How many times each session's ownership has moved beneath this tracker.
     ///
@@ -190,6 +197,9 @@ final class SessionExecutionLocusTracker {
         let sessionID = report.sessionID
         let phase: SessionExecutionObservationPhase = report.event == .turnFinished
             ? .turnFinished : .executing(observedAt: Date())
+        let source: SessionExecutionObservationSource = report.subagentID != nil
+            || report.event == .subagentStarted || report.event == .subagentStopped
+            ? .descendantProcess : .lifecycle
         let resolver = self.resolver
         resolutionQueue.async {
             let reportedCheckout = resolver(reported)
@@ -200,7 +210,8 @@ final class SessionExecutionLocusTracker {
                     against: ownedCheckout,
                     reportedPath: reported,
                     sessionID: sessionID,
-                    phase: phase
+                    phase: phase,
+                    source: source
                 )
             }
         }
@@ -235,7 +246,7 @@ final class SessionExecutionLocusTracker {
         }
         if candidates.isEmpty {
             classificationsApplied &+= 1
-            applyDrift(.none, sessionID: sessionID, phase: .executing(observedAt: Date()))
+            applyDrift(.none, sessionID: sessionID, phase: .executing(observedAt: observedAt), source: .descendantProcess)
             return
         }
 
@@ -274,12 +285,14 @@ final class SessionExecutionLocusTracker {
     /// just-repaired chat marked as drifting until its next turn.
     func forget(sessionID: SessionID) {
         ownershipEpochs[sessionID, default: 0] &+= 1
+        observationSources[sessionID] = nil
         lastReportedPath[sessionID] = nil
         lastProcessPathSignature[sessionID] = nil
         SessionExecutionProcessObserver.shared.forget(sessionID: sessionID)
         guard drifts.removeValue(forKey: sessionID) != nil else { return }
         NotificationCenter.default.post(SessionExecutionDriftDidChange(
-            sessionID: sessionID, phase: .executing(observedAt: Date())
+            sessionID: sessionID, phase: .executing(observedAt: Date()),
+            drift: .none, source: .lifecycle
         ))
     }
 
@@ -325,7 +338,7 @@ final class SessionExecutionLocusTracker {
         classificationsApplied &+= 1
         if siblingsByIdentity.isEmpty,
            reported.contains(where: { $0.worktreeIdentity == owned.worktreeIdentity }) {
-            applyDrift(.none, sessionID: sessionID, phase: .executing(observedAt: observedAt))
+            applyDrift(.none, sessionID: sessionID, phase: .executing(observedAt: observedAt), source: .descendantProcess)
             return
         }
         guard siblingsByIdentity.count == 1,
@@ -333,7 +346,7 @@ final class SessionExecutionLocusTracker {
 
         applyDrift(
             .siblingCheckout(checkout), sessionID: sessionID,
-            phase: .executing(observedAt: observedAt)
+            phase: .executing(observedAt: observedAt), source: .descendantProcess
         )
     }
 
@@ -342,7 +355,8 @@ final class SessionExecutionLocusTracker {
         against owned: ObservedCheckout?,
         reportedPath: String,
         sessionID: SessionID,
-        phase: SessionExecutionObservationPhase
+        phase: SessionExecutionObservationPhase,
+        source: SessionExecutionObservationSource
     ) {
         // The report may have been overtaken while the resolution ran, or the session may have
         // gone away entirely. Either way this answer is about a question nobody is asking now.
@@ -359,13 +373,14 @@ final class SessionExecutionLocusTracker {
         }
 
         classificationsApplied &+= 1
-        applyDrift(drift, sessionID: sessionID, phase: phase)
+        applyDrift(drift, sessionID: sessionID, phase: phase, source: source)
     }
 
     private func applyDrift(
         _ drift: SessionExecutionDrift,
         sessionID: SessionID,
-        phase: SessionExecutionObservationPhase
+        phase: SessionExecutionObservationPhase,
+        source: SessionExecutionObservationSource = .lifecycle
     ) {
         if let pending = projects.session(withID: sessionID)?.pendingCheckoutMove {
             switch drift {
@@ -373,9 +388,9 @@ final class SessionExecutionLocusTracker {
             where checkout.worktreeIdentity == pending.worktreeIdentity:
                 break
             case .none:
-                // The root process returning to its launch directory between tool calls is not
-                // stronger than the sibling-checkout evidence that created the durable move.
-                return
+                // A requested destination survives incidental readings. An automatic inference
+                // can be revoked when execution returns home before its boundary.
+                if pending.authorityBasis != .observedExecution { return }
             case .siblingCheckout(let checkout):
                 EventLog.shared.record(.session, "Checkout observation conflicted with pending move", [
                     "session": sessionID.uuidString,
@@ -396,10 +411,12 @@ final class SessionExecutionLocusTracker {
         // of them — stores nothing and announces nothing. Only a chat that leaves, or returns,
         // is news.
         let previous = drifts[sessionID] ?? .none
-        guard previous != drift else { return }
+        guard previous != drift || (observationSources[sessionID] != nil
+            && observationSources[sessionID] != source) else { return }
+        observationSources[sessionID] = source
         drifts[sessionID] = drift == .none ? nil : drift
         NotificationCenter.default.post(SessionExecutionDriftDidChange(
-            sessionID: sessionID, phase: phase
+            sessionID: sessionID, phase: phase, drift: drift, source: source
         ))
 
         guard case .siblingCheckout(let checkout) = drift else { return }
@@ -409,6 +426,7 @@ final class SessionExecutionLocusTracker {
         // The event above is the announcement; `SessionCoordinator` is what listens.
         EventLog.shared.record(.session, "Chat observed in another checkout", [
             "session": sessionID.uuidString,
+            "source": source.rawValue,
             "checkout": checkout.root,
             "branch": checkout.branch ?? ""
         ])
@@ -435,6 +453,8 @@ struct SessionExecutionDriftDidChange: AppEvent {
     static let name = Notification.Name("sessionExecutionDriftDidChange")
     let sessionID: SessionID
     let phase: SessionExecutionObservationPhase
+    let drift: SessionExecutionDrift
+    let source: SessionExecutionObservationSource
 }
 
 // MARK: - Defaults

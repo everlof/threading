@@ -1577,7 +1577,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     func moveRemoteSession(
         _ sessionID: SessionID,
         to accountHandle: AccountHandle
-    ) -> Result<Void, RemoteSessionAccountMoveFailure> {
+    ) async -> Result<Void, RemoteSessionAccountMoveFailure> {
         guard ownsSingleInstanceLock, let mainWindowController else {
             return .failure(.appUnavailable)
         }
@@ -1594,11 +1594,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             return .failure(.accountNotFound)
         }
 
-        switch SessionMigration.move(sessionID: sessionID, to: account) {
+        switch await SessionMigration.move(sessionID: sessionID, to: account) {
         case .success:
             mainWindowController.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
             return .success(())
         case .failure(let error):
+            if !AgentRuntime.shared.isRunning(sessionID: sessionID) {
+                mainWindowController.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
+            }
             return .failure(.moveRefused(error.code))
         }
     }

@@ -7069,3 +7069,28 @@ same `DYLD_LIBRARY_PATH`, `DYLD_FRAMEWORK_PATH` and `xcrun xctest` setup used by
 case. `RealDevicePaneTests` checks actual snapshot/movie output, immediate stop, rotation,
 disconnect, hidden recording demand and presenter/input revocation. The physical-iPhone evidence
 entry renders the toolbar, device menu and recording state in the product shell.
+
+## Account conversation-history copying
+
+Account migration retains one admitted operation and uses `TranscriptMigrationWorker`'s serial
+actor for all transcript bytes, child-history merging and recursive cleanup. Expected input is
+one parent transcript plus tens of child histories; the opt-in stress fixture uses 64 child
+transcripts totalling 16 MiB. Work is O(source bytes + target child entries + retained target bytes), with one
+fixed-size bundle journal and at most two promoted items. During copying, the main actor only
+fences the session, commits its account row and reconciles presentation; a terminal writer's exit is awaited on the
+worker with a five-second bound. Checkout observation callbacks retain their fixed eight-process
+sample and O(1) event admission; descendant evidence cannot initiate an ownership copy.
+
+Run the real worker fixture with:
+
+```bash
+TEST_RUNNER_THREADING_TRANSCRIPT_MIGRATION_STRESS=1 scripts/test.sh fast \
+  -only-testing:ThreadingTests/SessionMigrationTransactionTests
+```
+
+It verifies all 64 copied histories and that a main-actor heartbeat runs before the store commit. This is an
+I/O isolation contract, not a claim about provider resume time.
+
+The 64-history Debug fixture completed copying and commit in 7.43 ms on 2026-10-29, with the
+main-actor heartbeat observed before commit and all histories present. This is one warm local
+filesystem run, not a cold-disk or provider-launch latency bound.

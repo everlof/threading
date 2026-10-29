@@ -82,7 +82,7 @@ protocol RemoteSessionCommands: AnyObject {
     func moveRemoteSession(
         _ sessionID: SessionID,
         to accountHandle: AccountHandle
-    ) -> Result<Void, RemoteSessionAccountMoveFailure>
+    ) async -> Result<Void, RemoteSessionAccountMoveFailure>
 
     /// Freezes this conversation and creates a new one on another provider, leaving the source
     /// session and its transcript intact. Asynchronous because capturing the snapshot reads the

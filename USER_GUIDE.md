@@ -1717,8 +1717,8 @@ Asking an agent for a worktree goes through `create_session_worktree(branch, aut
 reason)`, which makes the checkout **and** moves the chat into it in one call. The branch may
 already exist or be new, and Threading chooses where the worktree lives so a repository's
 worktrees stay together on disk. This is the atomic route, not a requirement: a worktree made with
-ordinary Git is detected when the chat starts executing there and is then adopted into the
-sidebar in exactly the same way.
+ordinary Git is detected when a tool starts executing there. Select **Move Chat**, or ask the
+agent to call `set_session_checkout`, to adopt it into the sidebar.
 
 ### When a chat wanders
 
@@ -1733,14 +1733,16 @@ The hover card gains a **Working in** line, directly under the branch, whenever 
 That line appears for any disagreement, including one that can never be resolved by moving, such
 as an agent working in a different repository altogether.
 
-When the agent executes in one unambiguous checkout of the **same** repository, Threading waits for
-the active turn's final Git checkpoint. It shows one pending receipt, moves the chat, restarts the
-same conversation there, and replaces that receipt with a completion result. Repeated process
-samples do not create more receipts or change the pending destination. The checkout appears in
-the sidebar even when it was created with raw Git;
-an already-open Review or Overview tab is rebound to it too. **Always Ask** changes this into a
-band with a **Move Chat** button. **Same Repository** also permits moves proposed by the agent;
-the default still asks about those proposals while following work Threading directly observed.
+A tool process working in another checkout offers a **Move Chat** button. It never moves the
+parent chat automatically: a reviewer may inspect another agent's worktree, and a command may
+visit an old checkout temporarily. This holds under every Project authority setting. Selecting
+the button is an explicit move request and waits for the turn and background work to settle.
+
+A change reported by the parent runtime itself can still follow the Project authority policy.
+Threading waits for the final Git checkpoint, shows a pending receipt, moves the chat, and
+restarts the same conversation there. **Always Ask** requires the Move Chat button for this
+case too. Returning home cancels a deferred automatic move. Review and Overview tabs rebind to
+the destination after a committed move.
 
 ### Copying identifiers and paths
 Everything about a chat that is needed *elsewhere* sits in the right-click menu's **Copy ▸**

@@ -1392,7 +1392,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                         "The workspace window is no longer available."
                     )))
                 }
-                return self.sessionCoordinator.moveSupervisedSession(
+                return await self.sessionCoordinator.moveSupervisedSession(
                     sessionID,
                     to: account,
                     managerID: managerID
@@ -1459,12 +1459,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 )
                 return
             }
-            guard self.sessionCoordinator.moveSessionWithoutConfirmation(move.sessionID, to: source) else {
-                return
+            Task {
+                guard await self.sessionCoordinator.moveSessionWithoutConfirmation(move.sessionID, to: source) else {
+                    return
+                }
+                ManagerActionNoticeStore.shared.dismissMove(for: move.sessionID)
+                self.presentedManagerMoveSessionID = nil
+                self.containerViewController.dismissNotice()
             }
-            ManagerActionNoticeStore.shared.dismissMove(for: move.sessionID)
-            self.presentedManagerMoveSessionID = nil
-            self.containerViewController.dismissNotice()
         }
     }
 

@@ -18,21 +18,16 @@ extension SessionCoordinator {
     /// be re-filed anywhere — `SessionCheckoutCoordinator.validate` refuses it as
     /// `differentRepository`, correctly — so the row's marker is the whole of the response, and
     /// putting a band on screen offering nothing would be noise.
-    func reconcileObservedExecutionDrift(
-        _ sessionID: SessionID,
-        phase: SessionExecutionObservationPhase
-    ) {
-        guard case .siblingCheckout(let checkout) =
-                SessionExecutionLocusTracker.shared.drift(forSessionID: sessionID),
+    func reconcileObservedExecutionDrift(_ event: SessionExecutionDriftDidChange) {
+        let sessionID = event.sessionID
+        let result = checkoutCoordinator.reconcileExecutionObservation(
+            event, policy: environment.settings.sessionCheckoutAuthorityPolicy
+        )
+        guard case .siblingCheckout(let checkout) = event.drift,
               let session = environment.projectStore.session(withID: sessionID) else { return }
+        let epoch = executionLocusTracker.ownershipEpoch(forSessionID: sessionID)
 
-        let checkoutCoordinator = SessionCheckoutCoordinator.shared
-
-        switch checkoutCoordinator.reconcileObservedExecution(
-            sessionID: sessionID,
-            checkout: checkout,
-            phase: phase
-        ) {
+        switch result {
         case .queued(let move):
             // A move already fenced for somewhere else comes back as that move, not this one.
             // Reporting it would name the checkout just observed while the chat is on its way to
@@ -53,7 +48,10 @@ extension SessionCoordinator {
                 for: session,
                 checkout: checkout,
                 move: { [weak self] in
-                    self?.approveObservedMove(sessionID, to: checkout, phase: phase)
+                    guard let self,
+                          self.executionLocusTracker.ownershipEpoch(forSessionID: sessionID) == epoch,
+                          self.executionLocusTracker.drift(forSessionID: sessionID) == event.drift else { return }
+                    self.approveObservedMove(sessionID, to: checkout, phase: event.phase)
                 }
             ))
         case .denied, .failed:
@@ -84,11 +82,8 @@ extension SessionCoordinator {
         to checkout: ObservedCheckout,
         phase: SessionExecutionObservationPhase
     ) {
-        switch SessionCheckoutCoordinator.shared.reconcileObservedExecution(
-            sessionID: sessionID,
-            checkout: checkout,
-            phase: phase,
-            approval: true
+        switch checkoutCoordinator.acceptObservedCheckout(
+            sessionID: sessionID, checkout: checkout, phase: phase
         ) {
         case .queued, .alreadyPending:
             break
