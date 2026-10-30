@@ -13,7 +13,8 @@ final class AutomationProjectDiscoveryTests: XCTestCase {
 
         let heading = AgentToolCoordinator.sessionListingHeading(project: project, count: 3)
 
-        XCTAssertTrue(heading.hasPrefix("Sessions in “Alpha” (3)"), heading)
+        XCTAssertTrue(heading.hasPrefix("Reachable sessions from “Alpha” (3)"), heading)
+        XCTAssertTrue(heading.contains("including repository checkouts"), heading)
         let printed = try XCTUnwrap(heading.components(separatedBy: "project id ").last?
             .trimmingCharacters(in: CharacterSet(charactersIn: ":")))
         XCTAssertEqual(ProjectID(uuidString: printed), project.id)
@@ -25,7 +26,7 @@ final class AutomationProjectDiscoveryTests: XCTestCase {
 
     func testAListingWithoutAProjectStaysGeneric() {
         XCTAssertEqual(AgentToolCoordinator.sessionListingHeading(project: nil, count: 1),
-                       "Sessions in this project (1):")
+                       "Reachable sessions (1):")
     }
 
     func testAnUnknownProjectIsRefusedWithTheWayToFindTheRightOne() {

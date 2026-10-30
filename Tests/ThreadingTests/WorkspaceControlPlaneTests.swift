@@ -111,6 +111,7 @@ final class WorkspaceControlPlaneTests: XCTestCase {
                 resolvePermission: resolvePermission,
                 heldByCurfew: heldByCurfew,
                 grants: grants,
+                allProjects: { [workspace.project, workspace.otherProject] },
                 requestManagerArchive: requestManagerArchive,
                 accountMoveCount: moveCount
             )
@@ -174,6 +175,98 @@ final class WorkspaceControlPlaneTests: XCTestCase {
 
         let scope = plane.scope(for: .agentSession(workspace.caller.id))
         XCTAssertEqual(scope, .project(workspace.project.id))
+    }
+
+    func testRepositoryWorktreesCanListSendSteerWatchAndMailInBothDirectionsWithoutManager() throws {
+        var workspace = makeWorkspace()
+        workspace.project.lastKnownRepositoryIdentity = "/tmp/alpha/.git"
+        workspace.otherProject.lastKnownRepositoryIdentity = workspace.project.lastKnownRepositoryIdentity
+        let delivered = Delivered()
+        let plane = makePlane(workspace, delivered: delivered)
+
+        for (caller, target) in [(workspace.caller, workspace.stranger), (workspace.stranger, workspace.caller)] {
+            let actor = ControlActor.agentSession(caller.id)
+            let rows = try plane.sessions(for: actor).get()
+            XCTAssertEqual(Set(rows.map(\.id)), Set([workspace.caller.id, workspace.peer.id,
+                                                   workspace.sideChat.id, workspace.stranger.id]))
+            XCTAssertEqual(rows.filter(\.isCaller).map(\.id), [caller.id])
+            for operation in ControlOperation.regularProjectOperations {
+                XCTAssertNil(plane.authorize(actor, operation: operation, target: target.id))
+            }
+            guard case .sent(let sent) = send(plane, "Review the other checkout", to: target.id, from: actor) else {
+                return XCTFail("Worktree peer must receive the message")
+            }
+            XCTAssertEqual(sent.id, target.id)
+            var steered = false
+            plane.send("Also check this checkout", to: target.id, disposition: .steer, from: actor) {
+                if case .steered(let row) = $0 { steered = row.id == target.id }
+            }
+            XCTAssertTrue(steered)
+            guard case .armed(let watched, _, _) = plane.watch(target.id, from: actor) else {
+                return XCTFail("Worktree peer must be watchable")
+            }
+            XCTAssertEqual(watched.id, target.id)
+            XCTAssertEqual(try plane.admitMail(to: target.id, from: actor).get().id, target.id)
+            XCTAssertEqual(plane.scope(for: actor), .projects([workspace.project.id, workspace.otherProject.id]))
+        }
+        XCTAssertEqual(delivered.texts.map(\.target), [workspace.stranger.id, workspace.stranger.id,
+                                                      workspace.caller.id, workspace.caller.id])
+    }
+
+    func testRepositoryCommunicationDoesNotBroadenStoredManagerAuthority() {
+        var workspace = makeWorkspace()
+        workspace.project.lastKnownRepositoryIdentity = "/tmp/alpha/.git"
+        workspace.otherProject.lastKnownRepositoryIdentity = workspace.project.lastKnownRepositoryIdentity
+        let grant = ControlGrant.manager(sessionID: workspace.caller.id, projectID: workspace.project.id,
+                                         maximumPermissionMode: .manual, origin: .newManagerTemplate)
+        let plane = makePlane(workspace, grants: { _ in [grant] })
+        let actor = ControlActor.agentSession(workspace.caller.id)
+
+        XCTAssertNil(plane.authorize(actor, operation: .archiveSession, target: workspace.peer.id))
+        for operation in ControlOperation.managerOperations.subtracting(ControlOperation.regularProjectOperations) {
+            XCTAssertEqual(plane.authorize(actor, operation: operation, target: workspace.stranger.id),
+                           .notPermitted(operation))
+        }
+    }
+
+    func testMissingDifferentAndRemoteRepositoryIdentitiesDoNotJoinProjects() throws {
+        for identity in [nil, "", "/tmp/beta/.git", "/tmp/alpha/.git"] as [String?] {
+            var workspace = makeWorkspace()
+            workspace.project.lastKnownRepositoryIdentity = "/tmp/alpha/.git"
+            workspace.otherProject.lastKnownRepositoryIdentity = identity
+            if identity == workspace.project.lastKnownRepositoryIdentity {
+                workspace.otherProject.executionHost = ProjectExecutionHost(destination: "other-host", remoteDirectory: "/repo")
+            }
+            let plane = makePlane(workspace)
+            for (caller, target) in [(workspace.caller, workspace.stranger), (workspace.stranger, workspace.caller)] {
+                let actor = ControlActor.agentSession(caller.id)
+                XCTAssertFalse(try plane.sessions(for: actor).get().contains { $0.id == target.id })
+                XCTAssertEqual(plane.authorize(actor, operation: .sendMessage, target: target.id), .targetUnknown)
+            }
+        }
+    }
+
+    func testLargeRepositoryListingDoesNotResolveProjectMembershipForEverySession() throws {
+        let caller = AgentSession(kind: .claude, title: "Manager")
+        var project = Project(name: "Main", folderURL: URL(fileURLWithPath: "/tmp/main"))
+        project.lastKnownRepositoryIdentity = "/tmp/main/.git"
+        project.sessions = [caller]
+        var checkout = Project(name: "Worktree", folderURL: URL(fileURLWithPath: "/tmp/worktree"))
+        checkout.lastKnownRepositoryIdentity = project.lastKnownRepositoryIdentity
+        checkout.sessions = (0..<10_000).map { AgentSession(kind: .codex, title: "Chat \($0)") }
+        var lookups = 0
+        let plane = WorkspaceControlPlane(dependencies: .init(
+            session: { $0 == caller.id ? caller : nil },
+            projectForSession: { _ in lookups += 1; return project },
+            activity: { _ in .idle },
+            surface: { _ in .dormant },
+            deliver: { _, _, done in done(.noLiveSurface) },
+            steer: { _, _ in .targetNotLiveChat },
+            armWatch: { _, _, _ in .watcherAtCapacity(limit: 0) },
+            allProjects: { [project, checkout] }
+        ))
+        XCTAssertEqual(try plane.sessions(for: .agentSession(caller.id)).get().count, 10_001)
+        XCTAssertEqual(lookups, 2, "Listing must use each row's owning project, not scan the store per row")
     }
 
     func testImplicitAuthorityKeepsSelfLifecycleAndRefusesSiblingLifecycle() {

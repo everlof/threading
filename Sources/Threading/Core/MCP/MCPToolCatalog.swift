@@ -572,12 +572,12 @@ enum MCPToolCatalog {
     id: "workspace-control",
     family: .workspace,
     title: "Other sessions",
-    summary: "Let a session list the project’s other sessions and send them mail.",
+    summary: "Let a session find and mail chats across this repository’s checkouts.",
     symbol: "bubble.left.and.bubble.right",
     tools: [],
     instruction: """
-      This project's other chats and sessions are reachable from this one. list_sessions names \
-      them — id, agent, whether they are working, and which surface is live.
+      Chats in this project and added local checkouts of the same repository are reachable. \
+      list_sessions names them — id, agent, whether they are working, and which surface is live.
 
       mail_send is how to tell one of them something — a conclusion, a brief, a question — by \
       that id. Sending is storing: it succeeds whether the recipient is idle, busy or not \

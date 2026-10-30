@@ -1802,11 +1802,11 @@ a reference written for the agent reading it, in whichever form that input takes
   the message like a comment or an image, and the same words travel with your turn. Open the
   chip's menu to see the id or to remove it.
 
-The words change with where the row lands. Dropped on a session in the same project, the
+The words change with where the row lands. Dropped on a session in the same project or another
+added local checkout of the same repository, the
 reference tells the agent that `list_sessions` reports the session's state, that `mail_send`
 to the Threading id leaves it a message, that `send_to_session` hands it a turn when that is what
-you asked for, and that `watch_session` waits for it. Dropped on a session in *another* project it says so, because those tools see only their
-own project. Dropped on a runtime whose surface has no Threading tools (an OpenCode or Grok
+you asked for, and that `watch_session` waits for it. Dropped on a session outside that scope it says the tools cannot reach it. Dropped on a runtime whose surface has no Threading tools (an OpenCode or Grok
 TUI, or with **Settings ▸ Tools ▸ Other sessions** switched off) it says that too. Dropped on
 its own session it says "it is you". In every case the agent's own session id and the
 transcript's path follow, marked as *not* Threading ids, so nothing gets fed to the wrong tool.
@@ -5345,8 +5345,10 @@ Beyond colours, an app theme an agent builds for you can:
 
 ### Letting sessions talk to each other
 
-The **Other sessions** tool group lets a session see and message its project siblings —
-nothing beyond its own project. `list_sessions` names them (id, agent, whether they are
+The **Other sessions** tool group lets a session see and message chats in its project and
+other added local worktrees of the same Git repository. No Manager role is needed. Other
+repositories remain separate; folders without a known repository and remote checkouts retain
+their own project boundary. A Manager's extra lifecycle authority still follows its explicit grant. `list_sessions` names them (id, agent, whether they are
 working); `mail_send` leaves one of them a message by id, which it reads when it can. Agents
 are taught to reach for mail. `send_to_session`, which puts the words straight into the other
 chat as its next turn, is for when you asked one chat to hand another a turn now.
@@ -5386,7 +5388,7 @@ Messages run on the receiving session's own usage. Switch the group off in
 #### Agent mail
 
 The same group gives every session a **mailbox**. `mail_send` leaves a durable message for a
-sibling in this project — or, through a remote host's controller, for an agent on that host —
+sibling in this project or its added local repository checkouts — or, through a remote host's controller, for an agent on that host —
 and it succeeds whether the recipient is idle, busy, not running or on a host that is offline
 right now. `mail_inbox` reads what is waiting, `mail_ack` marks what the agent acted on, and
 `mail_directory` lists the session's own address and who it can write to.

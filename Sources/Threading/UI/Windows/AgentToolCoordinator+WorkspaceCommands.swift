@@ -46,8 +46,8 @@ extension AgentToolCoordinator {
     /// can: `manage_automation`'s `projectID` and `create_trigger_draft`'s `project_id` take
     /// exactly this value, and no other tool prints it.
     static func sessionListingHeading(project: Project?, count: Int) -> String {
-        guard let project else { return "Sessions in this project (\(count)):" }
-        return "Sessions in “\(project.name)” (\(count)) — project id \(project.id.uuidString.lowercased()):"
+        guard let project else { return "Reachable sessions (\(count)):" }
+        return "Reachable sessions from “\(project.name)” (\(count)), including repository checkouts — caller project id \(project.id.uuidString.lowercased()):"
     }
 
     // MARK: Sending

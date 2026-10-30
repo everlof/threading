@@ -73,7 +73,7 @@ struct SessionReference: Equatable, Sendable {
 /// do with one.
 ///
 /// A reference is only useful if it says how to *act*, and what a receiver can do depends on
-/// where it stands: `send_to_session` reaches only the receiver's own project, and only a
+/// where it stands: `send_to_session` reaches the receiver's project and repository checkouts. Only a
 /// runtime surface that receives Threading's MCP bridge has the tools at all. Resolved by the
 /// drop site rather than carried in the drag, because the same dragged row means different
 /// things dropped on different sessions.
@@ -85,15 +85,24 @@ struct SessionReferenceReader: Equatable, Sendable {
 
     let projectID: ProjectID?
 
+    /// Added checkouts the control plane admits for ordinary communication.
+    let reachableProjectIDs: Set<ProjectID>
+
     /// Whether the receiver has `list_sessions`, `mail_send`, `send_to_session` and
     /// `watch_session`: its surface receives the bridge, and the user has the "Other sessions"
     /// tool group on.
     let hasSessionTools: Bool
 
-    init(sessionID: SessionID?, projectID: ProjectID?, hasSessionTools: Bool) {
+    init(
+        sessionID: SessionID?,
+        projectID: ProjectID?,
+        hasSessionTools: Bool,
+        reachableProjectIDs: Set<ProjectID> = []
+    ) {
         self.sessionID = sessionID
         self.projectID = projectID
         self.hasSessionTools = hasSessionTools
+        self.reachableProjectIDs = reachableProjectIDs.union(projectID.map { [$0] } ?? [])
     }
 }
 
@@ -105,8 +114,7 @@ struct SessionReferenceReader: Equatable, Sendable {
 /// reach it* (which tools, with which id, or why not), and *what it is called elsewhere* (the
 /// runtime's own id and its transcript). The middle one is the whole reason the reference exists
 /// — the agent has to know, without asking, that the Threading id goes to `send_to_session` and
-/// the runtime's own id goes nowhere near it, and that a session in another project cannot be
-/// reached at all.
+/// the runtime's own id goes nowhere near it, and whether the other session is reachable.
 enum SessionReferenceBrief {
 
     /// The line a terminal is pasted.
@@ -173,10 +181,10 @@ enum SessionReferenceBrief {
             lines.append(
                 "It cannot be messaged — it is you: whatever is asked of it is being asked of you."
             )
-        } else if !isSameProject {
+        } else if !reader.reachableProjectIDs.contains(reference.projectID) {
             lines.append(
-                "It is in another project, so list_sessions, send_to_session and watch_session "
-                    + "cannot reach it from here."
+                "It is outside this session's project and repository checkouts, so "
+                    + "list_sessions, send_to_session and watch_session cannot reach it from here."
             )
         } else if reader.hasSessionTools {
             lines.append(
@@ -275,10 +283,14 @@ extension SessionReferenceReader {
         case .terminal: receivesBridge = session.kind.supports(.terminalThreadingBridge)
         case .conversation: receivesBridge = session.kind.supports(.threadingBridge)
         }
+        let project = store.project(forSessionID: sessionID)
         return SessionReferenceReader(
             sessionID: sessionID,
-            projectID: store.project(forSessionID: sessionID)?.id,
-            hasSessionTools: receivesBridge && MCPToolCatalog.isEnabled(MCPToolCatalog.workspace)
+            projectID: project?.id,
+            hasSessionTools: receivesBridge && MCPToolCatalog.isEnabled(MCPToolCatalog.workspace),
+            reachableProjectIDs: project.map {
+                WorkspaceControlPlane.communicationProjectIDs(for: $0, among: store.projects)
+            } ?? []
         )
     }
 }

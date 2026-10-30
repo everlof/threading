@@ -308,7 +308,8 @@ turn ends. The reasoning, the turn-end signal it waits on and the receipt it pro
 [`sessions.md`](sessions.md).
 
 The **Other sessions** group (`workspace-control`) is the first that sees past the calling
-session — `list_sessions` and `send_to_session`, scoped to the calling session's own project.
+session — `list_sessions` and `send_to_session`, scoped to the calling session's own project
+and added local checkouts of the same repository (see [control-plane.md](control-plane.md)).
 The tools own wording only: scope, membership and every refusal live in
 `WorkspaceControlPlane`, injected through `AgentToolDependencies`, so a future CLI or remote
 binding cannot come away with looser answers than MCP gets. See

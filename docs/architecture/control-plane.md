@@ -52,9 +52,11 @@ independent, none inferable from another:
   (`MCPSessionRegistry`), never from an argument, so a caller cannot claim to be a session it
   is not. Future cases: the user's own UI, an extension identity, a CLI, a remote device.
 - **`ControlScope`** — what the actor may see and touch. `.project`, `.sessions` and `.projects`
-  each own their membership rule. The implicit regular-session grant remains its own project plus
-  self-only lifecycle operations; the Manager template writes only one `.project` grant. No UI
-  creates a cross-project grant by implication.
+  each own their membership rule. Ordinary communication uses the caller's project plus added local
+  checkouts sharing its nonempty `lastKnownRepositoryIdentity`; missing identities and remote
+  projects stay checkout-scoped. `communicationProjectIDs` owns this rule and uses in-memory
+  metadata, never filesystem work. Self lifecycle remains self-only, and the Manager template
+  still writes one exact `.project` grant. Communication never expands that managerial authority.
 - **`ControlOperation` and `ControlGrant`** — the closed operation vocabulary and durable,
   revocable authority joining an actor, scope, exact operation set, permission-mode ceiling,
   managed-workspace delivery cap and optional spend ceiling. `GrantOrigin` has no agent-authored
@@ -73,6 +75,14 @@ can never be looser for one caller than another. Dependencies are injected closu
 and no live agent — and the live set is assembled once, on `AgentToolDependencies`, which is
 also what keeps handlers out of the singleton business (`check_architecture_boundaries.sh`
 enforces that).
+
+**Communication scaling.** Scope is resolved on demand from project values: normally tens of
+checkouts and hundreds of chats, with a regression fixture of 10,001 chats. Resolving the added
+checkout IDs is O(projects); listing is O(projects + sessions) for the usual fixed implicit
+grants. Each listed row carries its known owning project into membership checks, rather than
+looking the project up again for every row. The fixture pins two caller-project lookups regardless
+of row count. No Git invocation, filesystem read, view construction or polling is added to this
+path. Mail storage remains asynchronous in `MacMailbox`.
 
 Two refusal decisions worth their words:
 
@@ -97,8 +107,10 @@ tool filter retains the exact Supervision identities as a ceiling, so conferring
 already-running chat can make those tools discoverable after the notification without granting
 them before it.
 
-Regular sessions retain the implicit contract they had before grants: list, send, steer and watch
-within their own project, and archive or rename themselves. A Manager grant adds the complete
+Regular sessions can list, send, steer and watch across their added local repository checkouts,
+and archive or rename themselves. Both mail admission and its directory use this same plane.
+The dragged session brief also resolves these checkout IDs, so it cannot tell a reachable peer
+that worktree communication is unavailable. A Manager grant adds the complete
 operation set. Ten grant-derived tools form the **Supervision** catalogue: `list_accounts`,
 `session_cost`, `resume_session`, `spawn_session`, `move_session_to_account`,
 `finish_workspace`, `adopt_session`, `release_session`, `subscribe_to_children` and
@@ -296,16 +308,17 @@ sibling, visible only to managers.
 The group follows the catalog's standing policy — absent from the disabled set means enabled —
 and the Tools page switch is the off switch; what made "on by default" defensible is that
 every consequence is visible (transcript echo, queue rail, receipt in the ledger) and scoped
-to one project. `send_to_session` addresses targets by **Threading id** only — the id every
-app-side surface keys on — never a provider transcript id, which lives in a different identity
+to the project and its added local repository checkouts. `send_to_session` addresses targets by
+**Threading id** only — the id every app-side surface keys on — never a provider transcript id, which lives in a different identity
 space and is absent for half the runtimes.
 
 `list_sessions`' heading also prints the caller's **project id**
 (`AgentToolCoordinator.sessionListingHeading`). `manage_automation` (`projectID`) and
 `create_trigger_draft` (`project_id`) require it, and until 2026-10-02 no tool printed it: an
 agent asked to set up an automation could not supply a valid one, and the unknown id came back
-as "The trigger record no longer exists." It is the caller's own project only, the same scope as
-the rows. An unknown id is now refused with `AutomationToolActions.Refusal.unknownProject`, which
+as "The trigger record no longer exists." It is the caller's own checkout project, even when
+the rows include sibling checkouts. An unknown id is now refused with
+`AutomationToolActions.Refusal.unknownProject`, which
 names `list_sessions`. `AutomationProjectDiscoveryTests` holds both halves. For any other
 project, `manage_automation` has `projects` (every project's id, paged like `hosts`) and
 `addProject` (an existing absolute folder, through the sidebar's idempotent
@@ -524,8 +537,8 @@ a reference sits in a composer while the person keeps typing, and `working`/`idl
 so a row renamed mid-gesture lands under its new name.
 
 `SessionReferenceReader` is **who is reading**, reduced to what changes the words: the receiver's
-project (scope is per project, and out-of-scope answers as nonexistent, so a row from another
-project is told "cannot reach it from here" rather than handed a call that will be refused);
+project and reachable repository checkout IDs (out-of-scope answers as nonexistent, so an unrelated
+repository is told "cannot reach it from here" rather than handed a call that will be refused);
 whether its *surface* receives the bridge (`.terminalThreadingBridge` for a terminal drop,
 `.threadingBridge` for a composer drop — an OpenCode TUI has no tools and is told so) and the
 "Other sessions" group is on; and whether the row is the receiver itself ("it is you"). The

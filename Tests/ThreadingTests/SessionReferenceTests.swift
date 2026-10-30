@@ -112,6 +112,16 @@ final class SessionReferenceTests: XCTestCase {
         )
     }
 
+    func testBriefOffersCommunicationToAnotherCheckoutInTheSameRepository() {
+        let ref = reference(projectID: otherProjectID)
+        let reader = SessionReferenceReader(sessionID: SessionID(), projectID: projectID,
+                                            hasSessionTools: true, reachableProjectIDs: [otherProjectID])
+        let text = SessionReferenceBrief.sentences(for: ref, reader: reader).joined(separator: " ")
+        XCTAssertTrue(text.contains("in the project “Threading” at /Users/x/repo/Threading"), text)
+        XCTAssertTrue(text.contains("mail_send to \"\(ref.threadingID)\""), text)
+        XCTAssertFalse(text.contains("cannot reach it from here"), text)
+    }
+
     func testBriefSaysWhenTheReaderHasNoSessionTools() {
         let ref = reference()
         let text = SessionReferenceBrief.sentences(for: ref, reader: reader(hasSessionTools: false))

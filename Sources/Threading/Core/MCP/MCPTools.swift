@@ -2732,7 +2732,7 @@ struct RespondToPermissionArguments: Codable, Sendable {
   }
 }
 
-/// A message for another session in this project, addressed by its Threading id.
+/// A message for another reachable session, addressed by its Threading id.
 ///
 /// The id is the target's `SessionID` — the one `list_sessions` prints — never a provider
 /// transcript id, which belongs to a different identity space and can be absent for half the
@@ -7653,14 +7653,14 @@ enum MCPTools {
         completion(handler.listProjectSessions(for: sessionID))
       },
       description: """
-        List the sessions in this session's own project: each row carries the session's \
-        Threading id, its name, its agent, whether it is working right now, and which \
+        List sessions in this project and added local checkouts of the same repository. Each row \
+        carries the session's Threading id, its name, its agent, whether it is working right now, and which \
         input surface is live — a chat, a terminal, or nothing (dormant). A side chat \
         also names the session it was forked from, which is how you find your parent \
         when you were asked to report a conclusion back.
 
-        The ids this prints are what send_to_session addresses. It sees only this \
-        project — other projects' sessions do not exist as far as this tool is concerned. \
+        The ids this prints are what send_to_session addresses. Other repositories are out \
+        of scope unless explicitly granted. Manager is not required to communicate across worktrees. \
         The heading also names the project's own id: the projectID manage_automation \
         takes and the project_id create_trigger_draft takes.
         """,
@@ -7689,8 +7689,8 @@ enum MCPTools {
         handler.sendToSession(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Send a message to another session in this project, addressed by the Threading id \
-        list_sessions prints. The message is delivered as that session's own next turn: \
+        Send a message to a reachable session in this project or its repository checkouts, \
+        addressed by the Threading id list_sessions prints. The message is delivered as that session's own next turn: \
         an idle chat session receives it immediately, a chat session mid-turn queues it \
         visibly behind the turn in flight (where the user can edit or remove it), and a \
         terminal session is typed into only while its agent is idle. A busy terminal or a \
@@ -7760,8 +7760,8 @@ enum MCPTools {
         completion(handler.watchSession(arguments, for: sessionID))
       },
       description: """
-        Watch the next activity edge of another chat/session in this project without polling. If \
-        it has a turn in flight, the notice arrives when that turn finishes, its agent exits, or \
+        Watch the next activity edge of a reachable session in this project or its repository \
+        checkouts without polling. If it has a turn in flight, the notice arrives when that turn finishes, its agent exits, or \
         it stops at its usage limit. If it is already settled, the notice arrives when its next \
         turn starts.
 

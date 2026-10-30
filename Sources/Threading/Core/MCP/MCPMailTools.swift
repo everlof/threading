@@ -4,7 +4,7 @@ import Foundation
 
 /// A message for another agent's mailbox.
 ///
-/// `to` is either a Threading session id in this project (exactly as `list_sessions` prints it)
+/// `to` is either a reachable Threading session id (exactly as `list_sessions` prints it)
 /// or a full mail address, `<host>/session/<uuid>` or `<host>/worker/<uuid>`, as `mail_directory`
 /// prints one. The sender is never an argument: the MCP URL token names it.
 struct MailSendArguments: Codable, Sendable {
@@ -76,8 +76,8 @@ extension MCPTools {
         handler.mailSend(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Send durable mail to another agent's mailbox: a session in this project (by the \
-        Threading id list_sessions prints) or any address mail_directory lists, including \
+        Send durable mail to another agent's mailbox: a session in this project or its repository \
+        checkouts (by the Threading id list_sessions prints) or any address mail_directory lists, including \
         agents on other hosts. Sending is storing — it succeeds whether the recipient is idle, \
         busy, not running or on a host that is offline right now; it is refused only for \
         authority, bounds or an unknown address. A busy recipient is told only that mail is \
@@ -211,8 +211,8 @@ extension MCPTools {
       },
       description: """
         Print this session's own mail address and the addresses it may write to with \
-        mail_send: the other sessions in this project, plus any agent the user has granted or \
-        named, here or on another host. A listing confers nothing by itself — the recipient's \
+        mail_send: sessions in this project and its repository checkouts, plus any agent the user \
+        has granted or named, here or on another host. A listing confers nothing by itself — the recipient's \
         host decides when the mail arrives.
         """,
       inputSchema: MCPInputSchema(properties: [:], required: [])

@@ -32105,13 +32105,13 @@
         }
       }
     },
-    "Let a session list the project’s other sessions and send them mail." : {
+    "Let a session find and mail chats across this repository’s checkouts." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Låt en session lista projektets övriga sessioner och skicka post till dem."
+            "value" : "Låt en session hitta och skicka post till chattar i repots olika utcheckningar."
           }
         }
       }

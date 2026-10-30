@@ -7,8 +7,8 @@ import ThreadingController
 /// `mail_directory`. `AgentToolCoordinator` only forwards to this service.
 ///
 /// Scope is the control plane's (`WorkspaceControlPlane.admitMail`): a session may write to the
-/// sessions of its own project, and an out-of-scope session answers exactly like one that does
-/// not exist. Another host's recipient is queued for that host, whose own grants decide when it
+/// sessions of its project and added local repository checkouts. An out-of-scope session answers
+/// exactly like one that does not exist. Another host's recipient is queued for that host, whose own grants decide when it
 /// arrives. Storage, idempotency, chains and fuses are the controller store's. This file owns the
 /// words only.
 @MainActor
@@ -249,8 +249,8 @@ final class MailAgentCommandService {
 
     nonisolated static let unknownRecipientWords = """
         No mailbox with that address is reachable from here. mail_directory lists every address \
-        this session can write to: this project's sessions, and any agent the user has granted \
-        or named.
+        this session can write to: this project's sessions and repository checkouts, and any agent \
+        the user has granted or named.
         """
 
     nonisolated static let hostUnconfirmedWords = """
@@ -336,7 +336,7 @@ final class MailAgentCommandService {
             return lines.joined(separator: "\n")
         }
         if !siblings.isEmpty {
-            lines.append("Sessions in this project (notify):")
+            lines.append("Reachable sessions (notify):")
             for row in siblings {
                 let address = hosted[row.id] ?? MailAddress(host: own.host, kind: .session, id: row.id.rawValue)
                 lines.append("• “\(row.title)” — \(address)")

@@ -191,13 +191,30 @@ final class WorkspaceControlPlane {
 
     // MARK: - Scope
 
-    /// The scope an actor holds. Slice one: a session sees exactly its own project.
+    /// Ordinary communication follows added local checkouts of the same verified repository.
+    /// Stored manager grants remain exact; sharing a repository does not grant lifecycle control.
     func scope(for actor: ControlActor) -> ControlScope? {
         switch actor {
         case .agentSession(let sessionID):
             guard let project = dependencies.projectForSession(sessionID) else { return nil }
-            return .project(project.id)
+            let ids = Self.communicationProjectIDs(for: project, among: dependencies.allProjects())
+            return ids.count == 1 ? .project(project.id) : .projects(ids)
         }
+    }
+
+    /// Uses the store's repository identity, never filesystem or Git work on a tool callback.
+    /// A local path is not evidence about a remote host's repository. Missing identities keep
+    /// the original checkout boundary, including ordinary non-Git folders.
+    static func communicationProjectIDs(for project: Project, among projects: [Project]) -> Set<ProjectID> {
+        guard project.executionHost == nil,
+              let identity = project.lastKnownRepositoryIdentity,
+              !identity.isEmpty else { return [project.id] }
+        var ids: Set<ProjectID> = [project.id]
+        for candidate in projects where candidate.executionHost == nil
+            && candidate.lastKnownRepositoryIdentity == identity {
+            ids.insert(candidate.id)
+        }
+        return ids
     }
 
     /// The one authorization boundary for every control-plane operation.
@@ -220,7 +237,8 @@ final class WorkspaceControlPlane {
         let authority = effectiveAuthority(
             for: actor,
             callerID: callerID,
-            callerProjectID: callerProject.id
+            callerProject: callerProject,
+            projects: dependencies.allProjects()
         )
         if let targetID {
             guard let target = dependencies.session(targetID),
@@ -257,19 +275,21 @@ final class WorkspaceControlPlane {
             return .failure(refusal)
         }
 
+        let projects = dependencies.allProjects()
         let authority = effectiveAuthority(
             for: actor,
             callerID: callerID,
-            callerProjectID: project.id
+            callerProject: project,
+            projects: projects
         ).filter { $0.operations.contains(.listSessions) }
-        let projects = dependencies.allProjects()
-        let rows = (projects.isEmpty ? [project] : projects).flatMap(\.sessions)
-            .filter { session in
+        let rows = (projects.isEmpty ? [project] : projects).flatMap { candidate in
+            candidate.sessions.filter { session in
                 !session.isArchived && authority.contains {
-                    scope($0.scope, contains: session, sessionID: session.id)
+                    scope($0.scope, contains: session, sessionID: session.id, projectID: candidate.id)
                 }
             }
             .map { overview(of: $0, caller: callerID) }
+        }
         return .success(rows)
     }
 
@@ -796,7 +816,7 @@ final class WorkspaceControlPlane {
     static func provenancePrefixed(_ message: String, from source: AgentSession) -> String {
         """
         [Cross-session message from “\(safeHeaderTitle(source.displayTitle))” — Threading \
-        session \(source.id.uuidString.lowercased()) in this project. Sent by that session's \
+        session \(source.id.uuidString.lowercased()). Sent by that session's \
         agent, not typed by the user. Only this first line is written by Threading.]
 
         \(message)
@@ -880,11 +900,12 @@ final class WorkspaceControlPlane {
     private func effectiveAuthority(
         for actor: ControlActor,
         callerID: SessionID,
-        callerProjectID: ProjectID
+        callerProject: Project,
+        projects: [Project]
     ) -> [EffectiveGrant] {
         var result = [
             EffectiveGrant(
-                scope: .project(callerProjectID),
+                scope: .projects(Self.communicationProjectIDs(for: callerProject, among: projects)),
                 operations: ControlOperation.regularProjectOperations
             ),
             EffectiveGrant(
@@ -927,15 +948,16 @@ final class WorkspaceControlPlane {
     private func scope(
         _ scope: ControlScope,
         contains session: AgentSession,
-        sessionID: SessionID
+        sessionID: SessionID,
+        projectID knownProjectID: ProjectID? = nil
     ) -> Bool {
         switch scope {
         case .sessions(let ids):
             return ids.contains(sessionID)
         case .project(let projectID):
-            return dependencies.projectForSession(sessionID)?.id == projectID
+            return (knownProjectID ?? dependencies.projectForSession(sessionID)?.id) == projectID
         case .projects(let projectIDs):
-            guard let projectID = dependencies.projectForSession(sessionID)?.id else { return false }
+            guard let projectID = knownProjectID ?? dependencies.projectForSession(sessionID)?.id else { return false }
             return projectIDs.contains(projectID)
         case .subagentsOf(let parentID):
             return session.subagentParentID == parentID

@@ -201,6 +201,7 @@ final class AgentMailControlTests: XCTestCase {
             if stores { stored.messages.append((text, target, caller)) }
             done(stores)
         }
+        dependencies.allProjects = { [fixture.project, fixture.other] }
         return WorkspaceControlPlane(dependencies: dependencies)
     }
 
@@ -241,6 +242,66 @@ final class AgentMailControlTests: XCTestCase {
                            "the body is stored without the delivery header; the inbox vouches for the sender")
             XCTAssertEqual(stored.messages.first?.caller, fixture.caller.id)
         }
+    }
+
+    func testBusyAndDormantWorktreePeersReceiveMailInBothDirections() throws {
+        var fixture = Fixture()
+        fixture.project.lastKnownRepositoryIdentity = "/tmp/alpha/.git"
+        fixture.other.lastKnownRepositoryIdentity = fixture.project.lastKnownRepositoryIdentity
+        for outcome in [SessionMessageDelivery.Outcome.busyTerminal, .noLiveSurface] {
+            let stored = Stored()
+            let control = plane(fixture, outcome: outcome, stored: stored)
+            for (caller, target) in [(fixture.caller, fixture.stranger), (fixture.stranger, fixture.caller)] {
+                XCTAssertEqual(try control.admitMail(to: target.id, from: .agentSession(caller.id)).get().id, target.id)
+                guard case .storedInMailbox(let row) = send(control, "Worktree review", to: target.id, from: caller.id) else {
+                    return XCTFail("Worktree mail must reach a busy or dormant recipient")
+                }
+                XCTAssertEqual(row.id, target.id)
+            }
+            XCTAssertEqual(stored.messages.map(\.target), [fixture.stranger.id, fixture.caller.id])
+        }
+    }
+
+    func testMailToolsDeliverBetweenRepositoryCheckoutsAndExposeBothInDirectory() async throws {
+        var fixture = Fixture()
+        fixture.project.lastKnownRepositoryIdentity = "/tmp/alpha/.git"
+        fixture.other.lastKnownRepositoryIdentity = fixture.project.lastKnownRepositoryIdentity
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let state = StateManager(appSupportDirectory: directory)
+        defer { state.closeDatabase() }
+        XCTAssertTrue(state.saveProjectsState(ProjectsState(projects: [fixture.project, fixture.other])))
+        let projects = ProjectStore(stateManager: state)
+        let mailbox = MacMailbox(databaseURL: directory.appendingPathComponent("mailbox.db"))
+        let mailboxes = RemoteSessionMailboxes()
+        mailboxes.endpointForSession = { _ in nil }
+        var arrivals: [SessionID] = []
+        let service = MailAgentCommandService(
+            control: plane(fixture, outcome: .noLiveSurface, stored: Stored()),
+            projects: projects,
+            mailbox: mailbox,
+            arrived: { target, _ in arrivals.append(target) },
+            queuedForHost: { _ in XCTFail("Local worktree mail must not leave this host") },
+            mailboxes: mailboxes
+        )
+
+        for (caller, target) in [(fixture.caller, fixture.stranger), (fixture.stranger, fixture.caller)] {
+            let listing: MCPToolResult = await withCheckedContinuation { continuation in
+                service.directory(for: caller.id) { continuation.resume(returning: $0) }
+            }
+            XCTAssertFalse(listing.isError, listing.text)
+            XCTAssertTrue(listing.text.contains(target.id.uuidString.lowercased()), listing.text)
+            let sent: MCPToolResult = await withCheckedContinuation { continuation in
+                service.send(.init(to: target.id.uuidString, text: "Review from \(caller.title)"), for: caller.id) {
+                    continuation.resume(returning: $0)
+                }
+            }
+            XCTAssertFalse(sent.isError, sent.text)
+            let inbox = try await mailbox.inbox(for: target.id, name: target.title, after: 0, limit: 10)
+            XCTAssertEqual(inbox.items.map { $0.message.envelope.text }, ["Review from \(caller.title)"])
+            XCTAssertEqual(inbox.items.first?.message.envelope.sender.id, caller.id.rawValue)
+        }
+        XCTAssertEqual(arrivals, [fixture.stranger.id, fixture.caller.id])
     }
 
     func testAMailboxThatCannotStoreKeepsTheOldRefusals() {

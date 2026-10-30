@@ -7,8 +7,8 @@ extension ControlRefusal {
             "This session is no longer in the sidebar, so it has no project to act in."
         case .targetUnknown:
             """
-            No session with that id is in this project. list_sessions names every one this \
-            session can reach — sessions in other projects are out of reach by design.
+            No session with that id is reachable here. list_sessions names this project's \
+            sessions and added local checkouts of the same repository, plus any explicitly granted scope.
             """
         case .targetArchived:
             "That session has been archived. The user restores it from Settings ▸ Archived."

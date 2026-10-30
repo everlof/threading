@@ -11,17 +11,16 @@ enum ControlActor: Codable, Equatable, Hashable, Sendable {
 
 /// What one actor may see and touch.
 ///
-/// Slice one grants every actor exactly its own project. The cases this enum is missing —
-/// a session subtree, an explicit project set, the whole workspace — are the point of it being
-/// an enum: a broader grant is a new case with its own membership rule, not a loosened check.
+/// Ordinary communication resolves to the caller's project and added local repository checkouts.
+/// Stored grants retain their exact scopes; communication does not widen managerial authority.
 enum ControlScope: Codable, Equatable, Hashable, Sendable {
     /// Every unarchived session in one project.
     case project(ProjectID)
     /// An explicit bounded set of sessions. Used for the implicit self grant today and for
     /// deliberately narrow delegated authority later.
     case sessions(Set<SessionID>)
-    /// Several explicit projects. No manager template creates this; it is available only to a
-    /// future user-authored grant so cross-project reach never arrives by implication.
+    /// Several explicit projects. Also used transiently for repository communication; no
+    /// manager template creates this or implicitly widens its stored lifecycle authority.
     case projects(Set<ProjectID>)
     /// Every session whose lineage names this one as the chat that started it. Never stored:
     /// it is the implicit reach a chat has over its own subagents, resolved from the lineage at
