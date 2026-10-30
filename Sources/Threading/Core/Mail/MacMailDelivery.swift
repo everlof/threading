@@ -16,13 +16,12 @@ import ThreadingController
 /// | Surface | On arrival |
 /// |---|---|
 /// | Native chat, live | `interrupt`: steer the notice into the running turn where the transport can; otherwise, and for `normal`, the notice joins the visible queue. |
-/// | Terminal, idle and boot-verified | The notice is typed as the next turn, through the receipt-backed delivery seam. |
-/// | Terminal, working, hooks can answer | Nothing here: the answering `PostToolUse`/`Stop` hooks notice it mid-turn. |
-/// | Terminal, working, hooks cannot answer | Nothing until its turn settles; then the idle row applies. |
+/// | Terminal, hooks can answer | Nothing here: answering hooks announce mail during a turn or at its next prompt/start. |
+/// | Terminal, hooks cannot answer | Mail stays available through `mail_inbox`; input is never changed. |
 /// | Dormant | Nothing; its next launch's `SessionStart` hook (or, for a chat, its first live edge) announces it. |
 ///
-/// Which terminal row applies is a capability (`AgentCapabilities.answeringMailHooks`), never a
-/// runtime's name.
+/// An idle agent is not proof of an empty human draft. Terminal delivery belongs exclusively
+/// to hooks, including when a native chat changes surface while a mailbox query is in flight.
 @MainActor
 final class MacMailDelivery {
 
@@ -32,11 +31,10 @@ final class MacMailDelivery {
     enum Plan: Equatable {
         case steerNotice
         case queueNotice
-        case typeNotice
-        /// A working terminal whose own hooks will say so mid-turn.
+        /// A terminal whose own hooks announce mail without touching its input.
         case awaitHooks
-        /// A working terminal that cannot be told until its turn settles.
-        case awaitBoundary
+        /// A terminal without answering hooks can explicitly read its inbox.
+        case awaitInbox
         /// Not running; announced at its next launch.
         case awaitLaunch
     }
@@ -44,8 +42,24 @@ final class MacMailDelivery {
     /// The facts `plan` decides from, gathered by the live wrapper.
     struct Facts: Equatable {
         let surface: ControlSessionOverview.Surface
-        let terminalReady: Bool
         let answersHooks: Bool
+    }
+
+    /// Resolves only the affected session; no terminal input capability belongs to mail delivery.
+    @MainActor
+    struct Runtime {
+        let facts: @MainActor (SessionID) -> Facts
+        let chat: @MainActor (SessionID) -> (any AppMessageReceiving)?
+
+        static let live = Runtime(
+            facts: { sessionID in
+                Facts(
+                    surface: SessionMessageDelivery.surface(for: sessionID),
+                    answersHooks: ProjectStore.shared.session(withID: sessionID)?.kind.supports(.answeringMailHooks) ?? false
+                )
+            },
+            chat: { AgentRuntime.shared.conversationRuntimeSurface(for: $0) }
+        )
     }
 
     /// What became of a notice offered to a live chat.
@@ -63,6 +77,7 @@ final class MacMailDelivery {
     static let shared = MacMailDelivery(mailbox: .shared)
 
     private let mailbox: MacMailbox
+    private let runtime: Runtime
     private let observations = AppEventObservations()
     /// Sessions seen live in this run, so a session's first live edge can announce mail that
     /// arrived while it was not running. Bounded by the running-session count.
@@ -75,8 +90,9 @@ final class MacMailDelivery {
 
     // MARK: - Initialization
 
-    init(mailbox: MacMailbox) {
+    init(mailbox: MacMailbox, runtime: Runtime = .live) {
         self.mailbox = mailbox
+        self.runtime = runtime
     }
 
     /// Observes activity edges so mail waiting for a boundary is announced at it.
@@ -96,8 +112,7 @@ final class MacMailDelivery {
         case .chat:
             return priority == .interrupt ? .steerNotice : .queueNotice
         case .terminal:
-            if facts.terminalReady { return .typeNotice }
-            return facts.answersHooks ? .awaitHooks : .awaitBoundary
+            return facts.answersHooks ? .awaitHooks : .awaitInbox
         case .dormant:
             return .awaitLaunch
         }
@@ -120,14 +135,14 @@ final class MacMailDelivery {
     /// Mail was just stored for a Mac session. Decides and performs this surface's delivery.
     func arrived(for sessionID: SessionID, priority: MailPriority) {
         // A host-local mailbox is announced by its host's own hooks.
-        guard !RemoteSessionMailboxes.shared.keepsMailOnHost(sessionID) else { return }
-        let facts = liveFacts(for: sessionID)
+        guard !mailboxes.keepsMailOnHost(sessionID) else { return }
+        let facts = runtime.facts(sessionID)
         switch Self.plan(for: facts, priority: priority) {
-        case .steerNotice, .queueNotice, .typeNotice:
+        case .steerNotice, .queueNotice:
             announce(sessionID, event: .postToolUse, steering: priority == .interrupt)
         case .awaitLaunch:
             considerWake(sessionID)
-        case .awaitHooks, .awaitBoundary:
+        case .awaitHooks, .awaitInbox:
             break
         }
     }
@@ -230,30 +245,18 @@ final class MacMailDelivery {
         }
     }
 
-    // MARK: - Private
+    // MARK: - Activity
 
-    private func activityChanged(_ sessionID: SessionID) {
-        let facts = liveFacts(for: sessionID)
-        guard facts.surface != .dormant else {
+    func activityChanged(_ sessionID: SessionID) {
+        guard runtime.facts(sessionID).surface == .chat else {
             liveSessions.remove(sessionID)
             return
         }
         let firstLiveEdge = liveSessions.insert(sessionID).inserted
-        switch facts.surface {
-        case .chat:
-            // A chat has no SessionStart hook: its first live edge in this run is where mail
-            // that waited for it is announced, all of it, once.
-            if firstLiveEdge { announce(sessionID, event: .sessionStart, steering: false) }
-            else { announceIfUnannounced(sessionID) }
-        case .terminal:
-            // A terminal whose hooks answer is told at launch by its own SessionStart hook; one
-            // whose hooks cannot is told at its first settled edge instead.
-            guard facts.terminalReady else { return }
-            if firstLiveEdge && !facts.answersHooks { announce(sessionID, event: .sessionStart, steering: false) }
-            else { announceIfUnannounced(sessionID) }
-        case .dormant:
-            break
-        }
+        // A chat has no SessionStart hook: its first live edge in this run is where mail
+        // that waited for it is announced, all of it, once.
+        if firstLiveEdge { announce(sessionID, event: .sessionStart, steering: false) }
+        else { announceIfUnannounced(sessionID) }
     }
 
     /// The boundary delivery: only mail no hook or adapter has announced yet.
@@ -271,38 +274,16 @@ final class MacMailDelivery {
     private func announce(_ sessionID: SessionID, event: MailNoticeEvent, steering: Bool) {
         let mailbox = mailbox
         Task { @MainActor in
+            // Capture the receiving chat before the actor hop. Never redirect a notice to a
+            // terminal if this session changes surface while its mailbox is being read.
+            guard self.runtime.facts(sessionID).surface == .chat,
+                  let chat = self.runtime.chat(sessionID), chat.isRunning else { return }
             guard let notice = await mailbox.notice(for: sessionID, event: event) else { return }
-            self.deliver(notice, to: sessionID, steering: steering)
-        }
-    }
-
-    private func deliver(_ notice: String, to sessionID: SessionID, steering: Bool) {
-        if let chat = AgentRuntime.shared.conversationRuntimeSurface(for: sessionID), chat.isRunning {
             let outcome = Self.offer(notice, to: chat, steering: steering)
             if outcome == .notTaken {
                 EventLog.shared.record(.mcp, "Mail notice not taken by chat", ["session": sessionID.uuidString])
             }
-            return
         }
-        // A terminal: typed only through the receipt-backed seam, which refuses a busy or
-        // booting one. The mail stays in the inbox either way; the notice is a hint.
-        SessionMessageDelivery.deliver(notice, to: sessionID) { outcome in
-            guard outcome != .sentNow else { return }
-            EventLog.shared.record(.mcp, "Mail notice not typed", [
-                "session": sessionID.uuidString,
-                "outcome": String(describing: outcome)
-            ])
-        }
-    }
-
-    private func liveFacts(for sessionID: SessionID) -> Facts {
-        let surface = SessionMessageDelivery.surface(for: sessionID)
-        let kind = ProjectStore.shared.session(withID: sessionID)?.kind
-        return Facts(
-            surface: surface,
-            terminalReady: surface == .terminal && SessionMessageDelivery.isReadyForDelivery(sessionID),
-            answersHooks: kind?.supports(.answeringMailHooks) ?? false
-        )
     }
 
     static func title(of sessionID: SessionID) -> String {

@@ -1469,13 +1469,14 @@ entry that closes an ask stays first and silent. The reasoning and measurements 
 Every lifecycle hook above is silent, and stays so — their commands and the frozen-text test in
 `MCPSessionRegistryTests` are unchanged. Agent mail adds the one deliberate exception
 ([`agent-mail.md`](../feature-drafts/agent-mail.md), "Delivery, per surface"): **separate**
-`PostToolUse`, `Stop` and `SessionStart` entries (`MailNoticeHook`), no tool matcher, that POST
-to `/mail-notice/<token>?event=post-tool-use|stop|session-start` and print what comes back.
+`PostToolUse`, `Stop`, `SessionStart` and `UserPromptSubmit` entries (`MailNoticeHook`), no tool
+matcher, that POST to `/mail-notice/<token>?event=<MailNoticeEvent>` and print what comes back.
 `MCPServer.routeMailNotice` answers with the controller's notice (`mailNotice`) as hook JSON —
 `hookSpecificOutput.additionalContext`, or `decision: "block"` with the notice as `reason` at a
 stop — or an empty 200. The notice names counts, senders and hosts, never message text; each
-message is announced once per event kind and blocks a stop at most once, so `stop_hook_active`
-needs no handling of its own. The command keeps `2>/dev/null || true` (Codex: `; true`) and a
+message is announced after a tool once and blocks a stop at most once, so `stop_hook_active`
+needs no handling of its own. Session starts and submitted prompts remind about all still-open
+mail, including ignored notices from an earlier turn. The command keeps `2>/dev/null || true` (Codex: `; true`) and a
 2-second curl timeout, so an absent app prints nothing and exits 0. The "Other sessions" switch
 turns the endpoint silent.
 
@@ -1494,8 +1495,23 @@ turns the endpoint silent.
   token-guarded like every entry there. Adding them changed the file's text once, which costs the
   user **one renewal of their Codex hook trust** — the measured cost recorded under "Codex hooks,
   measured" in the draft; the rewrite's `EventLog` line says so.
-- Which runtimes get them is `AgentCapabilities.answeringMailHooks` (Claude, Codex). Others are
-  told at turn boundaries by `MacMailDelivery`.
+- Which runtimes get them is `AgentCapabilities.answeringMailHooks` (Claude, Codex). Others can
+  explicitly read `mail_inbox`; `MacMailDelivery` never types into any terminal. Idle/boot-ready
+  is not a safe input boundary: a person can be writing an unsent draft. Native chat notices use
+  `AppMessageReceiving`, which has a queue separate from the human composer.
+
+**Latency follows agent boundaries.** A post-tool notice reaches the next model call within the
+same turn; it does not wait for the whole turn to end. Long tools, model thinking/streaming, and
+tools outside the provider's hook coverage can delay it. A completely idle terminal waits for
+its next submitted prompt or session start. The Stop hook is a bounded continuation opportunity,
+not a guarantee that a model reads mail; storage/acknowledgement remain authoritative. No timer
+polls or terminal pastes are added to compensate for a missing boundary.
+
+**Scaling contract:** ordinary mail has a few open messages, with 1,000 allowed per inbox and
+10,000 activity edges as a stress case. Arrival/activity resolve only the affected session;
+terminal edges do no mailbox query, process work or delivery. Native queries remain coalesced
+per session. Each answering hook reads at most the existing 100-row page on the controller actor;
+`UserPromptSubmit` adds one such query per submitted prompt, not per keystroke or output chunk.
 
 **A blocked `Stop` continues the turn, and the silent `Stop` hook does not know.** Both CLIs fire
 `Stop` again after a block (Codex: same `turn_id`). Relayed as is, the first lifecycle finish
@@ -1504,8 +1520,8 @@ would show a working agent idle and let the control plane type into it.
 held until any later mail-hook call proves the turn went on (then dropped) or 20 s pass without
 one (then relayed — a block the agent never saw must not leave a spinner); finish first, a block
 within 10 s reopens the turn with a synthesized start. A reported turn start forgets the last
-relayed finish, so a block in a short follow-up turn (the notice typed at the idle edge starts
-one) holds that turn's own finish instead of being mistaken for the previous turn's.
+relayed finish, so a block in a short follow-up turn holds that turn's own finish instead of
+being mistaken for the previous turn's.
 `MailNoticeHookTests` holds the sequences.
 
 ## After a reattach

@@ -78,6 +78,26 @@ struct ControllerMailTests {
         _ = try await store.finish(executionID: b.execution.id, destination: "draft", payload: "Done")
     }
 
+    @Test func aNewPromptRemindsAboutUnacknowledgedMailWithoutRepeatingAtEveryTool() async throws {
+        let (directory, store) = try fixture.fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (a, b, _, bAddress) = try await pair(store)
+        _ = try await store.setMailGrant(recipient: bAddress, sender: "*", expectedRevision: 0, mode: .notify, allowsInterrupt: false)
+        let id = UUID()
+        _ = try await store.sendMail(executionID: a.execution.id, to: bAddress, id: id, text: "SECRET-BODY", replyTo: nil, priority: .normal)
+
+        let first = try #require(try await store.mailNotice(executionID: b.execution.id, event: .userPromptSubmit))
+        #expect(first.contains("1 unread mail message") && !first.contains("SECRET-BODY"))
+        #expect(try await store.mailNotice(executionID: b.execution.id, event: .postToolUse) == nil)
+        #expect(try await store.mailNotice(executionID: b.execution.id, event: .stop) != nil)
+        #expect(try await store.mailNotice(executionID: b.execution.id, event: .stop) == nil)
+        // A later user turn reminds again, including mail whose stop notice was ignored.
+        #expect(try await store.mailNotice(executionID: b.execution.id, event: .userPromptSubmit) == first)
+        #expect(try await store.mailNotice(executionID: b.execution.id, event: .stop) == nil)
+        _ = try await store.acknowledgeMail(executionID: b.execution.id, ids: [id])
+        #expect(try await store.mailNotice(executionID: b.execution.id, event: .userPromptSubmit) == nil)
+    }
+
     @Test func chainFuseCannotBeEscapedByOmittingReplyTo() async throws {
         let (directory, store) = try fixture.fixture()
         defer { try? FileManager.default.removeItem(at: directory) }

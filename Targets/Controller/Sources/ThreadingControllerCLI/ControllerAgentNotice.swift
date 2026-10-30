@@ -44,14 +44,14 @@ enum ControllerAgentNotice {
     }
 
     /// The shape both Claude Code and Codex accept: additional context after a tool call or at
-    /// session start, and a one-time block with a reason at a stop.
+    /// prompt/session start, and a one-time block with a reason at a stop.
     static func hookOutput(event: MailNoticeEvent, notice: String) -> MCPValue {
         switch event {
         case .stop:
             return .object(["decision": .string("block"), "reason": .string(notice)])
-        case .postToolUse, .sessionStart:
+        case .postToolUse, .sessionStart, .userPromptSubmit:
             return .object(["hookSpecificOutput": .object([
-                "hookEventName": .string(event == .stop ? "Stop" : event == .postToolUse ? "PostToolUse" : "SessionStart"),
+                "hookEventName": .string(event.hookName),
                 "additionalContext": .string(notice)
             ])])
         }

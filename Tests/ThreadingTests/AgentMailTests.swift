@@ -353,12 +353,68 @@ final class MacMailDeliveryTests: XCTestCase {
 
     func testThePlanFollowsTheSurfaceAndNeverTheRuntimeName() {
         typealias Facts = MacMailDelivery.Facts
-        XCTAssertEqual(MacMailDelivery.plan(for: Facts(surface: .chat, terminalReady: false, answersHooks: true), priority: .interrupt), .steerNotice)
-        XCTAssertEqual(MacMailDelivery.plan(for: Facts(surface: .chat, terminalReady: false, answersHooks: true), priority: .normal), .queueNotice)
-        XCTAssertEqual(MacMailDelivery.plan(for: Facts(surface: .terminal, terminalReady: true, answersHooks: false), priority: .normal), .typeNotice)
-        XCTAssertEqual(MacMailDelivery.plan(for: Facts(surface: .terminal, terminalReady: false, answersHooks: true), priority: .interrupt), .awaitHooks)
-        XCTAssertEqual(MacMailDelivery.plan(for: Facts(surface: .terminal, terminalReady: false, answersHooks: false), priority: .normal), .awaitBoundary)
-        XCTAssertEqual(MacMailDelivery.plan(for: Facts(surface: .dormant, terminalReady: false, answersHooks: true), priority: .interrupt), .awaitLaunch)
+        XCTAssertEqual(MacMailDelivery.plan(for: Facts(surface: .chat, answersHooks: true), priority: .interrupt), .steerNotice)
+        XCTAssertEqual(MacMailDelivery.plan(for: Facts(surface: .chat, answersHooks: true), priority: .normal), .queueNotice)
+        XCTAssertEqual(MacMailDelivery.plan(for: Facts(surface: .terminal, answersHooks: false), priority: .normal), .awaitInbox)
+        XCTAssertEqual(MacMailDelivery.plan(for: Facts(surface: .terminal, answersHooks: true), priority: .interrupt), .awaitHooks)
+        XCTAssertEqual(MacMailDelivery.plan(for: Facts(surface: .dormant, answersHooks: true), priority: .interrupt), .awaitLaunch)
+    }
+
+    func testTerminalArrivalAndActivityLeaveTheNoticeForTheHook() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MailDelivery-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mailbox = MacMailbox(databaseURL: directory.appendingPathComponent("mailbox.db"))
+
+        for answersHooks in [true, false] {
+            let recipient = SessionID()
+            let address = try await mailbox.register(recipient, name: "Terminal with a human draft")
+            let delivery = MacMailDelivery(mailbox: mailbox, runtime: .init(
+                facts: { _ in .init(surface: .terminal, answersHooks: answersHooks) },
+                chat: { _ in XCTFail("Terminal mail must not attempt app-message delivery"); return nil }
+            ))
+            for priority in [MailPriority.normal, .interrupt] {
+                _ = try await mailbox.send(
+                    from: SessionID(), senderName: "Peer", to: address, id: UUID(),
+                    text: "PEER-BODY", replyTo: nil, priority: priority, ownerAdmitted: true
+                )
+                delivery.arrived(for: recipient, priority: priority)
+            }
+            // Output/activity bursts must not turn idle edges into notice delivery or queries.
+            for _ in 0..<10_000 { delivery.activityChanged(recipient) }
+            let unannounced = await mailbox.hasUnannouncedMail(for: recipient)
+            XCTAssertTrue(unannounced, "arrival and idle edges must not consume the hook's notice")
+            let notice = await mailbox.notice(for: recipient, event: .userPromptSubmit)
+            XCTAssertTrue(try XCTUnwrap(notice).contains("2 unread mail messages"))
+            XCTAssertFalse(try XCTUnwrap(notice).contains("PEER-BODY"))
+            let repeated = await mailbox.notice(for: recipient, event: .postToolUse)
+            XCTAssertNil(repeated, "the next tool must not repeat the new-prompt notice")
+        }
+    }
+
+    func testAChatSwitchingToTerminalBeforeAnnouncementLeavesMailForHooks() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MailSurfaceChange-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mailbox = MacMailbox(databaseURL: directory.appendingPathComponent("mailbox.db"))
+        let recipient = SessionID()
+        let address = try await mailbox.register(recipient, name: "Switching chat")
+        _ = try await mailbox.send(
+            from: SessionID(), senderName: "Peer", to: address, id: UUID(), text: "Waiting",
+            replyTo: nil, priority: .normal, ownerAdmitted: true
+        )
+        var surface = ControlSessionOverview.Surface.chat
+        let rechecked = expectation(description: "announcement rechecks the surface")
+        let delivery = MacMailDelivery(mailbox: mailbox, runtime: .init(
+            facts: { _ in
+                if surface == .terminal { rechecked.fulfill() }
+                return .init(surface: surface, answersHooks: true)
+            },
+            chat: { _ in XCTFail("A switched surface must not receive the notice"); return nil }
+        ))
+        delivery.arrived(for: recipient, priority: .normal)
+        surface = .terminal
+        await fulfillment(of: [rechecked], timeout: 2)
+        let unannounced = await mailbox.hasUnannouncedMail(for: recipient)
+        XCTAssertTrue(unannounced)
     }
 
     func testOnlyRuntimesWhoseHooksAnswerClaimTheCapability() {
@@ -399,7 +455,8 @@ final class MailNoticeHookTests: XCTestCase {
         XCTAssertEqual(stop["decision"] as? String, "block")
         XCTAssertEqual(stop["reason"] as? String, "Threading: 1 unread")
 
-        for (event, name) in [(MailNoticeEvent.postToolUse, "PostToolUse"), (.sessionStart, "SessionStart")] {
+        for (event, name) in [(MailNoticeEvent.postToolUse, "PostToolUse"), (.sessionStart, "SessionStart"),
+                              (.userPromptSubmit, "UserPromptSubmit")] {
             let object = MacMailHookOutput.object(event: event, notice: "n")
             let specific = try XCTUnwrap(object["hookSpecificOutput"] as? [String: String])
             XCTAssertEqual(specific, ["hookEventName": name, "additionalContext": "n"])
@@ -407,6 +464,7 @@ final class MailNoticeHookTests: XCTestCase {
         XCTAssertTrue(MacMailHookOutput.silence.body.isEmpty)
         XCTAssertEqual(MacMailHookOutput.silence.status, 200)
         XCTAssertEqual(MCPServer.mailNoticeEvent(inQuery: "event=stop"), .stop)
+        XCTAssertEqual(MCPServer.mailNoticeEvent(inQuery: "event=user-prompt-submit"), .userPromptSubmit)
         XCTAssertNil(MCPServer.mailNoticeEvent(inQuery: "event=bogus"))
     }
 

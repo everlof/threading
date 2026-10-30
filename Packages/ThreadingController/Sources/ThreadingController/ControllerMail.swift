@@ -155,7 +155,22 @@ public struct MailMailbox: Codable, Equatable, Sendable {
     public let name: String
 }
 
-public enum MailNoticeEvent: String, Codable, Sendable { case postToolUse = "post-tool-use", stop, sessionStart = "session-start" }
+public enum MailNoticeEvent: String, Codable, Sendable {
+    case postToolUse = "post-tool-use"
+    case stop
+    case sessionStart = "session-start"
+    case userPromptSubmit = "user-prompt-submit"
+
+    /// Claude and Codex use the same names in their answering-hook JSON.
+    public var hookName: String {
+        switch self {
+        case .postToolUse: "PostToolUse"
+        case .stop: "Stop"
+        case .sessionStart: "SessionStart"
+        case .userPromptSubmit: "UserPromptSubmit"
+        }
+    }
+}
 
 /// Every mail notice opens with this, so a host can tell a turn its own notice started from one a
 /// person started.
@@ -769,7 +784,8 @@ extension ControllerStore {
 
     /// One host-authored line for a hook to inject, or nil. It names counts, senders and hosts,
     /// never message text, so a peer's words cannot arrive as harness context. Each message is
-    /// announced once per event kind, and blocks a stop at most once.
+    /// announced after a tool once, and blocks a stop at most once. A new session or user prompt
+    /// reminds the agent about all still-unacknowledged mail.
     public func mailNotice(_ recipient: MailAddress, event: MailNoticeEvent) throws -> String? {
         try db.transaction {
             let rows = try db.rows("""
@@ -783,7 +799,7 @@ extension ControllerStore {
                 switch event {
                 case .postToolUse: announce = message.state == .inbox
                 case .stop: announce = message.stopBlocked != true
-                case .sessionStart: announce = true
+                case .sessionStart, .userPromptSubmit: announce = true
                 }
                 guard announce else { continue }
                 if event == .stop { message.stopBlocked = true }

@@ -243,6 +243,17 @@ class MailTests(unittest.TestCase):
         # The notice hook works for a session too, and says nothing when there is nothing new.
         notice = subprocess.run([CONTROLLER, "agent-notice", "session-start"], input="{}", capture_output=True, text=True, timeout=15, env=env)
         self.assertEqual((notice.returncode, notice.stdout), (0, ""))
+        # A prompt submitted after an idle interval sees waiting mail without terminal typing.
+        self.vps.call("mail-grant-set", session, worker_address, "0", "notify", "normal")
+        self.vps.call("mail-send", worker_address, session, str(uuid.uuid4()), self.vps.file("prompt-mail", "PRIVATE-REPLY-BODY"))
+        notice = subprocess.run([CONTROLLER, "agent-notice", "user-prompt-submit"], input="{}", capture_output=True, text=True, timeout=15, env=env)
+        self.assertEqual(notice.returncode, 0, notice.stderr)
+        specific = json.loads(notice.stdout)["hookSpecificOutput"]
+        self.assertEqual(specific["hookEventName"], "UserPromptSubmit")
+        self.assertIn("1 unread mail message", specific["additionalContext"])
+        self.assertNotIn("PRIVATE-REPLY-BODY", specific["additionalContext"])
+        repeated = subprocess.run([CONTROLLER, "agent-notice", "post-tool-use"], input="{}", capture_output=True, text=True, timeout=15, env=env)
+        self.assertEqual((repeated.returncode, repeated.stdout), (0, ""))
 
     def test_a_moved_session_keeps_its_unread_mail_and_late_mail_is_forwarded_once(self):
         session = str(uuid.uuid4())

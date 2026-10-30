@@ -741,10 +741,11 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   (ask, answer, follow-up) long before anything looped, while the per-chain count already stops a
   real loop — every host a cross-host message passes counts it, so a ring of hosts is bounded too.
   Spend limits belong to admission ([usage ledger](../feature-drafts/agent-usage-ledger.md)).
-- **Notices, not bodies.** `threading-controller agent-notice post-tool-use|stop|session-start` is
+- **Notices, not bodies.** `threading-controller agent-notice post-tool-use|stop|session-start|user-prompt-submit` is
   the hook command a recipe installs. It prints one host-authored line naming counts, senders and
   hosts as hook JSON (`hookSpecificOutput.additionalContext`, or `decision: block` once per
-  message at a stop) and always exits 0. Measured on Codex 0.160.0 and the Claude Code hook
+  message at a stop) and always exits 0. Prompt/session starts remind about all open mail;
+  post-tool notices announce only fresh mail. Measured on Codex 0.160.0 and the Claude Code hook
   contract; a model may ignore a notice, which delays mail but cannot lose it.
 - **Ask.** `mail_ask` sends a question as mail and yields the work in one transaction; the
   question's recipient is `agent:<address>`. The reply (`reply_to` that message) answers it on the

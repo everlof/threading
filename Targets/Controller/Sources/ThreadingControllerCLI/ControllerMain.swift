@@ -131,7 +131,7 @@ struct ControllerMain {
     mail-send FROM_ADDRESS TO_ADDRESS MESSAGE_UUID TEXT_FILE [normal|interrupt [owner-admitted]]
     mail-ack ADDRESS MESSAGE_UUID
     mail-context-reset SESSION_ADDRESS   (a person started a new turn: the session's next mail starts a new chain)
-    mail-notice ADDRESS post-tool-use|stop|session-start
+    mail-notice ADDRESS post-tool-use|stop|session-start|user-prompt-submit
     mail-outbound HOST_UUID
     mail-outbound-cancel MESSAGE_UUID   (stops delivering queued mail; it bounces to its sender as cancelled.
         Queued mail older than seven days bounces as expired on its own)
@@ -175,7 +175,7 @@ struct ControllerMain {
 
     threading-controller agent REQUEST_JSON_FILE
     threading-controller agent-mcp
-    threading-controller agent-notice post-tool-use|stop|session-start
+    threading-controller agent-notice post-tool-use|stop|session-start|user-prompt-submit
     A session (not an execution) uses THREADING_MAILBOX_ADDRESS and THREADING_MAILBOX_CREDENTIAL
     instead, and agent-mcp then serves only the mail tools.
     With THREADING_CONTROLLER_AGENT_SOCKET these are clients of the supervisor's broker and open

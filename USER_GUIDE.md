@@ -5394,11 +5394,19 @@ right now. `mail_inbox` reads what is waiting, `mail_ack` marks what the agent a
 `mail_directory` lists the session's own address and who it can write to.
 
 A busy agent is never handed the text. It is told, in one line Threading writes, that mail is
-waiting and from whom — after a tool call, before its turn may end, or when it next starts — and
+waiting and from whom — after a tool call, before its turn may end, when you submit a prompt,
+or when it next starts — and
 reads the message itself. A chat that is working gets that line in its visible queue (or, for a
 message marked urgent, added to the turn it is running). `send_to_session` now uses the mailbox
 too: a message to a terminal that is mid-turn, or to a session that is not running, waits in its
 mailbox instead of being refused.
+
+Mail never types into a terminal's input, even when the agent is idle: you may be composing
+your next message there. Claude and Codex receive notices through hooks during the current turn
+or at the next submitted prompt/session start. A long tool call or model response can delay the
+notice until that boundary; a completely idle terminal waits for activity. With hooks disabled,
+or a runtime without answering hooks, mail remains available through `mail_inbox` and the Mail
+section. Native chat notices use the separate message queue and leave your composer untouched.
 
 Each session's **Info** panel has a **Mail** section listing what is waiting for it and what it
 sent lately — who, on which host, and whether it was read, handed to its host, or refused —
@@ -5425,8 +5433,8 @@ host — one address, or a whole host as `<host>/*` — leave mail for this chat
 also start it when it is not running (**Can write and wake**, which spends its usage); click a
 grant to revoke it. **Add contact…** names an address so the chat sees it in its directory.
 Every change asks first, and agents cannot make them. A chat woken by mail starts in the
-background with a one-line notice — never the message itself; a terminal session is never
-typed into and hears about its mail when it next starts.
+background with a one-line notice — never the message itself; a dormant terminal session hears
+about its mail when it next starts.
 
 Codex users approve Threading's hooks once more after this update: the mail notice adds entries
 to `hooks.json`, and Codex asks again for any changed hook file.

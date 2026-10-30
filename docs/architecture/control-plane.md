@@ -457,11 +457,12 @@ its local-only person mailboxes ([`linked-workrooms.md`](linked-workrooms.md)).
   a worker address on this Mac and an unknown host all answer with the same words. Another
   host's address is queued (`mail_outbound`) for that host, whose own grants decide.
 - **Delivery is notices** (`MacMailDelivery`): a live chat gets the controller's one-line notice
-  steered (urgent) or queued visibly; an idle, boot-verified terminal has it typed through the
-  receipt seam; a working terminal is told by its answering hooks
-  ([`session-activity.md`](session-activity.md#answering-mail-hooks)), or at its next settle when
-  its runtime lacks `answeringMailHooks`; a chat's first live edge in a run announces all open
-  mail. Never the body.
+  steered (urgent) or queued visibly; terminals are told exclusively by answering hooks
+  ([`session-activity.md`](session-activity.md#answering-mail-hooks)). Agent idleness says nothing
+  about a person's unsent draft, so neither arrival nor activity edges type notices or consume
+  a terminal's hook notice. Without `answeringMailHooks`, mail waits for an explicit inbox read.
+  A chat's first live edge in a run announces all open mail; the receiving native chat is captured
+  before the mailbox actor hop, with no terminal fallback if it stops. Never the body.
 - **Remote hosts** (`MacMailSync`): a host whose controller paths are saved on the Remote
   automations page is peered both ways through `owner-rpc` (`host`, `mail-peers`,
   `mail-peer-set`, no transport on either side) and synced over `mail-rpc --peer <macHost>` on

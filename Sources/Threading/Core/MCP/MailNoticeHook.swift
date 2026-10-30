@@ -12,16 +12,12 @@ import ThreadingController
 /// discarded, failure is swallowed so the hook always exits 0, and the timeout is short. An app
 /// that is not running therefore prints nothing, and the agent carries on.
 enum MailNoticeHook {
-    /// Registered for these three events, each as its own entry with no tool matcher.
-    static let events: [MailNoticeEvent] = [.postToolUse, .stop, .sessionStart]
+    /// Tool boundaries deliver mid-turn; a submitted prompt catches mail from an idle period.
+    static let events: [MailNoticeEvent] = [.postToolUse, .stop, .sessionStart, .userPromptSubmit]
 
-    /// The runtime's own hook name for an event. Claude and Codex spell all three the same.
+    /// The runtime's own hook name for an event.
     static func hookName(for event: MailNoticeEvent) -> String {
-        switch event {
-        case .postToolUse: return "PostToolUse"
-        case .stop: return "Stop"
-        case .sessionStart: return "SessionStart"
-        }
+        event.hookName
     }
 
     /// Whether a terminal launch of this runtime gets the answering entries: its hooks must be

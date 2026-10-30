@@ -3,14 +3,14 @@ import ThreadingController
 
 // MARK: - Mail Notice Hook
 
-/// The answering hook's endpoint: `/mail-notice/<token>?event=post-tool-use|stop|session-start`.
+/// The answering hook's endpoint: `/mail-notice/<token>?event=<MailNoticeEvent>`.
 ///
 /// Every other hook this listener serves is silent by contract. This one is the deliberate,
 /// narrow exception the agent-mail draft records: its reply is hook JSON carrying **one
 /// host-authored notice line** — counts, senders, hosts, never message text — or an empty body.
 /// The controller decides the notice (`mailNotice`), including its bounds: each message is
-/// announced once per event kind and blocks a stop at most once, and nothing is said when no
-/// unannounced mail is waiting. A failure of any kind answers empty, because a hook that errors
+/// announced after a tool once and blocks a stop at most once; a new prompt/start reminds about
+/// all open mail. A failure of any kind answers empty, because a hook that errors
 /// surfaces inside the agent's turn and a missed notice only delays mail.
 extension MCPServer {
 
@@ -105,7 +105,7 @@ extension MCPServer {
 
 /// The hook JSON both Claude Code and Codex accept, in the shape the controller's own
 /// `agent-notice` command prints (`ControllerAgentNotice.hookOutput`): additional context after a
-/// tool call or at session start, and a one-time block with a reason at a stop.
+/// tool call or at prompt/session start, and a one-time block with a reason at a stop.
 enum MacMailHookOutput {
     /// An empty 200: the hook prints nothing and the CLI carries on.
     static let silence = HTTPResponse(status: 200, reason: "OK", contentType: nil, body: Data())
@@ -120,9 +120,9 @@ enum MacMailHookOutput {
         switch event {
         case .stop:
             return ["decision": "block", "reason": notice]
-        case .postToolUse, .sessionStart:
+        case .postToolUse, .sessionStart, .userPromptSubmit:
             return ["hookSpecificOutput": [
-                "hookEventName": event == .postToolUse ? "PostToolUse" : "SessionStart",
+                "hookEventName": event.hookName,
                 "additionalContext": notice
             ]]
         }
