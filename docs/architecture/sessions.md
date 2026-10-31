@@ -91,11 +91,12 @@ persistence and spawn. This is a one-record transition shared by macOS and the L
 launch failure remains visible until runtime survival clears it. Hosts still own admission,
 transaction scope and process-start acknowledgement.
 
-Reasoning effort has a second, narrower admission check in `ProjectStore.addSession`: an
-explicit value must be one of the resolved model's `reasoningLevels`. Claude attaches the
-installed CLI's documented session set (`low`, `medium`, `high`, `xhigh`, `max`) to every model
-option and launches it with `--effort`; Codex uses each account's own model cache and launches a
-`model_reasoning_effort` override. Grok and OpenCode publish neither a host-side catalog nor a
+Reasoning effort has a second, narrower admission check in `ProjectStore.addSession`. Claude
+accepts the installed CLI's documented session set (`low`, `medium`, `high`, `xhigh`, `max`), even
+when no model is pinned or configured. It attaches that same set to every model option and
+launches it with `--effort`; Codex requires a value in the resolved model's `reasoningLevels`,
+using each account's own model cache, and launches a `model_reasoning_effort` override. Grok and
+OpenCode publish neither a host-side catalog nor a
 launch contract, so the composer invents no rows and the store accepts no explicit value.
 
 Continuation lineage deliberately does **not** live in this provider-specific enum. Every

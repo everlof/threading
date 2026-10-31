@@ -380,9 +380,9 @@ enum AgentModels {
 
     /// Whether an explicit reasoning effort can be admitted for a new session.
     ///
-    /// A nil model means "let the account choose", not "there is no model". Resolve that
-    /// account default before checking its provider-owned effort catalogue so every creation
-    /// path accepts the same model/effort pair.
+    /// Claude's effort contract belongs to the session, including when the account configures
+    /// no model. Other providers require the resolved model's own effort catalogue. A model
+    /// remembered from an earlier run is display evidence, never a pin needed for admission.
     static func supports(
         reasoningEffort: String?,
         kind: AgentKind,
@@ -391,6 +391,13 @@ enum AgentModels {
         options knownOptions: [AgentModelOption]? = nil
     ) -> Bool {
         guard let reasoningEffort else { return true }
+        switch kind {
+        case .claude:
+            return AgentDefaults.claudeReasoningEfforts.contains(reasoningEffort)
+        case .codex, .grok, .openCode, .cursor:
+            break
+        }
+
         let resolvedModel = model ?? defaultModel(for: kind, account: account)
         let modelOptions = knownOptions ?? options(for: kind, account: account)
         return option(

@@ -393,6 +393,13 @@ offering the same model straight back. `LaunchChoiceContractTests` holds the lin
 shaped like the real ones that broke, every combination the catalogue offers, and what the phone
 sends for Auto, must pass the gate. A new launch choice or account shape belongs in that test.
 
+An inherited Claude model may be named only by the last run, with neither a configured nor an
+organisation default. The Mac picker still offers that row's effort levels while submitting a
+nil model. Admission checks Claude's session-level effort contract in this case, just as the
+launcher does; it must not require a model setting or pin the remembered model. Codex effort
+admission still requires the resolved model's own catalogue. `LaunchChoiceContractTests` covers
+the remembered-model picker row and persistence through `ProjectStore.addSession`.
+
 A fresh composer in a project with [default accounts](#project-default-accounts) starts on that
 list's first login with usage left, runtime included. Everywhere else it starts on the enabled
 login this runtime most recently used, falling back to the standard login while it is on and then

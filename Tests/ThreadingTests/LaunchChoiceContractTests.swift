@@ -64,7 +64,82 @@ final class LaunchChoiceContractTests: XCTestCase {
         assertEveryOfferIsAccepted(kind: .claude, account: try claudeAccount(files: [:]))
     }
 
+    /// The Mac can name an inherited model from the last run without pinning it. Its effort
+    /// cells still submit a nil model, including when this login configures no default at all.
+    func testRememberedClaudeModelEffortsAreAcceptedWithoutPinningTheModel() throws {
+        let account = try claudeAccount(files: [:])
+        let configured = AgentModels.defaultModel(for: .claude, account: account)
+        XCTAssertNil(configured)
+        let resolved = AgentModels.resolvedDefault(
+            sessionModel: nil,
+            reportedModel: nil,
+            configuredModel: configured,
+            rememberedModel: "claude-opus-5-5"
+        )
+        let option = try XCTUnwrap(AgentModels.option(
+            identifier: resolved.identifier, for: .claude, account: account
+        ))
+        let picker = try XCTUnwrap(ModelEffortPickerPresentation.make(
+            options: AgentModels.launchableOptions(for: .claude, account: account),
+            defaultModelID: resolved.identifier,
+            defaultModelName: option.displayName,
+            defaultModelDetail: "Last used",
+            defaultOption: option,
+            selectedModel: nil,
+            selectedEffort: nil
+        ))
+        let inherited = try XCTUnwrap(picker.models.first { $0.representedValue == nil })
+        XCTAssertEqual(inherited.supportedEffortIDs, ["low", "medium", "high", "xhigh", "max"])
+
+        for effort in inherited.supportedEffortIDs {
+            let choice = AgentRunChoice(model: inherited.representedValue, reasoningEffort: effort)
+            XCTAssertNil(choice.refusal(kind: .claude, account: account), "refused \(effort)")
+            XCTAssertEqual(choice.honoured(kind: .claude, account: account), choice)
+        }
+        XCTAssertEqual(
+            AgentRunChoice(model: nil, reasoningEffort: "ultra")
+                .refusal(kind: .claude, account: account),
+            .unknownReasoningEffort
+        )
+    }
+
+    func testProjectStorePersistsClaudeEffortWithoutAConfiguredModel() throws {
+        let account = try claudeAccount(files: [:])
+        XCTAssertTrue(AgentAccountLocationRegistry.shared.register(
+            provider: .claude, handle: account.handle, configPath: account.configPath
+        ))
+        AgentAccountDiscovery.invalidate()
+        defer { AgentAccountDiscovery.invalidate() }
+        let discovered = try XCTUnwrap(AgentAccountDiscovery.account(for: .claude, handle: account.handle))
+        XCTAssertEqual(discovered.configPath, account.configPath)
+        XCTAssertNil(AgentModels.defaultModel(for: .claude, account: discovered))
+
+        let state = StateManager(appSupportDirectory: try directory(with: [:]))
+        let store = ProjectStore(stateManager: state)
+        let project = try XCTUnwrap(store.addProject(folderURL: try directory(with: [:])))
+        let session = try XCTUnwrap(store.addSession(
+            to: project.id, kind: .claude, accountHandle: account.handle,
+            reasoningEffort: "xhigh"
+        ))
+        let reloaded = try XCTUnwrap(ProjectStore(stateManager: state).session(withID: session.id))
+        XCTAssertNil(reloaded.model, "Accepting effort must not pin the last-used model")
+        XCTAssertEqual(reloaded.reasoningEffort, "xhigh")
+        XCTAssertEqual(reloaded.accountHandle, account.handle)
+    }
+
     // MARK: - Codex
+
+    func testAnUnconfiguredCodexLoginCannotBorrowAnotherModelsEfforts() throws {
+        let account = try codexAccount(files: [
+            AgentDefaults.codexModelsCacheFile: Self.codexCatalogue,
+        ])
+        XCTAssertNil(AgentModels.defaultModel(for: .codex, account: account))
+        XCTAssertEqual(
+            AgentRunChoice(model: nil, reasoningEffort: "ultra")
+                .refusal(kind: .codex, account: account),
+            .unknownReasoningEffort
+        )
+    }
 
     /// Models whose effort subsets and Fast tiers differ, and a default that names one of them.
     func testACodexCatalogueWithPerModelEffortsAndSpeedsIsAccepted() throws {
