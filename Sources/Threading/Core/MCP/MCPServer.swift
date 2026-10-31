@@ -513,7 +513,9 @@ final class MCPServer: @unchecked Sendable {
                 self?.eventStreamSessionByConnection.removeValue(forKey: identifier)
                 if let registration = self?.mailWakeRegistrations.removeValue(forKey: identifier) {
                     registration.cancel()
-                    Task { @MainActor in self?.mailIdleWakeProvider().disconnected(identifier) }
+                    // Keep the connection alive until its cross-actor cleanup runs; otherwise
+                    // a new connection could reuse the ObjectIdentifier before this hop.
+                    Task { @MainActor in self?.mailIdleWakeProvider().disconnected(ObjectIdentifier(closed)) }
                 }
             }
         )
