@@ -294,7 +294,8 @@ enum MCPSessionRegistry {
         fastMode: Bool? = nil,
         statusLineOverride: String? = nil,
         theme: String? = nil,
-        mailNotices: Bool = false
+        mailNotices: Bool = false,
+        idleMailWake: Bool = false
     ) -> String? {
         // This is what makes terminal opt-out complete rather than an empty hooks dictionary
         // still carried through `--settings`.
@@ -306,7 +307,8 @@ enum MCPSessionRegistry {
             fastMode: fastMode,
             statusLineOverride: statusLineOverride,
             theme: theme,
-            mailNotices: mailNotices
+            mailNotices: mailNotices,
+            idleMailWake: idleMailWake
         ) else {
             removeSettingsFile(for: sessionID)
             return nil
@@ -342,7 +344,8 @@ enum MCPSessionRegistry {
         fastMode: Bool? = nil,
         statusLineOverride: String? = nil,
         theme: String? = nil,
-        mailNotices: Bool = false
+        mailNotices: Bool = false,
+        idleMailWake: Bool = false
     ) -> [String: Any]? {
         let needsListener = brokersPermissions || reportsLifecycle
 
@@ -359,7 +362,8 @@ enum MCPSessionRegistry {
                 token: token(for: sessionID),
                 brokersPermissions: brokersPermissions,
                 reportsLifecycle: reportsLifecycle,
-                mailNotices: mailNotices && reportsLifecycle
+                mailNotices: mailNotices && reportsLifecycle,
+                idleMailWake: idleMailWake && mailNotices && reportsLifecycle
             )
         }
 
@@ -398,7 +402,8 @@ enum MCPSessionRegistry {
         token: String,
         brokersPermissions: Bool,
         reportsLifecycle: Bool,
-        mailNotices: Bool
+        mailNotices: Bool,
+        idleMailWake: Bool
     ) {
         // Accumulated per hook name rather than assigned, because one name can carry entries
         // from both halves of this function: `PreToolUse` is how a native session brokers
@@ -480,6 +485,12 @@ enum MCPSessionRegistry {
                 groups[MailNoticeHook.hookName(for: event), default: []].append(
                     group(command: MailNoticeHook.claudeCommand(token: token, event: event), matcher: nil)
                 )
+            }
+        }
+
+        if idleMailWake {
+            for event in MailIdleWakeHook.events {
+                groups[event, default: []].append(MailIdleWakeHook.entry())
             }
         }
 

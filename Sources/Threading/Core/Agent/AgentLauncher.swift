@@ -1071,7 +1071,8 @@ enum AgentLauncher {
             fastMode: fastModeAtStartup(for: session),
             statusLineOverride: statusLineOverride(for: session, in: project),
             theme: terminalTheme(for: session),
-            mailNotices: MailNoticeHook.isWanted(for: session.kind)
+            mailNotices: MailNoticeHook.isWanted(for: session.kind),
+            idleMailWake: session.kind.supports(.rewakingMailHooks)
         ) {
             command.append(flag: "--settings", value: settingsPath)
         }

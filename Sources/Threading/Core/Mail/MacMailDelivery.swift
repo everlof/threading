@@ -16,7 +16,7 @@ import ThreadingController
 /// | Surface | On arrival |
 /// |---|---|
 /// | Native chat, live | `interrupt`: steer the notice into the running turn where the transport can; otherwise, and for `normal`, the notice joins the visible queue. |
-/// | Terminal, hooks can answer | Nothing here: answering hooks announce mail during a turn or at its next prompt/start. |
+/// | Terminal, hooks can answer | Signal an armed idle-wake hook; ordinary hooks announce at tool/turn/prompt boundaries. |
 /// | Terminal, hooks cannot answer | Mail stays available through `mail_inbox`; input is never changed. |
 /// | Dormant | Nothing; its next launch's `SessionStart` hook (or, for a chat, its first live edge) announces it. |
 ///
@@ -136,6 +136,7 @@ final class MacMailDelivery {
     func arrived(for sessionID: SessionID, priority: MailPriority) {
         // A host-local mailbox is announced by its host's own hooks.
         guard !mailboxes.keepsMailOnHost(sessionID) else { return }
+        MailIdleWake.shared.arrived(for: sessionID)
         let facts = runtime.facts(sessionID)
         switch Self.plan(for: facts, priority: priority) {
         case .steerNotice, .queueNotice:

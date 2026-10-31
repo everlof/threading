@@ -205,6 +205,10 @@ struct AgentCapabilities: OptionSet {
   /// without it gets mail notices only at turn boundaries.
   static let answeringMailHooks = Self(rawValue: 1 << 41)
 
+  /// A background command hook can wake an idle terminal without writing its prompt editor.
+  /// Claude's asyncRewake contract; ordinary answering hooks alone cannot do this.
+  static let rewakingMailHooks = Self(rawValue: 1 << 47)
+
   /// A terminal interruption is written as a structured transcript record that **names the turn
   /// it aborted**, while the lifecycle hook that ordinarily closes a reported turn is omitted.
   /// Codex only: 0.147.0 appends `event_msg / turn_aborted / reason: interrupted` and returns to
@@ -548,7 +552,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory,
         .modelAliasResolution, .selectableTerminalRenderer, .remoteExecutionHostLaunch,
-        .longLivedAccountToken, .answeringMailHooks, .remoteNativeConversation,
+        .longLivedAccountToken, .answeringMailHooks, .rewakingMailHooks, .remoteNativeConversation,
         .killLineClearsTerminalInput, .unattendedTerminalRuns
       ]
     case .codex:

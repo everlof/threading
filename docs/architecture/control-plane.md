@@ -459,8 +459,10 @@ its local-only person mailboxes ([`linked-workrooms.md`](linked-workrooms.md)).
 - **Delivery is notices** (`MacMailDelivery`): a live chat gets the controller's one-line notice
   steered (urgent) or queued visibly; terminals are told exclusively by answering hooks
   ([`session-activity.md`](session-activity.md#answering-mail-hooks)). Agent idleness says nothing
-  about a person's unsent draft, so neither arrival nor activity edges type notices or consume
-  a terminal's hook notice. Without `answeringMailHooks`, mail waits for an explicit inbox read.
+  about a person's unsent draft, so neither arrival nor activity edges type notices. An armed
+  local Claude background hook receives the notice through `MailIdleWake`; its `asyncRewake`
+  exit wakes the existing CLI without touching terminal input. Other terminals keep their
+  ordinary hook boundaries. Without `answeringMailHooks`, mail waits for an explicit inbox read.
   A chat's first live edge in a run announces all open mail; the receiving native chat is captured
   before the mailbox actor hop, with no terminal fallback if it stops. Never the body.
 - **Remote hosts** (`MacMailSync`): a host whose controller paths are saved on the Remote

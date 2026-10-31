@@ -5402,9 +5402,12 @@ too: a message to a terminal that is mid-turn, or to a session that is not runni
 mailbox instead of being refused.
 
 Mail never types into a terminal's input, even when the agent is idle: you may be composing
-your next message there. Claude and Codex receive notices through hooks during the current turn
-or at the next submitted prompt/session start. A long tool call or model response can delay the
-notice until that boundary; a completely idle terminal waits for activity. With hooks disabled,
+your next message there. Local Claude terminals also keep a background hook waiting for mail:
+arrival wakes Claude through its own hook mechanism and leaves your unsent draft intact. Existing
+terminals need a restart to load this hook. Claude and Codex receive notices through ordinary
+hooks during the current turn or at the next submitted prompt/session start. A long tool call or
+model response can delay that notice. Codex and remote terminals still wait for activity when
+completely idle. With hooks disabled,
 or a runtime without answering hooks, mail remains available through `mail_inbox` and the Mail
 section. Native chat notices use the separate message queue and leave your composer untouched.
 

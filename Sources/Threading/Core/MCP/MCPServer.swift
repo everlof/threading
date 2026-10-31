@@ -253,6 +253,8 @@ final class MCPServer: @unchecked Sendable {
         .shared
     }
 
+    @MainActor var mailIdleWakeProvider: @MainActor () -> MailIdleWake = { .shared }
+
     /// The listening port, or nil until the listener is ready. Launches read this to decide
     /// whether to register the server at all.
     var port: UInt16? {
@@ -279,6 +281,7 @@ final class MCPServer: @unchecked Sendable {
     private var socketListener: NWListener?
     private var connectionsByID: [ObjectIdentifier: MCPConnection] = [:]
     private var eventStreamSessionByConnection: [ObjectIdentifier: SessionID] = [:]
+    private var mailWakeRegistrations: [ObjectIdentifier: Task<Void, Never>] = [:]
     private var grantObserver: NSObjectProtocol? = nil
     private var externalToolsObserver: NSObjectProtocol? = nil
     private var toolSettingsObserver: NSObjectProtocol? = nil
@@ -375,7 +378,10 @@ final class MCPServer: @unchecked Sendable {
         // Connections are accepted and removed on `queue`; perform shutdown there as well.
         // Synchronous dispatch preserves the app-termination contract: when this returns, the
         // listener and every tracked connection have received cancellation.
-        queue.sync {
+        let mailConnections = queue.sync {
+            let mailConnections = Array(mailWakeRegistrations.keys)
+            for registration in mailWakeRegistrations.values { registration.cancel() }
+            mailWakeRegistrations.removeAll()
             for connection in connectionsByID.values {
                 connection.cancel()
             }
@@ -397,7 +403,9 @@ final class MCPServer: @unchecked Sendable {
                 return bound
             }
             if let boundPath { unlinkStaleSocket(at: boundPath) }
+            return mailConnections
         }
+        for connection in mailConnections { mailIdleWakeProvider().disconnected(connection) }
     }
 
     // MARK: - Unix Rendezvous
@@ -503,6 +511,10 @@ final class MCPServer: @unchecked Sendable {
                 let identifier = ObjectIdentifier(closed)
                 self?.connectionsByID.removeValue(forKey: identifier)
                 self?.eventStreamSessionByConnection.removeValue(forKey: identifier)
+                if let registration = self?.mailWakeRegistrations.removeValue(forKey: identifier) {
+                    registration.cancel()
+                    Task { @MainActor in self?.mailIdleWakeProvider().disconnected(identifier) }
+                }
             }
         )
 
@@ -559,6 +571,20 @@ final class MCPServer: @unchecked Sendable {
 
         if request.path.hasPrefix(MCPDefaults.mailNoticePathPrefix) {
             routeMailNotice(request, respond: respond)
+            return
+        }
+
+        if request.path == MailIdleWakeHook.path {
+            guard let token = MCPDefaults.sessionToken(path: MCPDefaults.bearerEndpointPath,
+                                                      authorization: request.header(MCPDefaults.authorizationHeader)),
+                  let sessionID = MCPSessionRegistry.session(forToken: token) else {
+                return respond(.status(204, "No Content"))
+            }
+            let identifier = ObjectIdentifier(connection)
+            mailWakeRegistrations[identifier] = Task { @MainActor in
+                guard !Task.isCancelled else { return }
+                self.mailIdleWakeProvider().watch(sessionID, connection: identifier, respond: respond)
+            }
             return
         }
 

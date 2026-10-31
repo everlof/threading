@@ -1502,10 +1502,45 @@ turns the endpoint silent.
 
 **Latency follows agent boundaries.** A post-tool notice reaches the next model call within the
 same turn; it does not wait for the whole turn to end. Long tools, model thinking/streaming, and
-tools outside the provider's hook coverage can delay it. A completely idle terminal waits for
-its next submitted prompt or session start. The Stop hook is a bounded continuation opportunity,
+tools outside the provider's hook coverage can delay it. A completely idle terminal without an
+armed background wake hook waits for its next submitted prompt or session start. The Stop hook is a bounded continuation opportunity,
 not a guarantee that a model reads mail; storage/acknowledgement remain authoritative. No timer
 polls or terminal pastes are added to compensate for a missing boundary.
+
+**Local Claude idle wake, 2026-10-31.** `MailIdleWakeHook` adds an `asyncRewake` command beside
+the ordinary entries on SessionStart, UserPromptSubmit and Stop, only in local terminal launch
+settings. It holds an authenticated `/mail-idle-wake` request until mail arrives. The bearer
+token travels from the launch environment through curl's stdin configuration, never in the
+long-lived shell or curl arguments. A 200
+contains only the controller's host-authored notice; the command prints it and exits 2, letting
+Claude wake its existing conversation. It shares the store's one continuation opportunity with
+Stop, so SessionStart announcing mail cannot swallow the wake, and rearming cannot loop on
+unacknowledged mail. A 204 retires a superseded or ineligible hook silently.
+The Other sessions switch, provider capability, local execution and terminal presentation are
+checked before taking mail. Native and remote launches do not install this watcher.
+
+`MailIdleWake` owns at most one watcher per session and at most 512 in total. Arrival addresses
+one recipient and coalesces bursts into one pending actor query plus a dirty bit. A new hook
+retires the old one; socket close or server stop removes its watcher. While connected there is
+no polling. Transport failures retry through the stable socket with a 2–32 second backoff, so an
+app restart does not strand surviving PTYs. The provider's millisecond timer bounds one hook to
+24 days; every prompt and Stop renews it. A completely idle terminal past that limit needs
+another prompt/start to rearm. Stored mail remains available.
+
+Measured with the installed Claude Code 2.1.304, an isolated PTY, an unsent draft and a local
+mock Anthropic API: the background hook caused a model request containing its notice but not
+the draft. Submitting afterward sent the original draft intact. The wake also fired
+UserPromptSubmit and Stop, preserving the ordinary turn-start checkpoint
+barrier and rearming the watcher before the wake's model request. The actual generated shell
+command and MCP listener are covered by `MailIdleWakeTests`, including exit 2, renewal,
+disconnect and 10,000 arrival edges. This is provider transport verification, not a live BETA
+restart or a promise that the model will acknowledge every message.
+
+Codex 0.163 has `codex queue`, but its source's `daemon_startup::config_exclusion` rejects the
+configuration overrides Threading needs for per-session MCP routing and policy. Our TUI therefore
+runs an embedded server, while `queue` discovers a shared one. Queuing through that different
+server cannot be treated as delivery to the running terminal. Codex idle wake needs an explicitly
+owned, addressable app-server transport; it is not enabled by this Claude hook change.
 
 **Scaling contract:** ordinary mail has a few open messages, with 1,000 allowed per inbox and
 10,000 activity edges as a stress case. Arrival/activity resolve only the affected session;
