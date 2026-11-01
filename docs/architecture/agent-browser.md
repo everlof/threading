@@ -938,6 +938,23 @@ first-responder assignments as well as key/main status: AppKit can otherwise ass
 first responder in a non-key panel, which traverses back to the first form field on each attach
 and overwrites the page's DOM focus. Keyboard and password focus must survive separate operations.
 
+Screen lock occludes even this transport. `BrowserExecutionActivity` therefore temporarily disables
+WebKit's window-occlusion detection for each actively driven page, using the guarded
+`_windowOcclusionDetectionEnabled` getter and `_setWindowOcclusionDetectionEnabled:` setter.
+This is private WebKit API, also used by
+[WebKitTestRunner](https://github.com/WebKit/WebKit/blob/main/Tools/WebKitTestRunner/mac/PlatformWebViewMac.mm).
+The public scheduling policy keeps processes runnable but cannot override this page-visibility
+gate. Both accessors must exist; otherwise the existing transport and native readiness timeout
+remain in force. Keep the runtime calls isolated in `BrowserWindowOcclusionPolicy`.
+
+Disable detection before attaching the page to the transport. Restore the previous value before
+returning the page to its original parent: WebKit's setter changes a flag without recomputing
+visibility, so the attachment event must observe the restored policy. Overlapping operations on
+one page share the override; different pages restore independently, including pages without a
+parent. Completion, failure and timeout release it with the final operation. Idle pages retain
+their normal policy, and system sleep remains allowed. This overrides WebKit visibility only;
+it does not bypass the lock screen or make the transport interactive.
+
 Before semantic inspection, actions or screenshots on a hosted background page, a separate, native-deadline-bounded bridge
 call waits for two rendered frames. This lets suspended frame-driven UI reveal itself, instead
 of racing the first DOM read against reattachment. The actual action then receives a fresh
@@ -964,11 +981,18 @@ visibility, focus behavior, page custody or operation lifetime.
 
 The isolated macOS 26.5 probes exercised frame callbacks, CSS animations, ResizeObserver, fresh
 pixels after 70 seconds detached, and another foreground application. They explain the mechanism;
-the shipping regression is `BrowserOffScreenCaptureTests`. The focused app-hosted suite passed
+the shipping regression is `BrowserOffScreenCaptureTests`. The October 22 app-hosted suite passed
 91 tests with one viewport-scroll test skipped; measured cardinalities and latency are recorded
 in [performance.md](performance.md). This is not an exact replay of ALPHA's original timeouts.
-Screen lock, actual Space switches, multi-display behavior and older macOS releases require
-separate verification. No private WebKit preferences are used.
+A November 1 matched probe using the unchanged production rendering host reproduced a rendering
+stall under an actual screen lock on macOS 26.5: the ordinary host produced no animation frames
+or CSS completion and retained stale pixels. Disabling window-occlusion detection kept both
+callbacks and fresh captures working, including after recreating the host while still locked.
+`BrowserOffScreenCaptureTests` additionally occludes the transport itself off-display, drives the
+production click/snapshot/capture path, restores the ordinary visible window and drives it again.
+Lifecycle tests cover overlapping pages, original-policy restoration and missing private API.
+Actual Space switches, multi-display behavior, display/system sleep and older macOS releases
+require separate verification; a screen lock is not system sleep.
 
 ## Visual baselines
 

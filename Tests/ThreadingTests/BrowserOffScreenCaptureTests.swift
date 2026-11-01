@@ -116,6 +116,64 @@ final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
         )
     }
 
+    func testAnOccludedRenderingPanelStillProducesFreshFramesAndRestoresTheVisiblePage() async throws {
+        let browser = try await loadedBrowser()
+        let window = try XCTUnwrap(self.window)
+        let parent = try XCTUnwrap(browser.webView.superview)
+        XCTAssertTrue(try browserWindowOcclusionDetectionEnabled(browser.webView))
+        window.setFrameOrigin(NSPoint(x: -30_000, y: -30_000))
+        try await settle()
+        let keyWindow = NSApp.keyWindow
+        let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let finish = browser.beginAgentOperation()
+        defer { finish() }
+        let panel = try XCTUnwrap(browser.webView.window)
+        XCTAssertFalse(panel === window)
+
+        // Screen lock occludes even the transparent transport. Moving that transport off
+        // display exercises the same WebKit visibility gate without locking the test machine.
+        panel.setFrameOrigin(NSPoint(x: -50_000, y: -50_000))
+        try await settle()
+        XCTAssertFalse(NSScreen.screens.contains { $0.frame.intersects(panel.frame) })
+        XCTAssertFalse(panel.occlusionState.contains(.visible))
+        XCTAssertTrue(panel.isVisible)
+        try await changeWhileHidden(browser)
+        let hiddenReading = await capture(browser, green: true)
+        XCTAssertEqual(hiddenReading, .rendered)
+        XCTAssertTrue(NSApp.keyWindow === keyWindow)
+        XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, frontmost)
+
+        finish()
+        XCTAssertTrue(try browserWindowOcclusionDetectionEnabled(browser.webView))
+        XCTAssertTrue(browser.webView.superview === parent)
+        XCTAssertFalse(panel.isVisible)
+        try await settle()
+        // Read without starting another agent operation: the still-occluded ordinary window
+        // must become hidden again as soon as the final rendering lease ends.
+        let idleVisibility: String? = try await withCheckedThrowingContinuation { continuation in
+            browser.webView.evaluateJavaScript("document.visibilityState") {
+                value, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: value as? String) }
+            }
+        }
+        XCTAssertEqual(idleVisibility, "hidden")
+        window.center()
+        window.orderFront(nil)
+        try await settle()
+        XCTAssertTrue(browser.webView.window === window)
+        _ = try await browser.evaluate("""
+            document.body.style.background = '#FF0000';
+            document.querySelector('#change').textContent = 'Change';
+            document.querySelector('#text').style.animation = 'none';
+            """)
+        try await settle()
+        try await changeWhileHidden(browser)
+        let visibleReading = await capture(browser, green: true)
+        XCTAssertEqual(visibleReading, .rendered)
+        XCTAssertTrue(try browserWindowOcclusionDetectionEnabled(browser.webView))
+    }
+
     // MARK: - Reading
 
     private enum Reading: Equatable {
@@ -472,6 +530,7 @@ final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
         }
         XCTAssertTrue(browser.webView.superview === parent)
         XCTAssertNil(browser.webView.window)
+        XCTAssertTrue(try browserWindowOcclusionDetectionEnabled(browser.webView))
         if #available(macOS 14.0, *) {
             XCTAssertEqual(browser.webView.configuration.preferences.inactiveSchedulingPolicy, .suspend)
         }
@@ -578,6 +637,7 @@ final class BrowserOffScreenCaptureTests: HostedStoreTestCase {
         }
         XCTAssertTrue(browser.webView.superview === parent)
         XCTAssertNil(browser.webView.window)
+        XCTAssertTrue(try browserWindowOcclusionDetectionEnabled(browser.webView))
         if #available(macOS 14.0, *) {
             XCTAssertEqual(browser.webView.configuration.preferences.inactiveSchedulingPolicy, .suspend)
         }

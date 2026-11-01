@@ -1,8 +1,8 @@
 import WebKit
 
 /// An operation needs runnable host/WebKit processes while native keyboard focus stays user-owned.
-/// Restore idle scheduling when the final overlapping operation finishes, including failures
-/// and native deadlines.
+/// Restore idle scheduling and window-occlusion detection when the final overlapping operation
+/// finishes, including failures and native deadlines.
 @MainActor
 final class BrowserExecutionActivity {
     private struct Entry {
@@ -10,9 +10,18 @@ final class BrowserExecutionActivity {
         let restore: () -> Void
     }
 
+    @MainActor
     private struct RenderingEntry {
         var count: Int
-        let host: BackgroundRenderingHost
+        let host: BackgroundRenderingHost?
+        let restoreOcclusionDetection: () -> Void
+
+        func restore() {
+            // WebKit's setter only changes a flag. Restore it before reattachment so the
+            // ensuing visibility update observes the idle policy, including while locked.
+            restoreOcclusionDetection()
+            host?.restore()
+        }
     }
 
     private var entries: [ObjectIdentifier: Entry] = [:]
@@ -48,9 +57,13 @@ final class BrowserExecutionActivity {
         if var entry = renderingEntries[pageKey] {
             entry.count += 1
             renderingEntries[pageKey] = entry
-        } else if page.superview != nil {
+        } else {
+            // Even our transparent transport becomes occluded at screen lock. Process
+            // scheduling alone cannot resume WebKit's visibility-gated animation callbacks.
+            let restoreOcclusionDetection = BrowserWindowOcclusionPolicy.disable(for: page)
+            let host = page.superview == nil ? nil : BackgroundRenderingHost(content: page)
             renderingEntries[pageKey] = RenderingEntry(
-                count: 1, host: BackgroundRenderingHost(content: page)
+                count: 1, host: host, restoreOcclusionDetection: restoreOcclusionDetection
             )
         }
         var finished = false
@@ -65,7 +78,7 @@ final class BrowserExecutionActivity {
 
     func updatePresentation() {
         // Only operations currently in flight, never all retained tabs or sessions.
-        for entry in renderingEntries.values { entry.host.update() }
+        for entry in renderingEntries.values { entry.host?.update() }
     }
 
     func presentationDidChange() {
@@ -82,15 +95,15 @@ final class BrowserExecutionActivity {
     }
 
     func setFrame(_ frame: CGRect, for page: WKWebView) {
-        if let entry = renderingEntries[ObjectIdentifier(page)] {
-            entry.host.setFrame(frame)
+        if let host = renderingEntries[ObjectIdentifier(page)]?.host {
+            host.setFrame(frame)
         } else {
             page.frame = frame
         }
     }
 
     func isRenderingInBackground(_ page: WKWebView) -> Bool {
-        renderingEntries[ObjectIdentifier(page)]?.host.isRenderingInBackground == true
+        renderingEntries[ObjectIdentifier(page)]?.host?.isRenderingInBackground == true
     }
 
     private func endRendering(_ key: ObjectIdentifier) {
@@ -100,7 +113,7 @@ final class BrowserExecutionActivity {
             renderingEntries[key] = entry
         } else {
             renderingEntries.removeValue(forKey: key)
-            entry.host.restore()
+            entry.restore()
         }
     }
 
@@ -120,7 +133,31 @@ final class BrowserExecutionActivity {
     }
 
     isolated deinit {
+        for entry in renderingEntries.values { entry.restore() }
         for entry in entries.values { entry.restore() }
         if let processActivity { ProcessInfo.processInfo.endActivity(processActivity) }
+    }
+}
+
+/// Isolates the WebKit SPI also used by WebKitTestRunner and Playwright's Cocoa host.
+/// There is no public equivalent for page visibility. Missing accessors leave the existing
+/// host/readiness deadline in force; never assume an OS version guarantees private API.
+@MainActor
+private enum BrowserWindowOcclusionPolicy {
+    private static let getter = NSSelectorFromString("_windowOcclusionDetectionEnabled")
+    private static let setter = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
+    private typealias Getter = @convention(c) (AnyObject, Selector) -> Bool
+    private typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+
+    static func disable(for page: WKWebView) -> () -> Void {
+        guard page.responds(to: getter), page.responds(to: setter),
+              let getImplementation = page.method(for: getter),
+              let setImplementation = page.method(for: setter)
+        else { return {} }
+        let read = unsafeBitCast(getImplementation, to: Getter.self)
+        let write = unsafeBitCast(setImplementation, to: Setter.self)
+        let previous = read(page, getter)
+        write(page, setter, false)
+        return { write(page, setter, previous) }
     }
 }

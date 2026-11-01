@@ -1514,6 +1514,40 @@ These are current-platform correctness/latency observations, not Release power o
 benchmarks. Screen lock, actual Space switches, multi-display behavior and older macOS versions
 remain unverified; the installed app was not replaced for this run.
 
+The 2026-11-01 screen-lock follow-up on macOS 26.5 (25F71) used the unchanged production
+`BackgroundRenderingHost` in a matched two-page harness. Both pages used `.none` scheduling;
+only the candidate disabled WebKit window-occlusion detection. Under a confirmed screen lock,
+the baseline delivered zero animation frames, no CSS completion, a stale red capture and a
+two-frame wait exceeding the native four-second deadline (4.264 s). The candidate delivered
+316 frames during that measurement interval, completed the CSS animation, captured the fresh
+green marker and answered the two-frame wait in 28.3 ms. Retiring and recreating the shared host
+while still locked reproduced the difference: baseline zero frames, candidate 320 frames and
+a 1.4 ms frame wait. These frame counts cover the whole interval, including the baseline wait;
+they are not throughput measurements. DOM focus remained on the original input in both pages.
+The two post-remount PNGs were inspected; the logs and captures are in
+`.build/browser-lock-research/`. The harness did not observe unlock within its bounded wait, and
+did not exercise the complete browser/MCP bridge or operation-scoped policy restoration.
+
+The resulting production override is O(1) per first/final operation on a page. It adds two
+guarded selector lookups and one saved Boolean, with no new window, timer or idle-session work.
+Normal/stress cardinalities remain one page and 64 overlapping operations plus a second page.
+Restoration precedes reattachment because WebKit's setter does not recompute visibility itself.
+The app-hosted regression occludes the transport off-display, requires fresh frame- and
+CSS-dependent pixels, verifies the idle page becomes hidden again, then restores the ordinary
+visible window and drives it again. Actual unlock continuity, system/display sleep, other Spaces,
+multiple displays and older macOS remain separate platform checks.
+
+The focused app-hosted checks covered 83 distinct tests, all passing across the final selected
+runs. The first 62-case run had two interactive fixture failures: the composer received extra
+keyboard input, and a chat-switch fixture did not return to its expected visible window. Both
+passed unchanged on rerun. A separate annotation fixture initially lacked `THREADING_RENDER_OUT`
+and attempted to save at `/`; it passed with an explicit writable output directory. There were
+no skipped cases. Logs and xcresults are beside the lock probe. In the first run, 14 measured
+clicks had median/max latency 238.6/283.6 ms; 12 captures measured 33.8/65.9 ms. The new transport-
+occlusion case completed its hidden click/capture in 234.6/34.3 ms, and the visible repeat in
+233.1/35.6 ms. Both exported green frames were inspected. These are Debug correctness and latency
+observations, not Release power measurements; the installed/running app was not replaced.
+
 USB Device Logs must sustain roughly 5,800 rows/s with a 50,000-row ring while the table is
 onscreen. The regression workload uses 1,000-row batches, long messages and a full ring, and
 measures drain, AppKit layout and display together; the earlier dual-stream benchmark excluded
