@@ -811,6 +811,34 @@ extension ControllerStore {
             return try noticeText(fresh, openCount: rows.count, event: event)
         }
     }
+    /// A queue transport has a receipt, unlike an answering hook. Preparing its notice does
+    /// not consume the continuation opportunity; confirm only the exact accepted batch.
+    public func pendingMailWake(_ recipient: MailAddress) throws -> MailWakeNotice? {
+        let rows = try db.rows("""
+            SELECT payload FROM record WHERE kind='mail' AND parent=? AND state IN ('inbox','noticed')
+            ORDER BY sequence LIMIT 100
+            """, [.text(recipient.description)])
+        let messages: [MailMessage] = try rows.map { try decode($0.text(0)) }
+        let fresh = messages.filter { $0.stopBlocked != true }
+        guard !fresh.isEmpty else { return nil }
+        return MailWakeNotice(ids: fresh.map(\.envelope.id),
+                              text: try noticeText(fresh, openCount: rows.count, event: .stop))
+    }
+
+    public func confirmMailWake(_ recipient: MailAddress, ids: [UUID]) throws {
+        guard ids.count <= 100 else { throw ControllerError.invalidInput("mail wake batch too large") }
+        try db.transaction {
+            for id in ids {
+                guard var message: MailMessage = try optional("mail", id.uuidString.lowercased()),
+                      message.envelope.recipient == recipient,
+                      message.state == .inbox || message.state == .noticed else { continue }
+                message.stopBlocked = true
+                message.state = .noticed
+                try update("mail", id.uuidString.lowercased(), state: message.state.rawValue, value: message)
+            }
+        }
+    }
+
     public func mailNotice(executionID: ExecutionID, event: MailNoticeEvent) throws -> String? {
         try mailNotice(try executionAddress(executionID), event: event)
     }
@@ -1056,4 +1084,10 @@ extension ControllerStore {
         String(text.map { "[]“”\"\n\r".contains($0) ? "'" : $0 }.filter { !$0.isASCII || $0.asciiValue! >= 0x20 })
     }
     static func now() -> String { ISO8601DateFormatter().string(from: Date()) }
+}
+
+/// Host-authored metadata only. Message text remains available solely through the inbox.
+public struct MailWakeNotice: Equatable, Sendable {
+    public let ids: [UUID]
+    public let text: String
 }

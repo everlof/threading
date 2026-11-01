@@ -209,6 +209,10 @@ struct AgentCapabilities: OptionSet {
   /// Claude's asyncRewake contract; ordinary answering hooks alone cannot do this.
   static let rewakingMailHooks = Self(rawValue: 1 << 47)
 
+  /// Codex can connect its TUI and a separate notice queue to the same private app-server.
+  /// The launch supervisor probes the selected CLI's Unix transport before opting it in.
+  static let queuedTerminalMail = Self(rawValue: 1 << 48)
+
   /// A terminal interruption is written as a structured transcript record that **names the turn
   /// it aborted**, while the lifecycle hook that ordinarily closes a reported turn is omitted.
   /// Codex only: 0.147.0 appends `event_msg / turn_aborted / reason: interrupted` and returns to
@@ -563,7 +567,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .inlineTerminalViewport, .lifecycleReportedTranscriptPath,
         .lifecycleReportedWorkingDirectory, .detectableExternalResume, .bankedUsageReset,
-        .answeringMailHooks, .runtimeOwnedApprovals, .remoteNativeConversation,
+        .answeringMailHooks, .queuedTerminalMail, .runtimeOwnedApprovals, .remoteNativeConversation,
         .killLineClearsTerminalInput, .unattendedReadOnlyTerminalRuns
       ]
     case .grok:

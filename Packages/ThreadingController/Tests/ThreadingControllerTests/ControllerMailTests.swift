@@ -5,6 +5,30 @@ import Testing
 struct ControllerMailTests {
     let fixture = ControllerStoreTests()
 
+    @Test func queuedWakeSpendsOnlyItsReceiptedBatchAndNeverAcknowledgesMail() async throws {
+        let (directory, store) = try fixture.fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (a, _, _, recipient) = try await pair(store)
+        _ = try await store.setMailGrant(recipient: recipient, sender: "*", expectedRevision: 0,
+                                         mode: .notify, allowsInterrupt: false)
+        let first = UUID(), second = UUID()
+        _ = try await store.sendMail(executionID: a.execution.id, to: recipient, id: first,
+                                    text: "PRIVATE", replyTo: nil, priority: .normal)
+        _ = try await store.mailNotice(recipient, event: .sessionStart)
+        let notice = try #require(try await store.pendingMailWake(recipient))
+        #expect(notice.ids == [first] && !notice.text.contains("PRIVATE"))
+        #expect(try await store.pendingMailWake(recipient) == notice)
+        _ = try await store.sendMail(executionID: a.execution.id, to: recipient, id: second,
+                                    text: "ALSO PRIVATE", replyTo: nil, priority: .normal)
+        try await store.confirmMailWake(recipient, ids: notice.ids)
+        #expect(try await store.pendingMailWake(recipient)?.ids == [second])
+        // Acknowledgment racing the receipt must never put that message back in the inbox.
+        _ = try await store.acknowledgeMail(mailbox: recipient, ids: [second])
+        try await store.confirmMailWake(recipient, ids: [second])
+        #expect(try await store.pendingMailWake(recipient) == nil)
+        #expect(try await store.inbox(recipient).items.map(\.message.envelope.id) == [first])
+    }
+
     /// Two workers on one host, each with a running execution: both are "busy".
     func pair(_ store: ControllerStore) async throws -> (a: WorkClaim, b: WorkClaim, aAddress: MailAddress, bAddress: MailAddress) {
         let a = try await fixture.seed(store, key: "a")

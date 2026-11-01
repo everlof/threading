@@ -1536,17 +1536,57 @@ command and MCP listener are covered by `MailIdleWakeTests`, including exit 2, r
 disconnect and 10,000 arrival edges. This is provider transport verification, not a live BETA
 restart or a promise that the model will acknowledge every message.
 
-Codex 0.163 has `codex queue`, but its source's `daemon_startup::config_exclusion` rejects the
-configuration overrides Threading needs for per-session MCP routing and policy. Our TUI therefore
-runs an embedded server, while `queue` discovers a shared one. Queuing through that different
-server cannot be treated as delivery to the running terminal. Codex idle wake needs an explicitly
-owned, addressable app-server transport; it is not enabled by this Claude hook change.
+**Local Codex idle wake, 2026-11-01.** ALPHA finished at 09:40:52; three messages arrived
+between 09:47 and 10:02 and remained waiting until the user's 10:04 prompt. The ordinary hooks
+worked, but an idle TUI had no hook boundary. Codex 0.163's shared daemon excludes the configuration
+overrides Threading needs for per-session MCP routing and policy, so an unqualified `codex queue`
+would address a different server from that TUI's embedded one.
+
+`CodexTerminalLaunch` now supervises one private app-server and its `--remote` TUI in the same
+PTY process group. Both inherit the original account, credentials, working directory, model,
+effort, permissions and hook policy. An unset permission choice inherits the account's policy;
+the native transport's workspace-write default is not imposed on terminals. The selected CLI's
+help is probed for Unix transport and queue support before use; older clients keep ordinary hooks.
+Native and remote-host launches do not use this supervisor. Existing embedded TUIs need one
+restart to gain the connection; an app relaunch alone only reattaches their old process.
+
+The socket is session-scoped inside `/tmp/threading-codex-<uid>`, checked for owner-only directory
+permissions and symlinks. A live socket refuses a second supervisor. A dead socket can be replaced;
+normal exit and signals retire the server with a two-second escalation bound and remove the socket.
+The selected executable is resolved before wrapping, and the account/token env prefix stays
+outside the long-lived shell script. A background-hosted PTY retains both server and TUI while
+Threading is closed, so its same socket is available after reattachment.
+
+`CodexTerminalMail` reacts to arrival and transitions into prompt-ready. It admits only a local,
+live terminal with the runtime capability, an identified thread, no active turn/blocker and
+Other sessions enabled. `CodexMailQueue` runs the selected `queue --remote unix://… --thread <UUID>`
+client on one of four bounded workers; no shared daemon discovery or terminal input occurs.
+Only the controller's notice crosses this channel. `pendingMailWake` leaves storage unchanged;
+only a successful queue receipt calls `confirmMailWake` for those exact message ids. A message
+arriving during the receipt wait is retained for another notice, and an acknowledgment racing
+that receipt is never undone. Stop shares the same per-message continuation fuse. A missing
+connection or unconfirmed response leaves mail available for the next arrival/prompt-ready edge
+or ordinary hook; timeouts are not blindly replayed into duplicate model turns.
+
+The real Codex 0.163 TUI and queue command, with a disposable account and local mock Responses
+API, are exercised by `scripts/test_codex_terminal_mail.py --codex /absolute/path/to/codex`.
+It compiles the shipping supervisor generator and tests both fresh and resumed conversations:
+queue into an idle terminal containing an unsent draft, assert the notice started the model request
+without the draft, submit the intact draft, then check server cleanup and ordinary
+`UserPromptSubmit`/`Stop` hook execution. Its two fixture-owned hooks use invocation trust bypass
+on the fresh turn and persisted trust on resume; Codex 0.163 does not preserve invocation bypass
+on that remote resume path. This spends no provider usage and never touches a live user session.
 
 **Scaling contract:** ordinary mail has a few open messages, with 1,000 allowed per inbox and
 10,000 activity edges as a stress case. Arrival/activity resolve only the affected session;
-terminal edges do no mailbox query, process work or delivery. Native queries remain coalesced
+ordinary terminal edges do no mailbox query, process work or delivery. Native queries remain coalesced
 per session. Each answering hook reads at most the existing 100-row page on the controller actor;
 `UserPromptSubmit` adds one such query per submitted prompt, not per keystroke or output chunk.
+Codex prompt-ready transitions are the exception to terminal edges: one indexed 100-message page,
+at most 128 pending recipients, one in-flight batch and one dirty bit per recipient, and four
+queue clients at once. Each client has a ten-second deadline and a 4 KiB retained-output cap.
+The burst fixture addresses one recipient 10,000 times while its receipt is held and proves that
+only the first batch and the newly arrived batch are queued; no idle polling is introduced.
 
 **A blocked `Stop` continues the turn, and the silent `Stop` hook does not know.** Both CLIs fire
 `Stop` again after a block (Codex: same `turn_id`). Relayed as is, the first lifecycle finish

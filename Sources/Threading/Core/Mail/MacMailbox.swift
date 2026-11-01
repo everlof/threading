@@ -163,6 +163,16 @@ actor MacMailbox {
         return try? await store.mailNotice(address, event: event)
     }
 
+    func pendingWake(for sessionID: SessionID) async -> MailWakeNotice? {
+        guard let store = try? await openStore(), let address = try? await address(for: sessionID) else { return nil }
+        return try? await store.pendingMailWake(address)
+    }
+
+    func confirmWake(for sessionID: SessionID, ids: [UUID]) async {
+        guard let store = try? await openStore(), let address = try? await address(for: sessionID) else { return }
+        try? await store.confirmMailWake(address, ids: ids)
+    }
+
     /// Whether the session has mail it has not been told about. Indexed and bounded.
     func hasUnannouncedMail(for sessionID: SessionID) async -> Bool {
         guard let store = try? await openStore(), let address = try? await address(for: sessionID),

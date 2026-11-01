@@ -6,7 +6,8 @@ enum CodexLaunchCommand {
     static func appServer(
         executable: String = AgentDefaults.codexExecutable,
         model: String?, conversationOverrides: ShellCommand = ShellCommand(),
-        permissionMode: AgentPermissionMode?, hookFlags: ShellCommand = ShellCommand()
+        permissionMode: AgentPermissionMode?, hookFlags: ShellCommand = ShellCommand(),
+        listen: String = "stdio://", suppliesDefaultSandbox: Bool = true
     ) -> ShellCommand {
         var command = invocation(executable: executable)
         if let model, !model.isEmpty {
@@ -17,13 +18,13 @@ enum CodexLaunchCommand {
             for flag in permissionMode.launchFlags(for: .codex) {
                 command.append(flag: flag.name, value: flag.value)
             }
-        } else {
+        } else if suppliesDefaultSandbox {
             command.append(flag: AgentDefaults.codexSandboxFlag,
                            value: AgentDefaults.codexSandboxWorkspaceWrite)
         }
         command.append(contentsOf: hookFlags)
         command.append(word: "app-server")
-        command.append(flag: "--listen", value: "stdio://")
+        command.append(flag: "--listen", value: listen)
         return command
     }
 

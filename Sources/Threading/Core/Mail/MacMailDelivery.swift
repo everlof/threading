@@ -16,12 +16,12 @@ import ThreadingController
 /// | Surface | On arrival |
 /// |---|---|
 /// | Native chat, live | `interrupt`: steer the notice into the running turn where the transport can; otherwise, and for `normal`, the notice joins the visible queue. |
-/// | Terminal, hooks can answer | Signal an armed idle-wake hook; ordinary hooks announce at tool/turn/prompt boundaries. |
+/// | Terminal, hooks can answer | Signal an armed idle-wake hook or the private Codex queue; ordinary hooks announce at tool/turn/prompt boundaries. |
 /// | Terminal, hooks cannot answer | Mail stays available through `mail_inbox`; input is never changed. |
 /// | Dormant | Nothing; its next launch's `SessionStart` hook (or, for a chat, its first live edge) announces it. |
 ///
-/// An idle agent is not proof of an empty human draft. Terminal delivery belongs exclusively
-/// to hooks, including when a native chat changes surface while a mailbox query is in flight.
+/// An idle agent is not proof of an empty human draft. Terminal delivery uses provider hooks or
+/// queues, including when a native chat changes surface while a mailbox query is in flight.
 @MainActor
 final class MacMailDelivery {
 
@@ -137,6 +137,7 @@ final class MacMailDelivery {
         // A host-local mailbox is announced by its host's own hooks.
         guard !mailboxes.keepsMailOnHost(sessionID) else { return }
         MailIdleWake.shared.arrived(for: sessionID)
+        CodexTerminalMail.shared.arrived(for: sessionID)
         let facts = runtime.facts(sessionID)
         switch Self.plan(for: facts, priority: priority) {
         case .steerNotice, .queueNotice:
@@ -249,6 +250,7 @@ final class MacMailDelivery {
     // MARK: - Activity
 
     func activityChanged(_ sessionID: SessionID) {
+        CodexTerminalMail.shared.activityChanged(sessionID)
         guard runtime.facts(sessionID).surface == .chat else {
             liveSessions.remove(sessionID)
             return

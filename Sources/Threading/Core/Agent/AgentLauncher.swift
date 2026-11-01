@@ -62,13 +62,28 @@ enum AgentLauncher {
             throw AgentLaunchPlanningError.unsupportedTerminalConversation(.cursor)
         }
 
+        var route = routed(command, for: session, brokersPermissions: brokersTerminalRun(session),
+                           rendersTerminalUI: true)
+        if project.executionHost == nil, session.kind.supports(.queuedTerminalMail) {
+            var overrides = ShellCommand()
+            appendCodexConversationOverrides(for: session, to: &overrides)
+            var hooks = ShellCommand()
+            appendCodexHookFlags(for: session, to: &hooks)
+            let socket = CodexTerminalLaunch.socketPath(for: session.id)
+            var server = CodexLaunchCommand.appServer(
+                model: session.model, conversationOverrides: overrides,
+                permissionMode: permissionMode(for: session), hookFlags: hooks,
+                listen: "unix://\(socket)", suppliesDefaultSandbox: false
+            )
+            appendMCPFlags(for: session, to: &server)
+            route = AgentAccountRouting.Route(
+                command: CodexTerminalLaunch.wrap(route.command, server: server,
+                                                  socketPath: socket, store: AgentLocalLaunch.store),
+                credentials: route.credentials
+            )
+        }
         return launchPlan(
-            route: routed(
-                command,
-                for: session,
-                brokersPermissions: brokersTerminalRun(session),
-                rendersTerminalUI: true
-            ),
+            route: route,
             in: executionProject.folderPath,
             resumeState: resumeState,
             environmentOverrides: project.executionHost == nil
