@@ -8,6 +8,17 @@ struct RemoteNotificationTargetIdentity: Hashable, Sendable {
     let participantID: RemoteNotificationParticipantID
 }
 
+/// One owner phone a Mirror invite may reach, as the notification service sees it.
+struct RemoteMirrorInviteTarget: Hashable, Sendable {
+    let identity: RemoteNotificationTargetIdentity
+    /// The device's preview consent: without it the invite does not name the page.
+    let includesPreviews: Bool
+    /// A push can reach the phone while Threading is suspended.
+    let canPush: Bool
+    /// The phone removes a delivered invite when told to.
+    let canRetract: Bool
+}
+
 struct RemoteNotificationPushResult: Equatable, Sendable {
     let accepted: Bool
     let statusCode: Int?

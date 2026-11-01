@@ -165,6 +165,7 @@ private final class BrowserTunnelWorkspace: RemoteWorkspaceProviding {
     func remoteBrowserLink(for sessionID: SessionID, tabID: UUID) -> URL? {
         tabID == self.tabID && !isPrivate ? url : nil
     }
+    func remoteMirrorSource(for sessionID: SessionID, tabID: UUID) -> PhoneMirrorSourceSnapshot? { nil }
 }
 
 /// Queue-owned bounded HTTP fixture; the large body tests relay backpressure and final EOF.

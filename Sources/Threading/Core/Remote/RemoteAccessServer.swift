@@ -659,6 +659,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if request.method == "POST", path == RemoteRouter.mirrorEndPath {
+            handleMirrorEnd(request, respond: respond)
+            return
+        }
+
         if request.method == "POST", path == RemoteRouter.invitationAcceptancePath {
             handleAcceptInvitation(request, respond: respond)
             return
@@ -1113,7 +1118,54 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         case "mobileDiagnosticsDisabled":
             handleMobileDiagnosticsDisabled(connection, routeKind: parsed.state)
         default:
-            break
+            if let signal = RemoteMirrorSignal(rawValue: parsed.type) {
+                handlePhoneMirrorSignal(signal, message: parsed, from: connection)
+            }
+        }
+    }
+
+    /// A Mirror signal from a phone's events socket. Only an owner device that may manage this
+    /// Mac, on its own authenticated events socket, is ever a mirror's target or its author.
+    private func handlePhoneMirrorSignal(
+        _ signal: RemoteMirrorSignal,
+        message: RemoteClientMessage,
+        from connection: RemoteConnection
+    ) {
+        guard connection.routedSessionID == RemoteRouter.themeEventsRouteID,
+              let peer = connection.authenticatedPeer,
+              peer.authorization.canManageHost,
+              let deviceID = peer.deviceID
+        else { return }
+        let authorization = peer.authorization
+        let device = PhoneMirrorDevice(shareID: authorization.shareID, deviceID: deviceID)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                guard self.authorizer?.isCurrent(authorization) == true else { return }
+                let coordinator = self.services.phoneMirror
+                switch signal {
+                case .hello:
+                    let availability = message.state.flatMap(RemoteMirrorAvailability.init(rawValue:)) ?? .enabled
+                    coordinator.phoneSaidHello(
+                        device, availability: availability, showing: message.id, channel: connection
+                    )
+                case .join:
+                    guard let mirrorID = message.id else { return }
+                    coordinator.phoneJoined(device, mirrorID: mirrorID)
+                case .hold:
+                    guard let mirrorID = message.id,
+                          let reason = message.state.flatMap(RemoteMirrorHoldReason.init(rawValue:))
+                    else { return }
+                    coordinator.phoneHeld(device, mirrorID: mirrorID, reason: reason)
+                case .presence:
+                    guard let mirrorID = message.id,
+                          let presence = message.state.flatMap(RemoteMirrorPresence.init(rawValue:))
+                    else { return }
+                    coordinator.phonePresence(device, mirrorID: mirrorID, presence: presence)
+                case .leave:
+                    guard let mirrorID = message.id else { return }
+                    coordinator.phoneLeft(device, mirrorID: mirrorID)
+                }
+            }
         }
     }
 
@@ -2048,6 +2100,34 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         respond(.respond(RemoteRouter.json(
             RemoteDiagnosticUploadResponseDTO(acceptedRecords: upload.records.count)
         )))
+    }
+
+    /// The Live Activity's **End**, which runs while the events socket is closed. Only the phone
+    /// a mirror targets can end it this way.
+    private func handleMirrorEnd(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canManageHost,
+              request.body.count <= RemoteAccessDefaults.maximumMirrorEndRequestBytes,
+              let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+                  request.header(RemoteRouter.deviceHeader)
+              ),
+              let body = try? JSONDecoder().decode(RemoteMirrorEndRequestDTO.self, from: request.body)
+        else {
+            respond(.respond(RemoteRouter.error(403, "Forbidden")))
+            return
+        }
+        let device = PhoneMirrorDevice(shareID: authorization.shareID, deviceID: deviceID)
+        let ended = RemoteRouter.json(["ended": true])
+        Task { @MainActor in
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                respond(.respond(RemoteRouter.error(401, "Unauthorized"))); return
+            }
+            self.services.phoneMirror.phoneLeft(device, mirrorID: body.mirrorID)
+            respond(.respond(ended))
+        }
     }
 
     private func handleMobileDiagnosticsCaptureUpload(

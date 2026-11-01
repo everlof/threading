@@ -65,6 +65,10 @@ enum RemoteNotificationBrokerCompatibility {
     /// The first that accepts `soundName`. An older one refuses unknown envelope keys, so it is
     /// sent none and the phone plays its default sound.
     static let themeSoundVersion = 4
+    /// The first that knows `mirrorInvite`, its two-minute lifetime and its `time-sensitive`
+    /// interruption level. An older one would answer 400, so a Mac paired with it says *Open
+    /// Threading on iPhone* instead of sending an invite.
+    static let mirrorInviteVersion = 5
 
     static func themeSoundName(_ name: String?, forBrokerVersion version: Int) -> String? {
         guard version >= themeSoundVersion, let name, RemoteThemeSound.acceptsName(name) else { return nil }
@@ -72,7 +76,11 @@ enum RemoteNotificationBrokerCompatibility {
     }
 
     static func delivers(_ kind: RemoteNotificationKind, brokerVersion version: Int) -> Bool {
-        kind != .secretApproval || version >= secretApprovalVersion
+        switch kind {
+        case .secretApproval: version >= secretApprovalVersion
+        case .mirrorInvite: version >= mirrorInviteVersion
+        default: true
+        }
     }
 
     static func payload(

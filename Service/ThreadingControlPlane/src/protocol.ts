@@ -6,7 +6,8 @@ export const BOUNDS = {
   // `invalidRequest` until this service was redeployed.
   // 3 knows `secretApproval`, the keyvault Face ID alert. A Mac asks before sending one.
   // 4 accepts a device-confirmed theme sound filename in push delivery metadata.
-  notificationProtocolVersion: 4,
+  // 5 knows `mirrorInvite`, retractable, two minutes, `time-sensitive`. A Mac asks before sending.
+  notificationProtocolVersion: 5,
   maximumEnvelopeBytes: 384 * 1024,
   maximumIdentifierBytes: 256,
   maximumCredentialBytes: 4 * 1024,

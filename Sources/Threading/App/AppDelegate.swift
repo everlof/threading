@@ -669,6 +669,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // the seam a phone drives this window through.
         if plan.startsBackgroundServices {
             RemoteWorkspaceBridge.install(mainWindowController)
+            BrowserViewController.phoneMirrorSourceResolver = { [weak mainWindowController] browser in
+                mainWindowController?.mirrorSource(of: browser)
+            }
         }
 
         // First launch defers the main window behind the onboarding walkthrough. Everything
@@ -3445,6 +3448,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                   simulator.isPresenterWindowOpen || simulator.adoptedDevice != nil else {
                 return .unavailable(L10n.string("Show an adopted Simulator first."))
             }
+        case AppCommands.ID.togglePhoneMirror:
+            guard let target = mainWindowController?.commandMirrorSource else {
+                return .unavailable(L10n.string("Show a web page in the browser first."))
+            }
+            let mirror = PhoneMirrorCoordinator.shared
+            guard mirror.mirrorID(forBrowser: ObjectIdentifier(target.browser)) != nil
+                    || !mirror.candidates().isEmpty else {
+                return .unavailable(L10n.string("Open Threading on a paired iPhone to mirror to it."))
+            }
         case AppCommands.ID.saveBaseline:
             guard mainWindowController?.canSaveVisibleBrowserBaseline == true else {
                 return .unavailable(L10n.string("Show a browser before saving a baseline."))
@@ -3810,6 +3822,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             mainWindowController?.commandSimulator?.toggleShowTouches()
         case AppCommands.ID.toggleSimulatorPresenter:
             mainWindowController?.commandSimulator?.togglePresenterWindow()
+        case AppCommands.ID.togglePhoneMirror:
+            if let target = mainWindowController?.commandMirrorSource {
+                target.browser.togglePhoneMirror(source: target.source)
+            }
         case AppCommands.ID.saveBaseline: mainWindowController?.saveVisibleBrowserBaseline()
         case AppCommands.ID.sessionInfo: mainWindowController?.showInfo()
         case AppCommands.ID.shell: mainWindowController?.toggleShellDrawer()

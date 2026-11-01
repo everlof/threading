@@ -316,6 +316,13 @@ enum MobileDemoFixture: String, CaseIterable {
     case projectTerminalOpeningStarting = "project-terminal-opening-starting"
     case projectTerminalOpeningConnecting = "project-terminal-opening-connecting"
 
+    /// Mirror, met from inside the demo app: the stage with the controls guide's two steps, the
+    /// stage once the guide is done, and the quiet offer over the dashboard.
+    case mirrorGuide = "mirror-guide"
+    case mirrorControls = "mirror-controls"
+    case mirrorLive = "mirror-live"
+    case mirrorOffer = "mirror-offer"
+
     /// The session workspace and what it opens.
     case workspace = "workspace"
     case browserPermission = "browser-permission"

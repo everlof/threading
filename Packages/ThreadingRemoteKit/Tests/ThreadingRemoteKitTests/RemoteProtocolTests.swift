@@ -149,12 +149,15 @@ final class RemoteProtocolTests: XCTestCase {
             RemoteNotificationKind.allCases.map(\.rawValue),
             [
                 "sharedSession", "permissionRequest", "agentQuestion", "turnCompleted",
-                "agentMessage", "attentionRequest", "secretApproval",
+                "agentMessage", "attentionRequest", "secretApproval", "mirrorInvite",
             ]
         )
         // Sent the moment keyvault asks, never deferred, never retracted: it dies with the request.
         XCTAssertEqual(RemoteNotificationKind.secretApproval.lifecycle, .independentEvent)
         XCTAssertFalse(RemoteNotificationKind.secretApproval.supportsRetraction)
+        // Sent at once, and withdrawn the moment the phone shows up or the mirror ends.
+        XCTAssertEqual(RemoteNotificationKind.mirrorInvite.lifecycle, .expiringOffer)
+        XCTAssertTrue(RemoteNotificationKind.mirrorInvite.supportsRetraction)
     }
 
     func testHumanAttentionProtocolStaysSeparateFromPromptAndTerminalInput() throws {

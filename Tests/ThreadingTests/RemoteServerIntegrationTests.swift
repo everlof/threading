@@ -163,6 +163,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             attachments: live.attachments,
             extensions: live.extensions,
             mobileDiagnosticsCaptures: live.mobileDiagnosticsCaptures,
+            phoneMirror: live.phoneMirror,
             usageDashboard: live.usageDashboard,
             usageLimit: live.usageLimit,
             usageCapacity: {

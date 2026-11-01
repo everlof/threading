@@ -403,6 +403,17 @@
         }
       }
     },
+    "%@ — tap to show" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ – tryck för att visa"
+          }
+        }
+      }
+    },
     "%@, %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1083,6 +1094,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 behöver uppmärksamhet"
+          }
+        }
+      }
+    },
+    "1 of 2" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 av 2"
           }
         }
       }
@@ -1988,6 +2010,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tillåt åtkomst till lokalt nätverk"
+          }
+        }
+      }
+    },
+    "Allow Mirror from this Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt spegling från den här Macen"
           }
         }
       }
@@ -3880,6 +3913,17 @@
         }
       }
     },
+    "Connecting to %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ansluter till %@"
+          }
+        }
+      }
+    },
     "Connecting…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5302,6 +5346,28 @@
         }
       }
     },
+    "End Mirror" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avsluta spegling"
+          }
+        }
+      }
+    },
+    "End whenever you like" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avsluta när du vill"
+          }
+        }
+      }
+    },
     "Enroll this iPhone" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6334,6 +6400,17 @@
         }
       }
     },
+    "Got It" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppfattat"
+          }
+        }
+      }
+    },
     "Hand off to %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6452,6 +6529,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hålltider"
+          }
+        }
+      }
+    },
+    "Hold two fingers on the screen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Håll två fingrar på skärmen"
           }
         }
       }
@@ -6771,6 +6859,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Granska ändrade filer och jämför arbetskatalogens lägen."
+          }
+        }
+      }
+    },
+    "Interactive" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interaktiv"
+          }
+        }
+      }
+    },
+    "Interactive or view only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interaktivt eller bara visning"
           }
         }
       }
@@ -7342,6 +7452,17 @@
         }
       }
     },
+    "Lock Rotation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lås rotation"
+          }
+        }
+      }
+    },
     "Long press for session actions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7657,6 +7778,83 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Mätvärden återställdes %@"
+          }
+        }
+      }
+    },
+    "Mirror" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spegling"
+          }
+        }
+      }
+    },
+    "Mirror from %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spegling från %@"
+          }
+        }
+      }
+    },
+    "Mirror from %@ is ready. Show it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spegling från %@ är redo. Visa den."
+          }
+        }
+      }
+    },
+    "Mirror ready · Show" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spegling redo · Visa"
+          }
+        }
+      }
+    },
+    "Mirror shows the page you are working on at the Mac full screen on this iPhone. It never takes the screen while you are typing or touching it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spegling visar sidan du arbetar med på Macen i helskärm på den här iPhonen. Den tar aldrig över skärmen medan du skriver eller rör vid den."
+          }
+        }
+      }
+    },
+    "Mirroring ended on the Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speglingen avslutades på Macen."
+          }
+        }
+      }
+    },
+    "Mirroring stopped on the Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speglingen stoppades på Macen."
           }
         }
       }
@@ -8654,6 +8852,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "På"
+          }
+        }
+      }
+    },
+    "On the next mirror" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vid nästa spegling"
           }
         }
       }
@@ -10176,6 +10385,17 @@
         }
       }
     },
+    "Ready for mirroring" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redo för spegling"
+          }
+        }
+      }
+    },
     "Reasoning" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10347,6 +10567,17 @@
         }
       }
     },
+    "Reload" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ladda om"
+          }
+        }
+      }
+    },
     "Reload page" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10360,6 +10591,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Läs in sidan igen"
+          }
+        }
+      }
+    },
+    "Reload what the Mac shows" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ladda om det Macen visar"
           }
         }
       }
@@ -11215,6 +11457,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rulla till slutet av kodarkivet"
+          }
+        }
+      }
+    },
+    "Scrub two fingers to bring up the controls" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gnugga med två fingrar för att ta fram kontrollerna"
           }
         }
       }
@@ -12108,6 +12361,17 @@
         }
       }
     },
+    "Show the Controls Guide Again" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa introduktionen igen"
+          }
+        }
+      }
+    },
     "Show the Mac’s extension backdrop on this iPhone" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12115,6 +12379,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa Macens tilläggsbakgrund på den här iPhonen"
+          }
+        }
+      }
+    },
+    "Show the controls guide" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa introduktionen till kontrollerna"
           }
         }
       }
@@ -12242,6 +12517,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Färdighet"
+          }
+        }
+      }
+    },
+    "Skip" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hoppa över"
           }
         }
       }
@@ -12803,6 +13089,17 @@
         }
       }
     },
+    "Tap to show" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tryck för att visa"
+          }
+        }
+      }
+    },
     "Teach this screen a new trick…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12975,6 +13272,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den åtgärden stöds inte av den här agenten."
+          }
+        }
+      }
+    },
+    "That brings up the controls. Try it now." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Så tar du fram kontrollerna. Prova nu."
           }
         }
       }
@@ -14006,6 +14314,17 @@
         }
       }
     },
+    "The page closed on the Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidan stängdes på Macen."
+          }
+        }
+      }
+    },
     "The photo couldn’t be read. Please try again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14218,6 +14537,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det finns inget i urklipp att klistra in."
+          }
+        }
+      }
+    },
+    "These are the controls" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här är kontrollerna"
           }
         }
       }
@@ -14687,6 +15017,17 @@
         }
       }
     },
+    "This iPhone was disconnected from the Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här iPhonen kopplades från Macen."
+          }
+        }
+      }
+    },
     "This iPhone will trust only this Mac’s identity." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14888,6 +15229,28 @@
         }
       }
     },
+    "This mirror expired." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speglingen gick ut."
+          }
+        }
+      }
+    },
+    "This mirror is no longer on the Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speglingen finns inte längre på Macen."
+          }
+        }
+      }
+    },
     "This movie plays on your Mac." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14906,6 +15269,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Namnet delas med Mac-datorn."
+          }
+        }
+      }
+    },
+    "This page cannot be shown on iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här sidan kan inte visas på iPhone."
           }
         }
       }
@@ -16003,6 +16377,17 @@
         }
       }
     },
+    "View Only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Endast visning"
+          }
+        }
+      }
+    },
     "View only" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16482,6 +16867,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Du styr · andra tittar"
+          }
+        }
+      }
+    },
+    "You can also end it from the Mac or the Lock Screen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du kan också avsluta från Macen eller låsskärmen."
           }
         }
       }
@@ -17035,6 +17431,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "den här chatten"
+          }
+        }
+      }
+    },
+    "two fingers · controls" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "två fingrar · kontroller"
           }
         }
       }

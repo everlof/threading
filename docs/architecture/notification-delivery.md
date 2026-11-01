@@ -4,12 +4,22 @@ Read this with [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md), which owns the user
 notification and privacy contract. This note owns the implementation seams that must remain true
 when routine turn-completion delivery changes.
 
-**A public Mac build is Live only.** Push to a suspended iPhone goes through the hosted broker,
-which only a development build offers (`BuildChannel.offersHostedDirect`). A release, beta or
-nightly build's hosted controller has no endpoint, so `canSendHostedPush` is false and the push and
-retraction sinks report unavailable; `RemoteAPNSPushSender.fromEnvironment` is compiled only into
-Debug and internal builds. Every policy below still runs, and delivery reaches the phone over the
-authenticated live connection alone.
+**Push to a suspended iPhone goes through the hosted broker.** Every channel offers it since
+2026-09-27 (`BuildChannel.offersHostedDirect`); `canSendHostedPush` is true once the Mac holds a
+current hosted credential. `RemoteAPNSPushSender.fromEnvironment`, which sends without the
+broker, is compiled only into Debug and internal builds. Without either, every policy below still
+runs, and delivery reaches the phone over the authenticated live connection alone.
+
+## Mirror invites are expiring offers
+
+`mirrorInvite` is the one `.expiringOffer` kind: delivered at once like an independent event, but
+retractable. It does not pass through `deliverIndependentEvent`: `PhoneMirrorCoordinator` builds
+one event per target (the body names the page only with that device's preview consent), sends it
+through `sendMirrorInvite` only to a phone with no live events socket, and withdraws it through
+`withdrawMirrorInvite` on join, end or after 120 s. `pushRefusal` asks the coordinator once more
+before network I/O (`mirrorInviteIsCurrent`), so a phone that joined meanwhile is not woken. The
+APNs payload carries `interruption-level: time-sensitive` for this kind alone, and a broker below
+notification protocol 5 is never sent one. See [`phone-mirror.md`](phone-mirror.md).
 
 ## Explicit lifetimes share one activity source and transport
 

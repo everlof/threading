@@ -15,11 +15,13 @@ final class RemoteNotificationService {
             NSClassFromString("XCTestCase") == nil
                 ? RemoteNotificationSubscriptionKeychainStore()
                 : InMemoryRemoteNotificationSubscriptionStore()
-        return RemoteNotificationService(
+        let service = RemoteNotificationService(
             subscriptionStore: store,
             localPushSender: RemoteAPNSPushSender.fromEnvironment(),
             recordsPersistenceDiagnostics: true
         )
+        service.mirrorInviteIsCurrent = { PhoneMirrorCoordinator.shared.isInviteCurrent(eventID: $0) }
+        return service
     }()
 
     enum RequestedDeliveryResult: Equatable {
@@ -124,6 +126,10 @@ final class RemoteNotificationService {
     private var hostedRetractionSender: HostedRetractionSender?
     private var hostedPushAvailability: (@MainActor () -> Bool)?
     private var hostedPushServiceURL: (@MainActor () -> URL?)?
+    /// Whether a queued Mirror invite still applies. The mirror coordinator owns invites; the
+    /// push path asks it once more just before network I/O, the way it asks the response
+    /// coordinator about an answered question.
+    var mirrorInviteIsCurrent: (@MainActor (String) -> Bool)?
     private let observations = AppEventObservations()
     private var announcedGuestShares: Set<String> = []
     private var currentActorBySession: [SessionID: RemoteNotificationInteractionActor] = [:]
@@ -948,6 +954,10 @@ final class RemoteNotificationService {
                 ? nil
                 : "previewConsentChanged"
         }
+        if event.kind == .mirrorInvite {
+            // The phone may have joined, or the mirror ended, while this push was queued.
+            return mirrorInviteIsCurrent?(event.id) == true ? nil : "withdrawn"
+        }
         return responseDeliveryCoordinator.canSend(event, to: target) ? nil : "answered"
     }
 
@@ -1231,6 +1241,56 @@ final class RemoteNotificationService {
     /// A machine token in the session slot, so a newer approval alert replaces an older one
     /// (`session:secretApproval:secret-approval`) and nothing mistakes it for a chat.
     static let secretApprovalSessionID = RemoteNotificationKind.secretApprovalThread
+
+    // MARK: - Mirror invitations
+
+    /// An owner phone that has asked for Mirror invites from this Mac. The invite kind is in its
+    /// registration only while its Mirror switch for this Mac is on, so the registration is the
+    /// durable answer to "may this phone be invited, and does it understand Mirror at all".
+    func mirrorInviteTargets() -> [RemoteMirrorInviteTarget] {
+        let activeHostedServiceURL = RemoteNotificationSubscriptionDefaults
+            .normalizedHostedServiceURL(hostedPushServiceURL?())
+        return subscriptions.compactMap { key, subscription in
+            guard subscription.enabledKinds.contains(.mirrorInvite),
+                  subscription.authorization.canManageHost,
+                  !subscription.authorization.isExpired else { return nil }
+            let canPush = localPushSender != nil || (
+                supportsPush
+                    && subscription.hostedRegistrationID != nil
+                    && Self.hostedRegistration(
+                        serviceURL: subscription.hostedServiceURL,
+                        belongsTo: activeHostedServiceURL
+                    )
+            )
+            return RemoteMirrorInviteTarget(
+                identity: RemoteNotificationTargetIdentity(
+                    shareID: key.shareID,
+                    deviceID: key.deviceID,
+                    participantID: Self.participantID(for: subscription.authorization)
+                ),
+                includesPreviews: subscription.includesResponsePreviews,
+                canPush: canPush,
+                canRetract: subscription.capabilities.contains(.notificationRetraction)
+            )
+        }
+    }
+
+    /// Sends one invite to one phone that has no live events socket. The event is built per
+    /// target by the caller, because its title depends on that device's preview consent.
+    func sendMirrorInvite(
+        _ event: RemoteNotificationEventDTO,
+        to target: RemoteMirrorInviteTarget,
+        completion: @escaping @MainActor (RemoteNotificationPushResult) -> Void
+    ) {
+        precondition(event.kind == .mirrorInvite)
+        sendNotificationPush(event, to: target.identity, completion: completion)
+    }
+
+    /// Withdraws an invite from the phone: live if it is connected, by background push if not.
+    func withdrawMirrorInvite(_ retraction: RemoteNotificationRetractionDTO, from target: RemoteMirrorInviteTarget) {
+        precondition(retraction.kind == .mirrorInvite)
+        sendRetraction(retraction, to: target.identity, live: true, background: target.canPush)
+    }
 
     func revoke(shareID: String) {
         // Authorization was already revoked in its owning Keychain store. Drop live delivery
@@ -1662,10 +1722,14 @@ actor RemoteAPNSPushSender {
             let sound: String?
             let threadID: String
             let category: String
+            /// `time-sensitive` only for an alert the person asked for moments ago and that dies
+            /// within minutes; absent otherwise, which APNs reads as `active`.
+            let interruptionLevel: String?
 
             private enum CodingKeys: String, CodingKey {
                 case alert, sound, category
                 case threadID = "thread-id"
+                case interruptionLevel = "interruption-level"
             }
         }
 
@@ -1800,6 +1864,7 @@ actor RemoteAPNSPushSender {
         let retention: TimeInterval = switch event.kind {
         case .permissionRequest: 3_600
         case .secretApproval: TimeInterval(RemoteSecretApproval.approvalLifetime)
+        case .mirrorInvite: TimeInterval(RemoteMirror.inviteLifetime)
         default: 86_400
         }
         request.setValue(
@@ -1898,6 +1963,12 @@ actor RemoteAPNSPushSender {
         }
     }
 
+    /// A Mirror invite is the one alert the person requested seconds ago at the Mac and that is
+    /// gone in two minutes, so it may break through a Focus; every other kind stays `active`.
+    nonisolated static func interruptionLevel(for kind: RemoteNotificationKind) -> String? {
+        kind == .mirrorInvite ? "time-sensitive" : nil
+    }
+
     nonisolated static func collapseIdentifier(
         for event: RemoteNotificationEventDTO
     ) -> String {
@@ -1948,7 +2019,8 @@ actor RemoteAPNSPushSender {
                 threadID: event.sessionID,
                 category: event.kind == .permissionRequest
                     ? "THREADING_PERMISSION"
-                    : "THREADING_SESSION"
+                    : "THREADING_SESSION",
+                interruptionLevel: Self.interruptionLevel(for: event.kind)
             ),
             event: event
         )

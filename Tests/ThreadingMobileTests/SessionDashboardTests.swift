@@ -1451,6 +1451,10 @@ final class MobileDemoSceneTests: XCTestCase {
                     "project-terminal-opening-connecting",
                     .projectTerminalOpening(.connecting)
                 )
+            case .mirrorGuide: expected = ("mirror-guide", .shippingRoot)
+            case .mirrorControls: expected = ("mirror-controls", .shippingRoot)
+            case .mirrorLive: expected = ("mirror-live", .shippingRoot)
+            case .mirrorOffer: expected = ("mirror-offer", .shippingRoot)
             case .workspace: expected = ("workspace", .workspace)
             case .browserPermission: expected = ("browser-permission", .browserPermission)
             case .browserPreview: expected = ("browser-preview", .browserPreview)

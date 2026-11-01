@@ -1,4 +1,5 @@
 import SwiftUI
+import ThreadingRemoteKit
 import UIKit
 
 struct MobileSettingsView: View {
@@ -13,6 +14,8 @@ struct MobileSettingsView: View {
     @AppStorage(MobileThemeMotionPreferences.strengthKey) private var reactionStrength = 100.0
     @AppStorage(MobileThemeMotionPreferences.extensionBackdropsKey) private var extensionBackdrops = true
     @ObservedObject private var sentryDiagnostics = MobileSentryDiagnosticsStatus.shared
+    /// Mirror's switches live outside SwiftUI's store; a bump re-reads them.
+    @State private var mirrorSettingsRevision = 0
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -138,6 +141,53 @@ struct MobileSettingsView: View {
                         )
                         .disabled(model.isDemo || model.activeHost == nil
                             || (model.widgetHostID != model.activeHostID && !model.canReadUsage))
+                    }
+
+                    if let host = model.activeHost, host.isOwnerDevice,
+                       model.me?.features?.contains(RemoteRESTFeature.mirror.rawValue) == true {
+                        settingsSection("Mirror", footer: MobileL10n.string(
+                            "Mirror shows the page you are working on at the Mac full screen on this "
+                                + "iPhone. It never takes the screen while you are typing or touching it."
+                        )) {
+                            let _ = mirrorSettingsRevision
+                            SettingsToggleRow(
+                                symbol: "iphone.radiowaves.left.and.right",
+                                title: "Allow Mirror from this Mac",
+                                detail: LocalizedStringKey(host.name),
+                                isOn: Binding(
+                                    get: {
+                                        _ = mirrorSettingsRevision
+                                        return MobileMirrorPreferences.shared.isEnabled(
+                                            hostID: MobileMirrorController.macID(host)
+                                        )
+                                    },
+                                    set: { enabled in
+                                        MobileMirrorPreferences.shared.setEnabled(
+                                            enabled, hostID: MobileMirrorController.macID(host)
+                                        )
+                                        mirrorSettingsRevision += 1
+                                        model.mirror.eventsConnected(pairingID: host.id)
+                                        Task { await notifications.sync(hosts: model.hosts) }
+                                    }
+                                )
+                            )
+                            ThemedRowDivider()
+                            Button {
+                                MobileMirrorGuideStore.shared.resetGuide()
+                                mirrorSettingsRevision += 1
+                            } label: {
+                                SettingsRow(
+                                    symbol: "hand.raised.fingers.spread",
+                                    title: "Show the Controls Guide Again",
+                                    detail: "On the next mirror"
+                                )
+                                .padding(.horizontal, MobileDesign.Spacing.inset)
+                                .padding(.vertical, MobileDesign.Spacing.small)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!MobileMirrorGuideStore.shared.hasCompletedGuide)
+                        }
                     }
 
                     settingsSection("Security") {

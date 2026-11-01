@@ -677,6 +677,8 @@ public enum RemoteRoute: String, CaseIterable, Sendable {
     case settings = "api/settings"
     case projectVisibility = "api/project/visibility"
     case projectDefaultAccounts = "api/project/default-accounts"
+    /// Ends a mirror over REST, for the Live Activity's **End** while the events socket is closed.
+    case mirrorEnd = "api/mirror/end"
 
     /// The rooted path a host matches an incoming request against.
     public var absolutePath: String { "/" + rawValue }

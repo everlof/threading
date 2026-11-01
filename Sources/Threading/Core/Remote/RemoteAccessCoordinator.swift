@@ -299,6 +299,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             attachments: .shared,
             extensions: .shared,
             mobileDiagnosticsCaptures: .shared,
+            phoneMirror: PhoneMirrorCoordinator.shared,
             usageDashboard: { offset, count in
                 let now = Date()
                 transcriptUsage.refresh()
@@ -1533,6 +1534,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
         authority.set(nil, forToken: record.token)
         notifications.revoke(shareID: record.id)
+        PhoneMirrorCoordinator.shared.endAll(reason: .revoked, shareID: record.id)
         server.revokeConnections(shareID: record.id)
         hostedService.revokeDevice(deviceID: record.deviceID)
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)

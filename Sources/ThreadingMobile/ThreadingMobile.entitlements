@@ -11,5 +11,7 @@
     <array><string>group.codes.threading.mobile</string></array>
 	<key>aps-environment</key>
 	<string>$(APS_ENVIRONMENT)</string>
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
 </dict>
 </plist>

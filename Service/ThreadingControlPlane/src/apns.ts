@@ -29,9 +29,13 @@ export enum NotificationKind {
   attentionRequest = "attentionRequest",
   // keyvault waits for Face ID on one exact phone. Fixed words; the request is read in the app.
   secretApproval = "secretApproval",
+  // The person turned Mirror on at the Mac while Threading was not open on the phone. The Mac
+  // withdraws it when the phone joins, the mirror ends or two minutes pass.
+  mirrorInvite = "mirrorInvite",
 }
 type RetractableNotificationKind = NotificationKind.turnCompleted
-  | NotificationKind.agentQuestion | NotificationKind.permissionRequest;
+  | NotificationKind.agentQuestion | NotificationKind.permissionRequest
+  | NotificationKind.mirrorInvite;
 
 // Exhaustive: a new wire kind must explicitly choose whether it has a retractable lifetime.
 function supportsRetraction(kind: NotificationKind): kind is RetractableNotificationKind {
@@ -39,6 +43,7 @@ function supportsRetraction(kind: NotificationKind): kind is RetractableNotifica
     case NotificationKind.turnCompleted:
     case NotificationKind.agentQuestion:
     case NotificationKind.permissionRequest:
+    case NotificationKind.mirrorInvite:
       return true;
     case NotificationKind.sharedSession:
     case NotificationKind.agentMessage:
@@ -53,10 +58,11 @@ function supportsRetraction(kind: NotificationKind): kind is RetractableNotifica
 const kinds = new Set<NotificationKind>(Object.values(NotificationKind));
 
 // How long APNs may hold an alert for an offline phone. A Face ID approval is dead after two
-// minutes, and an approval prompt arriving later would only mislead.
+// minutes, and an approval prompt arriving later would only mislead; so is a Mirror invite.
 export function alertLifetimeSeconds(kind: string): number {
   switch (kind) {
     case NotificationKind.secretApproval: return 120;
+    case NotificationKind.mirrorInvite: return 120;
     case NotificationKind.permissionRequest: return 3_600;
     default: return 86_400;
   }
@@ -369,9 +375,16 @@ function encodeEnvelope(event: NotificationEvent, playsSound: boolean, soundName
       ...(playsSound ? { sound: soundName ?? "default" } : {}),
       "thread-id": event.sessionID,
       category: event.kind === "permissionRequest" ? "THREADING_PERMISSION" : "THREADING_SESSION",
+      ...(interruptionLevel(event.kind) ? { "interruption-level": interruptionLevel(event.kind) } : {}),
     },
     event,
   }));
+}
+
+// A Mirror invite is the one alert the person asked for seconds ago at the Mac and that is gone in
+// two minutes, so it may break through a Focus. Derived from the kind: no new request key.
+export function interruptionLevel(kind: NotificationKind): string | undefined {
+  return kind === NotificationKind.mirrorInvite ? "time-sensitive" : undefined;
 }
 
 async function apnsAuthorizationToken(env: Env): Promise<string> {

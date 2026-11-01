@@ -849,6 +849,7 @@ final class RemoteSessionMirrorRegistry {
             features.append(RemoteRESTFeature.sessionDraftAttachmentUploads.rawValue)
             features.append(RemoteRESTFeature.sessionContinuation.rawValue)
             features.append(RemoteRESTFeature.projectDefaultAccounts.rawValue)
+            features.append(RemoteRESTFeature.mirror.rawValue)
         }
         return features.isEmpty ? nil : features
     }
@@ -1790,6 +1791,9 @@ final class RemoteSessionMirrorRegistry {
         cancelTerminalHydration(for: key)
         catalogueStreamIDs.removeValue(forKey: key)
         catalogueStreamSequences.removeValue(forKey: key)
+        if themeEventSubscribers[key] != nil {
+            PhoneMirrorCoordinator.shared.channelClosed(connection)
+        }
         if themeEventSubscribers.removeValue(forKey: key) != nil,
            let peer = connection.authenticatedPeer {
             RemoteNotificationService.shared.foregroundDeviceDetached(
@@ -2034,6 +2038,7 @@ final class RemoteSessionMirrorRegistry {
         themeEventSubscribers.removeAll()
         catalogueStreamIDs.removeAll()
         catalogueStreamSequences.removeAll()
+        PhoneMirrorCoordinator.shared.endAll(reason: .revoked)
     }
 
     // MARK: - Input

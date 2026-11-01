@@ -260,7 +260,10 @@ struct UsageWidget: Widget {
 
 @main
 struct ThreadingGlanceBundle: WidgetBundle {
-    var body: some Widget { UsageWidget() }
+    var body: some Widget {
+        UsageWidget()
+        MirrorLiveActivity()
+    }
 }
 
 extension UsageEntry {

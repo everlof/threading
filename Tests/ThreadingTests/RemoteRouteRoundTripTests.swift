@@ -155,6 +155,8 @@ final class RemoteRouteRoundTripTests: XCTestCase {
                     try wirePath(link.hostedDeviceCredentialURL),
                     RemoteRouter.hostedDeviceCredentialPath
                 )
+            case .mirrorEnd:
+                XCTAssertEqual(try wirePath(link.mirrorEndURL), RemoteRouter.mirrorEndPath)
             case .settings:
                 // Named rather than skipped: `RemoteConnectionLink` builds **no** URL for this
                 // route, and neither the iPhone nor the browser client calls it — today the only
@@ -545,7 +547,7 @@ final class RemoteRouteRoundTripTests: XCTestCase {
                 // Composed from segments rather than spelled whole — pinned by the test below.
                 spelledWhole = false
             case .search, .usage, .usageCapacity, .usageLimit, .usageReset, .theme, .notifications, .localDiagnosticsCapture,
-                 .hostedDeviceCredential, .settings, .projectVisibility, .projectDefaultAccounts:
+                 .hostedDeviceCredential, .settings, .projectVisibility, .projectDefaultAccounts, .mirrorEnd:
                 // Native-client surfaces the browser page does not offer. If one of these gains
                 // a browser affordance, move it into the first arm rather than leaving it here.
                 spelledWhole = false

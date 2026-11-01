@@ -38,6 +38,7 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             case .invitationAcceptance: expected = "api/invitations/accept"
             case .hostedDeviceCredential: expected = "api/hosted-device-credential"
             case .settings: expected = "api/settings"
+            case .mirrorEnd: expected = "api/mirror/end"
             }
             XCTAssertEqual(route.rawValue, expected)
             // The host matches a rooted path; the client appends an unrooted one. Both come
@@ -45,7 +46,7 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             XCTAssertEqual(route.absolutePath, "/" + expected)
             XCTAssertEqual(route.prefix, "/" + expected + "/")
         }
-        XCTAssertEqual(RemoteRoute.allCases.count, 17)
+        XCTAssertEqual(RemoteRoute.allCases.count, 18)
     }
 
     func testEverySocketRouteKeepsItsWireSpelling() {
@@ -158,6 +159,9 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             case .hostedDeviceCredential:
                 built = link.hostedDeviceCredentialURL
                 expected = "\(origin)/api/hosted-device-credential"
+            case .mirrorEnd:
+                built = link.mirrorEndURL
+                expected = "\(origin)/api/mirror/end"
             case .settings:
                 // Host-only today: the Mac serves `/api/settings/<key>` and no client here
                 // builds it. The route still belongs to the shared vocabulary so the host has

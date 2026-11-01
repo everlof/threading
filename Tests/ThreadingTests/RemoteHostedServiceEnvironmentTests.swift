@@ -71,9 +71,17 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
         XCTAssertFalse(RemoteNotificationBrokerCompatibility.delivers(.secretApproval, brokerVersion: 2))
         XCTAssertFalse(RemoteNotificationBrokerCompatibility.delivers(.secretApproval, brokerVersion: 0))
         XCTAssertTrue(RemoteNotificationBrokerCompatibility.delivers(.secretApproval, brokerVersion: 3))
-        for kind in RemoteNotificationKind.allCases where kind != .secretApproval {
+        for kind in RemoteNotificationKind.allCases where kind != .secretApproval && kind != .mirrorInvite {
             XCTAssertTrue(RemoteNotificationBrokerCompatibility.delivers(kind, brokerVersion: 1), "\(kind)")
         }
+    }
+
+    /// A broker before protocol 5 refuses the kind outright, so a Mac paired with one says *Open
+    /// Threading on iPhone* instead of sending a Mirror invite that would cost a 400.
+    func testABrokerThatDoesNotKnowMirrorInvitesIsNeverSentOne() {
+        XCTAssertFalse(RemoteNotificationBrokerCompatibility.delivers(.mirrorInvite, brokerVersion: 4))
+        XCTAssertFalse(RemoteNotificationBrokerCompatibility.delivers(.mirrorInvite, brokerVersion: 0))
+        XCTAssertTrue(RemoteNotificationBrokerCompatibility.delivers(.mirrorInvite, brokerVersion: 5))
     }
 
     func testDeveloperEnvironmentChoicePersistsAndDefaultsToProduction() {

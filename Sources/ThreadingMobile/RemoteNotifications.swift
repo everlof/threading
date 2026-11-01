@@ -232,7 +232,11 @@ enum RemoteNotificationRemovalPolicy {
         hostID: String,
         sessionID: String
     ) -> Bool {
-        event.hostID == hostID && event.sessionID == sessionID && event.kind.supportsRetraction
+        // A chat's own state alerts. A Mirror invite is retractable too, but its session slot
+        // names a mirror, never a chat, so opening a chat has nothing of its to clear.
+        let lifecycle = event.kind.lifecycle
+        return event.hostID == hostID && event.sessionID == sessionID
+            && (lifecycle == .completedTurn || lifecycle == .responseRequest)
     }
 
     static func matchesApplicationActivation(_ event: RemoteNotificationEventDTO) -> Bool {
@@ -315,6 +319,8 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         notifications.routePlanner = { [weak model] host in
             await model?.registrationRoutes(for: host) ?? host.candidates
         }
+        // Mirror's Live Activity **End** may launch the app in the background just to run.
+        _ = model.mirror
     }
 
     func application(
@@ -545,10 +551,13 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         _ event: RemoteNotificationEventDTO,
         origin: RemoteNotificationOpenOrigin
     ) {
-        // Not a chat: it opens Face ID Approvals for the Mac that sent it.
-        let opened = event.kind == .secretApproval
-            ? model.openSecretApprovalFromNotification(event)
-            : model.openSessionFromNotification(event, origin: origin)
+        // Not a chat: a Face ID approval opens Face ID Approvals for the Mac that sent it, and a
+        // Mirror invite opens the stage.
+        let opened = switch event.kind {
+        case .secretApproval: model.openSecretApprovalFromNotification(event)
+        case .mirrorInvite: model.openMirrorFromNotification(event)
+        default: model.openSessionFromNotification(event, origin: origin)
+        }
         guard opened else { return }
         MobileDiagnostics.record(.notificationOpened, fields: [
             .trace: event.id,
@@ -634,9 +643,11 @@ final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
         open(connectionOptions.urlContexts)
         for activity in connectionOptions.userActivities { open(activity) }
-        let window = UIWindow(windowScene: windowScene)
+        // A touch anywhere in the app tells Mirror the phone is in use.
+        let window = MobileInteractionWindow(windowScene: windowScene)
         window.rootViewController = appDelegate.makeRootViewController()
         self.window = window
+        MobileInteractionMonitor.shared.track(window)
         window.makeKeyAndVisible()
 #if DEBUG
         MobileUIEvidenceCapture.startIfRequested(in: window)
@@ -1688,7 +1699,7 @@ final class RemoteNotificationManager: ObservableObject {
             )
             return
         }
-        let kinds = enabledKinds
+        let sharedKinds = enabledKinds
         let soundKinds = soundEnabledKinds
         let pushEnvironment = MobilePushEnvironment.current
         // An empty list is a launch still loading its pairings, not an unpairing.
@@ -1696,6 +1707,11 @@ final class RemoteNotificationManager: ObservableObject {
             MobileThemeAssets.shared.retainSoundReceipts(forHostIDs: Set(hosts.map { $0.hostID ?? $0.id }))
         }
         for host in hosts {
+            // Invites only from a Mac this phone takes mirrors from, and only as its owner.
+            let kinds = host.isOwnerDevice
+                && MobileMirrorPreferences.shared.isEnabled(hostID: MobileMirrorController.macID(host))
+                ? sharedKinds + [.mirrorInvite]
+                : sharedKinds
             let themeSoundNames = MobileThemeAssets.shared.confirmedSounds(for: host.hostID ?? host.id)
             let signature = [
                 host.id,
@@ -1746,7 +1762,7 @@ final class RemoteNotificationManager: ObservableObject {
             // otherwise-compatible notifications. The second registration upgrades the
             // preference atomically on hosts that know the optional features.
             let optionalKinds: Set<RemoteNotificationKind> = [
-                .attentionRequest, .agentQuestion, .turnCompleted, .secretApproval,
+                .attentionRequest, .agentQuestion, .turnCompleted, .secretApproval, .mirrorInvite,
             ]
             let baselineKinds = kinds.filter { !optionalKinds.contains($0) }
             let baselineRegistration = RemoteNotificationRegistrationDTO(
@@ -2177,6 +2193,8 @@ final class RemoteNotificationManager: ObservableObject {
         case .agentMessage: return agentUpdatesEnabled
         case .attentionRequest: return attentionRequestsEnabled
         case .secretApproval: return secretApprovalsEnabled
+        // Governed per Mac by the Mirror switch, which decides whether the kind is registered.
+        case .mirrorInvite: return true
         }
     }
 

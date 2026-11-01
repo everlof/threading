@@ -868,6 +868,13 @@ navigation policy. Themes supply the local browser's application chrome; Safari 
 their system and page controls. Extensions receive no proxy credentials, network access or new
 presentation slot. Follow Mac remains a separate read-only projection of the Mac browser.
 
+**Mirror** is host-only. Threading owns which phone receives a mirror, the in-use rule that keeps
+a phone being used from losing its screen, the per-Mac switch, the invite notification and its
+preview consent, the tunnel grant and the stage's exits. The Mac chip and its menu are the shared
+themed browser-strip button and menu; the phone's stage chrome is fixed dark media chrome over the
+page, and its quiet offer takes the app theme. Extensions receive no stage, no signal and no way
+to start or end a mirror.
+
 Browser Network Capture extends the host-only Tools page with four fixed opt-in rows. Threading
 owns persistence, exact owner-approved agent proposals, capture generations, origin access,
 payload redaction and process-wide retention bounds. Themes style the existing Settings controls;

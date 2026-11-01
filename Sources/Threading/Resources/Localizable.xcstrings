@@ -320,6 +320,17 @@
         }
       }
     },
+    "%1$@ · %2$@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · %2$@"
+          }
+        }
+      }
+    },
     "%1$@ · %2$@ · by %3$@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5486,6 +5497,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "A takeover theme's frame, drawn by the app. The band drags this very window, and its buttons really close, minimize, and zoom it."
+          }
+        }
+      }
+    },
+    "A tap brings up the controls" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ett tryck tar fram kontrollerna"
           }
         }
       }
@@ -10837,6 +10859,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på indexering"
+          }
+        }
+      }
+    },
+    "Away" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Borta"
           }
         }
       }
@@ -27077,6 +27110,17 @@
         }
       }
     },
+    "Full screen on your iPhone, rendered by the phone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I helskärm på din iPhone, renderad av telefonen"
+          }
+        }
+      }
+    },
     "Full-size device targets wrap together in a narrow viewport." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29492,6 +29536,17 @@
         }
       }
     },
+    "In use — waiting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Används · väntar"
+          }
+        }
+      }
+    },
     "Include files outside the project" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30469,6 +30524,17 @@
         }
       }
     },
+    "Interacting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interagerar"
+          }
+        }
+      }
+    },
     "Interaction receipt" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30476,6 +30542,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Interaktionskvitto"
+          }
+        }
+      }
+    },
+    "Interactive" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interaktiv"
           }
         }
       }
@@ -32057,6 +32134,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kvar från borttagna arbetsytor"
+          }
+        }
+      }
+    },
+    "Left the mirror" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lämnade speglingen"
           }
         }
       }
@@ -34716,6 +34804,72 @@
         }
       }
     },
+    "Mirror Again" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spegla igen"
+          }
+        }
+      }
+    },
+    "Mirror expired" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speglingen gick ut"
+          }
+        }
+      }
+    },
+    "Mirror is off on iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spegling är avstängd på iPhone"
+          }
+        }
+      }
+    },
+    "Mirror to %@ Instead" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spegla till %@ i stället"
+          }
+        }
+      }
+    },
+    "Mirror to iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spegla till iPhone"
+          }
+        }
+      }
+    },
+    "Mirror: %1$@ · %2$@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spegling: %1$@ · %2$@"
+          }
+        }
+      }
+    },
     "Missed while Threading was closed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37237,6 +37391,17 @@
         }
       }
     },
+    "No iPhone to mirror to" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen iPhone att spegla till"
+          }
+        }
+      }
+    },
     "No icon was found for this project." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38895,6 +39060,17 @@
         }
       }
     },
+    "Notified" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notis skickad"
+          }
+        }
+      }
+    },
     "Notify at" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40381,6 +40557,28 @@
         }
       }
     },
+    "Open Threading on a paired iPhone to mirror to it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna Threading på en parkopplad iPhone för att spegla till den."
+          }
+        }
+      }
+    },
+    "Open Threading on iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna Threading på iPhone"
+          }
+        }
+      }
+    },
     "Open Threading on iPhone, choose Pair a Mac, then scan this code." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41674,6 +41872,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sida %lld av %lld"
+          }
+        }
+      }
+    },
+    "Page closed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidan stängdes"
           }
         }
       }
@@ -46752,6 +46961,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ladda om från ursprunget"
+          }
+        }
+      }
+    },
+    "Reload on iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ladda om på iPhone"
           }
         }
       }
@@ -54150,6 +54370,17 @@
         }
       }
     },
+    "Show a web page in the browser first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa en webbsida i webbläsaren först."
+          }
+        }
+      }
+    },
     "Show account name" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54819,6 +55050,17 @@
         }
       }
     },
+    "Showing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar"
+          }
+        }
+      }
+    },
     "Showing complete file" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54991,6 +55233,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visar enheten ensam i ett eget fönster, för att dela i Meet eller Zoom."
+          }
+        }
+      }
+    },
+    "Shows the visible page full screen on your iPhone, rendered by the phone itself." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar den synliga sidan i helskärm på din iPhone, renderad av telefonen själv."
           }
         }
       }
@@ -56983,6 +57236,17 @@
         }
       }
     },
+    "Start or Stop Mirroring to iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta eller stoppa spegling till iPhone"
+          }
+        }
+      }
+    },
     "Start or Stop Simulator Recording" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -57542,6 +57806,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stoppa laddning"
+          }
+        }
+      }
+    },
+    "Stop Mirroring" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sluta spegla"
+          }
+        }
+      }
+    },
+    "Stop Mirroring to iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sluta spegla till iPhone"
           }
         }
       }
@@ -67419,6 +67705,17 @@
         }
       }
     },
+    "This page cannot be mirrored" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här sidan kan inte speglas"
+          }
+        }
+      }
+    },
     "This page reported no layout-shift measurements. WebKit does not record them for every document, so this is not the same as the page having stayed still." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -69998,6 +70295,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pekytan är inte tillgänglig"
+          }
+        }
+      }
+    },
+    "Touches act on the page" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tryck påverkar sidan"
           }
         }
       }
@@ -72582,6 +72890,17 @@
         }
       }
     },
+    "View Only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Endast visning"
+          }
+        }
+      }
+    },
     "View account usage, or use a usage limit reset" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -73052,6 +73371,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på värden"
+          }
+        }
+      }
+    },
+    "Waiting for iPhone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på iPhone"
           }
         }
       }

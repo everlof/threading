@@ -2113,6 +2113,9 @@ notifications**. Notification settings keep seven choices independent:
 - a Face ID approval keyvault is waiting for (only the enrolled phone; see
   [Face ID approvals](#face-id-approvals)).
 
+A Mirror invite is not one of these choices: it follows the Mirror switch for that Mac in
+**Settings → Mirror** (see [Mirror](#mirror)).
+
 The response-needed event is an activity edge supplied by the hook/BEL/session layer; the
 notification service never scrapes Claude Code or Codex terminal text. A structured Native
 permission request uses its more specific permission notification instead of also sending the
@@ -2587,6 +2590,45 @@ remote access remains available, while an official paid iOS/hosted service can s
 rendezvous, account-backed invitations, push delivery and cross-network presence. Payment buys
 operated infrastructure and convenience, not a proprietary chat format or an artificial local
 feature lock.
+
+## Mirror
+
+**Start or Stop Mirroring to iPhone** (the command palette, or **Mirror to iPhone** in the browser
+strip's Browser Options) shows the visible page full screen on the paired owner iPhone. The phone
+renders it in its own WebKit, because the phone is what the page is for: its viewport, safe
+areas, touch and scroll are the real ones. Nothing asks first, on either device.
+
+- **Which phone.** The owner iPhone that was active most recently. With several, the chip's menu
+  switches phone.
+- **An idle phone with Threading open** takes the stage at once.
+- **A phone in use** — keyboard up, or a finger on the screen in the last five seconds — is never
+  taken over. It shows a quiet **Mirror ready · Show** pill below the top bar; the Mac's chip says
+  *In use — waiting*. The pill never turns into a takeover by itself.
+- **A phone where Threading is not open** gets a time-sensitive notification for two minutes.
+  Tapping it opens straight into the stage. Without preview consent it does not name the page,
+  and the page's address never goes through Apple or the hosted service. The notification needs
+  hosted push (notification protocol 5); without it the chip says *Open Threading on iPhone*, and
+  opening Threading within thirty seconds of the click still enters the stage.
+- **Localhost pages** go through the same private tunnel as Browse on iPhone, so they need a
+  direct route (Threading Direct, Wi-Fi/VPN or Tailscale), not the legacy Relay. Public pages
+  load directly. Website data stays on the phone and is discarded when the mirror ends; no Mac
+  cookie or login is sent. Private tabs never mirror.
+- **Following.** A navigation or reload on the Mac becomes a new revision on the phone. The new
+  page loads behind the old one and replaces it without a blank frame, keeping the scroll position
+  when it is the same page.
+
+**On the phone.** Hold two fingers still on the screen for the controls: **Reload**,
+**Interactive / View Only**, **Lock Rotation**, **?** (the controls guide again) and **End Mirror**.
+In View Only one tap brings them up; with VoiceOver, the two-finger scrub does. The first mirror
+on a phone teaches the gesture by having you make it, in two short steps you can skip. While the
+mirror runs, a Live Activity in the Dynamic Island and on the Lock Screen offers **Return** and
+**End**.
+
+**Ending.** **End Mirror** on the phone, **Stop Mirroring** in the Mac chip, **End** in the Live
+Activity, revoking the device or turning Remote Access off. Every one returns the phone to the
+screen it was on, with any draft untouched. A phone that leaves the app keeps its mirror for
+thirty minutes and returns to it directly. **Settings → Mirror → Allow Mirror from this Mac**
+switches it off per Mac.
 
 ## Security model
 

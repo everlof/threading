@@ -234,6 +234,9 @@ enum AppCommands {
         static let toggleSimulatorRecording = "simulator.recording.toggle"
         static let toggleSimulatorTouches = "simulator.touches.toggle"
         static let toggleSimulatorPresenter = "simulator.presenter.toggle"
+        /// Mirror, which shows the page on the paired iPhone itself. Distinct from the two
+        /// presenter commands above, which open a *Mac* window.
+        static let togglePhoneMirror = "mirror.toggle"
         static let saveBaseline = "view.saveBaseline"
         static let sessionInfo = "view.info"
         static let shell = "view.shell"
@@ -472,6 +475,10 @@ enum AppCommands {
                    detail: "Shows the device alone in its own window, to share in Meet or Zoom.",
                    defaultShortcut: nil, isEditable: true, scope: .session,
                    iconName: "macwindow.on.rectangle"),
+        AppCommand(id: ID.togglePhoneMirror, group: .view, title: "Start or Stop Mirroring to iPhone",
+                   detail: "Shows the visible page full screen on your iPhone, rendered by the phone itself.",
+                   defaultShortcut: nil, isEditable: true, scope: .session,
+                   iconName: "iphone.radiowaves.left.and.right"),
         // No default chord. It is a real command with a real menu item, and the plan it comes from
         // is explicit that a baseline capture has not yet earned permanent space — not on the
         // browser strip, and not in the app's small stock of unclaimed two-modifier keys. The

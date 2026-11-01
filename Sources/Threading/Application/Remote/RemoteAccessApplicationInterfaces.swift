@@ -230,6 +230,7 @@ struct RemoteAccessServerServices {
     let attachments: SessionAttachmentStore
     let extensions: ExtensionManager
     let mobileDiagnosticsCaptures: MobileDiagnosticsCaptureStore
+    let phoneMirror: any RemotePhoneMirrorSignalling
     let usageCapacity: @MainActor @Sendable () async throws -> RemoteUsageCapacityDTO
     let usageDashboard: RemoteUsageDashboardLoader
     let usageLimit: RemoteUsageLimitLoader
@@ -249,6 +250,7 @@ struct RemoteAccessServerServices {
         attachments: SessionAttachmentStore,
         extensions: ExtensionManager,
         mobileDiagnosticsCaptures: MobileDiagnosticsCaptureStore,
+        phoneMirror: any RemotePhoneMirrorSignalling,
         usageDashboard: @escaping RemoteUsageDashboardLoader,
         usageLimit: @escaping RemoteUsageLimitLoader,
         usageCapacity: @escaping @MainActor @Sendable () async throws -> RemoteUsageCapacityDTO = {
@@ -271,6 +273,7 @@ struct RemoteAccessServerServices {
         self.attachments = attachments
         self.extensions = extensions
         self.mobileDiagnosticsCaptures = mobileDiagnosticsCaptures
+        self.phoneMirror = phoneMirror
         self.usageCapacity = usageCapacity
         self.usageDashboard = usageDashboard
         self.usageLimit = usageLimit

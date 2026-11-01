@@ -154,6 +154,72 @@
         }
       }
     },
+    "End" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avsluta"
+          }
+        }
+      }
+    },
+    "End Mirror" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avsluta spegling"
+          }
+        }
+      }
+    },
+    "Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac"
+          }
+        }
+      }
+    },
+    "Mirror" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spegling"
+          }
+        }
+      }
+    },
+    "Mirroring" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speglar"
+          }
+        }
+      }
+    },
+    "Mirroring from %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speglar från %@"
+          }
+        }
+      }
+    },
     "Open Threading to update" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -222,6 +288,17 @@
         }
       }
     },
+    "Return" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återgå"
+          }
+        }
+      }
+    },
     "Set up widgets in Threading" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -235,6 +312,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ställ in widgetar i Threading"
+          }
+        }
+      }
+    },
+    "Threading · Mirroring from %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading · Speglar från %@"
           }
         }
       }
@@ -269,6 +357,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdatering behövs"
+          }
+        }
+      }
+    },
+    "Updated %@ ago" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdaterad för %@ sedan"
           }
         }
       }

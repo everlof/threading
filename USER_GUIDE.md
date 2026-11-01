@@ -3708,6 +3708,18 @@ Local website data is discarded when you close the browser, and a local preview 
 for up to an hour before it needs reopening. Another localhost port needs its own preview.
 Close returns to the screenshot follow view.
 
+**Mirror** shows the page you are building on the iPhone itself, full screen. Choose **Start or
+Stop Mirroring to iPhone** from the command palette, or **Mirror to iPhone** under Browser Options
+in the browser strip. Nothing asks: an idle phone with Threading open shows the page at once, a
+phone where Threading is closed gets a notification that opens straight into it, and a phone you
+are typing on or touching only shows a small **Mirror ready · Show** pill. The page renders on the
+phone, so its size, safe areas and touch are the real ones, and every reload or navigation on the
+Mac follows without a blank frame. Hold two fingers on the phone's screen for the controls
+(Reload, Interactive or View Only, Lock Rotation, the guide again, End Mirror); the first mirror
+teaches this. A chip beside the address on the Mac shows which phone and what it is doing, and
+its menu reloads, switches phone, changes the mode or stops. Turn it off per Mac in the phone's
+**Settings → Mirror**.
+
 If the agent
 opens a shared web page, tap the menu beside its address to **Open in Browser**, **Share Link**,
 or **Copy Link**. These actions use the exact URL at the moment you choose one; the address shown

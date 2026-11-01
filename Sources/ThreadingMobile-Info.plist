@@ -39,6 +39,11 @@
 	<array>
 		<string>_threading._tcp</string>
 	</array>
+	<!--
+	Mirror starts its Live Activity locally while the stage is in front, so it needs no push.
+	-->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

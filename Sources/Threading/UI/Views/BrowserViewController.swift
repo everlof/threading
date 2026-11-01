@@ -107,6 +107,7 @@ final class BrowserChromeBar: NSView {
         static let labelledPasswordThreshold: CGFloat = 520
         static let hintedPasswordThreshold: CGFloat = 780
         static let expandedPrivateThreshold: CGFloat = 520
+        static let labelledMirrorThreshold: CGFloat = 600
     }
 
     let backButton = BrowserChromeBar.button("chevron.backward", L10n.string("Back"))
@@ -132,6 +133,9 @@ final class BrowserChromeBar: NSView {
     )
     let closePopupButton = BrowserChromeBar.button("xmark", L10n.string("Close Pop-up"))
     let overflowButton = BrowserChromeBar.button("ellipsis", L10n.string("Browser Options"))
+    /// Shown only while this page is mirrored to an iPhone, or just stopped being: one quiet
+    /// control whose menu holds the device, the mode, **Reload on iPhone** and **Stop Mirroring**.
+    let mirrorButton = BrowserChromeBar.button("iphone", L10n.string("Mirror to iPhone"))
     let passwordInputButton = BrowserChromeBar.button(
         "key.fill",
         L10n.string("Private Password Input")
@@ -153,6 +157,7 @@ final class BrowserChromeBar: NSView {
     private var isLoading = false
     private var isPasswordFieldFocused = false
     private var isAnnotating = false
+    private var mirrorTitle = ""
     private(set) var areTestConditionsFolded = false
     private(set) var isReloadFolded = false
 
@@ -166,6 +171,7 @@ final class BrowserChromeBar: NSView {
             passwordInputButton,
             passwordHintLabel,
             addressField,
+            mirrorButton,
             annotationButton,
             testConditionsButton,
             closePopupButton,
@@ -212,10 +218,12 @@ final class BrowserChromeBar: NSView {
             annotationButton,
             testConditionsButton,
             closePopupButton,
-            overflowButton
+            overflowButton,
+            mirrorButton
         ] {
             control.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
+        mirrorButton.isHidden = true
         privateIndicator.setContentCompressionResistancePriority(.required, for: .horizontal)
         privateIndicator.isHidden = contextKind != .private
         passwordInputButton.isHidden = true
@@ -291,6 +299,22 @@ final class BrowserChromeBar: NSView {
     func setPasswordFieldFocused(_ focused: Bool) {
         isPasswordFieldFocused = focused
         passwordInputButton.isHidden = !focused
+        updateResponsiveLayout()
+    }
+
+    /// Shows the Mirror chip with its glyph and status line, or hides it.
+    func setMirror(symbol: String?, title: String, toolTip: String) {
+        guard let symbol else {
+            mirrorButton.isHidden = true
+            mirrorTitle = ""
+            updateResponsiveLayout()
+            return
+        }
+        mirrorButton.isHidden = false
+        mirrorButton.image = Self.image(symbol, accessibility: toolTip)
+        mirrorButton.toolTip = toolTip
+        mirrorButton.setAccessibilityLabel(toolTip)
+        mirrorTitle = title
         updateResponsiveLayout()
     }
 
@@ -376,6 +400,11 @@ final class BrowserChromeBar: NSView {
         // go: the key glyph, then its title, then the sentence that explains both.
         passwordHintLabel.isHidden = !isPasswordFieldFocused
             || width < Layout.hintedPasswordThreshold
+
+        let shownMirrorTitle = width >= Layout.labelledMirrorThreshold ? mirrorTitle : ""
+        if mirrorButton.title != shownMirrorTitle {
+            mirrorButton.title = shownMirrorTitle
+        }
 
         let annotationTitle = isAnnotating
             && width >= Layout.labelledAnnotationThreshold
@@ -554,6 +583,7 @@ final class BrowserViewController: NSViewController {
     private let appEvents = AppEventObservations()
     private var testConditionsMenuSession: AnyObject?
     private var overflowMenuSession: AnyObject?
+    private var phoneMirrorMenuSession: AnyObject?
     private var downloadsMenuSession: AnyObject?
     private lazy var toasts = ToastPresenter(host: view, above: view.bottomAnchor)
 
@@ -624,6 +654,8 @@ final class BrowserViewController: NSViewController {
     private(set) var browserPageZoom = 1.0
 
     private var observations: [NSKeyValueObservation] = []
+    /// Mirrors following this page. Separate from `onPageChange`, which belongs to one host.
+    private var phoneMirrorObservers: [UUID: @MainActor (PhoneMirrorSourceChange) -> Void] = [:]
     private var consoleMessages: [BrowserConsoleMessage] = []
     private var networkEntries: [BrowserNetworkEntry] = []
     private let networkPayloadOwner = UUID()
@@ -871,6 +903,11 @@ final class BrowserViewController: NSViewController {
         closePopupButton.action = #selector(closeActivePopup)
         chromeBar.overflowButton.target = self
         chromeBar.overflowButton.action = #selector(showBrowserOverflow)
+        chromeBar.mirrorButton.target = self
+        chromeBar.mirrorButton.action = #selector(showPhoneMirrorMenu)
+        appEvents.observe(PhoneMirrorDidChange.self) { [weak self] _ in
+            self?.refreshPhoneMirrorChip()
+        }
         chromeBar.passwordInputButton.target = self
         chromeBar.passwordInputButton.action = #selector(resumePrivatePasswordInput)
         chromeBar.annotationButton.target = self
@@ -1038,6 +1075,7 @@ final class BrowserViewController: NSViewController {
                     self.syncAddress()
                     self.updateAnnotationOverlay()
                     self.onPageChange?()
+                    self.notifyPhoneMirrors(.address)
                     // pushState/hash/history moves do not produce a document-load callback. Their
                     // URL change is authoritative, and completing here keeps agent history actions
                     // from sitting on the general navigation timeout.
@@ -1047,7 +1085,10 @@ final class BrowserViewController: NSViewController {
                 }
             },
             webView.observe(\.title) { [weak self] _, _ in
-                Task { @MainActor [weak self] in self?.onPageChange?() }
+                Task { @MainActor [weak self] in
+                    self?.onPageChange?()
+                    self?.notifyPhoneMirrors(.title)
+                }
             },
             webView.observe(\.canGoBack) { [weak self] _, _ in
                 Task { @MainActor [weak self] in self?.updateNavButtons() }
@@ -3955,6 +3996,24 @@ final class BrowserViewController: NSViewController {
             ),
             onChoose: { [weak self] in self?.showRecentDownloads() }
         )))
+        if let source = phoneMirrorSource {
+            let isMirrored = PhoneMirrorCoordinator.shared.mirrorID(forBrowser: ObjectIdentifier(self)) != nil
+            entries.append(.item(ThemedMenuItem(
+                title: isMirrored
+                    ? L10n.string("Stop Mirroring to iPhone")
+                    : L10n.string("Mirror to iPhone"),
+                subtitle: isMirrored
+                    ? nil
+                    : L10n.string("Full screen on your iPhone, rendered by the phone"),
+                shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.togglePhoneMirror),
+                image: BrowserChromeBar.image(
+                    "iphone.radiowaves.left.and.right",
+                    accessibility: L10n.string("Mirror to iPhone")
+                ),
+                isEnabled: isMirrored || !PhoneMirrorCoordinator.shared.candidates().isEmpty,
+                onChoose: { [weak self] in self?.togglePhoneMirror(source: source) }
+            )))
+        }
         let canClearWebsiteData = webView.url.flatMap(BrowserOrigin.init(url:)) != nil
         entries.append(.item(ThemedMenuItem(
             title: L10n.string("Clear Browsing Data…"),
@@ -4295,6 +4354,7 @@ extension BrowserViewController: WKNavigationDelegate {
         capturedAnnotationAnchorTokens[identifier] = nil
         if webView === self.webView {
             recordAgentNavigationTrace("commit")
+            notifyPhoneMirrors(.document)
             // A filled value is retained only to scrub it back out of this origin's pages. Once
             // the tab is somewhere else it is nothing but a secret held for no reason.
             if let committed = webView.url.flatMap(BrowserOrigin.init(url:)),
@@ -5137,5 +5197,193 @@ private final class BrowserScreenshotCompletion {
         self.continuation = nil
         continuation.resume(with: result)
         return true
+    }
+}
+
+// MARK: - Mirror
+
+extension BrowserViewController: PhoneMirrorObservableSource {
+    func observePhoneMirrorChanges(
+        _ handler: @escaping @MainActor (PhoneMirrorSourceChange) -> Void
+    ) -> PhoneMirrorSourceObservation {
+        let id = UUID()
+        phoneMirrorObservers[id] = handler
+        return PhoneMirrorSourceObservation { [weak self] in
+            self?.phoneMirrorObservers[id] = nil
+        }
+    }
+
+    fileprivate func notifyPhoneMirrors(_ change: PhoneMirrorSourceChange) {
+        for handler in phoneMirrorObservers.values {
+            handler(change)
+        }
+    }
+
+    /// The window that hosts this browser resolves which session and tab it is; the browser
+    /// itself only knows its session.
+    static var phoneMirrorSourceResolver: (@MainActor (BrowserViewController) -> PhoneMirrorSource?)?
+
+    fileprivate var phoneMirrorSource: PhoneMirrorSource? {
+        guard contextKind == .shared else { return nil }
+        return Self.phoneMirrorSourceResolver?(self)
+    }
+
+    /// Starts mirroring this page, or stops the mirror it already has.
+    func togglePhoneMirror(source: PhoneMirrorSource) {
+        let coordinator = PhoneMirrorCoordinator.shared
+        if let mirrorID = coordinator.mirrorID(forBrowser: ObjectIdentifier(self)) {
+            coordinator.stop(mirrorID: mirrorID)
+            return
+        }
+        switch coordinator.start(source) {
+        case .started:
+            break
+        case .noPhone:
+            toasts.present(ToastRequest(
+                message: L10n.string("No iPhone to mirror to"),
+                detail: L10n.string("Open Threading on a paired iPhone to mirror to it."),
+                identifier: "browser.mirror.unavailable"
+            ))
+        case .sourceUnavailable:
+            toasts.present(ToastRequest(
+                message: L10n.string("This page cannot be mirrored"),
+                identifier: "browser.mirror.unavailable"
+            ))
+        }
+    }
+
+    fileprivate func refreshPhoneMirrorChip() {
+        guard let state = PhoneMirrorCoordinator.shared.chipState(forBrowser: ObjectIdentifier(self)) else {
+            chromeBar.setMirror(symbol: nil, title: "", toolTip: "")
+            return
+        }
+        let status = Self.phoneMirrorStatusText(state.status)
+        let symbol: String
+        switch state.status {
+        case .showing, .interacting: symbol = "iphone.radiowaves.left.and.right"
+        case .ended: symbol = "iphone.slash"
+        default: symbol = "iphone"
+        }
+        chromeBar.setMirror(
+            symbol: symbol,
+            title: L10n.format("%1$@ · %2$@", state.deviceName, status),
+            toolTip: L10n.format("Mirror: %1$@ · %2$@", state.deviceName, status)
+        )
+    }
+
+    static func phoneMirrorStatusText(_ status: PhoneMirrorStatus) -> String {
+        switch status {
+        case .connecting: return L10n.string("Connecting")
+        case .showing: return L10n.string("Showing")
+        case .interacting: return L10n.string("Interacting")
+        case .away: return L10n.string("Away")
+        case .notified: return L10n.string("Notified")
+        case .inUse: return L10n.string("In use — waiting")
+        case .waiting: return L10n.string("Waiting for iPhone")
+        case .openOnPhone: return L10n.string("Open Threading on iPhone")
+        case .disabledOnPhone: return L10n.string("Mirror is off on iPhone")
+        case let .ended(reason):
+            switch reason {
+            case .endedOnPhone: return L10n.string("Left the mirror")
+            case .expired: return L10n.string("Mirror expired")
+            case .disabled: return L10n.string("Mirror is off on iPhone")
+            case .revoked: return L10n.string("Disconnected")
+            case .sourceClosed: return L10n.string("Page closed")
+            case .stoppedOnMac, .replaced, .unknown: return L10n.string("Stopped")
+            }
+        }
+    }
+
+    @objc fileprivate func showPhoneMirrorMenu() {
+        let coordinator = PhoneMirrorCoordinator.shared
+        let browserID = ObjectIdentifier(self)
+        guard let state = coordinator.chipState(forBrowser: browserID) else { return }
+        var entries: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: state.deviceName,
+                subtitle: Self.phoneMirrorStatusText(state.status),
+                image: BrowserChromeBar.image("iphone", accessibility: state.deviceName),
+                isEnabled: false,
+                onChoose: {}
+            )),
+            .separator
+        ]
+        if let mirrorID = state.mirrorID {
+            switch state.status {
+            case .inUse, .waiting, .notified, .openOnPhone:
+                // A fresh offer: the phone decides again, and never takes a screen in use.
+                entries.append(.item(ThemedMenuItem(
+                    title: L10n.string("Mirror Again"),
+                    image: BrowserChromeBar.image(
+                        "iphone.radiowaves.left.and.right",
+                        accessibility: L10n.string("Mirror Again")
+                    ),
+                    onChoose: { coordinator.start(state.source) }
+                )))
+            default:
+                break
+            }
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Reload on iPhone"),
+                image: BrowserChromeBar.image("arrow.clockwise", accessibility: L10n.string("Reload on iPhone")),
+                onChoose: { coordinator.reload(mirrorID: mirrorID) }
+            )))
+            entries.append(.separator)
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Interactive"),
+                subtitle: L10n.string("Touches act on the page"),
+                image: BrowserChromeBar.image("hand.tap", accessibility: L10n.string("Interactive")),
+                isSelected: state.mode == .interactive,
+                onChoose: { coordinator.setMode(.interactive, mirrorID: mirrorID) }
+            )))
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("View Only"),
+                subtitle: L10n.string("A tap brings up the controls"),
+                image: BrowserChromeBar.image("eye", accessibility: L10n.string("View Only")),
+                isSelected: state.mode == .viewOnly,
+                onChoose: { coordinator.setMode(.viewOnly, mirrorID: mirrorID) }
+            )))
+            if !state.otherDevices.isEmpty {
+                entries.append(.separator)
+                for candidate in state.otherDevices {
+                    entries.append(.item(ThemedMenuItem(
+                        title: L10n.format("Mirror to %@ Instead", candidate.name),
+                        image: BrowserChromeBar.image("iphone", accessibility: candidate.name),
+                        onChoose: { coordinator.move(mirrorID: mirrorID, to: candidate.device) }
+                    )))
+                }
+            }
+            entries.append(.separator)
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Stop Mirroring"),
+                image: BrowserChromeBar.image("stop.circle", accessibility: L10n.string("Stop Mirroring")),
+                onChoose: { coordinator.stop(mirrorID: mirrorID) }
+            )))
+        } else {
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Mirror Again"),
+                image: BrowserChromeBar.image(
+                    "iphone.radiowaves.left.and.right",
+                    accessibility: L10n.string("Mirror Again")
+                ),
+                onChoose: { [weak self] in
+                    guard let self else { return }
+                    coordinator.dismissNotice(forBrowser: browserID)
+                    self.togglePhoneMirror(source: state.source)
+                }
+            )))
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Dismiss"),
+                image: BrowserChromeBar.image("xmark", accessibility: L10n.string("Dismiss")),
+                onChoose: { coordinator.dismissNotice(forBrowser: browserID) }
+            )))
+        }
+        phoneMirrorMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: 260),
+            from: chromeBar.mirrorButton,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.phoneMirrorMenuSession = nil }
+        )
     }
 }

@@ -4,6 +4,9 @@ public enum RemoteNotificationLifecycle: Equatable, Sendable {
     case completedTurn
     case responseRequest
     case independentEvent
+    /// Delivered at once like an independent event, but the sender withdraws it the moment it no
+    /// longer applies: an invitation whose answer is the person showing up.
+    case expiringOffer
 }
 
 public extension RemoteNotificationKind {
@@ -12,6 +15,7 @@ public extension RemoteNotificationKind {
         case .turnCompleted: return .completedTurn
         case .agentQuestion, .permissionRequest: return .responseRequest
         case .sharedSession, .agentMessage, .attentionRequest, .secretApproval: return .independentEvent
+        case .mirrorInvite: return .expiringOffer
         }
     }
 

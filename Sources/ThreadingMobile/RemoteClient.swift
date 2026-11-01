@@ -1651,6 +1651,14 @@ struct RemoteClient {
         )
     }
 
+    /// Ends a mirror on the Mac while the events socket is closed — the Live Activity's **End**.
+    func endMirror(mirrorID: String) async throws {
+        let _: [String: Bool] = try await postResponse(
+            RemoteMirrorEndRequestDTO(mirrorID: mirrorID),
+            to: link.mirrorEndURL, requestID: UUID().uuidString
+        )
+    }
+
     func closeBrowserTunnel(sessionID: String, tabID: String, token: String) async throws {
         let _: [String: Bool] = try await postResponse(
             RemoteBrowserTunnelRequest(tabID: tabID, closingToken: token),

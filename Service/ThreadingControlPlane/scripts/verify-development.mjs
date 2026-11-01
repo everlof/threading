@@ -40,7 +40,7 @@ async function verifyAttempt(origin, fetchImplementation) {
   const readyValue = JSON.parse(ready.body);
   if (ready.status !== 200 || readyValue.status !== "ready"
     || readyValue.rendezvousProtocol !== 1
-    || readyValue.notificationProtocol !== 4) {
+    || readyValue.notificationProtocol !== 5) {
     throw new Error(`readiness returned HTTP ${ready.status}`);
   }
 

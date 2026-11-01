@@ -253,6 +253,8 @@ enum RemoteAccessDefaults {
     /// A consumed owner bootstrap is cached just long enough for the same device to retry a lost
     /// acceptance response. The QR rotates immediately, so a photographed old code cannot pair a
     /// second device during this window.
+    /// `POST /api/mirror/end` carries one mirror id.
+    static let maximumMirrorEndRequestBytes = 1_024
     static let pairingRetrySeconds: TimeInterval = 60
 
     // MARK: - Mutation replay

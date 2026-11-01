@@ -88,6 +88,18 @@ reshuffling it is a line move.
   UUID-preserving adoption and a consumer-managed remote chat path that retains application grants.
   The [rollout handoff](persistent-agents-rollout.md) records the overall-review prerequisites,
   execution order, phase gates and implementing-agent prompt.
+- [Mirror](mirror.md) — **Phase 1 implemented 2026-10-31** ([`phone-mirror.md`](../architecture/phone-mirror.md));
+  later phases still in design. See what you design or build for a phone on a real phone, with no setup:
+  one click on the Mac and it appears on the paired iPhone, with no question on either device; a
+  backgrounded or locked phone gets a notification that opens straight into the stage, and a phone
+  in use (keyboard up, finger on the screen) is never taken over. The first arrival teaches the one
+  gesture that brings up the controls. Web pages render on the phone itself (localhost through the existing browser tunnel,
+  agent HTML through a confined file server, public URLs direct) and swap revisions without a
+  flash or a scroll jump; Simulators stream as H.264 with forwarded touch. The phone sends a
+  marked-up, real-device capture with its device context back to the chat. A local Live Activity
+  covers leaving the app. Agents present onto a stage the person opened and never open one. Four
+  spikes gate it: the swap, the frame path's latency, the Live Activity and notification tap to
+  stage. The notification needs the broker deployed at notification protocol 5.
 
 ### Next — researched and ready, waiting for a slot
 

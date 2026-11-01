@@ -118,6 +118,7 @@
 		A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000002 /* RemoteHostTrustTests.swift */; };
 		A63100010000000000000101 /* MobileInvitationRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000102 /* MobileInvitationRouteTests.swift */; };
 		61A0CE010000000000000018 /* MobileUsageWidgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61A0CE010000000000000019 /* MobileUsageWidgetTests.swift */; };
+		4D1220A00000000000000001 /* MobileMirrorPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D1220A00000000000000002 /* MobileMirrorPolicyTests.swift */; };
 		A63100010000000000000201 /* ShareChatFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000202 /* ShareChatFlowTests.swift */; };
 		A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63200010000000000000002 /* RemoteHostCandidateTests.swift */; };
 		A63300010000000000000001 /* MobileLocalNetworkPermissionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */; };
@@ -468,6 +469,7 @@
 		A63100010000000000000002 /* RemoteHostTrustTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostTrustTests.swift; sourceTree = "<group>"; };
 		A63100010000000000000102 /* MobileInvitationRouteTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileInvitationRouteTests.swift; sourceTree = "<group>"; };
 		61A0CE010000000000000019 /* MobileUsageWidgetTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileUsageWidgetTests.swift; sourceTree = "<group>"; };
+		4D1220A00000000000000002 /* MobileMirrorPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileMirrorPolicyTests.swift; sourceTree = "<group>"; };
 		A63100010000000000000202 /* ShareChatFlowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareChatFlowTests.swift; sourceTree = "<group>"; };
 		A63200010000000000000002 /* RemoteHostCandidateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostCandidateTests.swift; sourceTree = "<group>"; };
 		A63300010000000000000002 /* MobileLocalNetworkPermissionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileLocalNetworkPermissionTests.swift; sourceTree = "<group>"; };
@@ -554,6 +556,12 @@
 				ThreadingMobile/MobileButtonHaptics.swift,
 				ThreadingMobile/MobileCameraCapture.swift,
 				ThreadingMobile/MobileClipboardWriter.swift,
+				ThreadingMobile/MobileMirrorController.swift,
+				ThreadingMobile/MobileMirrorEndIntent.swift,
+				ThreadingMobile/MobileMirrorLiveActivity.swift,
+				ThreadingMobile/MobileMirrorPolicy.swift,
+				ThreadingMobile/MobileMirrorStage.swift,
+				ThreadingMobile/MobileMirrorStageOverlay.swift,
 				ThreadingMobile/MobileProjectDisclosureStore.swift,
 				ThreadingMobile/MobileProjectChatPreview.swift,
 				ThreadingMobile/MobileProjectDefaultAccounts.swift,
@@ -938,6 +946,7 @@
 				A63100010000000000000002 /* RemoteHostTrustTests.swift */,
 				A63100010000000000000102 /* MobileInvitationRouteTests.swift */,
 				61A0CE010000000000000019 /* MobileUsageWidgetTests.swift */,
+				4D1220A00000000000000002 /* MobileMirrorPolicyTests.swift */,
 				A63100010000000000000202 /* ShareChatFlowTests.swift */,
 				A63500010000000000000002 /* MobileSettingsIdentityTests.swift */,
 				A63200010000000000000002 /* RemoteHostCandidateTests.swift */,
@@ -1956,6 +1965,7 @@
 				A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */,
 				A63100010000000000000101 /* MobileInvitationRouteTests.swift in Sources */,
 				61A0CE010000000000000018 /* MobileUsageWidgetTests.swift in Sources */,
+				4D1220A00000000000000001 /* MobileMirrorPolicyTests.swift in Sources */,
 				A63100010000000000000201 /* ShareChatFlowTests.swift in Sources */,
 				A63500010000000000000001 /* MobileSettingsIdentityTests.swift in Sources */,
 				A63200010000000000000001 /* RemoteHostCandidateTests.swift in Sources */,

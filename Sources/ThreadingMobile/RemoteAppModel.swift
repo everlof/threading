@@ -612,6 +612,30 @@ final class RemoteAppModel: ObservableObject {
         themeEventsDidReceiveHello ? themeEventsTask : nil
     }
 
+    /// Mirror: the full-screen stage a Mac opens on this phone.
+    lazy var mirror: MobileMirrorController = {
+        let mirror = MobileMirrorController()
+        mirror.attach(self)
+        return mirror
+    }()
+
+    /// Signals ride the authenticated events socket. Encoded on one serial worker, so they keep
+    /// their order and the main actor only decides what to say.
+    private static let eventsMessageQueue = DispatchQueue(label: "codes.threading.mobile.events-messages")
+
+    func sendEventsMessage(_ message: RemoteClientMessage) {
+        guard let task = mobileDiagnosticsAuthenticatedEventsTask else { return }
+        Self.eventsMessageQueue.async {
+            guard let data = try? JSONEncoder().encode(message) else { return }
+            task.send(.string(String(decoding: data, as: UTF8.self))) { _ in }
+        }
+    }
+
+    @discardableResult
+    func openMirrorFromNotification(_ event: RemoteNotificationEventDTO) -> Bool {
+        mirror.openFromNotification(event)
+    }
+
     init(
         continuity: MobileSessionContinuityStore = MobileSessionContinuityStore(),
         newSessionDefaults: MobileNewSessionDefaultsStore = MobileNewSessionDefaultsStore(),
@@ -1184,6 +1208,9 @@ final class RemoteAppModel: ObservableObject {
     /// somebody else's Mac, which is not something a tap should do without showing its work.
     @discardableResult
     func open(_ url: URL) -> Bool {
+        if let route = MirrorReturnRoute(url: url) {
+            return mirror.openFromLiveActivity(route)
+        }
         if let route = UsageGlanceRoute(url: url) {
             if needsHostStorageRecovery {
                 deferredHostOpen = .widget(url)
@@ -4299,6 +4326,7 @@ final class RemoteAppModel: ObservableObject {
                         ]) { _, new in new }
                     )
                     sendMobileDiagnosticsHello(on: task)
+                    mirror.eventsConnected(pairingID: hostID)
                 }
                 // The one place the socket's attempt counter goes back to zero. A catalogue
                 // answer is not a socket: in the 2026-09-06 report a `304` over Tailscale reset
@@ -4369,6 +4397,14 @@ final class RemoteAppModel: ObservableObject {
                            from: data
                        ), RemoteNotificationPayloadValidation.accepts(retraction) {
                         RemoteNotificationBridge.received(retraction, connectionID: hostID)
+                    }
+                case RemoteMirrorFrame.state.rawValue:
+                    if let state = try? JSONDecoder().decode(RemoteMirrorStateDTO.self, from: data) {
+                        mirror.receive(state, pairingID: hostID)
+                    }
+                case RemoteMirrorFrame.ended.rawValue:
+                    if let ended = try? JSONDecoder().decode(RemoteMirrorEndedDTO.self, from: data) {
+                        mirror.receive(ended, pairingID: hostID)
                     }
                 case "mobileDiagnosticsCaptureRequest":
                     if let request = try? JSONDecoder().decode(

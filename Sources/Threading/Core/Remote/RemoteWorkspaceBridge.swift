@@ -34,6 +34,8 @@ protocol RemoteWorkspaceProviding: AnyObject {
     func remoteBrowserTabs(for sessionID: SessionID) -> [RemoteBrowserTabDTO]
     func remoteBrowserPreview(for sessionID: SessionID, tabID: UUID) async -> Data?
     func remoteBrowserLink(for sessionID: SessionID, tabID: UUID) -> URL?
+    /// The page a Mirror follows, under the same export policy as `remoteBrowserLink`.
+    func remoteMirrorSource(for sessionID: SessionID, tabID: UUID) -> PhoneMirrorSourceSnapshot?
 }
 
 @MainActor
@@ -83,5 +85,14 @@ enum RemoteWorkspaceBridge {
             return nil
         }
         return RemoteBrowserLinkDTO(url: url)
+    }
+
+    static func mirrorSource(for sessionID: SessionID, tabID: UUID) -> PhoneMirrorSourceSnapshot? {
+        guard let provider,
+              RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID))
+        else {
+            return nil
+        }
+        return provider.remoteMirrorSource(for: sessionID, tabID: tabID)
     }
 }

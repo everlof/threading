@@ -1662,6 +1662,10 @@ public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
     /// replaces it, and a create may say its login came from that list. A phone paired with a Mac
     /// that does not say so shows no editor and sends no `accountSelection`.
     case projectDefaultAccounts = "project-default-accounts"
+    /// Owner-only: the Mac can open a full-screen Mirror stage on this phone over the events
+    /// socket, and `mirror/end` ends one. A phone paired with a Mac that does not say so shows no
+    /// Mirror settings.
+    case mirror
 }
 
 /// The size a thumbnail is asked at, and the most a Mac will answer with.
@@ -3938,6 +3942,10 @@ public enum RemoteNotificationKind: String, Codable, CaseIterable, Sendable {
     /// keyvault on the Mac is waiting for a Face ID approval from this exact phone. Fixed words:
     /// what is asked, and by whom, is shown only inside the app, over the pinned connection.
     case secretApproval
+    /// The person turned Mirror on at the Mac while Threading was not open on this phone. Its
+    /// session slot is the mirror's id; a tap opens the stage directly, and the Mac withdraws it
+    /// when the phone joins, the mirror ends or two minutes pass.
+    case mirrorInvite
 }
 
 /// The authenticated in-app destination a notification opens.

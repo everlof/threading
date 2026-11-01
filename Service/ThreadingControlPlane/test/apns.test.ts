@@ -6,7 +6,8 @@ import { sha256Hex, signAccessToken } from "../src/crypto";
 import worker from "../src/index";
 
 const testEnv = env as unknown as Env;
-const accountID = "acct_apns-test";
+// One account per test: the suite outgrew the sixteen active hosts one account may hold.
+let accountID = "acct_apns-test";
 let apnsPrivateKey = "";
 
 beforeAll(async () => {
@@ -24,6 +25,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  accountID = `acct_apns-test-${crypto.randomUUID()}`;
   await testEnv.DB.batch([
     testEnv.DB.prepare("DELETE FROM service_failure_alerts"),
     testEnv.DB.prepare("DELETE FROM service_failure_diagnostics"),
@@ -223,6 +225,46 @@ describe("hosted APNs broker", () => {
     });
   });
 
+  it("delivers a Mirror invite as a time-sensitive alert that APNs drops after two minutes", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, {
+      status: 200,
+    }));
+    const body = pushBody(hostID, crypto.randomUUID().toLowerCase(), registrationID);
+    const event = body.event as Record<string, unknown>;
+    event.kind = NotificationKind.mirrorInvite;
+    event.title = "Mirror from MacBook Pro";
+    event.body = "Tap to show";
+
+    const response = await sendPush(hostCredential, body);
+
+    expect(response.status).toBe(200);
+    const [, options] = upstream.mock.calls[0] ?? [];
+    const headers = new Headers(options?.headers);
+    expect(Number(headers.get("apns-expiration"))).toBe(Math.floor(Number(event.createdAt) + 120));
+    const payload = JSON.parse(new TextDecoder().decode(options?.body as Uint8Array));
+    expect(payload).toMatchObject({
+      aps: { alert: { title: "Mirror from MacBook Pro" }, "interruption-level": "time-sensitive" },
+      event: { kind: "mirrorInvite" },
+    });
+  });
+
+  it("leaves every other kind at the default interruption level", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, {
+      status: 200,
+    }));
+    const response = await sendPush(
+      hostCredential, pushBody(hostID, crypto.randomUUID().toLowerCase(), registrationID),
+    );
+    expect(response.status).toBe(200);
+    const [, options] = upstream.mock.calls[0] ?? [];
+    const payload = JSON.parse(new TextDecoder().decode(options?.body as Uint8Array));
+    expect(payload.aps["interruption-level"]).toBeUndefined();
+  });
+
   it("never writes preview text or raw routing identifiers to provider logs", async () => {
     const hostID = `host-${crypto.randomUUID()}`;
     const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
@@ -248,7 +290,7 @@ describe("hosted APNs broker", () => {
     expect(encodedLog).toContain('"previewBytes":51');
   });
 
-  it.each([NotificationKind.turnCompleted, NotificationKind.agentQuestion, NotificationKind.permissionRequest])("sends %s retractions as short-lived background pushes", async (kind) => {
+  it.each([NotificationKind.turnCompleted, NotificationKind.agentQuestion, NotificationKind.permissionRequest, NotificationKind.mirrorInvite])("sends %s retractions as short-lived background pushes", async (kind) => {
     const hostID = `host-${crypto.randomUUID()}`;
     const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
     const apnsID = crypto.randomUUID();
@@ -302,7 +344,7 @@ describe("hosted APNs broker", () => {
     expect(payload.aps.sound).toBeUndefined();
   });
 
-  it.each([NotificationKind.turnCompleted, NotificationKind.agentQuestion, NotificationKind.permissionRequest])("keeps old %s retractions separate from a newer alert", async (kind) => {
+  it.each([NotificationKind.turnCompleted, NotificationKind.agentQuestion, NotificationKind.permissionRequest, NotificationKind.mirrorInvite])("keeps old %s retractions separate from a newer alert", async (kind) => {
     const hostID = `host-${crypto.randomUUID()}`;
     const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
     const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(

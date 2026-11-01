@@ -4489,6 +4489,41 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         )
     }
 
+    func remoteMirrorSource(for sessionID: SessionID, tabID: UUID) -> PhoneMirrorSourceSnapshot? {
+        guard let location = browserResolver.locations(for: sessionID).first(where: { $0.tabID == tabID }),
+              let url = RemoteBrowserLinkPolicy.exportableURL(
+                  location.browser.currentURL,
+                  contextKind: location.browser.contextKind
+              )
+        else {
+            return nil
+        }
+        return PhoneMirrorSourceSnapshot(
+            url: url,
+            title: boundedRemoteBrowserTitle(location.tab.title),
+            browser: location.browser
+        )
+    }
+
+    /// The visible browser a Mirror command acts on, with the session and tab that address it.
+    var commandMirrorSource: (source: PhoneMirrorSource, browser: BrowserViewController)? {
+        for host in commandDisplayHosts {
+            guard let browser = host.currentBrowser, let sessionID = host.currentSessionID,
+                  let location = browserResolver.location(of: browser, for: sessionID)
+            else { continue }
+            return (PhoneMirrorSource(sessionID: sessionID, tabID: location.tabID), browser)
+        }
+        return nil
+    }
+
+    /// The source a particular browser shows, for its own overflow menu.
+    func mirrorSource(of browser: BrowserViewController) -> PhoneMirrorSource? {
+        guard let sessionID = browser.baselineSessionID,
+              let location = browserResolver.location(of: browser, for: sessionID)
+        else { return nil }
+        return PhoneMirrorSource(sessionID: sessionID, tabID: location.tabID)
+    }
+
     private func boundedRemoteBrowserTitle(_ title: String) -> String {
         let collapsed = title
             .split(whereSeparator: \.isWhitespace)
