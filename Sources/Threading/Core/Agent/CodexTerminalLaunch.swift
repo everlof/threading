@@ -81,7 +81,7 @@ enum CodexTerminalLaunch {
             [ "$threading_attempt" -lt 200 ] || exit 1
             sleep 0.05
         done
-        "$threading_codex" --remote "unix://$threading_socket" "$@"
+        "$threading_codex" --remote "unix://$threading_socket" --cd "$PWD" "$@"
         threading_status=$?
         exit "$threading_status"
         """

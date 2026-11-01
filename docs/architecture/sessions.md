@@ -1213,6 +1213,15 @@ terminal screen. The flag belongs only to interactive terminal launches; native 
 headless pipe transports have no terminal buffer to configure. An already-running Codex process
 must be relaunched before the launch contract can affect it.
 
+The local terminal's queue connection uses a session-owned app-server and Codex's `--remote`
+transport. Its TUI must also receive `--cd "$PWD"`: the launch shell has already entered the
+session's execution directory, but a remote-workspace client does not infer that directory from
+its own process cwd. In particular, `tui.resume_cwd = "current"` refuses a resume without the
+explicit flag before opening the transcript. `CodexTerminalLaunch` supplies it only on the
+remote connection branch; older clients taking the direct-launch fallback keep their own cwd
+behavior. `CodexTerminalLaunchTests` executes the supervisor against a socket-backed fixture and
+checks the directory and resume arguments, including a checkout path with spaces and a quote.
+
 **An identifier is not a conversation, so the resume branch asks the filesystem — and the
 encoding it asks with is load-bearing.** Claude's id is minted before anything is written, so
 `AgentLauncher` emits `--resume` only when `ClaudeTranscript.exists` finds the file and otherwise
