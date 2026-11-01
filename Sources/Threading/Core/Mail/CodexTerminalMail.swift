@@ -115,7 +115,8 @@ enum CodexMailQueue {
         // The server owns model credentials. This client needs only local socket access;
         // account configuration is kept consistent without inheriting another chat's identity.
         let environment = ["HOME": FileManager.default.homeDirectoryForCurrentUser.path,
-                           "CODEX_HOME": target.accountHome, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+                           "CODEX_HOME": target.accountHome,
+                           "PATH": AgentLocalLaunch.store?.effectivePATH ?? ManagedAgentCatalog.systemPATH]
         guard let result = try? BoundedChildProcess.run(
             executable: target.executable,
             arguments: ["queue", "--remote", "unix://\(target.socketPath)", "--thread", target.threadID,

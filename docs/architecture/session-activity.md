@@ -1561,6 +1561,8 @@ Threading is closed, so its same socket is available after reattachment.
 live terminal with the runtime capability, an identified thread, no active turn/blocker and
 Other sessions enabled. `CodexMailQueue` runs the selected `queue --remote unix://… --thread <UUID>`
 client on one of four bounded workers; no shared daemon discovery or terminal input occurs.
+The queue client inherits the launcher's cached PATH so custom Node/shell installations can
+find their interpreter, while account and session credentials remain owned by the server.
 Only the controller's notice crosses this channel. `pendingMailWake` leaves storage unchanged;
 only a successful queue receipt calls `confirmMailWake` for those exact message ids. A message
 arriving during the receipt wait is retained for another notice, and an acknowledgment racing

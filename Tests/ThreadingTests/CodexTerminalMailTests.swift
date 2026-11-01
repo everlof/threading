@@ -23,6 +23,38 @@ final class CodexTerminalMailTests: XCTestCase {
         func release() { suspended = false; hold?.resume(); hold = nil }
     }
 
+    func testCustomQueueLauncherFindsItsInterpreterOnTheTerminalPATH() async throws {
+        let root = URL(fileURLWithPath: "/tmp/cm-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let helper = root.appendingPathComponent("threading-queue-test-helper")
+        let launcher = root.appendingPathComponent("codex")
+        try "#!/bin/sh\nshift\n[ \"$1\" = queue ] && [ \"$CODEX_HOME\" = '\(root.path)' ]\n"
+            .write(to: helper, atomically: true, encoding: .utf8)
+        try "#!/usr/bin/env threading-queue-test-helper\n".write(to: launcher, atomically: true, encoding: .utf8)
+        for file in [helper, launcher] {
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+        }
+        let suite = "CodexQueuePATH.\(UUID())"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        preferences.set(root.path + ":/usr/bin:/bin", forKey: ManagedAgentRuntimeStore.projectPATHKey)
+        let original = AgentLocalLaunch.store
+        AgentLocalLaunch.configure(ManagedAgentRuntimeStore(root: root, preferences: preferences))
+        defer { AgentLocalLaunch.configure(original) }
+        let socket = root.appendingPathComponent("queue.sock").path
+        let server = MCPServer(socketPath: socket)
+        let listening = expectation(description: "private socket exists")
+        server.start { listening.fulfill() }
+        defer { server.stop() }
+        await fulfillment(of: [listening], timeout: 10)
+        let target = CodexTerminalMail.Target(executable: launcher.path, socketPath: socket,
+                                             threadID: UUID().uuidString, accountHome: root.path)
+        let accepted = await CodexMailQueue.enqueue(target, notice: "fixture notice")
+        XCTAssertTrue(accepted, "A custom CLI must find its interpreter just as its terminal launch does")
+    }
+
     func testIdleArrivalCoalescesBurstAndConsumesOnlyTheReceiptedNotice() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-mail-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
