@@ -388,29 +388,6 @@ struct ConversationTimeline {
         }
     }
 
-    /// The tool call a row sits under: the nearest one at or before it **within the same turn**.
-    ///
-    /// Nil when the walk reaches the turn's own user message first, which is the honest answer
-    /// for the top of a turn — nothing has been done yet, so there is no step to name. The walk
-    /// is bounded by one turn, and stops at the first call it meets going back, so it is short
-    /// except in a turn that ran no tools at all.
-    func currentStep(atOrBefore rowIndex: Int) -> Int? {
-        guard rows.indices.contains(rowIndex) else { return nil }
-
-        var index = rowIndex
-        while index >= 0 {
-            switch rows[index] {
-            case .userMessage:
-                return nil
-            case .toolCall:
-                return index
-            default:
-                index -= 1
-            }
-        }
-        return nil
-    }
-
     /// The last assistant message between this user turn and the next, with where the turn's
     /// rows end. Any user row is a boundary, even one whose text compacts to nothing.
     private func finalAssistant(

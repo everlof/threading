@@ -10,20 +10,33 @@ import AppKit
 /// line, so a conversation reads as its exchanges rather than as the work that carried them
 /// out. A presentation owner can handle disclosure through the callback (the virtualized
 /// conversation does); simpler standalone callers may still toggle an existing group of views.
-final class TurnFoldView: NSView {
+final class TurnFoldView: NSView, OpticalInsetProviding {
 
     // MARK: - Properties
 
     private let label: String
+    private let attention: String?
     private let foldedViews: [NSView]
     private let onExpansionChanged: ((TurnFoldView, Bool) -> Void)?
 
     private lazy var disclosure: ThemedDisclosureRow = {
         let title = NSTextField(labelWithString: label)
-        title.applyFont(.caption, in: .conversation)
-        title.textColor = Design.Text.tertiary
-        let control = ThemedDisclosureRow(content: title, isExpanded: isExpanded, density: .conversation)
-        control.setAccessibilityLabel(label)
+        title.applyFont(.body, in: .conversation)
+        title.textColor = Design.Text.secondary
+        title.lineBreakMode = .byTruncatingTail
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let words = NSStackView(views: [title])
+        words.orientation = .horizontal
+        words.alignment = .firstBaseline
+        words.spacing = Design.Spacing.small
+        if let attention {
+            let failure = NSTextField(labelWithString: attention)
+            failure.applyFont(.body, in: .conversation)
+            failure.textColor = Design.Status.negative
+            words.addArrangedSubview(failure)
+        }
+        let control = ThemedDisclosureRow(content: words, isExpanded: isExpanded, density: .conversation)
+        control.setAccessibilityLabel(attention.map { "\(label), \($0)" } ?? label)
         control.setAccessibilityIdentifier("conversation.work-disclosure")
         control.onToggle = { [weak self] expanded in self?.setExpanded(expanded) }
         return control
@@ -45,6 +58,7 @@ final class TurnFoldView: NSView {
         self.foldedViews = views
         self.onExpansionChanged = onExpansionChanged
         self.label = Self.title(duration: duration, outcome: outcome)
+        self.attention = nil
         self.isExpanded = expanded
         super.init(frame: .zero)
         setupViews()
@@ -54,6 +68,7 @@ final class TurnFoldView: NSView {
     /// child transcript. The caller owns the label because this fold does not describe a turn.
     init(
         label: String,
+        attention: String? = nil,
         folding views: [NSView],
         expanded: Bool = false,
         onExpansionChanged: ((TurnFoldView, Bool) -> Void)? = nil
@@ -61,6 +76,7 @@ final class TurnFoldView: NSView {
         self.foldedViews = views
         self.onExpansionChanged = onExpansionChanged
         self.label = label
+        self.attention = attention
         self.isExpanded = expanded
         super.init(frame: .zero)
         setupViews()
@@ -77,10 +93,20 @@ final class TurnFoldView: NSView {
         addSubview(disclosure)
         NSLayoutConstraint.activate([
             disclosure.leadingAnchor.constraint(equalTo: leadingAnchor),
-            disclosure.trailingAnchor.constraint(equalTo: trailingAnchor),
+            // Hugs its words: the plate that rises under the pointer is the size of what it names,
+            // not a slab the width of the column around one short phrase.
+            disclosure.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             disclosure.topAnchor.constraint(equalTo: topAnchor),
             disclosure.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
+    }
+
+    // MARK: - OpticalInsetProviding
+
+    var opticalHorizontalInset: CGFloat { disclosure.opticalHorizontalInset }
+
+    func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
+        disclosure.opticalVerticalInset(forFrameHeight: frameHeight)
     }
 
     // MARK: - Private Methods

@@ -133,28 +133,25 @@ final class PermissionRequestViewTests: XCTestCase {
         XCTAssertFalse(PermissionPolicy.isAutoAllowed(.unknown("FutureProviderTool")))
     }
 
-    func testToolGlyphKeepsUnknownAndMCPNamesUseful() {
-        let unknown = ToolGlyph.forTool(.unknown("FutureProviderTool"))
-        let mcp = ToolGlyph.forTool(.mcp("mcp__web__query"))
+    func testToolPresentationKeepsUnknownAndMCPNamesUseful() {
+        let unknown = ToolPresentation.forTool(.unknown("FutureProviderTool"))
+        let mcp = ToolPresentation.forTool(.mcp("mcp__web__query"))
 
-        XCTAssertEqual(unknown.symbol, "•")
         XCTAssertEqual(unknown.label, "FutureProviderTool")
-        XCTAssertEqual(mcp.symbol, "◇")
         XCTAssertEqual(mcp.label, "query")
     }
 
     func testNativeThreadingToolUsesCatalogTitleWithoutChangingOtherMCPTools() {
-        let screenshot = ToolGlyph.forTool(.mcp("mcp__threading__simulator_screenshot"))
-        XCTAssertEqual(screenshot.symbol, "◇")
+        let screenshot = ToolPresentation.forTool(.mcp("mcp__threading__simulator_screenshot"))
         XCTAssertEqual(screenshot.label, "Threading")
         XCTAssertEqual(screenshot.displaySubject(""), "Capture Simulator")
         XCTAssertEqual(screenshot.displaySubject("Sign in"), "Capture Simulator · Sign in")
 
-        let foreign = ToolGlyph.forTool(.mcp("mcp__web__query"))
+        let foreign = ToolPresentation.forTool(.mcp("mcp__web__query"))
         XCTAssertEqual(foreign.label, "query")
         XCTAssertEqual(foreign.displaySubject("example"), "example")
 
-        let future = ToolGlyph.forTool(.mcp("mcp__threading__future_tool"))
+        let future = ToolPresentation.forTool(.mcp("mcp__threading__future_tool"))
         XCTAssertEqual(future.label, "future_tool")
     }
 

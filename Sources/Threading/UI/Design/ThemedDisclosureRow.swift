@@ -11,12 +11,14 @@ import AppKit
 /// view with a click gesture, which no keyboard and no assistive technology could operate.
 ///
 /// The chevron leads, outline-style, so the state is readable at the row's start where the eye
-/// begins, and every header's title starts on the same line whether or not its card is open.
+/// begins, and every header's title starts on the same line whether or not its card is open. In a
+/// conversation it follows the words instead: the row stands on the same edge as the sentences
+/// around it, and a leading chevron would give that column a second edge one glyph inboard.
 ///
 /// The caller's interactive accessory stays a **sibling** on purpose: this control is one
 /// accessibility element (the labels inside it are content, not children VoiceOver should walk),
 /// and a toggle nested inside it would disappear from the accessibility tree entirely.
-final class ThemedDisclosureRow: ThemedControl {
+final class ThemedDisclosureRow: ThemedControl, OpticalInsetProviding {
 
     enum Density {
         /// A section decision in a settings-style inventory.
@@ -102,13 +104,21 @@ final class ThemedDisclosureRow: ThemedControl {
         addSubview(chevron)
         addSubview(content)
 
+        let chevronFollows = density == .conversation
         NSLayoutConstraint.activate([
             heightAnchor.constraint(greaterThanOrEqualToConstant: density.minimumHeight),
 
-            chevron.leadingAnchor.constraint(equalTo: leadingAnchor, constant: density.edgeInset),
             chevron.widthAnchor.constraint(equalToConstant: Layout.chevronSlot),
             chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
 
+            content.topAnchor.constraint(equalTo: topAnchor, constant: density.verticalInset),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -density.verticalInset)
+        ] + (chevronFollows ? [
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: density.edgeInset),
+            chevron.leadingAnchor.constraint(equalTo: content.trailingAnchor),
+            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.tight)
+        ] : [
+            chevron.leadingAnchor.constraint(equalTo: leadingAnchor, constant: density.edgeInset),
             content.leadingAnchor.constraint(
                 equalTo: chevron.trailingAnchor,
                 constant: Design.Spacing.small
@@ -116,10 +126,8 @@ final class ThemedDisclosureRow: ThemedControl {
             content.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
                 constant: -density.edgeInset
-            ),
-            content.topAnchor.constraint(equalTo: topAnchor, constant: density.verticalInset),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -density.verticalInset)
-        ])
+            )
+        ]))
 
         updateChevron()
         chevron.isHidden = !isCollapsible
@@ -128,6 +136,16 @@ final class ThemedDisclosureRow: ThemedControl {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    // MARK: - OpticalInsetProviding
+
+    /// Where a conversation row's words begin inside its frame. Under any other density the first
+    /// thing on the edge is a chevron slot, which is its own ink question and no caller asks it.
+    var opticalHorizontalInset: CGFloat { density.edgeInset }
+
+    func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
+        density.verticalInset
     }
 
     // MARK: - Interaction

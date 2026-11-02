@@ -373,8 +373,10 @@ enum MCPToolCatalog {
       Prefer refs; use an x/y viewport point only for visual canvas, WebGL, map, or chart \
       content without a useful semantic target; browser_screenshot pixels map one-to-one to \
       those CSS-pixel coordinates. \
-      Same-origin frames participate in snapshots, refs, selectors, waits, and actions; \
-      cross-origin frames are visible as opaque boundaries rather than silently disappearing. \
+      Same-origin frames participate in snapshots, refs, selectors, waits, and actions. \
+      A frame from another origin shows as frame=opaque with a ref; browser_snapshot with that \
+      ref asks the user to allow its origin and returns refs like f1e3 that act inside it. \
+      x/y clicks and keys cross into such a frame the same way; selectors and locators do not. \
       browser_press_key preserves page shortcuts and supplies native Tab, activation, option, \
       radio, number, and range behavior where synthetic WebKit events have no default action. \
       Scroll or use browser_wait for text, URL, and target-state changes, and read the fresh \

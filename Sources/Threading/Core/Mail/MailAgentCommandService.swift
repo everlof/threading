@@ -218,10 +218,11 @@ final class MailAgentCommandService {
             do {
                 let own = try await mailbox.register(sessionID, name: name)
                 let contacts = try await mailbox.storeDirectory(for: sessionID, name: name)
+                let policy = try await mailbox.policy()
                 let hosted = Dictionary(uniqueKeysWithValues: siblings.compactMap { row in
                     self.mailboxes.binding(for: row.id).map { (row.id, $0.address) }
                 })
-                completion(.success(Self.directoryWords(own: own, siblings: siblings, contacts: contacts, hosted: hosted)))
+                completion(.success(Self.directoryWords(own: own, siblings: siblings, contacts: contacts, hosted: hosted, policy: policy)))
             } catch let failure as MacMailbox.Failure {
                 completion(.failure(Self.mailWords(for: failure)))
             } catch {
@@ -265,11 +266,11 @@ final class MailAgentCommandService {
             return "This Mac's mailbox is unavailable (\(reason)), so nothing was sent or read. The user can see why in Threading's event log."
         case .refused(let error):
             switch error {
+            case .mailChainLimit(let limit):
+                return MailPolicy.limitReachedMessage(limit)
             case .invalidInput(let field):
                 switch field {
                 case "unknown_host", "mail_address", "mail_recipient": return unknownRecipientWords
-                case "chain_limit":
-                    return "This conversation between agents has reached its \(MailLimits.chainMessages)-message limit."
                 case "send_rate":
                     return "This session has sent \(MailLimits.sendsPerMinute) messages in the last minute. Wait before sending more."
                 case "inbox_full":
@@ -328,9 +329,13 @@ final class MailAgentCommandService {
         own: MailAddress,
         siblings: [ControlSessionOverview],
         contacts: [MailContact],
-        hosted: [SessionID: MailAddress] = [:]
+        hosted: [SessionID: MailAddress] = [:],
+        policy: MailPolicy
     ) -> String {
-        var lines = ["This session's address: \(own)"]
+        var lines = [
+            "This session's address: \(own)",
+            "This host's mail chain message limit: \(policy.chainMessageLimit). Other hosts apply their own limits."
+        ]
         if siblings.isEmpty && contacts.isEmpty {
             lines.append("Nobody else is reachable by mail from here yet.")
             return lines.joined(separator: "\n")

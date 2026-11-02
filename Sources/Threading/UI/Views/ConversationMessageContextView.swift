@@ -3,13 +3,17 @@ import AppKit
 /// Adds quiet message actions — Copy, and a menu for the rest — and durable context receipts to
 /// a conversation message without changing the message renderer itself.
 ///
-/// The actions are **quiet until relevant**: they keep their line under the message, so nothing
-/// reflows when they appear, but draw only while the pointer is over the message, a menu from
-/// them is open, or a copy is being confirmed. Drawn permanently, an ellipsis under every
-/// message was the most repeated mark in the transcript — more of them on screen than
+/// The actions are **quiet until relevant**: they draw only while the pointer is over the message,
+/// a menu from them is open, or a copy is being confirmed. Drawn permanently, an ellipsis under
+/// every message was the most repeated mark in the transcript — more of them on screen than
 /// paragraphs — and it made the conversation read as a list of records rather than as an
-/// exchange. Hidden by alpha, not by `isHidden`, so VoiceOver and a pointer that already knows
-/// where they are still reach them.
+/// exchange. Hidden by alpha, not by `isHidden`, so VoiceOver still reaches them.
+///
+/// **They float, and take no line of their own.** Reserving an invisible line under each message
+/// kept anything from reflowing on hover, and put a 24-point hole under every sentence the agent
+/// said and none under its reasoning: the same page stepped between loose and tight for no reason
+/// a reader could see. Over a reply they sit on an opaque plate at the message's foot; beside a
+/// user's bubble they use the empty side of the row, where they cover nothing.
 final class ConversationMessageContextView: NSView {
 
     enum Speaker {
@@ -37,6 +41,7 @@ final class ConversationMessageContextView: NSView {
     private let copyButton: ThemedIconButton
     private let actionButton: ThemedIconButton
     private let actionRow = NSStackView()
+    private lazy var actionPlate = ConversationMessageActionPlate(actions: actionRow)
     private var menuSession: AnyObject? {
         didSet { updateActionPresence() }
     }
@@ -104,17 +109,19 @@ final class ConversationMessageContextView: NSView {
         actionRow.alignment = .centerY
         actionRow.spacing = Design.Spacing.hairline
         actionRow.detachesHiddenViews = true
-        actionRow.translatesAutoresizingMaskIntoConstraints = false
-        actionRow.alphaValue = 0
         copyButton.isHidden = true
 
-        let column = NSStackView(views: [contextRail, content, actionRow])
+        let column = NSStackView(views: [contextRail, content])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = Design.Spacing.tight
         column.detachesHiddenViews = true
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
+        actionPlate.float(
+            over: self,
+            beside: Self.firstDescendant(ConversationUserRowView.self, in: content)?.bubble
+        )
 
         NSLayoutConstraint.activate([
             column.topAnchor.constraint(equalTo: topAnchor),
@@ -122,9 +129,7 @@ final class ConversationMessageContextView: NSView {
             column.trailingAnchor.constraint(equalTo: trailingAnchor),
             column.bottomAnchor.constraint(equalTo: bottomAnchor),
             contextRail.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
-            content.trailingAnchor.constraint(equalTo: column.trailingAnchor),
-            actionRow.leadingAnchor.constraint(equalTo: column.leadingAnchor),
-            actionRow.trailingAnchor.constraint(equalTo: column.trailingAnchor)
+            content.trailingAnchor.constraint(equalTo: column.trailingAnchor)
         ])
 
         actionButton.presentsMenu = true
@@ -173,15 +178,23 @@ final class ConversationMessageContextView: NSView {
 
     private func updateActionPresence(animated: Bool = true) {
         let alpha: CGFloat = showsActions ? 1 : 0
-        guard actionRow.alphaValue != alpha else { return }
+        guard actionPlate.alphaValue != alpha else { return }
         guard animated, window != nil else {
-            actionRow.alphaValue = alpha
+            actionPlate.alphaValue = alpha
             return
         }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = showsActions ? Design.Motion.appear : Design.Motion.vanish
-            actionRow.animator().alphaValue = alpha
+            actionPlate.animator().alphaValue = alpha
         }
+    }
+
+    private static func firstDescendant<T: NSView>(_ type: T.Type, in root: NSView) -> T? {
+        if let match = root as? T { return match }
+        for child in root.subviews {
+            if let match = firstDescendant(type, in: child) { return match }
+        }
+        return nil
     }
 
     // MARK: - Actions

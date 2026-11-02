@@ -549,9 +549,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 112)
+        XCTAssertEqual(authoredRows.count, 113)
 #else
-        XCTAssertEqual(authoredRows.count, 111)
+        XCTAssertEqual(authoredRows.count, 112)
 #endif
         XCTAssertEqual(
             // Markdown associations are OS-owned actions, not persisted AppSettings.
@@ -626,7 +626,7 @@ final class AppSettingDefinitionTests: XCTestCase {
                                          "React to agent activity", "Reaction strength",
                                          "Working indicator", "Chat name transition"])
         XCTAssertEqual(actual["tools"], [
-            "Agents may move chats between checkouts", "Proxy Client Access", "Capture request headers",
+            "Agents may move chats between checkouts", "Mail chain message limit", "Proxy Client Access", "Capture request headers",
             "Capture response headers", "Capture request bodies", "Capture response bodies"
         ])
         XCTAssertEqual(actual["usage-windows"], [

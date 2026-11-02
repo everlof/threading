@@ -12,8 +12,13 @@ enum ConversationPaneLayout {
         NSLayoutConstraint.Priority.defaultLow.rawValue + 1
     )
 
+    /// The reply box's ceiling in a pane of `paneWidth`, on the same column the transcript takes.
+    static func composerWidth(inPane paneWidth: CGFloat) -> CGFloat {
+        Design.Chat.columnWidth(inPane: paneWidth) + 2 * Design.Spacing.inset
+    }
+
     static func measuredComposerWidth(in paneWidth: CGFloat) -> CGFloat {
-        min(composerWidth, paneWidth - 2 * Design.Spacing.inset)
+        min(composerWidth(inPane: paneWidth), paneWidth - 2 * Design.Spacing.inset)
     }
 
     static func constraints(

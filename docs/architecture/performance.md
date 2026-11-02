@@ -191,6 +191,27 @@ the new child path; it does not claim a speedup over parent-only detection. Invo
 `xcrun xctest` and the built app's `DYLD_LIBRARY_PATH` / `DYLD_FRAMEWORK_PATH`, as the existing
 stress runner does: arbitrary new environment variables are not forwarded by the Xcode test plan.
 
+## Agent browser frames from other origins — 2026-11-02
+
+The scaling unit is frames per page: expected under ten, stress in the hundreds. The contract in
+[`agent-browser.md`](agent-browser.md#frames-from-other-origins) is that nothing is proportional to
+them, because only an explicit entry touches a frame, and only that one. A plain snapshot was measured
+with and without the change, as matched Debug runs on one fixture of 200 cross-origin frames, in a
+parked window, 15 samples each through the real tool coordinator:
+
+| Framed page | Before, median / max | After, median / max |
+|---|---|---|
+| One button | 35.9 / 45.2 ms | 35.9 / 85.5 ms, then 35.3 / 38.7 ms |
+| Widget with a form and a tall body | 73.9 / 505 ms | 56.6 / 518 ms |
+
+So the change costs nothing measurable. **The 500 ms tail on the heavier page is there before the
+change too**, and it remains unattributed: it needs a `sample` on the fixture before anyone concludes
+what owns it. `testStressAPageFullOfFramesWhenEnabled` keeps the opt-in fixture
+(`TEST_RUNNER_THREADING_BROWSER_FRAME_STRESS=1`). On it, entering frame 100 of 200 took 143 ms and
+re-reading it 146 ms, both independent of the frame count, and a click inside took 512 ms, most of which is the
+stability delay, the navigation guard and the action result's own snapshot. It also asserts that none
+of the 200 pages saw a probe.
+
 ## Independent iPhone browser — 2026-10-09
 
 The scaling unit is one explicitly opened browser, normally one preview capability and a small
@@ -6707,19 +6728,24 @@ The terminal-output edge is unbounded in frequency and descendant process count 
 tools, so detecting a tool-local `cd` cannot walk processes in that callback. The shipping path
 does one main-actor dictionary replacement, coalesces all sessions that produced output, and runs
 at most one system process-table walk per second on a utility queue. Parentage is built once for
-the batch. Each session retains only its newest eight descendants and therefore performs at most
-eight cwd syscalls per scan, even when a compiler or build system fans out into thousands of
-workers. The expected case is one to ten simultaneously working chats; the stress case is every
-live chat producing output together, which still pays one table walk plus eight bounded reads per
-chat and returns only path strings to main.
+the batch. Each session reads the cwds of only its newest eight descendants, plus at most eight
+retained anchors for work already found outside its checkout and one for its root, so a scan costs
+at most seventeen cwd syscalls per session even when a compiler or build system fans out into
+thousands of workers. A newly found outside directory adds one climb to its anchor, bounded by
+`processAncestryLimit` and stopping at an ancestor already retained. The expected case is one to
+ten simultaneously working chats; the stress case is every live chat producing output together,
+which still pays one table walk plus those bounded reads per chat and returns only path strings to
+main.
 
 `SessionExecutionProcessSnapshot` has the deterministic stress fixture: forty direct children, a
 grandchild and a reachable parent cycle produce the four newest candidates in order without
-growing the retained result or looping. `SessionExecutionLocusTests` separately prove that one
-same-repository checkout is actionable, two are ambiguous, and runtimes without lifecycle cwd
-hooks still reach the observer. A live product-shell sample remains unverified; the code path is
-rate- and cardinality-bounded rather than justified by an unmeasured claim that process trees are
-small.
+growing the retained result or looping. `testALongRunningJobInASiblingStaysEvidenceUntilItExits`
+drives ten polling loops past a sibling job and asserts both that the window alone loses it and
+that the sample with retained evidence keeps it within the stated read bound.
+`SessionExecutionLocusTests` separately prove that one same-repository checkout is actionable,
+two are ambiguous, and runtimes without lifecycle cwd hooks still reach the observer. A live
+product-shell sample remains unverified; the code path is rate- and cardinality-bounded rather
+than justified by an unmeasured claim that process trees are small.
 
 
 ## Main-actor latency audit (2026-09-04)

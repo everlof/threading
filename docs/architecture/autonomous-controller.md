@@ -724,7 +724,9 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   — a native chat's composer, or a terminal prompt that is neither the mail notice
   (`MailNoticeWords.prefix`) nor a cross-session delivery. Stop-hook continuations, typed notices,
   deliveries and wakes keep agents going unattended, and the shared chain is what bounds them;
-  a person's next prompt always starts fresh. (Tried first and rejected: keeping the context
+  a person's next prompt clears the session's inherited context. A send without `reply_to` can
+  then start fresh; explicitly replying to an old message still uses its old chain, and reading
+  or acknowledging old mail can inherit that chain again. (Tried first and rejected: keeping the context
   forever, consuming it on the next send, a time window, and reply-only chains — each either
   refused legitimate mail or let an unattended exchange escape its bound.) Owner admission is the
   same-project default, never an override: a revocation for the sender stands. A reply to a forwarded
@@ -733,7 +735,7 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   mailbox that moves onto the asker's own host replaces the asker's sent copy rather than
   colliding with it. Wake admission keys on the newest open message that may wake the worker
   and whose chain is within budget, not on whichever message arrived last. Fuses
-  that need no reading: 50 messages and 16 wakes per chain on a host, 20 sends a minute
+  that need no reading: an owner-configured message limit (default 50) and 16 wakes per chain on a host, 20 sends a minute
   per sender, 1,000 open messages per inbox. Updating the message count preserves the wake count;
   replacing the chain record would reset the wake fuse on every message. A chain has no depth
   limit: the depth a message carries is shown in its
@@ -741,6 +743,16 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   (ask, answer, follow-up) long before anything looped, while the per-chain count already stops a
   real loop — every host a cross-host message passes counts it, so a ring of hosts is bounded too.
   Spend limits belong to admission ([usage ledger](../feature-drafts/agent-usage-ledger.md)).
+- **The message fuse is owner policy** (`MailPolicy`, `mail-policy`, `mail-policy-set POSITIVE_MESSAGE_LIMIT`).
+  A singleton `mailPolicy/host` record holds the limit; an absent record means the default, so
+  existing stores need no migration. The next send reads it in the counting transaction, including
+  sends in an existing chain, and another open process sees the change without restarting.
+  Policy lookup and chain counting are indexed, constant-size reads; neither scans message history.
+  The setter is available only through the owner CLI/RPC, never agent tools. `mail_directory`
+  reports the current host policy, and both MCP catalogues explain human-prompt reset semantics.
+  A refusal carries the actual limit and tells the agent to explain in chat that nothing was sent,
+  how a new human prompt permits a fresh chain, and why retrying or acknowledging cannot free
+  capacity. Autonomous executions need new owner-started work or an owner policy change.
 - **Notices, not bodies.** `threading-controller agent-notice post-tool-use|stop|session-start|user-prompt-submit` is
   the hook command a recipe installs. It prints one host-authored line naming counts, senders and
   hosts as hook JSON (`hookSpecificOutput.additionalContext`, or `decision: block` once per

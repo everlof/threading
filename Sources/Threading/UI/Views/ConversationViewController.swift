@@ -328,9 +328,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         return header
     }()
 
-    /// The row the header last resolved from, so the walk back through the turn runs on a change
-    /// of viewport rather than on every scroll event.
-    private var stickyStepTopRow: Int?
+    /// The call the header currently names, so a scroll that changes nothing animates nothing.
     private var stickyStepRow: Int?
     private lazy var workspaceFilePlane = WorkspaceFileSearchPlane { sessionID in
         ProjectStore.shared.executionProject(forSessionID: sessionID)?.folderURL
@@ -1807,7 +1805,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// layout has already made satisfiable, so the box follows the pane and can never resize
     /// it — see `ConversationDefaults.statedColumnPriority`.
     private func updateComposerColumnWidth() {
-        let cap = ConversationDefaults.composerWidth
+        let cap = ConversationPaneLayout.composerWidth(inPane: view.bounds.width)
         if abs(composerColumnCap.constant - cap) > 0.5 { composerColumnCap.constant = cap }
         let width = ConversationPaneLayout.measuredComposerWidth(in: view.bounds.width)
         guard width > 0, abs(composerColumnWidth.constant - width) > 0.5 else { return }
@@ -1816,13 +1814,14 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     /// The rail gets whatever gutter the capped column leaves, and nothing when there is none.
     private func updateMinimapWidth() {
+        let column = Design.Chat.columnWidth(inPane: view.bounds.width)
         let width = ConversationMinimap.railWidth(
             paneWidth: view.bounds.width,
-            columnWidth: Design.Chat.columnWidth
+            columnWidth: column
         )
         let leading = ConversationMinimap.railLeading(
             paneWidth: view.bounds.width,
-            columnWidth: Design.Chat.columnWidth
+            columnWidth: column
         )
 
         if minimapWidth.constant != width { minimapWidth.constant = width }
@@ -1899,33 +1898,27 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     // MARK: - Sticky Step
 
-    /// Names the tool call the top of the viewport currently sits inside, or hides.
+    /// Names the open tool call whose output the top of the viewport is inside, or hides.
     ///
-    /// **Chrome at the top means hide.** A divider, a fold, a permission card or the streaming
-    /// placeholder at the top of the pane is a *boundary*, and a boundary is already telling the
-    /// reader where they are — naming a step over it would be a second, quieter answer to a
-    /// question that had already been answered louder.
+    /// **Only an open call, scrolled past its own header.** That is the one place a reader can
+    /// lose which call a line belongs to. Anything else at the top of the pane already says where
+    /// the reader is. This used to name the nearest earlier call for whatever row was at the top,
+    /// which since runs of calls fold away meant a band across the pane naming a call the reader
+    /// could not see, over a sentence that had nothing to do with it.
     func updateStickyStep() {
         guard isViewLoaded else { return }
 
-        let visibleRows = tableView.rows(in: scrollView.contentView.documentVisibleRect)
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let visibleRows = tableView.rows(in: visibleRect)
         guard visibleRows.location != NSNotFound,
-              presentationItems.indices.contains(visibleRows.location) else {
+              presentationItems.indices.contains(visibleRows.location),
+              case .timeline(let index) = presentationItems[visibleRows.location].content,
+              transcript.expandedToolRows.contains(index),
+              tableView.rect(ofRow: visibleRows.location).minY < visibleRect.minY else {
             setStickyStep(nil)
             return
         }
-
-        // Resolved only when the top row changes. Scrolling inside one tall row fires this
-        // continuously, and the walk back through the turn is the one part worth not repeating.
-        let topRow = visibleRows.location
-        guard topRow != stickyStepTopRow else { return }
-        stickyStepTopRow = topRow
-
-        guard let timelineIndex = presentationItems[topRow].content.timelineIndex else {
-            setStickyStep(nil)
-            return
-        }
-        setStickyStep(timeline.currentStep(atOrBefore: timelineIndex))
+        setStickyStep(index)
     }
 
     private func setStickyStep(_ rowIndex: Int?) {
@@ -1951,16 +1944,6 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// Whether the header is currently naming a step, and which. Read by tests, which cannot ask
     /// an alpha-faded view what it means.
     var stickyStepRowIndex: Int? { stickyStepRow }
-
-    /// How far above a jump target to stop.
-    ///
-    /// The usual gap, plus the header's own height when landing there will pin one — otherwise
-    /// the row a reader deliberately navigated to is delivered underneath the strip that names
-    /// it, which is the one place the overlay would actively cost them something.
-    private func landingClearance(for index: Int) -> CGFloat {
-        guard timeline.currentStep(atOrBefore: index) != nil else { return Design.Spacing.large }
-        return Design.Spacing.large + stickyStep.fittingSize.height
-    }
 
     // MARK: - Turn and Step Navigation
 
@@ -2057,7 +2040,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
         let started = DispatchTime.now().uptimeNanoseconds
         let geometryStarted = DispatchTime.now().uptimeNanoseconds
-        let target = max(0, tableView.rect(ofRow: tableRow).minY - landingClearance(for: index))
+        let target = max(0, tableView.rect(ofRow: tableRow).minY - Design.Spacing.large)
         let geometryEnded = DispatchTime.now().uptimeNanoseconds
 
         guard animated else {
@@ -2096,7 +2079,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         guard let correctedRow = presentationRow(forTimelineIndex: index) else { return (0, 0) }
         let correctedTarget = max(
             0,
-            tableView.rect(ofRow: correctedRow).minY - landingClearance(for: index)
+            tableView.rect(ofRow: correctedRow).minY - Design.Spacing.large
         )
         scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: correctedTarget))
         scrollView.reflectScrolledClipView(scrollView.contentView)

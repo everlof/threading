@@ -32,6 +32,7 @@ public typealias DeliveryAttemptID = ControllerID<AttemptTag>
 public enum ControllerError: Error, Equatable, CustomStringConvertible {
     case invalidInput(String), notFound, conflict, forbidden, unsupportedSchema
     case storage(Int32)
+    case mailChainLimit(Int)
     public var description: String {
         switch self {
         case .invalidInput(let field): return "invalid_input: \(field)"
@@ -40,6 +41,8 @@ public enum ControllerError: Error, Equatable, CustomStringConvertible {
         case .forbidden: return "forbidden"
         case .unsupportedSchema: return "unsupported_schema"
         case .storage(let code): return "storage_error: \(code)"
+        case .mailChainLimit(let limit):
+            return "invalid_input: chain_limit: \(MailPolicy.limitReachedMessage(limit))"
         }
     }
 }

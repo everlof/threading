@@ -68,6 +68,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// archive may be in flight for a session, and only its completion clears the pending row.
     private var archiveSessionIDsInFlight: Set<SessionID> = []
 
+    /// Not private: `SessionCoordinator+ExecutionDrift` asks it before raising a Move Chat band.
+    var observedMoveOffers = ObservedMoveOffers()
+
     /// Released with this coordinator, which the window owns for its own lifetime.
     private let appEvents = AppEventObservations()
 

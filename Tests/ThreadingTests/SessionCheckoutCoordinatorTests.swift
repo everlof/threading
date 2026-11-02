@@ -825,6 +825,46 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         }
     }
 
+    /// An offer is a standing question. A background job seen leaving the window and coming
+    /// back put the same band on screen hundreds of times a day; the same checkout is now
+    /// offered once per ownership, and only a change of ownership asks again.
+    func testTheSameCheckoutIsOfferedOncePerOwnership() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let sessionID = session.id
+        let coordinator = makeCoordinator()
+        let tracker = SessionExecutionLocusTracker(projects: store)
+        var offers = 0
+        let window = makeWindowCoordinator(checkout: coordinator, tracker: tracker, policy: .allowExplicitRequests) {
+            if $0.identifier == "sidebar.toast.execution-drift.offer" { offers += 1 }
+        }
+        func observe(_ paths: [String], arrivingIn sibling: Bool) {
+            let arrived = expectation(description: sibling ? "sibling observed" : "home observed")
+            arrived.assertForOverFulfill = false
+            let token = NotificationCenter.default.observe(SessionExecutionDriftDidChange.self) { event in
+                guard event.sessionID == sessionID else { return }
+                switch event.drift {
+                case .siblingCheckout where sibling, .none where !sibling: arrived.fulfill()
+                default: break
+                }
+            }
+            tracker.observeProcessWorkingDirectories(paths, sessionID: sessionID)
+            wait(for: [arrived], timeout: 3)
+            NotificationCenter.default.removeObserver(token)
+        }
+
+        observe([main.path, sibling.path], arrivingIn: true)
+        XCTAssertEqual(offers, 1)
+        observe([main.path], arrivingIn: false)
+        observe([main.path, sibling.path], arrivingIn: true)
+        XCTAssertEqual(offers, 1, "the same checkout under the same ownership is not offered again")
+
+        tracker.forget(sessionID: sessionID)
+        observe([main.path, sibling.path], arrivingIn: true)
+        XCTAssertEqual(offers, 2, "a change of ownership asks afresh")
+        withExtendedLifetime(window) {}
+    }
+
     func testSubagentLifecycleCannotMoveTheParentThroughTheWindowRoute() throws {
         let project = try XCTUnwrap(store.addProject(folderURL: main))
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))

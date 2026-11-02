@@ -3360,17 +3360,6 @@
         }
       }
     },
-    "%lld tool calls" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld verktygsanrop"
-          }
-        }
-      }
-    },
     "%lld tools" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3923,17 +3912,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 verktyg"
-          }
-        }
-      }
-    },
-    "1 tool call" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1 verktygsanrop"
           }
         }
       }
@@ -4897,6 +4875,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En inbyggd semantisk scen från ett tillägg. Ytan motsvarar installerad storlek."
+          }
+        }
+      }
+    },
+    "A new prompt from you lets that chat start a fresh chain. Replies to old mail still belong to the old chain; reading or acknowledging old mail can inherit it again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En ny prompt från dig låter chatten starta en ny kedja. Svar på gamla mail hör fortfarande till den gamla kedjan. Om agenten läser eller kvitterar gamla mail kan den ärva kedjan igen."
           }
         }
       }
@@ -19032,6 +19021,17 @@
         }
       }
     },
+    "Could not load the mail policy. Try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte läsa mailinställningen. Försök igen."
+          }
+        }
+      }
+    },
     "Could not move to %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19145,6 +19145,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte spara Apple-profilen tillfälligt. Kontrollera ledigt diskutrymme och försök igen."
+          }
+        }
+      }
+    },
+    "Could not save the mail policy. Try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte spara mailinställningen. Försök igen."
           }
         }
       }
@@ -19741,6 +19752,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Räknar indata, utdata och cacheskrivningar – de token som belastar en plan. Cacheläsningar räknas inte eftersom de är billiga och annars skulle dominera allt annat. En tur som förs vidare vid återupptagning, komprimering eller en sidokonversation räknas en gång. Underagenters trådar räknas också, eftersom deras token inte förekommer i någon annan fil. Gäller endast Claude; Codex registrerar användning på ett annat sätt."
+          }
+        }
+      }
+    },
+    "Counts messages from all agents in the same chain on this Mac. Changes apply to the next send, including existing chains. Other hosts have their own limits." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Räknar meddelanden från alla agenter i samma kedja på den här Macen. Ändringar gäller från nästa sändning, även i befintliga kedjor. Andra värdar har egna gränser."
           }
         }
       }
@@ -23149,6 +23171,28 @@
         }
       }
     },
+    "Edited %lld files" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändrade %lld filer"
+          }
+        }
+      }
+    },
+    "Edited 1 file" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändrade 1 fil"
+          }
+        }
+      }
+    },
     "Editing" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23782,6 +23826,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ange en giltig pilotinbjudan för att ansluta den här Macen."
+          }
+        }
+      }
+    },
+    "Enter a whole number greater than zero." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange ett heltal större än noll."
           }
         }
       }
@@ -25534,6 +25589,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återkoppling & separation"
+          }
+        }
+      }
+    },
+    "Fetched %lld pages" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämtade %lld sidor"
+          }
+        }
+      }
+    },
+    "Fetched 1 page" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämtade 1 sida"
           }
         }
       }
@@ -33301,6 +33378,17 @@
         }
       }
     },
+    "Loading mail policy…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läser mailinställningen…"
+          }
+        }
+      }
+    },
     "Loading release notes…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33721,6 +33809,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "E-posttråd"
+          }
+        }
+      }
+    },
+    "Mail chain message limit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meddelandegräns för mailkedjor"
           }
         }
       }
@@ -34717,6 +34816,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka meddelande till chatt"
+          }
+        }
+      }
+    },
+    "Messages per chain on this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meddelanden per kedja på den här Macen."
           }
         }
       }
@@ -45365,6 +45475,28 @@
         }
       }
     },
+    "Ran %lld commands" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körde %lld kommandon"
+          }
+        }
+      }
+    },
+    "Ran 1 command" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Körde 1 kommando"
+          }
+        }
+      }
+    },
     "Random" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45493,6 +45625,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Reaktioner"
+          }
+        }
+      }
+    },
+    "Read %lld files" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läste %lld filer"
+          }
+        }
+      }
+    },
+    "Read 1 file" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läste 1 fil"
           }
         }
       }
@@ -50836,6 +50990,17 @@
         }
       }
     },
+    "Saving mail policy…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sparar mailinställningen…"
+          }
+        }
+      }
+    },
     "Saving pauses the automation. Enable it when you are ready. Results remain in Activity after a successful run is archived." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -51933,6 +52098,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SearchResultRowView"
+          }
+        }
+      }
+    },
+    "Searched %lld times" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sökte %lld gånger"
+          }
+        }
+      }
+    },
+    "Searched once" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sökte en gång"
           }
         }
       }
@@ -57381,6 +57568,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Startad %@"
+          }
+        }
+      }
+    },
+    "Started %lld agents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startade %lld agenter"
+          }
+        }
+      }
+    },
+    "Started 1 agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Startade 1 agent"
           }
         }
       }
@@ -67550,6 +67759,17 @@
         }
       }
     },
+    "This is a frame inside %@, loaded from another origin." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här är en ram på %@, laddad från ett annat ursprung."
+          }
+        }
+      }
+    },
     "This is a real Android device. Threading and this session's agent will be able to tap, swipe, type, and press buttons on it while it is adopted in the right panel, including in its other apps. Threading remembers this choice for this device." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -71743,6 +71963,17 @@
         }
       }
     },
+    "Updated the plan" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdaterade planen"
+          }
+        }
+      }
+    },
     "Updates you receive" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -72479,6 +72710,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använd inloggningen på denna Mac för fjärrchattar"
+          }
+        }
+      }
+    },
+    "Used %lld tools" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använde %lld verktyg"
+          }
+        }
+      }
+    },
+    "Used 1 tool" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använde 1 verktyg"
           }
         }
       }
@@ -74182,6 +74435,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "När en konversation blir klar…"
+          }
+        }
+      }
+    },
+    "When a send reaches the limit, the agent is told to explain in the chat that its message was not sent and how a new prompt can continue the work." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När gränsen stoppar en sändning får agenten instruktionen att förklara i chatten att meddelandet inte skickades och hur en ny prompt kan fortsätta arbetet."
           }
         }
       }
@@ -77842,6 +78106,17 @@
         }
       }
     },
+    "interact with the frame at" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "interagera med ramen på"
+          }
+        }
+      }
+    },
     "interrupt" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -79472,6 +79747,17 @@
         }
       }
     },
+    "read the frame at" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "läsa ramen på"
+          }
+        }
+      }
+    },
     "read your annotations for" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -80948,6 +81234,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "uppdateringar"
+          }
+        }
+      }
+    },
+    "use the frame at" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "använda ramen på"
           }
         }
       }

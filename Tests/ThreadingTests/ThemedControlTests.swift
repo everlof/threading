@@ -8285,6 +8285,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                                         "ComposerWelcomeStackView", "PromptContentView",
                                         "PromptAttachmentStripView", "PromptAttachmentThumbnail"],
             "conversation-pane-width": ["ConversationPaneContentView"],
+            "conversation-working-turn": ["ConversationMessageActionPlate", "ConversationUserRowView"],
             "attachment-subagents": ["SessionAttachmentsContentView", "SessionAttachmentListView",
                                      "SessionAttachmentRowView", "SessionAttachmentHeaderRow",
                                      "SessionAttachmentTurnHeaderView"]

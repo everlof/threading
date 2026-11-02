@@ -844,6 +844,11 @@ final class BrowserViewController: NSViewController {
             contentWorld: .defaultClient,
             name: BrowserDefaults.annotationViewportMessageHandler
         )
+        contentController.add(
+            proxy,
+            contentWorld: .defaultClient,
+            name: BrowserDefaults.frameProbeMessageHandler
+        )
         contentController.addUserScript(
             WKUserScript(
                 source: BrowserAgentScripts.navigationReadiness,
@@ -863,6 +868,14 @@ final class BrowserViewController: NSViewController {
         contentController.addUserScript(
             WKUserScript(
                 source: BrowserAgentScripts.annotationViewportObservation,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false,
+                in: .defaultClient
+            )
+        )
+        contentController.addUserScript(
+            WKUserScript(
+                source: BrowserAgentScripts.frameProbeListener,
                 injectionTime: .atDocumentStart,
                 forMainFrameOnly: false,
                 in: .defaultClient
@@ -1772,36 +1785,259 @@ final class BrowserViewController: NSViewController {
         maximumNodes: Int = BrowserAgentDefaults.maximumSnapshotNodes,
         ref: String? = nil,
         selector: String? = nil,
-        viewportOnly: Bool = false
+        viewportOnly: Bool = false,
+        in frame: BrowserAgentFrame? = nil
     ) async throws
         -> BrowserSnapshot {
-        try await callAgentScript(
+        let route = try frame ?? agentFrames.frame(forRef: ref, page: webView)
+        let snapshot: BrowserSnapshot = try await callAgentScript(
             BrowserAgentScripts.snapshot,
             arguments: [
                 "maxNodes": maximumNodes,
                 "scopeRef": ref ?? "",
                 "scopeSelector": selector ?? "",
                 "viewportOnly": viewportOnly
-            ]
+            ],
+            in: route
+        )
+        // Scoping to a frame from another origin is how an agent asks to go inside. Nothing else
+        // on this path raises that question, so a page full of frames never does.
+        if let frameRef = snapshot.scopeFrameRef {
+            let entered = try await enterAgentFrame(
+                elementRef: frameRef,
+                in: route,
+                purpose: BrowserAgentFramePurpose.read
+            )
+            return try await agentSnapshot(maximumNodes: maximumNodes, in: entered)
+        }
+        guard let route else { return snapshot }
+        return snapshot.placed(
+            in: route,
+            placement: try? await agentFramePlacement(of: route),
+            pageURL: webView.url?.absoluteString ?? ""
         )
     }
 
     func describeTarget(
         ref: String?,
         selector: String?,
-        locator: BrowserSemanticLocator? = nil
+        locator: BrowserSemanticLocator? = nil,
+        in frame: BrowserAgentFrame? = nil
     ) async throws -> BrowserTargetDescription {
         try await callAgentScript(
             BrowserAgentScripts.describeTarget,
-            arguments: targetArguments(ref: ref, selector: selector, locator: locator)
+            arguments: targetArguments(ref: ref, selector: selector, locator: locator),
+            in: frame
         )
     }
 
-    func describePoint(x: Double, y: Double) async throws -> BrowserTargetDescription {
+    func describePoint(
+        x: Double,
+        y: Double,
+        in frame: BrowserAgentFrame? = nil
+    ) async throws -> BrowserTargetDescription {
         try await callAgentScript(
             BrowserAgentScripts.describeTarget,
-            arguments: pointArguments(x: x, y: y)
+            arguments: pointArguments(x: x, y: y),
+            in: frame
         )
+    }
+
+    // MARK: - Frames From Other Origins
+
+    /// Called for every authorized tool call, before anything can reach a frame. See
+    /// "Frames from other origins" in `agent-browser.md`.
+    func beginAgentFrameAccess(_ access: @escaping BrowserAgentFrameAccess) {
+        agentFrameAccess = access
+        agentResultFrame = nil
+    }
+
+    /// The entered frame a ref belongs to. A frame that is gone answers nil here and fails with
+    /// its own message when an action reaches it.
+    func agentFrame(forRef ref: String?) -> BrowserAgentFrame? {
+        try? agentFrames.frame(forRef: ref, page: webView)
+    }
+
+    /// Crosses into the frame whose `<iframe>` element has this ref, and stops there unless the
+    /// user allows its origin.
+    ///
+    /// Identifying the frame reads nothing inside it, so the prompt can name what it would open
+    /// before anything has been seen. The browser is shared with the user, who can navigate it
+    /// while the sheet is up, and the answer only covers the page it was asked about.
+    private func enterAgentFrame(
+        elementRef: String,
+        in parent: BrowserAgentFrame?,
+        purpose: String
+    ) async throws -> BrowserAgentFrame {
+        let finishActivity = beginAgentOperation()
+        defer { finishActivity() }
+        let page = webView
+        let identity = agentPageIdentity
+        let nonce = UUID().uuidString
+        agentFrames.expectProbeReply(nonce: nonce)
+        var arguments = targetArguments(ref: elementRef, selector: nil, locator: nil)
+        arguments["nonce"] = nonce
+        let probe: BrowserFrameProbeResult
+        do {
+            probe = try await callAgentScript(
+                BrowserAgentScripts.frameProbe,
+                arguments: arguments,
+                in: parent
+            )
+        } catch {
+            agentFrames.cancelProbe(nonce: nonce)
+            throw error
+        }
+        guard probe.ok, let ref = probe.ref else {
+            agentFrames.cancelProbe(nonce: nonce)
+            throw BrowserAgentFrameError.refused(probe.message)
+        }
+        guard let reply = await agentFrames.waitForProbeReply(
+            nonce: nonce,
+            timeout: BrowserAgentDefaults.frameProbeTimeout
+        ), page === webView else {
+            throw BrowserAgentFrameError.unanswered
+        }
+        let frame = try agentFrames.register(
+            reply,
+            page: page,
+            parentID: parent?.id,
+            elementRef: ref
+        )
+        guard await agentFrameAccess?(frame, purpose) == true else {
+            throw BrowserAgentFrameError.notAllowed(frame.origin.displayName)
+        }
+        guard agentPageIdentity == identity else {
+            throw BrowserAgentFrameError.gone
+        }
+        return frame
+    }
+
+    /// Carries a viewport point across frames from other origins until it lands on an element.
+    /// A document cannot hit-test inside a frame it cannot read, so each one answers for itself,
+    /// and the point only crosses once the user has allowed the origin on the far side.
+    func agentLandPoint(x: Double, y: Double) async throws -> BrowserPointLanding {
+        var point = (x: x, y: y)
+        var frame: BrowserAgentFrame?
+        for _ in 0..<BrowserAgentDefaults.maximumFrameDepth {
+            let target = try await describePoint(x: point.x, y: point.y, in: frame)
+            guard target.ok,
+                  let boundary = target.frameBoundary,
+                  let frameX = boundary.x,
+                  let frameY = boundary.y else {
+                return BrowserPointLanding(
+                    target: target,
+                    x: point.x,
+                    y: point.y,
+                    frame: frame,
+                    pageX: x,
+                    pageY: y
+                )
+            }
+            frame = try await enterAgentFrame(
+                elementRef: boundary.ref,
+                in: frame,
+                purpose: BrowserAgentFramePurpose.interact
+            )
+            point = (frameX, frameY)
+        }
+        throw BrowserAgentFrameError.tooDeep
+    }
+
+    /// The element a key press would land on, following focus into frames from other origins.
+    /// The form-submission question has to be asked about that element, not the frame around it.
+    func describeKeyTarget(
+        ref: String?,
+        selector: String?,
+        locator: BrowserSemanticLocator?
+    ) async throws -> BrowserTargetDescription {
+        var target = try await describeTarget(ref: ref, selector: selector, locator: locator)
+        var frame = try agentFrames.frame(forRef: ref, page: webView)
+        for _ in 0..<BrowserAgentDefaults.maximumFrameDepth {
+            guard let boundary = target.frameBoundary else { return target }
+            let entered = try await enterAgentFrame(
+                elementRef: boundary.ref,
+                in: frame,
+                purpose: BrowserAgentFramePurpose.interact
+            )
+            frame = entered
+            target = try await describeTarget(ref: nil, selector: ":focus", locator: nil, in: entered)
+        }
+        throw BrowserAgentFrameError.tooDeep
+    }
+
+    /// Runs an action that stops at a frame's element before dispatching anything, then again in
+    /// that frame's document, which is where a key or a scroll aimed at a frame belongs.
+    private func crossingFrames(
+        from ref: String?,
+        perform action: (_ frame: BrowserAgentFrame?, _ crossed: Bool) async throws -> BrowserActionOutcome
+    ) async throws -> BrowserActionOutcome {
+        var frame = try agentFrames.frame(forRef: ref, page: webView)
+        var outcome = try await action(frame, false)
+        for _ in 0..<BrowserAgentDefaults.maximumFrameDepth {
+            guard let boundary = outcome.frameBoundary else { return outcome }
+            let entered = try await enterAgentFrame(
+                elementRef: boundary.ref,
+                in: frame,
+                purpose: BrowserAgentFramePurpose.interact
+            )
+            frame = entered
+            outcome = try await action(entered, true)
+        }
+        throw BrowserAgentFrameError.tooDeep
+    }
+
+    /// Where a frame's content sits on the page, through every frame above it.
+    private func agentFramePlacement(
+        of frame: BrowserAgentFrame,
+        reveal: Bool = false
+    ) async throws -> BrowserFramePlacement {
+        let parent = agentFrames.frame(id: frame.parentID, page: webView)
+        guard frame.parentID == nil || parent != nil else {
+            throw BrowserAgentFrameError.gone
+        }
+        var arguments = targetArguments(ref: frame.elementRef, selector: nil, locator: nil)
+        arguments["reveal"] = reveal
+        let measured: BrowserFramePlacementMeasurement = try await callAgentScript(
+            BrowserAgentScripts.framePlacement,
+            arguments: arguments,
+            in: parent
+        )
+        guard measured.ok else {
+            throw BrowserAgentFrameError.refused(measured.message)
+        }
+        let placement = BrowserFramePlacement(measured)
+        guard let parent else { return placement }
+        return try await agentFramePlacement(of: parent, reveal: reveal).composing(placement)
+    }
+
+    /// Whether a target in this frame could actually be acted on. Hit-testing inside a frame
+    /// cannot see what the page has drawn over the frame, so that half is asked of the page.
+    private func agentFrameActionIssue(_ frame: BrowserAgentFrame) async throws -> String? {
+        let placement: BrowserFramePlacement
+        do {
+            placement = try await agentFramePlacement(of: frame, reveal: true)
+        } catch BrowserAgentFrameError.refused(let message) {
+            return message
+        }
+        return placement.covered
+            ? "The frame does not receive pointer events at a visible point; another element may "
+                + "cover it."
+            : nil
+    }
+
+    /// What this tool call's result should show: the frame it worked in, or the page once that
+    /// frame has navigated or gone, which is a normal outcome of clicking a link inside one.
+    func agentResultSnapshot(viewportOnly: Bool = false) async throws -> BrowserSnapshot {
+        defer { agentResultFrame = nil }
+        guard let frame = agentFrames.frame(id: agentResultFrame?.id, page: webView) else {
+            return try await agentSnapshot(viewportOnly: viewportOnly)
+        }
+        do {
+            return try await agentSnapshot(viewportOnly: viewportOnly, in: frame)
+        } catch is BrowserAgentFrameError {
+            return try await agentSnapshot(viewportOnly: viewportOnly)
+        }
     }
 
     /// The component under one point, for the app's own annotation overlay rather than for a
@@ -1834,6 +2070,12 @@ final class BrowserViewController: NSViewController {
     }
 
     // MARK: - Filled Credentials
+
+    private let agentFrames = BrowserAgentFrameRegistry()
+    private var agentFrameAccess: BrowserAgentFrameAccess?
+    /// The frame this tool call worked in, so its result shows where it happened.
+    private var agentResultFrame: BrowserAgentFrame?
+    private var textSearchSkippedFrames = false
 
     /// Values this tab has put into a sign-in form, kept so they can be taken back out of
     /// anything the agent is about to read.
@@ -2109,6 +2351,25 @@ final class BrowserViewController: NSViewController {
     /// This is the visual fallback for canvas and similar surfaces. Semantic refs remain the
     /// default because they can be actionability-checked without relying on image coordinates.
     func agentClickAt(
+        _ landing: BrowserPointLanding,
+        button: String = "left",
+        clickCount: Int = 1,
+        allowsFormSubmission: Bool = false
+    ) async throws -> BrowserActionOutcome {
+        var arguments = pointArguments(x: landing.x, y: landing.y)
+        arguments["button"] = button
+        arguments["clickCount"] = clickCount
+        arguments["reportedX"] = landing.pageX
+        arguments["reportedY"] = landing.pageY
+        return try await callAgentActionScript(
+            BrowserAgentScripts.click,
+            arguments: arguments,
+            allowsFormSubmission: allowsFormSubmission,
+            in: landing.frame
+        )
+    }
+
+    func agentClickAt(
         x: Double,
         y: Double,
         button: String = "left",
@@ -2151,6 +2412,14 @@ final class BrowserViewController: NSViewController {
         sourceLocator: BrowserSemanticLocator? = nil,
         targetLocator: BrowserSemanticLocator? = nil
     ) async throws -> BrowserActionOutcome {
+        // Both ends run in one script, which can only be delivered to one document.
+        guard BrowserAgentFrameRef.frameID(of: sourceRef) == BrowserAgentFrameRef.frameID(of: targetRef)
+        else {
+            return BrowserActionOutcome(
+                ok: false,
+                message: "The source and destination must be in the same frame."
+            )
+        }
         var arguments = targetArguments(
             ref: sourceRef,
             selector: sourceSelector,
@@ -2199,9 +2468,18 @@ final class BrowserViewController: NSViewController {
         var arguments = targetArguments(ref: nil, selector: nil, locator: nil)
         arguments["fields"] = payload
         arguments["maximumFields"] = BrowserAgentDefaults.maximumFormFields
+        // One batch validates every field before changing any, which takes one document.
+        let frameIDs = Set(fields.map { BrowserAgentFrameRef.frameID(of: $0.ref) })
+        guard frameIDs.count == 1 else {
+            return BrowserActionOutcome(
+                ok: false,
+                message: "No fields were changed. Every field in a batch must be in the same frame."
+            )
+        }
         return try await callAgentActionScript(
             BrowserAgentScripts.fillForm,
-            arguments: arguments
+            arguments: arguments,
+            in: agentFrames.frame(forRef: fields.first?.ref, page: webView)
         )
     }
 
@@ -2243,17 +2521,22 @@ final class BrowserViewController: NSViewController {
         command: Bool = false,
         allowsFormSubmission: Bool = false
     ) async throws -> BrowserActionOutcome {
-        var arguments = targetArguments(ref: ref, selector: selector, locator: locator)
-        arguments["key"] = key
-        arguments["shift"] = shift
-        arguments["control"] = control
-        arguments["option"] = option
-        arguments["command"] = command
-        return try await callAgentActionScript(
-            BrowserAgentScripts.pressKey,
-            arguments: arguments,
-            allowsFormSubmission: allowsFormSubmission
-        )
+        try await crossingFrames(from: ref) { frame, crossed in
+            var arguments = crossed
+                ? targetArguments(ref: nil, selector: nil, locator: nil)
+                : targetArguments(ref: ref, selector: selector, locator: locator)
+            arguments["key"] = key
+            arguments["shift"] = shift
+            arguments["control"] = control
+            arguments["option"] = option
+            arguments["command"] = command
+            return try await callAgentActionScript(
+                BrowserAgentScripts.pressKey,
+                arguments: arguments,
+                allowsFormSubmission: allowsFormSubmission,
+                in: frame
+            )
+        }
     }
 
     func agentScroll(
@@ -2263,18 +2546,50 @@ final class BrowserViewController: NSViewController {
         selector: String?,
         locator: BrowserSemanticLocator? = nil
     ) async throws -> BrowserActionOutcome {
-        var arguments = targetArguments(ref: ref, selector: selector, locator: locator)
-        arguments["direction"] = direction
-        arguments["amount"] = amount ?? 0
-        return try await callAgentActionScript(BrowserAgentScripts.scroll, arguments: arguments)
+        try await crossingFrames(from: ref) { frame, crossed in
+            var arguments = crossed
+                ? targetArguments(ref: nil, selector: nil, locator: nil)
+                : targetArguments(ref: ref, selector: selector, locator: locator)
+            arguments["direction"] = direction
+            arguments["amount"] = amount ?? 0
+            return try await callAgentActionScript(
+                BrowserAgentScripts.scroll,
+                arguments: arguments,
+                in: frame
+            )
+        }
     }
 
+    /// Looks in the page and in the frames this tab has entered and may still use. Never in every
+    /// frame on the page: a wait polls, and a page can hold hundreds nobody asked about.
     func containsText(_ text: String) async throws -> Bool {
-        let result: BrowserTextPresence = try await callAgentScript(
+        let onPage: BrowserTextPresence = try await callAgentScript(
             BrowserAgentScripts.textPresence,
             arguments: ["text": text]
         )
-        return result.present
+        textSearchSkippedFrames = (onPage.opaqueFrames ?? 0) > 0
+        if onPage.present { return true }
+        for frame in agentFrames.enteredFrames(page: webView) {
+            guard await agentFrameAccess?(frame, nil) == true else { continue }
+            let inFrame: BrowserTextPresence? = try? await callAgentScript(
+                BrowserAgentScripts.textPresence,
+                arguments: ["text": text],
+                in: frame
+            )
+            if inFrame?.present == true {
+                agentResultFrame = frame
+                return true
+            }
+        }
+        return false
+    }
+
+    /// An absence is only as good as where it looked, and a frame nobody entered was not looked in.
+    var textAbsenceDescription: String {
+        textSearchSkippedFrames
+            ? "text absent; this page has frames from another origin, which are searched only once "
+                + "entered with browser_snapshot"
+            : "text absent"
     }
 
     func observeTargetState(
@@ -2285,6 +2600,7 @@ final class BrowserViewController: NSViewController {
     ) async throws -> BrowserTargetStateObservation {
         var arguments = targetArguments(ref: ref, selector: selector, locator: locator)
         arguments["expectedState"] = state
+        agentResultFrame = agentFrame(forRef: ref)
         return try await callAgentScript(
             BrowserAgentScripts.targetState,
             arguments: arguments
@@ -2307,6 +2623,7 @@ final class BrowserViewController: NSViewController {
         arguments["attributeName"] = attributeName ?? ""
         arguments["attributeValueProvided"] = attributeValueProvided
         arguments["expectedBoolean"] = expectedBoolean ?? false
+        agentResultFrame = agentFrame(forRef: ref)
         return try await callAgentScript(
             BrowserAgentScripts.targetExpectation,
             arguments: arguments
@@ -2446,63 +2763,84 @@ final class BrowserViewController: NSViewController {
         arguments: [String: Any],
         timeout: TimeInterval? = BrowserDefaults.agentBridgeTimeout,
         onLateCompletion: (@MainActor () -> Void)? = nil,
-        preparesRendering: Bool = true
+        preparesRendering: Bool = true,
+        in frame: BrowserAgentFrame? = nil
     ) async throws -> Value {
         let page = webView
         let finishActivity = executionActivity.begin(for: page)
         defer { finishActivity() }
+        // A ref says which document it belongs to, so every target tool routes through this one
+        // place rather than each having to know that frames exist.
+        let route = try frame ?? agentFrames.frame(forRef: arguments["ref"] as? String, page: page)
+        // The one door into a frame, so no tool can forget it. A grant can be revoked after a ref
+        // was issued, and the page embedding a frame answers nothing on its behalf.
+        if let route, await agentFrameAccess?(route, BrowserAgentFramePurpose.use) != true {
+            throw BrowserAgentFrameError.notAllowed(route.origin.displayName)
+        }
         if preparesRendering { try await prepareBackgroundRendering() }
         let startedAt = Date()
         let phase = preparesRendering ? "javascript.dispatch" : "rendering.resume"
-        let payload: BrowserBridgePayload<String?> = try await withCheckedThrowingContinuation { continuation in
-            let completion = BrowserBridgeCallCompletion(
-                continuation,
-                onLateCompletion: onLateCompletion
-            )
-            page.callAsyncJavaScript(
-                script,
-                arguments: arguments,
-                in: nil,
-                in: .defaultClient
-            ) { [weak self] result in
-                let result = result.map { $0 as? String }
-                Task { @MainActor in
-                    let accepted = completion.finish(result)
-                    let outcome: String
-                    let detail: String?
-                    switch result {
-                    case .success:
-                        outcome = accepted ? "success" : "late-success"
-                        detail = nil
-                    case .failure(let error):
-                        outcome = accepted ? "webkit-error" : "late-webkit-error"
-                        let nsError = error as NSError
-                        detail = "\(nsError.domain) \(nsError.code)"
-                    }
-                    self?.recordAgentBridgePhase(
-                        phase,
-                        startedAt: startedAt,
-                        outcome: outcome,
-                        detail: detail
-                    )
-                }
-            }
-            if let timeout {
-                DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self, weak page] in
-                    guard completion.timeout(
-                        BrowserBridgeError.timedOut(
-                            seconds: timeout,
-                            presentation: Self.presentationDescription(of: page)
+        var deliveredArguments = arguments
+        if let route {
+            deliveredArguments["expectedFrameDocument"] = route.documentToken
+            deliveredArguments["refPrefix"] = route.refPrefix
+        }
+        let delivered = deliveredArguments
+        let source = route.map { _ in BrowserAgentScripts.frameDocumentGuard + script } ?? script
+        let payload: BrowserBridgePayload<String?>
+        do {
+            payload = try await withCheckedThrowingContinuation { continuation in
+                let completion = BrowserBridgeCallCompletion(
+                    continuation,
+                    onLateCompletion: onLateCompletion
+                )
+                page.callAsyncJavaScript(
+                    source,
+                    arguments: delivered,
+                    in: route?.handle,
+                    in: .defaultClient
+                ) { [weak self] result in
+                    let result = result.map { $0 as? String }
+                    Task { @MainActor in
+                        let accepted = completion.finish(result)
+                        let outcome: String
+                        let detail: String?
+                        switch result {
+                        case .success:
+                            outcome = accepted ? "success" : "late-success"
+                            detail = nil
+                        case .failure(let error):
+                            outcome = accepted ? "webkit-error" : "late-webkit-error"
+                            let nsError = error as NSError
+                            detail = "\(nsError.domain) \(nsError.code)"
+                        }
+                        self?.recordAgentBridgePhase(
+                            phase,
+                            startedAt: startedAt,
+                            outcome: outcome,
+                            detail: detail
                         )
-                    ) else { return }
-                    self?.recordAgentBridgePhase(
-                        phase,
-                        startedAt: startedAt,
-                        outcome: "timeout",
-                        detail: "limit \(Int(timeout))s; \(Self.presentationDescription(of: page))"
-                    )
+                    }
+                }
+                if let timeout {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self, weak page] in
+                        guard completion.timeout(
+                            BrowserBridgeError.timedOut(
+                                seconds: timeout,
+                                presentation: Self.presentationDescription(of: page)
+                            )
+                        ) else { return }
+                        self?.recordAgentBridgePhase(
+                            phase,
+                            startedAt: startedAt,
+                            outcome: "timeout",
+                            detail: "limit \(Int(timeout))s; \(Self.presentationDescription(of: page))"
+                        )
+                    }
                 }
             }
+        } catch {
+            throw route.map { agentFrames.translate(error, for: $0) } ?? error
         }
         let result = payload.value
         guard let json = result, let data = json.data(using: .utf8) else {
@@ -2532,10 +2870,16 @@ final class BrowserViewController: NSViewController {
     private func callAgentActionScript(
         _ script: String,
         arguments: [String: Any],
-        allowsFormSubmission: Bool = false
+        allowsFormSubmission: Bool = false,
+        in frame: BrowserAgentFrame? = nil
     ) async throws -> BrowserActionOutcome {
         let finishActivity = beginAgentOperation()
         defer { finishActivity() }
+        let route = try frame ?? agentFrames.frame(forRef: arguments["ref"] as? String, page: webView)
+        if let route, let issue = try await agentFrameActionIssue(route) {
+            return BrowserActionOutcome(ok: false, message: issue)
+        }
+        agentResultFrame = route
         let actionID = agentNavigationPolicy.beginAction(
             allowsFormSubmission: allowsFormSubmission
         )
@@ -2556,7 +2900,8 @@ final class BrowserViewController: NSViewController {
                     ) {
                         self?.agentNavigationPolicy.endAction(actionID)
                     }
-                }
+                },
+                in: route
             )
         } catch {
             if let bridgeError = error as? BrowserBridgeError,
@@ -2681,12 +3026,22 @@ final class BrowserViewController: NSViewController {
     ) async throws -> (target: BrowserScreenshotTarget, capture: BrowserScreenshotCapture?) {
         let finishActivity = beginAgentOperation()
         defer { finishActivity() }
-        let target = try await screenshotTarget(
+        let route = try agentFrames.frame(forRef: ref, page: webView)
+        if let route {
+            // The page has to scroll for a frame's target; the target's own reveal stops at the
+            // frame, because WebKit refuses to propagate a scroll across origins.
+            _ = try await agentFramePlacement(of: route, reveal: true)
+        }
+        var target = try await screenshotTarget(
             ref: ref,
             selector: selector,
             locator: locator
         )
         guard target.ok else { return (target, nil) }
+        if let route {
+            target = try await agentFramePlacement(of: route).project(target)
+            guard target.ok else { return (target, nil) }
+        }
 
         var rect = CGRect(
             x: CGFloat(target.x),
@@ -4352,6 +4707,7 @@ extension BrowserViewController: WKNavigationDelegate {
         documentSequences[identifier, default: 0] += 1
         annotationAnchorPositions[identifier] = nil
         capturedAnnotationAnchorTokens[identifier] = nil
+        agentFrames.removeAll(page: webView)
         if webView === self.webView {
             recordAgentNavigationTrace("commit")
             notifyPhoneMirrors(.document)
@@ -4863,6 +5219,7 @@ enum BrowserDefaults {
     static let navigationReadinessMessageHandler = "threadingNavigationReadiness"
     static let passwordFocusMessageHandler = "threadingPasswordFocus"
     static let annotationViewportMessageHandler = "threadingAnnotationViewport"
+    static let frameProbeMessageHandler = "threadingFrameProbe"
     /// How far the pointer must travel before the annotation overlay asks the page what is under
     /// it again. Below a couple of points the answer is the same element, and the round trip is
     /// pure cost on a surface the user is sweeping across.
@@ -4987,6 +5344,22 @@ extension BrowserViewController: WKScriptMessageHandler {
             if messageWebView === webView {
                 chromeBar.setPasswordFieldFocused(!focusedFrames.isEmpty)
             }
+            return
+        }
+        if message.name == BrowserDefaults.frameProbeMessageHandler {
+            guard !message.frameInfo.isMainFrame,
+                  message.webView === webView,
+                  let nonce = payload["nonce"] as? String,
+                  let documentToken = payload["document_token"] as? String,
+                  let url = payload["url"] as? String else { return }
+            agentFrames.receiveProbeReply(
+                nonce: nonce,
+                reply: BrowserAgentFrameRegistry.ProbeReply(
+                    handle: message.frameInfo,
+                    documentToken: documentToken,
+                    url: url
+                )
+            )
             return
         }
         if message.name == BrowserDefaults.annotationViewportMessageHandler {

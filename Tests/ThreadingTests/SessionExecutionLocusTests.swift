@@ -237,6 +237,87 @@ final class SessionExecutionLocusTests: XCTestCase {
         XCTAssertEqual(candidates, [500, 140, 139, 138])
     }
 
+    /// A job an agent left running in a sibling checkout stays evidence while it lives, however
+    /// many newer processes the agent's polling loops start in its own checkout. The newest
+    /// window alone lost the job and found it again every few seconds, and the tracker announced
+    /// each return as fresh drift with a fresh Move Chat band.
+    func testALongRunningJobInASiblingStaysEvidenceUntilItExits() {
+        let rootPID: pid_t = 100
+        let owned = "/repo/main"
+        let sibling = "/repo/sibling"
+        var table: [pid_t: ProcessSummary] = [rootPID: process(pid: rootPID, parent: 1, order: 0)]
+        var cwd: [pid_t: String] = [rootPID: owned]
+        func add(_ pid: pid_t, parent: pid_t, order: UInt64, in path: String) {
+            table[pid] = process(pid: pid, parent: parent, order: order)
+            cwd[pid] = path
+        }
+        // The job: a shell that `cd`'d into the sibling, its interpreter, and the leaf it runs
+        // right now in a subdirectory. Ten polling loops sleep in the agent's own checkout.
+        add(200, parent: rootPID, order: 1, in: sibling)
+        add(201, parent: 200, order: 2, in: sibling)
+        add(202, parent: 201, order: 40, in: sibling + "/output")
+        for loop in pid_t(0)..<10 {
+            add(300 + loop, parent: rootPID, order: 3 + UInt64(loop), in: owned)
+            add(400 + loop, parent: 300 + loop, order: 20 + UInt64(loop), in: owned)
+        }
+
+        var reads = 0
+        let reader: (pid_t) -> String? = { reads += 1; return cwd[$0] }
+        let first = SessionExecutionProcessSnapshot(table: table)
+            .sample(below: rootPID, retaining: [], workingDirectory: reader)
+        XCTAssertTrue(first.paths.contains(sibling + "/output"))
+        XCTAssertEqual(first.evidence.map(\.pid), [200], "the job's shell, not the sampled leaf")
+
+        // The leaf exits and the loops restart their sleeps, filling the newest window.
+        table[202] = nil
+        for loop in pid_t(0)..<10 {
+            table[400 + loop] = nil
+            add(500 + loop, parent: 300 + loop, order: 50 + UInt64(loop), in: owned)
+        }
+        let snapshot = SessionExecutionProcessSnapshot(table: table)
+        XCTAssertEqual(
+            snapshot.sample(below: rootPID, retaining: [], workingDirectory: reader).paths,
+            [owned],
+            "the window by itself no longer sees the job: this is the reading that flapped"
+        )
+        reads = 0
+        let second = snapshot.sample(below: rootPID, retaining: first.evidence, workingDirectory: reader)
+        XCTAssertEqual(Set(second.paths), [owned, sibling])
+        XCTAssertEqual(second.evidence, first.evidence)
+        XCTAssertLessThanOrEqual(
+            reads, 1 + 2 * SessionExecutionLocusDefaults.processCandidatesPerSession,
+            "the root, the retained evidence and the newest window"
+        )
+
+        // The job ends, and with it the evidence.
+        table[200] = nil
+        table[201] = nil
+        let third = SessionExecutionProcessSnapshot(table: table)
+            .sample(below: rootPID, retaining: second.evidence, workingDirectory: reader)
+        XCTAssertEqual(third.paths, [owned])
+        XCTAssertEqual(third.evidence, [])
+    }
+
+    /// A recycled pid is a different process. Evidence names its start time so a new process
+    /// handed the job's pid inherits nothing.
+    func testRetainedEvidenceIsNotInheritedByARecycledPID() {
+        let rootPID: pid_t = 100
+        let table: [pid_t: ProcessSummary] = [
+            rootPID: process(pid: rootPID, parent: 1, order: 0),
+            200: process(pid: 200, parent: rootPID, order: 9),
+            201: process(pid: 201, parent: rootPID, order: 10)
+        ]
+        let cwd: [pid_t: String] = [rootPID: "/repo/main", 200: "/repo/sibling", 201: "/repo/main"]
+        let stale = SessionExecutionProcessEvidence(
+            pid: 200, startTime: ProcessStartTime(seconds: 1, microseconds: 0)
+        )
+        let sample = SessionExecutionProcessSnapshot(table: table).sample(
+            below: rootPID, retaining: [stale], workingDirectory: { cwd[$0] }, limit: 1
+        )
+        XCTAssertEqual(sample.paths, ["/repo/main"])
+        XCTAssertEqual(sample.evidence, [])
+    }
+
     // MARK: - Cost
 
     /// The load-bearing property. These reports are the highest-frequency callback in the app

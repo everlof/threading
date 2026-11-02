@@ -465,6 +465,30 @@ enum SessionExecutionLocusDefaults {
     static let processInitialDelay: TimeInterval = 0.12
     static let processMinimumScanInterval: TimeInterval = 1.0
     static let processCandidatesPerSession = 8
+
+    /// How far a parentage walk may climb. Generous for any real tool tree, and it stops a
+    /// malformed table — or a pid recycled into a cycle — from looping.
+    static let processAncestryLimit = 32
+}
+
+// MARK: - Descendant Process Evidence
+
+/// A descendant kept for re-reading because it was found working outside the agent root's own
+/// directory. The start time makes it *this* process rather than a later one handed its pid.
+struct SessionExecutionProcessEvidence: Equatable, Sendable {
+    let pid: pid_t
+    let startTime: ProcessStartTime?
+}
+
+/// One bounded reading of where a root's descendants are working.
+struct SessionExecutionProcessSample: Equatable, Sendable {
+
+    /// Distinct working directories, which is all the tracker classifies.
+    let paths: [String]
+
+    /// The processes the next sample re-reads: at most one per directory outside the root's,
+    /// each the oldest process found working there.
+    let evidence: [SessionExecutionProcessEvidence]
 }
 
 // MARK: - Descendant Process Observation
@@ -506,6 +530,116 @@ struct SessionExecutionProcessSnapshot {
         return candidates.map(\.pid)
     }
 
+    /// Samples where `rootPID`'s descendants are working.
+    ///
+    /// The newest descendants alone are a moving window, and an agent with a handful of polling
+    /// loops refills it every second. A corpus run it started ten minutes earlier in a sibling
+    /// checkout fell out of that window and back in, and every pass read as the chat coming home
+    /// and leaving again: one chat was announced in the same checkout 791 times in a day, each
+    /// announcement a fresh Move Chat band. Absence from a bounded sample is not absence.
+    ///
+    /// So a process found working outside the root's own directory is anchored — climbed to its
+    /// oldest ancestor still working there or in a directory containing it, which is the job
+    /// rather than whichever leaf happened to be sampled — and re-read on every later sample
+    /// until it exits or leaves. The evidence ends when the work does, not when the window moves.
+    ///
+    /// Bounded like the window it complements: at most `limit` retained reads, `limit` newest
+    /// reads and one for the root, plus a climb of at most `processAncestryLimit` reads for a
+    /// directory not already evidenced, which stops at the first ancestor already retained.
+    func sample(
+        below rootPID: pid_t,
+        retaining retained: [SessionExecutionProcessEvidence],
+        workingDirectory: (pid_t) -> String?,
+        limit: Int = SessionExecutionLocusDefaults.processCandidatesPerSession
+    ) -> SessionExecutionProcessSample {
+        let rootDirectory = workingDirectory(rootPID)
+        var paths: [String] = []
+        var seenPaths: Set<String> = []
+        var evidence: [SessionExecutionProcessEvidence] = []
+        var evidencedPaths: Set<String> = []
+        var evidencedPIDs: Set<pid_t> = []
+        var read: Set<pid_t> = []
+
+        // Retained evidence first, so a job that is still running keeps its slot ahead of the
+        // newer arrivals competing for it.
+        for kept in retained.prefix(limit) where isLiveDescendant(kept, of: rootPID) {
+            read.insert(kept.pid)
+            guard let path = workingDirectory(kept.pid) else { continue }
+            if seenPaths.insert(path).inserted { paths.append(path) }
+            guard Self.isOutside(path, rootDirectory),
+                  evidencedPaths.insert(path).inserted else { continue }
+            evidencedPIDs.insert(kept.pid)
+            evidence.append(kept)
+        }
+
+        for pid in candidateProcessIDs(below: rootPID, limit: limit) where read.insert(pid).inserted {
+            guard let path = workingDirectory(pid) else { continue }
+            if seenPaths.insert(path).inserted { paths.append(path) }
+            guard evidence.count < limit, Self.isOutside(path, rootDirectory),
+                  evidencedPaths.insert(path).inserted else { continue }
+            let anchor = anchor(
+                pid, workingIn: path, below: rootPID, rootDirectory: rootDirectory,
+                stoppingAt: evidencedPIDs, workingDirectory: workingDirectory
+            )
+            guard evidencedPIDs.insert(anchor).inserted else { continue }
+            evidence.append(SessionExecutionProcessEvidence(
+                pid: anchor, startTime: table[anchor]?.startTime
+            ))
+        }
+
+        return SessionExecutionProcessSample(paths: paths, evidence: evidence)
+    }
+
+    /// Climbs from `pid` to its oldest ancestor beneath `rootPID` still working outside the
+    /// root's directory, in `path` or a directory containing it. A build tool runs at its
+    /// workspace root while its compilers run in each crate; the tool is the job.
+    private func anchor(
+        _ pid: pid_t,
+        workingIn path: String,
+        below rootPID: pid_t,
+        rootDirectory: String?,
+        stoppingAt evidenced: Set<pid_t>,
+        workingDirectory: (pid_t) -> String?
+    ) -> pid_t {
+        var anchor = pid
+        var anchorPath = path
+        for _ in 0..<SessionExecutionLocusDefaults.processAncestryLimit {
+            guard let parent = table[anchor]?.parentPid, parent != rootPID,
+                  table[parent] != nil else { break }
+            if evidenced.contains(parent) { return parent }
+            guard let parentPath = workingDirectory(parent),
+                  Self.isOutside(parentPath, rootDirectory),
+                  !Self.isOutside(anchorPath, parentPath) else { break }
+            anchor = parent
+            anchorPath = parentPath
+        }
+        return anchor
+    }
+
+    /// Whether retained evidence is still the same process, still beneath this root.
+    private func isLiveDescendant(
+        _ evidence: SessionExecutionProcessEvidence,
+        of rootPID: pid_t
+    ) -> Bool {
+        guard let summary = table[evidence.pid],
+              summary.startTime == evidence.startTime else { return false }
+        var parent = summary.parentPid
+        for _ in 0..<SessionExecutionLocusDefaults.processAncestryLimit {
+            if parent == rootPID { return true }
+            guard let next = table[parent] else { return false }
+            parent = next.parentPid
+        }
+        return false
+    }
+
+    /// Outside `directory`, which is neither `path` nor one of its ancestors. An unreadable
+    /// root evidences nothing, since there is then nothing to be outside of.
+    private static func isOutside(_ path: String, _ directory: String?) -> Bool {
+        guard let directory else { return false }
+        let prefix = directory.hasSuffix("/") ? directory : directory + "/"
+        return path != directory && !path.hasPrefix(prefix)
+    }
+
     private func insertNewest(
         _ candidate: ProcessSummary,
         into candidates: inout [ProcessSummary],
@@ -536,8 +670,9 @@ struct SessionExecutionProcessSnapshot {
 ///
 /// Expected load is one to ten simultaneously working sessions on a machine with hundreds of
 /// processes; the stress boundary is every live session reporting output together. They share
-/// one process-table walk per second, and each contributes at most eight cwd syscalls. The output
-/// callback itself only replaces one dictionary value and schedules work on the main queue.
+/// one process-table walk per second, and each contributes at most eight newest-descendant cwd
+/// reads, eight re-reads of retained evidence and one of its root. The output callback itself
+/// only replaces one dictionary value and schedules work on the main queue.
 @MainActor
 final class SessionExecutionProcessObserver: @unchecked Sendable {
     static let shared = SessionExecutionProcessObserver()
@@ -552,7 +687,7 @@ final class SessionExecutionProcessObserver: @unchecked Sendable {
 
     private struct Observation: Sendable {
         let request: Request
-        let paths: [String]
+        let sample: SessionExecutionProcessSample
         let observedAt: Date
     }
 
@@ -561,6 +696,9 @@ final class SessionExecutionProcessObserver: @unchecked Sendable {
     private let workingDirectoryReader: WorkingDirectoryReader
     private var pending: [SessionID: Request] = [:]
     private var generations: [SessionID: UInt64] = [:]
+
+    /// What each session's next sample re-reads; see `SessionExecutionProcessSnapshot.sample`.
+    private var evidence: [SessionID: [SessionExecutionProcessEvidence]] = [:]
     private var scanScheduled = false
     private var scanInFlight = false
     private var lastScanAt: TimeInterval = 0
@@ -592,6 +730,7 @@ final class SessionExecutionProcessObserver: @unchecked Sendable {
     func forget(sessionID: SessionID) {
         generations[sessionID, default: 0] &+= 1
         pending[sessionID] = nil
+        evidence[sessionID] = nil
     }
 
     private func scheduleIfNeeded() {
@@ -613,6 +752,9 @@ final class SessionExecutionProcessObserver: @unchecked Sendable {
         guard !pending.isEmpty else { return }
         let requests = pending
         pending.removeAll(keepingCapacity: true)
+        let retained = requests.keys.reduce(into: [SessionID: [SessionExecutionProcessEvidence]]()) {
+            $0[$1] = evidence[$1]
+        }
         scanInFlight = true
         lastScanAt = ProcessInfo.processInfo.systemUptime
         let tableReader = self.tableReader
@@ -624,12 +766,14 @@ final class SessionExecutionProcessObserver: @unchecked Sendable {
             var pathsBySession: [SessionID: Observation] = [:]
             pathsBySession.reserveCapacity(requests.count)
             for (sessionID, request) in requests {
-                var seen: Set<String> = []
-                let paths = snapshot.candidateProcessIDs(below: request.rootPID).compactMap {
-                    workingDirectoryReader($0)
-                }.filter { seen.insert($0).inserted }
                 pathsBySession[sessionID] = Observation(
-                    request: request, paths: paths, observedAt: observedAt
+                    request: request,
+                    sample: snapshot.sample(
+                        below: request.rootPID,
+                        retaining: retained[sessionID] ?? [],
+                        workingDirectory: workingDirectoryReader
+                    ),
+                    observedAt: observedAt
                 )
             }
             let completed = pathsBySession
@@ -645,8 +789,10 @@ final class SessionExecutionProcessObserver: @unchecked Sendable {
         scanInFlight = false
         for (sessionID, observation) in observations
         where generations[sessionID, default: 0] == observation.request.generation {
+            evidence[sessionID] = observation.sample.evidence.isEmpty
+                ? nil : observation.sample.evidence
             SessionExecutionLocusTracker.shared.observeProcessWorkingDirectories(
-                observation.paths,
+                observation.sample.paths,
                 sessionID: sessionID,
                 observedAt: observation.observedAt
             )

@@ -11,9 +11,22 @@ enum Design {
         static let arrivalRise: CGFloat = 10
         // The fixture has no user font scale; production's default is 14pt × 52em.
         static let columnWidth: CGFloat = 14 * 52
+        static let columnMargin: CGFloat = 24
+        static let nestedRowIndent: CGFloat = 12
+        static let turnDividerHeight: CGFloat = 1
+        static var turnDivider: NSColor { .separatorColor }
+        static func columnWidth(inPane paneWidth: CGFloat) -> CGFloat { columnWidth }
     }
     enum Spacing { static let inset: CGFloat = 12 }
     enum Size { static let readableWidth: CGFloat = 620 }
+}
+
+protocol OpticalInsetProviding {
+    var opticalHorizontalInset: CGFloat { get }
+}
+
+extension NSView {
+    func applyLayerBackground(_ fill: NSColor) {}
 }
 
 // This harness measures row geometry only. Text selection belongs to the full conversation

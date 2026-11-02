@@ -311,6 +311,16 @@ final class SettingsDisclosureRenderTests: HostedStoreTestCase {
             host.appearance = appearance
             controller.view.appearance = appearance
 
+            if let field = descendants(of: controller.view, type: ThemedTextField.self).first(where: {
+                $0.accessibilityIdentifier() == "settings.tools.mail.chainMessageLimit"
+            }) {
+                let deadline = Date().addingTimeInterval(5)
+                while !field.isEnabled, Date() < deadline {
+                    try await Task.sleep(for: .milliseconds(20))
+                }
+                XCTAssertTrue(field.isEnabled)
+            }
+
             for state in ["collapsed", "unfolded"] {
                 if state == "unfolded" {
                     let disclosure = try XCTUnwrap(
@@ -341,6 +351,55 @@ final class SettingsDisclosureRenderTests: HostedStoreTestCase {
         print("Rendered \(written) tools pages to \(directory.path)")
         XCTAssertEqual(written, Render.fixtures.count * 2)
         try await renderNetworkCaptureInProductSettingsShell(directory: directory)
+        try await renderMailPolicyInProductSettingsShell(directory: directory)
+    }
+
+    @MainActor
+    private func renderMailPolicyInProductSettingsShell(directory: URL) async throws {
+        let previous = try await MacMailbox.shared.policy()
+        let previousMotion = Design.Motion.reduceMotionOverrideForTesting
+        Design.Motion.reduceMotionOverrideForTesting = true
+        defer { Design.Motion.reduceMotionOverrideForTesting = previousMotion }
+        try await MacMailbox.shared.setPolicy(chainMessageLimit: 75)
+        do {
+            for fixture in Render.fixtures where ["system-light", "system-dark", "cyberpunk", "swiss"].contains(fixture.name) {
+                AppThemePalette.set(fixture.theme)
+                let shell = makeMainWindowController()
+                let window = try XCTUnwrap(shell.window)
+                window.setContentSize(NSSize(width: 1320, height: 1000))
+                shell.showSettingsPage(id: SettingsPages.toolsID)
+                let content = try XCTUnwrap(window.contentView)
+                content.appearance = NSAppearance(named: fixture.appearance)
+                func findTools(_ root: NSViewController) -> ToolsPreferencesViewController? {
+                    if let tools = root as? ToolsPreferencesViewController { return tools }
+                    return root.children.lazy.compactMap(findTools).first
+                }
+                let tools = try XCTUnwrap(findTools(try XCTUnwrap(window.contentViewController)))
+                AppThemeRefresh.repaint(content)
+                content.layoutSubtreeIfNeeded()
+                SettingsRowReveal.reveal(title: L10n.string(MailPolicySettingsController.title), in: tools.view)
+                let field = try XCTUnwrap(descendants(of: tools.view, type: ThemedTextField.self).first {
+                    $0.accessibilityIdentifier() == "settings.tools.mail.chainMessageLimit"
+                })
+                let deadline = Date().addingTimeInterval(5)
+                while (field.stringValue != "75" || !descendants(of: tools.view, type: RevealHighlightView.self).isEmpty), Date() < deadline {
+                    try await Task.sleep(for: .milliseconds(20))
+                }
+                XCTAssertEqual(field.stringValue, "75")
+                XCTAssertTrue(field.isEnabled)
+                XCTAssertEqual(ThemeBoundaryAudit.violations(in: tools.view), [])
+                content.layoutSubtreeIfNeeded()
+                let rep = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+                content.cacheDisplay(in: content.bounds, to: rep)
+                try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(
+                    to: directory.appendingPathComponent("tools-mail-\(fixture.name).png")
+                )
+            }
+        } catch {
+            try await MacMailbox.shared.setPolicy(chainMessageLimit: previous.chainMessageLimit)
+            throw error
+        }
+        try await MacMailbox.shared.setPolicy(chainMessageLimit: previous.chainMessageLimit)
     }
 
     @MainActor

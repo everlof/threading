@@ -1,5 +1,29 @@
 import AppKit
 
+// MARK: - Observed Move Offers
+
+/// Which Move Chat offers a window has already put on screen.
+///
+/// Keyed by chat and by the ownership the offer was made under: a checkout is offered once per
+/// ownership, and a committed or cancelled move — which advances the tracker's epoch — starts
+/// afresh. Storage is O(chats × sibling checkouts they were seen in), and each admission is O(1).
+struct ObservedMoveOffers {
+    private var offered: [SessionID: (epoch: UInt64, worktrees: Set<String>)] = [:]
+
+    /// Records the offer and says whether it is new.
+    mutating func admit(
+        sessionID: SessionID,
+        worktreeIdentity: String,
+        ownershipEpoch: UInt64
+    ) -> Bool {
+        var entry = offered[sessionID] ?? (ownershipEpoch, [])
+        if entry.epoch != ownershipEpoch { entry = (ownershipEpoch, []) }
+        guard entry.worktrees.insert(worktreeIdentity).inserted else { return false }
+        offered[sessionID] = entry
+        return true
+    }
+}
+
 // MARK: - Observed Execution Drift
 
 /// What the window does about a chat found working in a checkout other than the one that owns it.
@@ -44,6 +68,15 @@ extension SessionCoordinator {
             // transition and must not restart its toast's dismissal clock.
             break
         case .approvalRequired:
+            // An offer is a standing question, like the pending move above. Asking it again each
+            // time the same checkout is observed is how one background job put the same band
+            // back on screen hundreds of times a day, however often the user dismissed it. The
+            // row's marker and menu carry it from here; a move re-arms it by advancing the epoch.
+            guard observedMoveOffers.admit(
+                sessionID: sessionID,
+                worktreeIdentity: checkout.worktreeIdentity,
+                ownershipEpoch: epoch
+            ) else { break }
             toastPresenter(Self.observedMoveOfferToast(
                 for: session,
                 checkout: checkout,

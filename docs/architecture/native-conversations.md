@@ -1163,6 +1163,42 @@ of a row:
   settled whole-turn fold still replaces it. This is the main transcript form of the work-group
   treatment already used in child transcripts and in t3code's `WorkGroupSection`.
 
+**A working turn reads as steps** (reported 2026-11-01: "spretigt", "rakt och stolpigt"). A
+rendered 1,000pt pane of a real run's shape, `ConversationWorkingTurnRenderTests`, showed four
+separate faults that together made one page look like several:
+
+- **An invisible line under every sentence.** Each assistant row carried its hidden action row,
+  so the gap under a sentence measured 24 points more than its margins asked for: 36 points beside
+  4 under a thought on the same page, alternating with no meaning. The actions now float
+  (`ConversationMessageActionPlate`) and reserve nothing. Over a reply they stand on an opaque
+  plate at the message's foot; beside a user's bubble they use the empty side of the row. An undrawn
+  plate answers no press, because a drag starting on the words under it is a text selection.
+- **Space on the wrong side of the work.** A run of calls sat midway between the sentence that
+  announced it and the next, so nothing was grouped. `Rhythm.answer` now stands `stepSpacing` clear
+  above and `tight` below, and a thought takes the same rhythm: a sentence or thought and its calls
+  are one step, and the space falls between steps. A thought differs only in its ink.
+- **Three left edges.** Prose stood on the column, a tool row's glyph 6 points in and its words 28
+  in. Every row now starts on the column. `ToolCallView`, `TurnFoldView` and the row host agree
+  through `OpticalInsetProviding`: a row's frame hangs its hover padding into the margin, so only
+  the plate reaches past the edge. The glyph column (`$`, `→`, `✱`) is gone, and a failure leads
+  with `✗` in the title. A disclosure's chevron follows its words, and its plate hugs them, so a
+  wide column does not put a slab under a three-word phrase or send the chevron to the far side.
+  A call's size and chevron follow its subject for the same reason, and the chevron arrives with
+  the pointer.
+- **"4 tool calls" said nothing.** A run names what it did, in the order it first did each kind:
+  "Ran 1 command, read 2 files, searched once" (`ToolRunSummary`). Reads and edits count distinct
+  subjects, since reading one file twice is one file. Classification goes by `ToolIdentity`, never
+  by command text, the rule the iPhone's `RemoteConversationToolGroups` already keeps. A fold hides
+  its rows, so it also carries the count of failed calls; a failure arriving after the fold was
+  drawn reloads that one row through `refreshToolFold`, walking from the tail no further than the
+  call itself.
+
+The scaling contract for those rows: runs are 2–20 calls, and 5,000 in stress. A summary is computed
+when a host materializes the disclosure, so it costs O(run) per mount over at most eight kinds, the
+same order as the array copy that already extends a live run; a collapsed run still owns no member
+views. A disclosure's open rows stand `nestedRowIndent` in, on a rule the row host draws through the
+cell's full height so one run's rows draw one unbroken line.
+
 **A settled turn folds behind one line** — "Worked for 42s" (`TurnFoldView`,
 `Change.turnSettled`). This finishes what quieting the tool rows started: twenty quiet rows
 are still twenty rows, and t3code's fold is the finished form — once a turn's terminal event
@@ -1197,7 +1233,10 @@ that pane adds. What a fold, a jump or a recycled host does is therefore decided
 a rendering improvement made in a row view or in the table reaches both panes.
 
 A collapsed turn removes its intermediate timeline identities from the presentation and inserts
-one fold identity; expansion puts those identities back and collapse removes them again. During
+one fold identity; expansion puts them back in the shape they had while the turn ran
+(`setTurnWork`), each run of calls behind its own disclosure and any run the reader had open still
+open, and collapse removes them again. Handing back one row per call turned a tidy turn into a list
+of every call it ever made. During
 replay every event mutates only the timeline and presentation model, followed by one table reload,
 so a successful, interrupted or unfinished history no longer requires a retained native view for
 every presented row. Exact minimap navigation resolves the target by timeline identity even when no
@@ -1383,10 +1422,11 @@ finished form of a streamed reply takes its placeholder's place in silence: anim
 blink the reply out and fade it back at the moment it completes. Reduce Motion plays nothing.
 
 **Message actions are quiet until relevant** (`ConversationMessageContextView`): Copy and the
-… menu keep their line under the message, so nothing reflows, but draw only under the pointer,
-while their menu is open, or while a copy is being confirmed. Drawn permanently, an ellipsis
-under every message was the most repeated mark in the transcript and made it read as a list of
-records. They are hidden by alpha rather than `isHidden`, so VoiceOver still reaches them.
+… menu draw only under the pointer, while their menu is open, or while a copy is being confirmed.
+Drawn permanently, an ellipsis under every message was the most repeated mark in the transcript and
+made it read as a list of records. They are hidden by alpha rather than `isHidden`, so VoiceOver
+still reaches them, and they float rather than keep a line, for the reason under "A working turn
+reads as steps".
 
 ### iOS conversation boundary
 
@@ -1834,7 +1874,7 @@ Claude's 768px column at 16px — so the fix is the type, with the column follow
 | Code | 12pt, 8pt padding | `readingCodeSize` 13pt, 1.45, `inset` padding | Codex, t3code 13px |
 | Paragraph gap | `small` (6) | `Chat.blockSpacing` = `inset` (12) | t3code 0.65rem, Codex 1em |
 | Above a heading | the ordinary gap | `Chat.headingLeading` = `large` (20) | — |
-| Column | 620pt | `columnMeasure` 52 reading ems = 728pt at default size | t3code 46rem@14px ≈ 52.6em; Claude/ChatGPT 48em; Codex ≈ 55em |
+| Column | 620pt | `columnMeasure` 52 reading ems = 728pt at default size, growing to 68 ems = 952pt in a roomy pane | t3code 46rem@14px ≈ 52.6em; Claude/ChatGPT 48em; Codex ≈ 55em |
 
 - **Reading is its own role** (`Typography.reading`, `FontRole.reading`), not a larger `body` on
   the `.conversation` surface. That surface also sets a scheduled message's one-line summary and
@@ -1855,6 +1895,20 @@ Claude's 768px column at 16px — so the fix is the type, with the column follow
   constant — the row host's cap, the reply box, the sticky step header, the rail's gutter — reads
   it, and restates it in layout, because a text-size change moves it while the pane keeps its
   width; the controller asks for that layout pass on `AppThemeDidChange`.
+- **The column follows the pane** (`Chat.columnWidth(inPane:)`, reported 2026-11-01: use more of a
+  wide window, come together in a tight one). A fixed 728pt used 32% of a 2,300pt pane. The column
+  now takes 60% of a roomy pane, from the base measure up to `columnGrowth` (68 ems), the longest
+  line still comfortable to return from; tables and code get the same room. Every consumer asks with
+  the same pane width (`ConversationVirtualRowHost.paneWidth(of:)` reads the scroll view, not the
+  column, so a legacy scroller cannot give the rows and the reply box different answers). It moves in
+  `columnStep`s, so a slow divider drag in the 1,213–1,587pt range rewraps once per 17 points of
+  travel rather than on every point. A resize there now pays the height invalidation a pane narrower
+  than the column has always paid. That cost was not re-measured when this shipped: the machine was
+  under a load of 50–70 from other work, so a matched sweep would have measured the load.
+- **A tight pane gives up its margins first.** `Chat.columnMargin` (24) replaced the row's 12 plus
+  the 16 a side the table's automatic style added unasked, so a 480pt pane reads 432pt rather than
+  424pt. It is the reply box's inset plus its padding, which puts the lines read and the line typed
+  on one edge at *every* width; they used to differ by 4 points below the column.
 - **Code still scrolls inside the column.** Only Codex lets content break out wider (to 56rem),
   and only media and diagrams, not code; nobody surveyed widens code blocks. A wider column at a
   larger size gives code about 88 columns before it scrolls.
@@ -1961,17 +2015,17 @@ it settles back towards where the pointer left rather than collapsing flat.
 
 **The rail indexes the conversation; the sticky header indexes the turn.** A turn that ran forty
 tool calls is one mark by design, so inside it the rail has nothing to say and the reader scrolling
-through it loses what every other line is about. `ConversationStickyStepView` pins the current
-call's glyph, tool and `ToolCall.summary` to the top of the pane, and
+through it loses what every other line is about. `ConversationStickyStepView` pins the
+call's tool and `ToolCall.summary` to the top of the pane, and
 `ConversationViewController.updateStickyStep` resolves it from the viewport's topmost row.
 
-Two rules make it behave. **Chrome at the top means hide**: a divider, a fold, a card or the
-streaming placeholder is a boundary that has already said where the reader is, and naming a step
-over it would be a second, quieter answer to a question answered louder. And it **overlays rather
-than insets** the scroll view, because insetting would move content under an anchored auto-scroll
-and make arriving output jump by the header's height — the cost is that free scrolling can tuck a
-line under it, which `landingClearance(for:)` pays back on the one path where it would actually
-hurt, a deliberate jump landing its target underneath the strip that names it.
+Two rules make it behave. **It names only an open call scrolled past its own header**, the one
+place a reader can have lost which call a line belongs to. It used to name the nearest earlier call
+under any row, which since runs fold away meant a band across the pane naming a call the reader
+could not see, over a sentence that had nothing to do with it. And it **overlays rather than insets**
+the scroll view, because insetting would move content under an anchored auto-scroll and make
+arriving output jump by the header's height. A jump lands its target below the pane's top edge, so
+it never delivers a row beneath the strip that names it.
 
 The model half is `ConversationTimeline.steps(inTurnStartingAt:)` and `currentStep(atOrBefore:)`.
 Steps are recorded as calls append (`toolCallRowsByTurnStart`), keyed off `turnStartIndices.last`

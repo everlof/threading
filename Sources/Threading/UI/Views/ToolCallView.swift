@@ -7,27 +7,24 @@ import AppKit
 ///
 /// Collapsed by default, and the call and its result are one view rather than two: a directory
 /// listing or a file read is usually far longer than everything said around it, and left open
-/// it buries the conversation it was part of. What stays visible is the glyph, the tool, and
-/// the one line that says what it did; the output is there when it is wanted.
+/// it buries the conversation it was part of. What stays visible is the tool and the one line that
+/// says what it did, standing on the same edge as the sentences around it; the output is there
+/// when it is wanted.
 ///
 /// An edit is the exception worth opening for: its body is a rendered diff, and its size line
 /// reads `+7 −3` rather than a line count, because for an edit the change *is* the point.
-final class ToolCallView: NSView {
+final class ToolCallView: NSView, OpticalInsetProviding {
 
     // MARK: - Properties
 
     private let tool: ToolIdentity
     private let diffLines: [DiffLine]?
     private let summary: String
-    private lazy var style = ToolGlyph.forTool(tool)
+    private lazy var style = ToolPresentation.forTool(tool)
 
-    private lazy var glyphLabel = makeLabel(
-        style.symbol,
-        role: .code(weight: .medium)
-    )
-    private lazy var titleLabel = makeLabel(style.label, role: .caption)
+    private lazy var titleLabel = makeLabel(style.label, role: .body)
     private lazy var detailLabel = makeLabel(style.displaySubject(summary), role: .code())
-    private lazy var metaLabel = makeLabel(Self.runningText, role: .caption)
+    private lazy var metaLabel = makeLabel(Self.runningText, role: .body)
     private lazy var chevron: NSImageView = {
         let image = NSImageView()
         image.translatesAutoresizingMaskIntoConstraints = false
@@ -41,6 +38,7 @@ final class ToolCallView: NSView {
             weight: .semibold
         )
         image.isHidden = true
+        image.alphaValue = 0
         return image
     }()
 
@@ -90,9 +88,6 @@ final class ToolCallView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         applySurface(fill: Design.Chat.toolRowResting, radius: .control)
 
-        glyphLabel.textColor = Design.Text.secondary
-        glyphLabel.alignment = .center
-
         titleLabel.textColor = Design.Text.secondary
         if case .mcp = tool { titleLabel.toolTip = tool.rawName }
 
@@ -103,10 +98,11 @@ final class ToolCallView: NSView {
         // rests on every collapsed row being the same height.
         detailLabel.usesSingleLineMode = true
         detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        detailLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
         // Reads while a call is still running, so the row is not blank until the result lands.
         metaLabel.textColor = Design.Text.tertiary
-        [glyphLabel, titleLabel, detailLabel, metaLabel, chevron].forEach(addSubview)
+        [titleLabel, detailLabel, metaLabel, chevron].forEach(addSubview)
         setupConstraints()
 
         // A diff is known from the call's arguments, so an edit is expandable at once — its
@@ -151,10 +147,10 @@ final class ToolCallView: NSView {
 
     /// Every label in a tool row, carrying its **role** rather than a resolved font.
     ///
-    /// A tool row is transcript, so its prose is set in the conversation's own font; the glyph
-    /// and the command stay code, which neither a surface nor a theme moves. Taking an `NSFont`
-    /// here was the bug: the sweep re-resolves a *recorded role*, and a font argument has none,
-    /// so these four labels sat out every live theme switch.
+    /// A tool row is transcript, so its prose is set in the conversation's own font; the command
+    /// stays code, which neither a surface nor a theme moves. Taking an `NSFont` here was the bug:
+    /// the sweep re-resolves a *recorded role*, and a font argument has none, so these labels sat
+    /// out every live theme switch.
     private func makeLabel(
         _ text: String,
         role: Design.FontRole,
@@ -169,7 +165,7 @@ final class ToolCallView: NSView {
 
     private lazy var headerBottom = titleLabel.bottomAnchor.constraint(
         equalTo: bottomAnchor,
-        constant: -Design.Spacing.small
+        constant: -Design.Spacing.tight
     )
     private var bodyBottom: NSLayoutConstraint?
 
@@ -178,28 +174,25 @@ final class ToolCallView: NSView {
         headerBottom.isActive = true
 
         NSLayoutConstraint.activate([
-            glyphLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            glyphLabel.topAnchor.constraint(equalTo: topAnchor, constant: inset),
-            glyphLabel.widthAnchor.constraint(equalToConstant: Design.Chat.toolIconWidth),
-
-            titleLabel.leadingAnchor.constraint(equalTo: glyphLabel.trailingAnchor, constant: inset),
-            titleLabel.firstBaselineAnchor.constraint(equalTo: glyphLabel.firstBaselineAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.tight),
 
             detailLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: Design.Spacing.small),
             detailLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
 
+            // The size follows the words it is about, and the chevron follows the size, so a
+            // wider column does not push them to the far side of it, away from their subject.
             metaLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: detailLabel.trailingAnchor,
+                equalTo: detailLabel.trailingAnchor,
                 constant: Design.Spacing.small
             ),
             metaLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
 
-            chevron.leadingAnchor.constraint(equalTo: metaLabel.trailingAnchor, constant: Design.Spacing.small),
-            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            chevron.leadingAnchor.constraint(equalTo: metaLabel.trailingAnchor, constant: Design.Spacing.tight),
+            chevron.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -inset),
             chevron.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor)
         ])
 
-        detailLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         metaLabel.setContentHuggingPriority(.required, for: .horizontal)
     }
 
@@ -208,10 +201,10 @@ final class ToolCallView: NSView {
     /// Attaches the result once the tool has run — or marks the row stopped when the turn
     /// ended around a call that never reported back.
     ///
-    /// Failure overrides the identity glyph with a destructive `✗`: the title still names the
-    /// tool, and a row that went wrong is the one place per-row ink is relevant rather than
-    /// noise. Success stays quiet — twenty check marks down a working turn would be exactly
-    /// the slab-ink the resting-fill rule was written against.
+    /// Failure leads with a destructive `✗`: the title still names the tool, and a row that went
+    /// wrong is the one place per-row ink is relevant rather than noise. Success stays quiet —
+    /// twenty check marks down a working turn would be exactly the slab-ink the resting-fill rule
+    /// was written against.
     func setResult(_ text: String, outcome: ToolOutcome) {
         if outcome == .interrupted {
             metaLabel.stringValue = L10n.string("stopped")
@@ -220,11 +213,9 @@ final class ToolCallView: NSView {
 
         let failed = outcome == .failed
         let tint: NSColor = failed ? Design.Status.negative : Design.Text.secondary
-        glyphLabel.stringValue = failed ? ToolGlyph.failureSymbol : style.symbol
-        glyphLabel.textColor = tint
         titleLabel.textColor = tint
         titleLabel.stringValue = failed
-            ? L10n.format("%@ · failed", style.label)
+            ? "\(ToolPresentation.failureSymbol) \(L10n.format("%@ · failed", style.label))"
             : style.label
 
         // An edit already shows its diff and its `+/−` line; the result only settles whether
@@ -246,6 +237,14 @@ final class ToolCallView: NSView {
             ? sizeSummary(text)
             : (failed ? L10n.string("failed") : L10n.string("done"))
         if hasText { enableExpansion() }
+    }
+
+    // MARK: - OpticalInsetProviding
+
+    var opticalHorizontalInset: CGFloat { Design.Spacing.small }
+
+    func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
+        Design.Spacing.tight
     }
 
     // MARK: - Private Methods
@@ -349,6 +348,9 @@ final class ToolCallView: NSView {
         // whether or not the pointer is still over it.
         let isActive = isHovered || isExpanded
         applyLayerBackground(isActive ? Design.Chat.toolRowActive : Design.Chat.toolRowResting)
+        // The chevron is an affordance, so it arrives with the pointer. Alpha, not `isHidden`, so
+        // the row's words do not move when it does.
+        chevron.alphaValue = isActive ? 1 : 0
     }
 }
 
@@ -368,20 +370,16 @@ extension ToolCallView: NSGestureRecognizerDelegate {
     }
 }
 
-// MARK: - Tool Glyph
+// MARK: - Tool Presentation
 
-/// The symbol and label a tool row shows, so a call reads at a glance rather than by parsing
-/// its name. Glyphs are drawn from the same vocabulary a terminal user already knows — `$` for
-/// a shell, `→`/`←` for reading and writing — rather than invented.
-enum ToolGlyph {
+/// The name a tool row shows, so a call reads at a glance rather than by parsing its raw name.
+enum ToolPresentation {
 
     struct Style {
-        let symbol: String
         let label: String
         let action: String?
 
-        init(symbol: String, label: String, action: String? = nil) {
-            self.symbol = symbol
+        init(label: String, action: String? = nil) {
             self.label = label
             self.action = action
         }
@@ -403,9 +401,8 @@ enum ToolGlyph {
     )
 #endif
 
-    /// Overrides the identity glyph when a call fails — t3code's destructive-✗ cascade. `✓`
-    /// is not its counterpart here: it already means Todo in this column, and success stays
-    /// quiet anyway.
+    /// Leads a call that failed — t3code's destructive-✗ cascade. Success has no counterpart:
+    /// it stays quiet.
     static let failureSymbol = "✗"
 
     static func forTool(_ name: String) -> Style {
@@ -417,41 +414,41 @@ enum ToolGlyph {
     static func forTool(_ tool: ToolIdentity) -> Style {
         switch tool {
         case .bash:
-            return Style(symbol: "$", label: "Bash")
+            return Style(label: "Bash")
         case .read:
-            return Style(symbol: "→", label: "Read")
+            return Style(label: "Read")
         case .write:
-            return Style(symbol: "←", label: "Write")
+            return Style(label: "Write")
         case .edit, .multiEdit:
-            return Style(symbol: "±", label: "Edit")
+            return Style(label: "Edit")
         case .glob:
-            return Style(symbol: "✱", label: "Glob")
+            return Style(label: "Glob")
         case .grep:
-            return Style(symbol: "✱", label: "Grep")
+            return Style(label: "Grep")
         case .webFetch:
-            return Style(symbol: "%", label: "Fetch")
+            return Style(label: "Fetch")
         case .webSearch:
-            return Style(symbol: "◈", label: "Search")
+            return Style(label: "Search")
         case .task:
-            return Style(symbol: "⌘", label: "Task")
+            return Style(label: "Task")
         case .todoWrite, .taskCreate, .taskUpdate:
-            return Style(symbol: "✓", label: "Todo")
+            return Style(label: "Todo")
         case .taskList, .taskGet:
-            return Style(symbol: "•", label: tool.rawName)
+            return Style(label: tool.rawName)
         case .mcp(let name):
 #if !os(Linux)
             // The Linux host serves no Threading MCP tools, so it names every server's tool alike.
             let prefix = "mcp__\(MCPDefaults.serverName)__"
             if name.hasPrefix(prefix),
                let action = threadingActions[String(name.dropFirst(prefix.count))] {
-                return Style(symbol: "◇", label: "Threading", action: action)
+                return Style(label: "Threading", action: action)
             }
 #endif
-            return Style(symbol: "◇", label: name.components(separatedBy: "__").last ?? name)
+            return Style(label: name.components(separatedBy: "__").last ?? name)
         case .notebookEdit, .notebookRead, .todoRead, .toolSearch, .plan:
-            return Style(symbol: "•", label: tool.rawName)
+            return Style(label: tool.rawName)
         case .unknown(let name):
-            return Style(symbol: "•", label: name)
+            return Style(label: name)
         }
     }
 }

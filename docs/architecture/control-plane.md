@@ -451,6 +451,17 @@ its local-only person mailboxes ([`linked-workrooms.md`](linked-workrooms.md)).
 - **Tools.** `mail_send`, `mail_inbox`, `mail_ack`, `mail_directory` sit in the same
   "Other sessions" group (`MCPMailTools.swift`; policy and words in `MailAgentCommandService`).
   The caller is the URL token, as for every tool here. `to` is a Threading id or a full address.
+- **Chain limit.** Settings → Tools → **Mail chain message limit** edits this Mac's `MailPolicy`
+  through `MacMailbox`, defaulting to 50. The row reads on the mailbox actor once when Tools opens
+  and saves only on the owner's Save action; the virtual table builds controls only near the
+  viewport. Positive whole numbers are required, failed writes retain the draft, and the
+  database remains the single policy source. Remote hosts use their owner `mail-policy-set`
+  command. `mail_directory` reports the current limit; a limit refusal tells the agent to explain
+  non-delivery and recovery in the chat. A human prompt clears inherited context, not the old
+  chain's count: an explicit reply or a subsequent read/ack of old mail can still use that chain.
+  This is deliberately a host-only Settings surface: themes style its native field, Save button
+  and help; Threading retains persistence, validation, admission, counting and prompt-reset
+  authority. No extension or agent tool can replace that policy decision.
 - **Scope.** A local target is admitted by `WorkspaceControlPlane.admitMail` — the send's
   membership-before-operation check, without the surface, limit or curfew checks, because mail
   is storing, not spending — and then stored with `ownerAdmitted: true`. Out of scope, unknown,

@@ -2,12 +2,11 @@ import AppKit
 
 // MARK: - Conversation Sticky Step
 
-/// Which tool call you are currently inside, pinned to the top of the conversation.
+/// Which tool call's output you are currently inside, pinned to the top of the conversation.
 ///
-/// A turn that ran forty tool calls is one mark on the rail and one very tall stretch of pane, so
-/// scrolling through it loses the thing every other line is about: which call this output belongs
-/// to. The header answers that in place — the call's glyph, its tool, and the one-line subject the
-/// call already carries.
+/// An opened call can run to far more than a pane, and scrolling through it loses the thing every
+/// other line is about: which call this output belongs to. The header answers that in place — the call's tool and the one-line subject the call
+/// already carries.
 ///
 /// **It costs no width.** That is the point of choosing it over anything in the gutter: the rail
 /// disappears in a narrow pane and Threading is a three-pane window, so the narrow pane is the
@@ -36,7 +35,6 @@ final class ConversationStickyStepView: NSView, PointerClaiming {
     /// Called with the timeline row index of the pinned call, when the header is clicked.
     var onSelect: ((Int) -> Void)?
 
-    private let glyphLabel = NSTextField(labelWithString: "")
     private let toolLabel = NSTextField(labelWithString: "")
     private let subjectLabel = NSTextField(labelWithString: "")
     /// The reading column, so the band's content lands on the same ink as the rows beneath it.
@@ -101,10 +99,6 @@ final class ConversationStickyStepView: NSView, PointerClaiming {
         layer?.shadowRadius = Metrics.shadowRadius
         layer?.shadowOffset = CGSize(width: 0, height: -Metrics.shadowDrop)
 
-        glyphLabel.applyFont(.caption, in: .conversation)
-        glyphLabel.textColor = Design.Text.tertiary
-        glyphLabel.alignment = .center
-
         toolLabel.applyFont(.caption, in: .conversation)
         toolLabel.textColor = Design.Text.secondary
         toolLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -117,7 +111,7 @@ final class ConversationStickyStepView: NSView, PointerClaiming {
             Metrics.labelCompressionResistance, for: .horizontal
         )
 
-        let row = NSStackView(views: [glyphLabel, toolLabel, subjectLabel])
+        let row = NSStackView(views: [toolLabel, subjectLabel])
         row.orientation = .horizontal
         row.alignment = .firstBaseline
         row.spacing = Design.Spacing.small
@@ -137,35 +131,26 @@ final class ConversationStickyStepView: NSView, PointerClaiming {
             column.centerXAnchor.constraint(equalTo: centerXAnchor),
             columnCap,
             column.leadingAnchor.constraint(
-                greaterThanOrEqualTo: leadingAnchor, constant: Design.Spacing.inset
+                greaterThanOrEqualTo: leadingAnchor, constant: Design.Chat.columnMargin
             ),
             columnWidth,
 
-            // Exactly `ToolCallView`'s leading structure, down to the padding, because the header
-            // **is** a copy of the row it names: `Spacing.small`, a glyph column of
-            // `toolIconWidth`, `Spacing.small`, then the labels. The transcript has two ink edges
-            // — prose on the column, tool rows one glyph gutter in — and the header belongs on
-            // the second. Held to its own inset inside a column-width plate it invented a third,
-            // which is what made it look like a row that had lost its place.
-            glyphLabel.widthAnchor.constraint(equalToConstant: Design.Chat.toolIconWidth),
-
+            // On the column's own edge, because the header **is** a copy of the row it names and
+            // the transcript has one ink edge. Held to its own inset inside a column-width plate
+            // it invented a second, which is what made it look like a row that had lost its place.
             row.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.small),
             row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.small),
-            row.leadingAnchor.constraint(
-                equalTo: column.leadingAnchor, constant: Design.Spacing.small
-            ),
-            row.trailingAnchor.constraint(
-                lessThanOrEqualTo: column.trailingAnchor, constant: -Design.Spacing.small
-            ),
+            row.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            row.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
         ])
     }
 
     /// States the column for the band's current width before the pass lays it out — the plain
     /// view's `viewDidLayout`.
     override func layout() {
-        let cap = Design.Chat.columnWidth
+        let cap = Design.Chat.columnWidth(inPane: bounds.width)
         if abs(columnCap.constant - cap) > 0.5 { columnCap.constant = cap }
-        let width = min(cap, bounds.width - Design.Spacing.inset * 2)
+        let width = min(cap, bounds.width - Design.Chat.columnMargin * 2)
         if width > 0, abs(columnWidth.constant - width) > 0.5 {
             columnWidth.constant = width
         }
@@ -179,8 +164,7 @@ final class ConversationStickyStepView: NSView, PointerClaiming {
     /// Nil is not a failure state: the top of a turn, a fold, and a divider all legitimately have
     /// no step to name, and saying so by disappearing is quieter than naming the wrong one.
     func show(tool: ToolIdentity, subject: String, atRow index: Int) {
-        let style = ToolGlyph.forTool(tool)
-        glyphLabel.stringValue = style.symbol
+        let style = ToolPresentation.forTool(tool)
         toolLabel.stringValue = style.label
         if case .mcp = tool { toolLabel.toolTip = tool.rawName }
         else { toolLabel.toolTip = nil }

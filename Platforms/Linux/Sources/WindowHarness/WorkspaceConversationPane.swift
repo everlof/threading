@@ -708,7 +708,7 @@ final class WorkspaceConversationPane: WorkspacePane {
         guard height >= minimumWindowHeight else { needsPresentation = true; return }
         guard needsPresentation || size != presentedSize || displayRevision != owner.displayRevision else { return }
         root.frame = NSRect(origin: .zero, size: size)
-        let columnCap = ConversationPaneLayout.composerWidth
+        let columnCap = ConversationPaneLayout.composerWidth(inPane: size.width)
         let composerWidth = max(1, ConversationPaneLayout.measuredComposerWidth(in: size.width))
         if composerColumnCap.constant != columnCap { composerColumnCap.constant = columnCap }
         if composerColumnWidth.constant != composerWidth {

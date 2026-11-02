@@ -2681,10 +2681,11 @@ Your messages sit in bubbles on the right; the agent's replies run down the left
 text — headings, lists, code blocks and inline `code` rendered rather than shown as raw
 markdown. A short instruction gets a small bubble; a long answer gets room to breathe. The
 conversation is set a step larger than the rest of the window, with room between its lines and
-paragraphs, because it is read rather than scanned. The column stops widening past a comfortable
-reading measure, so a wide window gives you margins rather than very long lines, and a rule marks
-where each new exchange begins. The column is measured in the conversation's own text size, so
-**Settings ▸ Themes ▸ Fonts ▸ Text size** widens it along with the text.
+paragraphs, because it is read rather than scanned. The column follows the pane: it uses more of a
+wide window, up to a comfortable longest line, and closes in as the pane narrows, always lined up
+with the reply box. A rule marks where each new exchange begins. The column is measured in the
+conversation's own text size, so **Settings ▸ Themes ▸ Fonts ▸ Text size** widens it along with the
+text.
 
 **Selecting text** works across the whole conversation, the way it does on a web page: drag from
 anywhere in one message into another and everything between is selected — headings, paragraphs,
@@ -2794,14 +2795,16 @@ first, on its own, so Claude and Codex attach the picture rather than reading a 
 your comment follows it. **Send** then presses Return for you. The **Chat…** button and the
 secondary-click actions appear whenever the agent is running and disappear when it is not.
 
-Tool calls appear as a single collapsed line: a glyph, the tool, what it ran, and how much it
-returned — `$ Bash · ls -la · 42 lines`. Click to expand. A directory listing is usually
-longer than everything said around it, so it stays folded until you want it. The rows sit flat
-against the background until you point at one — a busy turn is mostly tool calls, and boxing
-each of them buries what was actually said.
+A tool call appears as a single collapsed line under the sentence that led to it: the tool, what it
+ran, and how much it returned — `Bash  ls -la  42 lines`. Several calls in a row share one line that
+says what they did, such as **Ran 1 command, read 2 files, searched once**. Click to expand, and
+the calls open beneath it on a thin rule. A directory listing is usually longer than everything
+said around it, so it stays folded until you want it. The rows sit flat against the background
+until you point at one — a busy turn is mostly tool calls, and boxing each of them buries what was
+actually said.
 
-A call that went wrong says so: its glyph becomes a red **✗** and the row reads `Edit ·
-failed`. That covers failures the provider admits to and ones it does not — shell output that
+A call that went wrong says so: its row turns red and reads `✗ Edit · failed`, and a shared line adds
+how many failed, such as **1 failed**. That covers failures the provider admits to and ones it does not — shell output that
 plainly reports `command not found` or a non-zero exit code marks the row even when the CLI
 called it a success. A call still unanswered when its turn ends reads **stopped** rather than
 `running…` forever.
@@ -2859,12 +2862,10 @@ at least two exchanges to index before it is worth drawing. In a very long conve
 stop at the closest spacing a pointer can still separate, and each one then stands for the
 exchange nearest it; the keyboard commands below still walk every turn.
 
-A single exchange can be tall on its own — one turn may run dozens of tool calls — and the rail
-gives that whole turn one mark. So while you are scrolled inside a turn, a **step header** pins
-the tool call you are currently reading to the top of the conversation: its symbol, the tool, and
-the one-line subject. Click it to jump back to the top of that call. It disappears at a turn's
-own boundaries, where the divider or the fold already says where you are. Unlike the rail it
-costs no width, so it works in a narrow pane too.
+An opened tool call can be far taller than the pane. So while you are scrolled inside one, a **step
+header** pins that call to the top of the conversation: the tool and its one-line subject. Click it
+to jump back to the top of that call. It disappears everywhere else, where the page already says
+where you are. Unlike the rail it costs no width, so it works in a narrow pane too.
 
 Four keys move without the pointer. **⌃⌘↑** and **⌃⌘↓** step between exchanges, the vertical
 counterparts of Go Back and Go Forward. **⌥⌘↑** and **⌥⌘↓** step between tool calls inside a turn
@@ -5048,6 +5049,14 @@ Access**, where they can be revoked. Redirects are checked again before the dest
 returned to the agent. Form submissions, website-data clearing and other sensitive actions keep
 their separate confirmations.
 
+A page can embed a frame from another website, such as a support chat or a payment form. Allowing
+the page does not allow the frame. The agent sees that the frame is there, and when it asks to go
+inside, Threading asks the same question about the frame's own website and names the page holding
+it. Until you allow it, nothing the agent does reaches the frame, and the agent is told so instead
+of being told it worked. Inside a frame, password fields still come to you, stored sign-ins are
+never filled, form submissions keep their confirmation, and card numbers are hidden from what the
+agent reads. Screenshots still show whatever is on screen, frames included.
+
 Passwords and form submissions keep their native confirmation boundaries. File uploads and
 downloads can use a user-chosen native panel or an exact local path requested through the agent's
 browser tools. Console, network, CSS-query, and page-snapshot results are
@@ -5405,6 +5414,15 @@ sibling in this project or its added local repository checkouts — or, through 
 and it succeeds whether the recipient is idle, busy, not running or on a host that is offline
 right now. `mail_inbox` reads what is waiting, `mail_ack` marks what the agent acted on, and
 `mail_directory` lists the session's own address and who it can write to.
+
+To keep unattended exchanges from looping forever, each mail chain has a message limit shared
+by its participating agents on a host. Change this Mac's limit in **Settings ▸ Tools ▸ Mail chain
+message limit**, then press **Save**; the default is 50 and changes apply to the next send.
+Remote hosts have their own setting, changed by their owner with `mail-policy-set`.
+When a send is blocked, the tool tells the agent to explain in the chat that the message was
+not sent and how to continue. **A new prompt from you lets that chat start a fresh chain.**
+The old chain stays capped: replying to an old message, or reading or acknowledging old mail,
+can continue it. Reading and acknowledging do not free message capacity.
 
 A busy agent is never handed the text. It is told, in one line Threading writes, that mail is
 waiting and from whom — after a tool call, before its turn may end, when you submit a prompt,

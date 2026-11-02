@@ -125,7 +125,7 @@ extension AgentToolCoordinator {
                 completion(.failure("The browser page closed before it could be queried."))
                 return
             }
-            let javascript = Self.queryScript(selector: selector)
+            let javascript = BrowserAgentScripts.query(selector: selector)
             browser.runAgentOperation {
                 do {
                     let result = try await browser.evaluate(javascript)
@@ -205,8 +205,11 @@ extension AgentToolCoordinator {
             browser.runAgentOperation {
                 do {
                     let target: BrowserTargetDescription
+                    var landing: BrowserPointLanding?
                     if let point {
-                        target = try await browser.describePoint(x: point.x, y: point.y)
+                        let landed = try await browser.agentLandPoint(x: point.x, y: point.y)
+                        target = landed.target
+                        landing = landed
                     } else {
                         target = try await browser.describeTarget(
                             ref: arguments.ref,
@@ -257,10 +260,9 @@ extension AgentToolCoordinator {
                         allowsFormSubmission = true
                     }
                     let outcome: BrowserActionOutcome
-                    if let point {
+                    if let landing {
                         outcome = try await browser.agentClickAt(
-                            x: point.x,
-                            y: point.y,
+                            landing,
                             button: button,
                             clickCount: clickCount,
                             allowsFormSubmission: allowsFormSubmission
@@ -492,6 +494,16 @@ extension AgentToolCoordinator {
                                 + "the user; its value remains unavailable to the agent."
                             : reason + " The browser is visible for the user to sign in."
                     ))
+                }
+
+                // A credential is stored for the page's own origin. Checked before any secret is
+                // read, so a frame ref cannot carry one into another document even to be refused.
+                if BrowserAgentFrameRef.frameID(of: arguments.ref) != nil {
+                    await handOverToUser(
+                        "Stored sign-ins are only filled on the page's own origin, and this "
+                            + "field is inside a frame."
+                    )
+                    return
                 }
 
                 let provider = BrowserCredentialPreference.provider
@@ -828,7 +840,7 @@ extension AgentToolCoordinator {
                     let isSpace = key.caseInsensitiveCompare("Space") == .orderedSame
                     var allowsFormSubmission = false
                     if (isEnter || isSpace),
-                       let target = try? await browser.describeTarget(
+                       let target = try? await browser.describeKeyTarget(
                            ref: arguments.ref,
                            selector: inspectionSelector,
                            locator: arguments.locator
@@ -1286,7 +1298,8 @@ extension AgentToolCoordinator {
                                         let sought = arguments.text ?? arguments.textGone ?? ""
                                         let present = try await browser.containsText(sought)
                                         satisfied = hasText ? present : !present
-                                        lastActual = present ? "text present" : "text absent"
+                                        lastActual = present
+                                            ? "text present" : browser.textAbsenceDescription
                                     }
                                     guard browser.agentPageIdentity == polledPage else {
                                         satisfied = false
@@ -1377,7 +1390,7 @@ extension AgentToolCoordinator {
                         return
                     }
 
-                    let snapshot = try await browser.agentSnapshot()
+                    let snapshot = try await browser.agentResultSnapshot()
                     guard browser.agentPageIdentity == completedPage else {
                         completion(.failure(
                             "The browser document changed while the wait result was being read; "

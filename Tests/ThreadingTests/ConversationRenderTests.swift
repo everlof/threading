@@ -152,9 +152,14 @@ final class ConversationRenderTests: XCTestCase {
                 add(view, rhythm: ConversationRowView.rhythm(for: row))
 
             case .toolFold(let calls):
-                let label = L10n.format("%lld tool calls", Int64(calls.count))
+                let summary = ToolRunSummary(calls: calls)
                 add(
-                    TurnFoldView(label: label, folding: [], expanded: false) { _, _ in },
+                    TurnFoldView(
+                        label: summary.text,
+                        attention: summary.attention,
+                        folding: [],
+                        expanded: false
+                    ) { _, _ in },
                     rhythm: .work
                 )
             }
@@ -401,6 +406,26 @@ final class ConversationRenderTests: XCTestCase {
                     )
                     host.appearance = appearance
 
+                    // The header only names an open call, so open one the way a reader would:
+                    // jumping to it reveals its turn's run, and the row is then opened.
+                    let turn = try? XCTUnwrap(controller.timeline.turns.dropFirst(2).first)
+                    let opened = (turn?.rowIndex ?? 0) + 2
+                    if let foldRow = controller.presentationItems.firstIndex(where: {
+                        $0.id == .surface(.fold(turnStart: turn?.rowIndex ?? 0))
+                    }), let cell = controller.tableView.view(
+                        atColumn: 0, row: foldRow, makeIfNecessary: true
+                    ), let fold = Self.firstDescendant(TurnFoldView.self, in: cell) {
+                        fold.setExpanded(true)
+                    }
+                    controller.scrollToTimelineRow(opened, animated: false)
+                    if let row = controller.presentationRow(forTimelineIndex: opened),
+                       let cell = controller.tableView.view(
+                           atColumn: 0, row: row, makeIfNecessary: true
+                       ), let tool = Self.firstDescendant(ToolCallView.self, in: cell) {
+                        tool.setExpanded(true)
+                    }
+                    host.layoutSubtreeIfNeeded()
+
                     // Scrolled the way a reader gets there rather than positioned: walk down the
                     // document until the header resolves a step, which is the state being drawn.
                     let clip = controller.scrollView.contentView
@@ -409,7 +434,7 @@ final class ConversationRenderTests: XCTestCase {
                         (clip.documentView?.bounds.height ?? 0)
                             - controller.scrollView.contentSize.height
                     )
-                    for step in stride(from: 0.05, through: 0.95, by: 0.05) {
+                    for step in stride(from: 0.0, through: 0.995, by: 0.005) {
                         clip.setBoundsOrigin(NSPoint(x: 0, y: overflow * CGFloat(step)))
                         controller.scrollView.reflectScrolledClipView(clip)
                         host.layoutSubtreeIfNeeded()
@@ -428,7 +453,7 @@ final class ConversationRenderTests: XCTestCase {
 
                 XCTAssertTrue(
                     landed,
-                    "No scroll position inside six stress turns put the reader under a tool call"
+                    "No scroll position put the reader inside the opened call's output"
                 )
                 try XCTUnwrap(data, "the pane drew nothing at \(Int(width))pt").write(
                     to: directory.appendingPathComponent("sticky-step-\(Int(width))-\(name).png")
@@ -510,10 +535,8 @@ final class ConversationRenderTests: XCTestCase {
         for width in [Design.Chat.columnWidth, 720, 1000, 1418, 1800] as [CGFloat] {
             let (controller, _) = livePane(turns: 4, width: width)
             let pane = controller.view
-            let expectedColumn = min(
-                Design.Chat.columnWidth,
-                width - Design.Spacing.inset * 2
-            )
+            let measure = Design.Chat.columnWidth(inPane: width)
+            let expectedColumn = min(measure, width - Design.Chat.columnMargin * 2)
 
             var contentFrames: [NSRect] = []
             for row in 0..<controller.tableView.numberOfRows {
@@ -522,7 +545,11 @@ final class ConversationRenderTests: XCTestCase {
                     row: row,
                     makeIfNecessary: true
                 ), let content = cell.subviews.first else { continue }
-                contentFrames.append(content.convert(content.bounds, to: pane))
+                // Measured by ink: a row whose frame carries hover padding hangs it past the column.
+                let ink = (content as? OpticalInsetProviding)?.opticalHorizontalInset ?? 0
+                contentFrames.append(
+                    content.convert(content.bounds, to: pane).insetBy(dx: ink, dy: 0)
+                )
             }
             XCTAssertFalse(contentFrames.isEmpty, "no rows materialized at \(Int(width))pt")
 
@@ -557,16 +584,13 @@ final class ConversationRenderTests: XCTestCase {
             )
             XCTAssertEqual(
                 box.width,
-                min(ConversationDefaults.composerWidth, width - Design.Spacing.inset * 2),
+                ConversationPaneLayout.measuredComposerWidth(in: width),
                 accuracy: 1,
                 "the reply box does not hold its column at \(Int(width))pt"
             )
-            // Only where both hold their columns. Under that the box keeps the *pane's* inset
-            // and the row keeps the table's, which differ by the few points the table insets
-            // its own column by — a pane narrower than the reading measure has no column for
-            // them to share in the first place.
-            if let column = contentFrames.first,
-               box.width >= ConversationDefaults.composerWidth - 1 {
+            // At every width: the box's own padding is what the row's margin is made of, so a pane
+            // narrower than the column still has one edge down it.
+            if let column = contentFrames.first {
                 XCTAssertEqual(
                     box.minX + Design.Spacing.inset,
                     column.minX,
@@ -578,10 +602,10 @@ final class ConversationRenderTests: XCTestCase {
             // Whatever else moves, the rail keeps its clearance from the words.
             let railTrailing = ConversationMinimap.railLeading(
                 paneWidth: width,
-                columnWidth: Design.Chat.columnWidth
+                columnWidth: measure
             ) + ConversationMinimap.railWidth(
                 paneWidth: width,
-                columnWidth: Design.Chat.columnWidth
+                columnWidth: measure
             )
             if let column = contentFrames.first {
                 XCTAssertLessThanOrEqual(
@@ -650,7 +674,7 @@ final class ConversationRenderTests: XCTestCase {
         )
         XCTAssertEqual(
             composer.frame.width,
-            ConversationDefaults.composerWidth,
+            ConversationPaneLayout.composerWidth(inPane: controller.view.frame.width),
             accuracy: 1,
             "the reply box left its column in a wide pane"
         )
@@ -667,7 +691,7 @@ final class ConversationRenderTests: XCTestCase {
         )
         XCTAssertEqual(
             composer.frame.width,
-            min(ConversationDefaults.composerWidth, narrow - Design.Spacing.inset * 2),
+            ConversationPaneLayout.measuredComposerWidth(in: narrow),
             accuracy: 1,
             "the reply box does not hold its column in a narrow pane"
         )
@@ -1210,10 +1234,14 @@ final class ConversationRenderTests: XCTestCase {
             controller.presentationRow(forTimelineIndex: $0) == nil
         })
 
+        // Opening the turn gives back the shape it had while it ran: its thought, and its three
+        // calls behind one disclosure rather than as three rows.
         fold.setExpanded(true)
-        XCTAssertEqual(controller.presentationItems.count, 8)
-        XCTAssertTrue((1...4).allSatisfy {
-            controller.presentationRow(forTimelineIndex: $0) != nil
+        XCTAssertEqual(controller.presentationItems.count, 6)
+        XCTAssertNotNil(controller.presentationRow(forTimelineIndex: 1))
+        XCTAssertTrue(controller.presentationItems.contains {
+            guard case .toolFold(let indices) = $0.content else { return false }
+            return indices == [2, 3, 4]
         })
         XCTAssertTrue(controller.expandedTurnStarts.contains(0))
 
@@ -1222,11 +1250,23 @@ final class ConversationRenderTests: XCTestCase {
         XCTAssertTrue((1...4).allSatisfy {
             controller.presentationRow(forTimelineIndex: $0) == nil
         })
+        XCTAssertFalse(controller.presentationItems.contains {
+            if case .toolFold = $0.content { return true }
+            return false
+        })
         XCTAssertFalse(controller.expandedTurnStarts.contains(0))
 
         fold.setExpanded(true)
-        XCTAssertEqual(controller.presentationItems.count, 8)
+        XCTAssertEqual(controller.presentationItems.count, 6)
         XCTAssertTrue(controller.expandedTurnStarts.contains(0))
+
+        // A run the reader opened comes back open with the turn around it.
+        XCTAssertNotNil(controller.scrollToTimelineRow(3, animated: false))
+        XCTAssertEqual(controller.presentationItems.count, 9)
+        fold.setExpanded(false)
+        XCTAssertEqual(controller.presentationItems.count, 4)
+        fold.setExpanded(true)
+        XCTAssertEqual(controller.presentationItems.count, 9)
     }
 
     func testReplayRestoresChangedFilesCardFromRecordedEdit() throws {
@@ -3833,16 +3873,17 @@ final class SubagentSummaryViewTests: XCTestCase {
         XCTAssertFalse(contents.isEmpty, "The transcript materialized no rows to measure")
 
         let measures = contents.map { $0.alignmentRect(forFrame: $0.frame).width }
+        let column = Design.Chat.columnWidth(inPane: paneWidth)
         for (content, measure) in zip(contents, measures) {
             XCTAssertLessThanOrEqual(
-                measure, Design.Chat.columnWidth + 1,
+                measure, column + 1,
                 "\(type(of: content)) ran to \(measure)pt of a \(paneWidth)pt pane"
             )
         }
         // The cap has to be reached, not merely respected: a row that stops short of it in a
         // wide pane is the same fault read from the other side.
         XCTAssertEqual(
-            measures.max() ?? 0, Design.Chat.columnWidth, accuracy: 1,
+            measures.max() ?? 0, column, accuracy: 1,
             "Prose no longer fills the readable column when the pane can hold it"
         )
     }

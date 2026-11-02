@@ -9,7 +9,7 @@ import AppKit
 /// page: every mark is one exchange, hovering one says what was asked and what came of it, and
 /// clicking jumps to it.
 ///
-/// It lives in the gutter left by capping the column at `Design.Chat.columnWidth`, and
+/// It lives in the gutter left by capping the column at `Design.Chat.columnWidth(inPane:)`, and
 /// `ConversationMinimap.railWidth` returns zero when a pane is too narrow to spare one — at
 /// which point this view hides rather than drawing over the text. That rule is the difference
 /// between a control that helps in a wide window and one that ruins a narrow one.
@@ -163,7 +163,7 @@ final class ConversationMinimapView: NSView {
     func setAvailableWidth(_ width: CGFloat, paneWidth: CGFloat) {
         isPersistent = ConversationMinimap.isPersistent(
             paneWidth: paneWidth,
-            columnWidth: Design.Chat.columnWidth
+            columnWidth: Design.Chat.columnWidth(inPane: paneWidth)
         )
         updateVisibility()
     }

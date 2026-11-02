@@ -175,6 +175,9 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
     var expandedToolRows: Set<Int> = []
     var expandedUserRows: Set<Int> = []
 
+    /// Calls presented beneath their run's open disclosure, which stand one step in from it.
+    private var nestedToolRows: Set<Int> = []
+
     /// Whether a long assistant answer is presented block by block, so revealing one near the
     /// bottom of a narrow pane does not attach a document-sized constraint tree at once. The
     /// main conversation keeps one row per answer — its wrappers and contextual actions belong
@@ -247,6 +250,14 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
         table.headerView = nil
+        // Every other style insets the column by points of its own (`.automatic` 16 a side,
+        // `.fullWidth` 6), which a narrow pane could not spare and which stood the rows off the
+        // reply box's edge. The margin is `Design.Chat.columnMargin`, and the row host states it.
+#if os(Linux)
+        table.style = .fullWidth
+#else
+        table.style = .plain
+#endif
         table.selectionHighlightStyle = .none
         // The table takes the keyboard only to hold a text selection for ⌘C; the selection's
         // own highlight is the mark of that, and a ring around the whole conversation is not.
@@ -293,8 +304,8 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
     func layoutColumn() {
         let column = ConversationVirtualRowHost.stateColumnWidth(in: tableView)
         let width = min(
-            Design.Chat.columnWidth,
-            max(0, column - Design.Spacing.inset * 2)
+            Design.Chat.columnWidth(inPane: ConversationVirtualRowHost.paneWidth(of: tableView)),
+            max(0, column - Design.Chat.columnMargin * 2)
         )
         guard width > 0 else { return }
         if automaticHeightWidth == 0 {
@@ -584,6 +595,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         isRebuilding = true
         items = prefix
         activeToolGroupIndices.removeAll(keepingCapacity: true)
+        nestedToolRows.removeAll(keepingCapacity: true)
         let rows = surface?.transcriptRows ?? []
         for index in rows.indices {
             appendTimelineRow(at: index, rows: rows)
@@ -620,6 +632,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
             )
             // A rebuilt transcript can form a group the reader already had open.
             if expandedToolGroups.contains(index - 1) {
+                nestedToolRows.formUnion(indices)
                 for member in indices {
                     appendItem(
                         Item(id: .timeline(member), content: .timeline(member)),
@@ -657,6 +670,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
             )
         )
         if expandedToolGroups.contains(first) {
+            nestedToolRows.insert(index)
             appendItem(plain, endsToolRun: false)
         }
     }
@@ -681,13 +695,74 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         }
     }
 
+    /// Puts a settled turn's hidden rows back under its fold in the shape they had while the turn
+    /// ran, each run of calls behind its own disclosure, or takes them out again. Handing back one
+    /// row per call turned a tidy turn into a list of every call it ever made.
+    func setTurnWork(_ indices: [Int], expanded: Bool, after foldID: ItemID) {
+        guard let foldPosition = index(of: foldID) else { return }
+        if expanded {
+            insert(reducingToolRuns(indices), at: foldPosition + 1)
+            return
+        }
+        let hidden = Set(indices)
+        remove(at: IndexSet(items.indices.filter { position in
+            if case .toolFold(let members) = items[position].content {
+                return members.first.map(hidden.contains) ?? false
+            }
+            guard let index = items[position].content.timelineIndex else { return false }
+            return hidden.contains(index)
+        }))
+    }
+
+    /// The same reduction `appendToolCall` makes as calls arrive, over rows that already exist.
+    private func reducingToolRuns(_ indices: [Int]) -> [Item] {
+        guard let rows = surface?.transcriptRows else { return [] }
+        var result: [Item] = []
+        var run: [Int] = []
+
+        func flushRun() {
+            guard let first = run.first else { return }
+            if run.count == 1 {
+                result.append(Item(id: .timeline(first), content: .timeline(first)))
+            } else {
+                result.append(Item(id: .toolFold(firstIndex: first), content: .toolFold(indices: run)))
+                if expandedToolGroups.contains(first) {
+                    nestedToolRows.formUnion(run)
+                    result.append(contentsOf: run.map { Item(id: .timeline($0), content: .timeline($0)) })
+                }
+            }
+            run.removeAll(keepingCapacity: true)
+        }
+
+        for index in indices where rows.indices.contains(index) {
+            if run.last.map({ $0 != index - 1 }) ?? false { flushRun() }
+            if case .toolCall(let call) = rows[index], call.chart == nil {
+                run.append(index)
+            } else {
+                flushRun()
+                result.append(Item(id: .timeline(index), content: .timeline(index)))
+            }
+        }
+        flushRun()
+        return result
+    }
+
+    /// Forgets that a run was open, for a fold that has just taken it out of the presentation.
+    func forgetToolGroup(_ indices: [Int]) {
+        guard let first = indices.first else { return }
+        expandedToolGroups.remove(first)
+        nestedToolRows.subtract(indices)
+    }
+
     func setToolGroup(_ indices: [Int], expanded: Bool) {
         guard let first = indices.first,
               index(of: .toolFold(firstIndex: first)) != nil else { return }
         if expanded {
             guard expandedToolGroups.insert(first).inserted else { return }
+            nestedToolRows.formUnion(indices)
         } else {
             guard expandedToolGroups.remove(first) != nil else { return }
+            nestedToolRows.subtract(indices)
         }
         setRows(indices, expanded: expanded, after: .toolFold(firstIndex: first))
     }
@@ -708,6 +783,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         expandedToolGroups.removeAll(keepingCapacity: true)
         expandedToolRows.removeAll(keepingCapacity: true)
         expandedUserRows.removeAll(keepingCapacity: true)
+        nestedToolRows.removeAll(keepingCapacity: true)
         clearMarkdownBlockCache()
     }
 
@@ -730,6 +806,30 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         pendingToolViews[index]?.setResult(result.text, outcome: result.outcome)
         if result.outcome != .interrupted { pendingToolViews[index] = nil }
         noteHeightChanged(ofTimelineRow: index)
+        if result.outcome == .failed { refreshToolFold(containing: index) }
+    }
+
+    /// A run's summary counts its failures, so one that fails after the fold was drawn has to say
+    /// so. From the tail, which is where a result lands, and no further back than its own call.
+    private func refreshToolFold(containing index: Int) {
+        guard notifies else { return }
+        for position in items.indices.reversed() {
+            switch items[position].content {
+            case .toolFold(let indices) where indices.contains(index):
+                guard position < tableView.numberOfRows else { return }
+                tableView.reloadData(
+                    forRowIndexes: IndexSet(integer: position),
+                    columnIndexes: IndexSet(integer: 0)
+                )
+                return
+            // An open run's own calls lie between the tail and its disclosure; anything else that
+            // came earlier than the call means no disclosure is holding it.
+            case .timeline(let row) where row < index && !nestedToolRows.contains(row):
+                return
+            default:
+                continue
+            }
+        }
     }
 
     // MARK: - NSTableViewDataSource
@@ -774,7 +874,10 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
         ) as? ConversationVirtualRowHost ?? ConversationVirtualRowHost()
         host.identifier = identifier
         host.textSelection = textSelection
-        host.setColumnWidth(ConversationVirtualRowHost.columnWidth(of: tableView))
+        host.setColumnWidth(
+            ConversationVirtualRowHost.columnWidth(of: tableView),
+            paneWidth: ConversationVirtualRowHost.paneWidth(of: tableView)
+        )
 #if DEBUG
         let hostEnded = DispatchTime.now().uptimeNanoseconds
 #endif
@@ -790,6 +893,7 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
             content,
             topInset: topInset(at: tableRow),
             bottomInset: bottomInset,
+            isNested: item.content.timelineIndex.map(nestedToolRows.contains) ?? false,
             onRelease: releaseHandler(for: item, content: content)
         )
         if !arrivals.isEmpty, takeArrival(of: item.id), host.playArrival() {
@@ -826,13 +930,15 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
             return ConversationRowView.turnDivider()
 
         case .toolFold(let indices):
-            let count = indices.count
-            let label = count == 1
-                ? L10n.string("1 tool call")
-                : L10n.format("%lld tool calls", Int64(count))
+            let summary = ToolRunSummary(calls: indices.lazy.compactMap { [rows = surface?.transcriptRows] index in
+                guard let rows, rows.indices.contains(index),
+                      case .toolCall(let call) = rows[index] else { return nil }
+                return call
+            })
             let first = indices[0]
             return TurnFoldView(
-                label: label,
+                label: summary.text,
+                attention: summary.attention,
                 folding: [],
                 expanded: expandedToolGroups.contains(first)
             ) { [weak self] _, expanded in
@@ -872,10 +978,10 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
             return MarkdownView(markdown: source)
         }
         let availableWidth = min(
-            Design.Chat.columnWidth,
+            Design.Chat.columnWidth(inPane: ConversationVirtualRowHost.paneWidth(of: tableView)),
             max(
                 1,
-                ConversationVirtualRowHost.columnWidth(of: tableView) - Design.Spacing.inset * 2
+                ConversationVirtualRowHost.columnWidth(of: tableView) - Design.Chat.columnMargin * 2
             )
         )
         return MarkdownView.blockView(
@@ -992,8 +1098,9 @@ final class ConversationTranscriptTable<Surface: ConversationTranscriptSurface>:
                 return .chrome
             }
             return ConversationRowView.rhythm(for: rows[index])
-        case .markdown(_, _, let source):
-            return Markdown.headingLevel(ofSource: source) == nil ? .answer : .heading
+        case .markdown(_, let block, let source):
+            if Markdown.headingLevel(ofSource: source) != nil { return .heading }
+            return block == 0 ? .answer : .answerBlock
         case .divider:
             return .boundary
         case .toolFold:

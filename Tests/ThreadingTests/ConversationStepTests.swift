@@ -106,60 +106,6 @@ final class ConversationStepTests: XCTestCase {
         }
     }
 
-    // MARK: - Current Step
-
-    func testARowInsideATurnResolvesToTheCallItSitsUnder() {
-        let timeline = self.timeline([
-            .userMessage("Build it"),
-            toolUse("1", .bash, ["command": .string("swift build")]),
-            .assistantMessage(blocks: [.text("Compiling.")]),
-            toolUse("2", .bash, ["command": .string("swift test")]),
-            .assistantMessage(blocks: [.text("Green.")])
-        ])
-
-        XCTAssertEqual(timeline.currentStep(atOrBefore: 1), 1, "The call did not resolve to itself")
-        XCTAssertEqual(timeline.currentStep(atOrBefore: 2), 1, "Narration lost the call above it")
-        XCTAssertEqual(timeline.currentStep(atOrBefore: 3), 3)
-        XCTAssertEqual(timeline.currentStep(atOrBefore: 4), 3)
-    }
-
-    func testTheTopOfATurnNamesNoStepRatherThanTheLastTurnsLastCall() {
-        // The rule that keeps the header honest at a boundary: nothing has been done in this turn
-        // yet, and reaching back past the question into the previous exchange would name a step
-        // that has nothing to do with what the reader is looking at.
-        let timeline = self.timeline([
-            .userMessage("First"),
-            toolUse("1", .bash, ["command": .string("ls")]),
-            .userMessage("Second"),
-            .assistantMessage(blocks: [.text("Thinking about it.")])
-        ])
-
-        XCTAssertNil(timeline.currentStep(atOrBefore: 2), "The user row resolved to a step")
-        XCTAssertNil(
-            timeline.currentStep(atOrBefore: 3),
-            "A row in a turn that has run nothing borrowed the previous turn's last call"
-        )
-    }
-
-    func testATurnWithNoToolCallsResolvesToNothingThroughout() {
-        let timeline = self.timeline([
-            .userMessage("Explain"),
-            .assistantMessage(blocks: [.text("One.")]),
-            .assistantMessage(blocks: [.text("Two.")])
-        ])
-
-        for index in timeline.rows.indices {
-            XCTAssertNil(timeline.currentStep(atOrBefore: index), "Row \(index) invented a step")
-        }
-    }
-
-    func testAnOutOfRangeRowResolvesToNothingRatherThanTrapping() {
-        let timeline = self.timeline([.userMessage("Hello")])
-
-        XCTAssertNil(timeline.currentStep(atOrBefore: 99))
-        XCTAssertNil(timeline.currentStep(atOrBefore: -1))
-    }
-
     // MARK: - Commands
 
     func testTheTurnAndStepCommandsExistWithTheirStatedChords() {

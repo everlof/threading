@@ -192,7 +192,7 @@ extension ConversationViewController {
                 }
             case .toolFold(let indices):
                 if !hiddenSet.isDisjoint(with: indices) {
-                    if let first = indices.first { transcript.expandedToolGroups.remove(first) }
+                    transcript.forgetToolGroup(indices)
                     removed.insert(position)
                 }
             case .divider, .surface:
@@ -235,7 +235,7 @@ extension ConversationViewController {
         } else {
             expandedTurnStarts.remove(turnStart)
         }
-        transcript.setRows(indices, expanded: expanded, after: foldID)
+        transcript.setTurnWork(indices, expanded: expanded, after: foldID)
     }
 
     // MARK: - Changed Files Card

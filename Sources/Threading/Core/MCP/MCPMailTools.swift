@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingController
 
 // MARK: - Mail Tool Arguments
 
@@ -85,9 +86,11 @@ extension MCPTools {
 
         Supply your own id (a UUID) to make a retry safe: the same id with the same content \
         returns the stored message, and different content under it is refused. reply_to \
-        answers a message you received and continues its chain; a chain is refused after 50 \
-        messages, so never forward mail mechanically. priority "interrupt" asks for the next \
+        answers a message you received and continues its chain. Never forward mail mechanically. \
+        priority "interrupt" asks for the next \
         model boundary and is honoured only where the recipient's host allows it.
+
+        \(MailPolicy.agentGuidance)
         """,
       inputSchema: MCPInputSchema(
         properties: [

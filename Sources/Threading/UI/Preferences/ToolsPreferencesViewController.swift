@@ -30,6 +30,7 @@ final class ToolsPreferencesViewController: NSViewController {
     private let credentialStore: BrowserCredentialStore
     private let projects: ProjectStore
     private let networkCaptureSettings: BrowserNetworkCaptureSettings
+    private let mailPolicyController: MailPolicySettingsController
     private var credentialProvider: BrowserCredentialProvider = .fallback
     private var storedCredentials: [BrowserCredentialIdentity] = []
     private var onePasswordItems: [BrowserCredentialIdentity] = []
@@ -46,6 +47,7 @@ final class ToolsPreferencesViewController: NSViewController {
         case groupFooter(Int)
         case browserSignInCaption
         case proxyClientAccess
+        case mailChainLimit
         case browserNetworkCaption
         case browserNetworkField(BrowserNetworkCaptureField)
         case browserSignInProvider
@@ -117,7 +119,8 @@ final class ToolsPreferencesViewController: NSViewController {
         chromeAutomationProfile: ChromeAutomationProfile = .shared,
         credentialStore: BrowserCredentialStore = BrowserCredentialStore(),
         projects: ProjectStore = .shared,
-        networkCaptureSettings: BrowserNetworkCaptureSettings = .shared
+        networkCaptureSettings: BrowserNetworkCaptureSettings = .shared,
+        mailbox: MacMailbox = .shared
     ) {
         groupOverride = groups
         self.browserAccessStore = browserAccessStore
@@ -125,6 +128,7 @@ final class ToolsPreferencesViewController: NSViewController {
         self.credentialStore = credentialStore
         self.projects = projects
         self.networkCaptureSettings = networkCaptureSettings
+        mailPolicyController = MailPolicySettingsController(mailbox: mailbox)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -146,6 +150,7 @@ final class ToolsPreferencesViewController: NSViewController {
         }
         view = root
         render()
+        Task { await mailPolicyController.load() }
         appEvents.observe(MCPExternalToolsDidChange.self) { [weak self] _ in
             self?.render()
         }
@@ -226,6 +231,7 @@ final class ToolsPreferencesViewController: NSViewController {
                 }
             }
         }
+        rows.append(.mailChainLimit)
         rows.append(.proxyClientAccess)
         rows.append(.browserNetworkCaption)
         rows.append(contentsOf: BrowserNetworkCaptureField.allCases.map(PresentationRow.browserNetworkField))
@@ -331,7 +337,7 @@ final class ToolsPreferencesViewController: NSViewController {
                 } else {
                     extensionBounds[sectionIndex] = (rowIndex, rowIndex)
                 }
-            case .note, .group, .tool, .groupFooter, .proxyClientAccess, .browserSignInCaption, .browserNetworkCaption, .chromeAutomation,
+            case .note, .group, .tool, .groupFooter, .mailChainLimit, .proxyClientAccess, .browserSignInCaption, .browserNetworkCaption, .chromeAutomation,
                  .websiteAccessCaption, .extensionCaption:
                 break
             }
@@ -523,6 +529,15 @@ final class ToolsPreferencesViewController: NSViewController {
     /// virtual row does not exist. Match against the footer's actual built anchor, then unfold
     /// only that group and ask the table to vend the destination before reveal searches again.
     private func prepareToRevealSettingsRow(_ title: String) -> Bool {
+        if title == L10n.string(MailPolicySettingsController.title), let row = presentationRows.firstIndex(where: {
+            if case .mailChainLimit = $0 { return true }
+            return false
+        }) {
+            tableView.scrollRowToVisible(row)
+            _ = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
+            tableView.layoutSubtreeIfNeeded()
+            return true
+        }
         if title == L10n.string("Proxy Client Access"), let row = presentationRows.firstIndex(where: {
             if case .proxyClientAccess = $0 { return true }
             return false
@@ -1271,7 +1286,7 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
         case .websiteAccessEmpty, .websiteAccessOrigin, .websiteAccessSession,
              .websiteAccessRevokeAll:
             return 0
-        case .note, .group, .proxyClientAccess, .browserSignInCaption, .browserNetworkCaption, .chromeAutomation,
+        case .note, .group, .mailChainLimit, .proxyClientAccess, .browserSignInCaption, .browserNetworkCaption, .chromeAutomation,
              .websiteAccessCaption, .extensionCaption:
             return Design.Spacing.large
         case .extensionField(let sectionIndex, let fieldIndex):
@@ -1311,6 +1326,8 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
                 : supervisionFooter()
         case .browserSignInCaption:
             return SettingsUI.caption("Browser Sign-In")
+        case .mailChainLimit:
+            return mailPolicyController.makeRow()
         case .proxyClientAccess:
             return SettingsUI.row(
                 title: "Proxy Client Access",

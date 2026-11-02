@@ -135,6 +135,10 @@ not an app-modal session: that held the main queue until somebody answered
 when its view is already loaded, so answering "which window" never builds a pane for a session
 nobody has opened.
 
+**9. A frame's origin is asked about in its own right.** The page embedding a frame answers nothing
+for it, and a grant for one document's origin is never spent on the document that replaced it. See
+[Frames from other origins](#frames-from-other-origins).
+
 `BrowserAgentBridge` reads the page into a compact accessibility-oriented snapshot. Interactive
 elements receive stable `eN` refs kept in WebKit's isolated client world; click, hover, type,
 drag, select, key and scroll tools prefer those refs over guessed CSS. Hover sends DOM
@@ -183,8 +187,9 @@ Click sends pointer-down/up and mouse-down/up around activation, with bounded si
 left/right/middle variants; right clicks reach page context-menu handlers without opening native
 browser chrome. For canvas, WebGL, maps, and similarly visual content without a semantic target,
 `browser_click` also accepts one viewport-relative CSS-pixel x/y pair. Hit-testing descends through
-open shadow roots and same-origin frames without moving the user's cursor; refs remain preferred
-because they survive layout changes. Double submission and double file-input activation are
+open shadow roots and same-origin frames without moving the user's cursor, and crosses into a frame
+from another origin once its origin is allowed; refs remain preferred because they survive layout
+changes. Double submission and double file-input activation are
 refused, and coordinate clicks cannot activate file selection. Screenshots are normalized to
 CSS-pixel resolution, so their PNG coordinates map one-to-one to coordinate clicks even on Retina
 displays. `browser_screenshot` can also isolate one current ref or deep selector. It scrolls that
@@ -440,6 +445,113 @@ The subprocess boundary returns a typed two-case outcome: success owns the forma
 optional screenshot, while failure owns only an actionable diagnostic. A boolean beside nullable
 payloads is deliberately avoided here, so callers cannot treat failure text as page output or
 forward a screenshot from a failed run.
+
+## Frames from other origins
+
+The bridge runs in the main frame, and from there the same-origin policy stops at a frame from
+another origin: `contentDocument` is null, so its content is not in any snapshot, selector or
+hit test. An agent that had to work in Stripe's support chat, which is an iframe from
+`support-conversations.stripe.com` on `support.stripe.com`, could only read it from screenshots. Worse,
+the tools said otherwise. A click was dispatched at the `<iframe>` element and reported as
+`Clicked iframe`; a key and a scroll did the same. None of it reached the frame's document, and the
+agent told the user it could click there. A local page with a frame that logged what it received
+measured zero events from all three, and a click on a real "View 5 sources" row changed nothing.
+
+**A frame's origin is asked about in its own right.** This is guarantee 9 above, and everything
+below serves it. The page embedding a frame answers nothing on its behalf, so a frame gets the same
+question `browser_navigate` would raise for its origin, through the same `authorizeBrowserAccess`
+and the same stores. It follows that loopback frames need no answer, as loopback pages do not, and
+that the check repeats on every use of a ref, since a grant can be revoked after the ref was issued.
+
+**That check has one door.** `callAgentScript` asks before it delivers anything to a frame, so no
+tool can forget it, and no tool command knows frames exist. The first version threaded a `ref:`
+through `withAuthorizedBrowser` at every call site, which grew `AgentToolCoordinator` past its
+ratchet and left a new tool one omitted argument away from skipping the question. Now
+`withAuthorizedBrowser` hands the browser one closure through `beginAgentFrameAccess`, and a
+browser given none refuses. A wait polls through the same closure with no purpose, which reports the
+answer already given and cannot raise a sheet from a poll.
+
+**Entry is explicit, and nothing folds in by itself.** A frame shows as `frame=opaque` with a ref and
+the origin its `src` declares, which is labelled as a claim because the page wrote it. Scoping
+`browser_snapshot` to that ref, or to a selector resolving to it, is how an agent asks to go inside,
+and an x/y click or a key aimed there asks too. Folding granted frames into every snapshot was the
+obvious design and is deliberately not this one: a page can hold hundreds of frames, one chat-wide
+grant would then pour every advert on the page into every result, and each of those is page-authored
+text an agent reads as untrusted input. So a plain snapshot posts nothing, waits for nothing and raises
+no prompt, on any page. An action's result shows the frame it happened in; a wait for text searches the
+frames this tab entered, and says when it could not look in the others.
+
+**A probe identifies the frame, because nothing else can.** `callAsyncJavaScript(in:)` needs a
+`WKFrameInfo`, and the public API hands one out only with a message from that frame, with no way to
+map it to an element. `window[i]` looked like the answer and is not: measured here, it returns -1 for
+a frame in a shadow root, because those are not in the indexed list. So the parent posts a nonce at the
+element's `contentWindow`, and `frameProbeListener` in the frame's isolated world replies with its
+handle. Three properties were measured rather than assumed:
+
+- **The page never sees a probe.** The listener is installed at document start, ahead of anything the
+  page can add, and stops the event. A page listener logged nothing during an entry, and the same
+  listener did log an ordinary message, so that silence means something. The nonce therefore stays
+  unknown to page script, and native code only accepts a nonce it issued.
+- **A page's messages are not touched.** A probe always transfers one port, so `ports` is read first and
+  `data` is left alone for everything else. Reading `data` would clone each message into this world, and
+  a page streaming through `postMessage` would pay for a listener with nothing to do. A page's transferred
+  `ArrayBuffer` arrives whole, including on a message that does carry a port.
+- **It runs in sandboxed frames that allow scripts**, and not in those that do not, which simply never
+  answer. That timeout is `frameProbeTimeout`, spent only on an explicit entry.
+
+**The handle names the frame, not its document.** Measured: a `WKFrameInfo` kept across a navigation
+runs in whatever loaded next, and fails with `javaScriptInvalidFrameTarget` only once the frame is removed.
+Unchecked, a grant for one origin would be spent on the origin that replaced it. So each document mints a
+token in its isolated world at document start, the registry records it, and `frameDocumentGuard` is prepended
+to every routed script and compares it at delivery, which page script cannot reach and a navigation
+cannot race. A frame that navigated answers with "take a new snapshot", and re-entering it asks about
+wherever it is now.
+
+**WebKit's origin outranks the document's.** `WKFrameInfo.securityOrigin` must agree with the document's
+URL or the frame is refused. A sandboxed document has an opaque security origin and is named by its URL,
+because its content still came from there. An `about:srcdoc` has neither, so there is nothing a prompt could
+name and the agent cannot enter it.
+
+**Refs carry the frame, so routing lives in one place.** A ref minted inside frame 1 is `f1e3`, and
+`callAgentScript` reads the ref it was given and delivers the script to that document. Every target tool
+gained frames without knowing they exist. Frame ids are never reused in a tab, so a ref from an earlier page
+cannot name a later frame. **Selectors and locators stop at the boundary**, deliberately: they are strict
+across the composed tree, and keeping that promise across documents would mean querying every granted frame
+on every action. A miss says how many frames it did not search and points at refs instead.
+
+**The refusals are the other half of the fix.** `actionabilityIssue` refuses an opaque frame, so click, hover,
+drag and the rest stop rather than dispatch at the element. Key presses and scrolls return a `frameBoundary`
+before dispatching anything, because there the frame is where the action belongs: `crossingFrames` asks for its
+origin and sends the same action inside. A click's x/y descends the same way in `agentLandPoint`, carrying the
+point through each frame's own hit test. `browser_scroll` also reports `Nothing scrolled` when no position changed, and without a
+target it falls back to the scroller at the viewport's centre, since widgets commonly keep their document still
+and scroll an inner list that has no ref to aim at.
+
+**Boxes stay in page coordinates.** A frame cannot say where it is, since its `frameElement` is null, so
+`framePlacement` asks the document holding the element and `BrowserFramePlacement` composes that through every
+frame above. Without a placement a snapshot drops its boxes rather than let frame coordinates read as page
+ones. Before an action the same walk reveals the frame, because a reveal inside it stops there: measured, a
+`scrollIntoView` in a cross-origin frame moved the frame to 918 and left the page at 0. It also checks the page
+has not drawn something over the frame, which hit-testing inside the frame cannot see.
+
+**What stays out of a frame.** Password fields keep their takeover. Stored sign-ins are refused before any secret
+is read, because `fillCredentials` compares origins only after its arguments have already crossed, and a frame
+ref must not carry one anywhere. The form-submission guard is browser-level and already covered subframes, and the
+confirmation names the frame's origin, so a remembered approval is scoped to the site receiving the submission.
+`value=` is redacted for `autocomplete="cc-*"` fields, on any page: a payment frame is built to keep those from
+its embedder, and a grant should not undo that for text an agent gets back. **A screenshot remains a residual
+channel**, as it already was: a frame's pixels are part of the page's, and were always captured under the page's
+grant.
+
+**Limits.** Events are untrusted, as they are everywhere in this bridge, so a widget checking `isTrusted` can still
+ignore them. `<frame>` and `<object>` are not walked. The network capture and the accessibility audit still treat
+these frames as opaque, and say so.
+
+**Scaling contract.** Frames per page: expected under ten, stress in the hundreds. Nothing is proportional to them.
+A plain snapshot does one extra `tagName` comparison per visited element, already bounded by its work budget. An
+entry is one probe to one frame. A routed action adds one round trip per level of nesting, capped at
+`maximumFrameDepth`. A polling text wait visits only entered frames, capped at `maximumEnteredFrames`, and the
+registry is emptied when the main frame commits. `frameProbeListener` costs one integer comparison per message.
 
 ## Attached Chrome
 

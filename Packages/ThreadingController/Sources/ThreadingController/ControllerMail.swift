@@ -60,7 +60,7 @@ public struct MailEnvelope: Codable, Equatable, Sendable {
     public let questionID: QuestionID?
     public let chainID: UUID
     /// How many messages deep in its chain this one is. Informational: the chain's message
-    /// fuse (`MailLimits.chainMessages`) is what bounds a loop, not how deep it nests.
+    /// fuse (`MailPolicy.chainMessageLimit`) is what bounds a loop, not how deep it nests.
     public let depth: Int
     public let sentAt: String
     /// Set on the one copy a forward makes: the address it was first accepted for. A message
@@ -186,7 +186,6 @@ public enum MailOwnerRPCWords {
 }
 
 public enum MailLimits {
-    public static let chainMessages = 50
     public static let sendsPerMinute = 20
     public static let openInbox = 1_000
     /// Tasks mail may start in one chain on this host, independently of its message count.
@@ -376,7 +375,10 @@ extension ControllerStore {
                 try adoptReadContext(address.description, page.items)
                 response.inbox = page
             case .mailAck(let ids): response.mails = try acknowledgeMail(mailbox: address, ids: ids)
-            case .mailDirectory: response.address = address; response.directory = try mailDirectory(for: address)
+            case .mailDirectory:
+                response.address = address
+                response.directory = try mailDirectory(for: address)
+                response.mailPolicy = try mailPolicy()
             case .mailNotice(let event): response.notice = try mailNotice(address, event: event)
             default: throw ControllerError.forbidden
             }
@@ -1041,8 +1043,9 @@ extension ControllerStore {
         let id = chainID.uuidString.lowercased()
         let prior: MailChain? = try optional("mailChain", id)
         var chain = prior ?? MailChain(count: 0)
+        let limit = try mailPolicy().chainMessageLimit
+        guard chain.count < limit else { throw ControllerError.mailChainLimit(limit) }
         chain.count += 1
-        guard chain.count <= MailLimits.chainMessages else { throw ControllerError.invalidInput("chain_limit") }
         if prior == nil { try insert("mailChain", id, value: chain) }
         else { try update("mailChain", id, value: chain) }
     }

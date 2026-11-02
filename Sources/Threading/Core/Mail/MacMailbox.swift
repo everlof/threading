@@ -82,6 +82,19 @@ actor MacMailbox {
         )
     }
 
+    // MARK: - Owner policy
+
+    func policy() async throws -> MailPolicy {
+        let store = try await openStore()
+        return try await refusing { try await store.mailPolicy() }
+    }
+
+    @discardableResult
+    func setPolicy(chainMessageLimit: Int) async throws -> MailPolicy {
+        let store = try await openStore()
+        return try await refusing { try await store.setMailPolicy(chainMessageLimit: chainMessageLimit) }
+    }
+
     // MARK: - Identity
 
     /// This Mac's mail host, minted once by the store.

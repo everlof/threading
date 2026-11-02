@@ -49,7 +49,7 @@ enum ConversationUserRow {
     /// The row wrapper both bubble shapes share: trailing-aligned, capped to the bubble
     /// fraction of the pane.
     private static func rightAligned(_ bubble: NSView) -> NSView {
-        let row = NSView()
+        let row = ConversationUserRowView(bubble: bubble)
         row.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(bubble)
         NSLayoutConstraint.activate([
@@ -64,5 +64,21 @@ enum ConversationUserRow {
         ])
 
         return row
+    }
+}
+
+/// The full-width row a user's bubble is aligned inside, which names the bubble so that what stands
+/// beside it — the message's actions — can find it without knowing which shape it is.
+final class ConversationUserRowView: NSView {
+    let bubble: NSView
+
+    init(bubble: NSView) {
+        self.bubble = bubble
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }

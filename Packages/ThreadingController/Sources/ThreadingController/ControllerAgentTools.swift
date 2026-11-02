@@ -48,6 +48,7 @@ public struct ControllerAgentResponse: Codable, Sendable {
     public var inbox: ControllerPage<MailInboxItem>?
     public var directory: [MailContact]?
     public var address: MailAddress?
+    public var mailPolicy: MailPolicy?
     public var notice: String?
     public init() {}
 }
@@ -121,6 +122,7 @@ extension ControllerStore {
                 case .mailDirectory:
                     response.address = try executionAddress(executionID)
                     response.directory = try mailDirectory(executionID: executionID)
+                    response.mailPolicy = try mailPolicy()
                 case .mailNotice(let event): response.notice = try mailNotice(executionID: executionID, event: event)
                 case .ask, .askPresented, .finish, .mailAsk: throw ControllerError.conflict
                 }

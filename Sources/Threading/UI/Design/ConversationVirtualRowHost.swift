@@ -12,8 +12,15 @@ enum ConversationRowDefaults {
 /// automatic height ownership for the presentation table.
 final class ConversationVirtualRowHost: NSTableCellView {
     private var releaseContent: (() -> Void)?
-    /// The installed content's ceiling, `Design.Chat.columnWidth`.
+    /// The installed content's ceiling, `Design.Chat.columnWidth(inPane:)`.
     private weak var measureCap: NSLayoutConstraint?
+    /// The measure this cell's pane currently gives, stated before and after content is installed.
+    private var measure: CGFloat?
+    /// How far the installed content's frame reaches past the column on each side, so what it
+    /// draws stands on the column's edge and only its hover plate hangs outside it.
+    private var overhang: CGFloat = 0
+    /// How far inboard of the column the installed content stands, when it is nested.
+    private var indent: CGFloat = 0
 
     /// The transcript's own text selection, which a press on this row's prose belongs to.
     weak var textSelection: TranscriptTextSelection?
@@ -79,11 +86,17 @@ final class ConversationVirtualRowHost: NSTableCellView {
     /// Stating the width is what makes `centerXAnchor` mean the pane's centre. It also closes
     /// the older fault the other way round: with the cell pinned to its column it can no longer
     /// grow past the clip in a pane narrower than the column.
-    func setColumnWidth(_ width: CGFloat) {
-        // The measure is restated beside the column: it is counted in the reading size, so a
-        // text-size change moves it under a cell that was never recycled.
-        if let measureCap, abs(measureCap.constant - Design.Chat.columnWidth) > 0.5 {
-            measureCap.constant = Design.Chat.columnWidth
+    ///
+    /// `paneWidth` is what the measure is read from, so a row and the reply box asking about one
+    /// pane get one answer. A caller with no pane to name has only the column to go on.
+    func setColumnWidth(_ width: CGFloat, paneWidth: CGFloat? = nil) {
+        // The measure is restated beside the column: it follows the pane and is counted in the
+        // reading size, so a resize or a text-size change moves it under a cell never recycled.
+        let measure = Design.Chat.columnWidth(inPane: paneWidth ?? width)
+        self.measure = measure
+        let cap = measure + overhang * 2 - indent
+        if let measureCap, abs(measureCap.constant - cap) > 0.5 {
+            measureCap.constant = cap
         }
         guard width > 0 else {
             columnWidth.isActive = false
@@ -101,6 +114,12 @@ final class ConversationVirtualRowHost: NSTableCellView {
         tableView.tableColumns.first?.width ?? tableView.bounds.width
     }
 
+    /// The width of the pane a table's column stands in, which is what the reading measure and the
+    /// reply box both read. The scroller and the table's own insets are not the pane's to give up.
+    static func paneWidth(of tableView: NSTableView) -> CGFloat {
+        tableView.enclosingScrollView?.frame.width ?? columnWidth(of: tableView)
+    }
+
     /// Tells every cell currently on screen how wide its column is, and answers with it.
     ///
     /// Called from the host's `viewDidLayout`, because a cell AppKit does not rebuild would
@@ -110,9 +129,10 @@ final class ConversationVirtualRowHost: NSTableCellView {
     static func stateColumnWidth(in tableView: NSTableView) -> CGFloat {
         let width = columnWidth(of: tableView)
         guard width > 0 else { return width }
+        let paneWidth = paneWidth(of: tableView)
         tableView.enumerateAvailableRowViews { rowView, _ in
             for cell in rowView.subviews {
-                (cell as? ConversationVirtualRowHost)?.setColumnWidth(width)
+                (cell as? ConversationVirtualRowHost)?.setColumnWidth(width, paneWidth: paneWidth)
             }
         }
         return width
@@ -122,6 +142,7 @@ final class ConversationVirtualRowHost: NSTableCellView {
         _ content: NSView,
         topInset: CGFloat,
         bottomInset: CGFloat,
+        isNested: Bool = false,
         onRelease: (() -> Void)?
     ) {
         releaseInstalledContent()
@@ -130,7 +151,11 @@ final class ConversationVirtualRowHost: NSTableCellView {
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
 
-        let sideInset = Design.Spacing.inset
+        // A row whose frame carries padding for a hover plate hangs that padding into the margin:
+        // the transcript has one ink edge, and a plate reaching past it reads as a plate.
+        overhang = (content as? OpticalInsetProviding)?.opticalHorizontalInset ?? 0
+        let sideInset = Design.Chat.columnMargin - overhang
+        indent = isNested ? Design.Chat.nestedRowIndent : 0
 
         // The pane's width leads and the readable column is a cap, never the other way round.
         //
@@ -147,22 +172,40 @@ final class ConversationVirtualRowHost: NSTableCellView {
         // centring below has a column to be a fraction of.
         let paneWidth = content.widthAnchor.constraint(
             equalTo: widthAnchor,
-            constant: -sideInset * 2
+            constant: -sideInset * 2 - indent
         )
         paneWidth.priority = .defaultHigh
         let measureCap = content.widthAnchor.constraint(
-            lessThanOrEqualToConstant: Design.Chat.columnWidth
+            lessThanOrEqualToConstant: (measure ?? Design.Chat.columnWidth) + overhang * 2 - indent
         )
         self.measureCap = measureCap
 
         NSLayoutConstraint.activate([
             content.topAnchor.constraint(equalTo: topAnchor, constant: topInset),
             content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bottomInset),
-            content.centerXAnchor.constraint(equalTo: centerXAnchor),
-            content.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: sideInset),
+            content.centerXAnchor.constraint(equalTo: centerXAnchor, constant: indent / 2),
+            content.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: sideInset + indent),
             content.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -sideInset),
             measureCap,
             paneWidth
+        ])
+        if isNested { installSpine(leading: content.leadingAnchor, offset: overhang - indent) }
+    }
+
+    /// The rule a nested row hangs from. It runs the cell's full height, gap included, so one
+    /// disclosure's rows draw one unbroken line down from it. Added after the content, which is
+    /// what `playArrival` and the text selection find first.
+    private func installSpine(leading: NSLayoutXAxisAnchor, offset: CGFloat) {
+        let spine = NSView()
+        spine.translatesAutoresizingMaskIntoConstraints = false
+        spine.wantsLayer = true
+        spine.applyLayerBackground(Design.Chat.turnDivider)
+        addSubview(spine)
+        NSLayoutConstraint.activate([
+            spine.topAnchor.constraint(equalTo: topAnchor),
+            spine.bottomAnchor.constraint(equalTo: bottomAnchor),
+            spine.leadingAnchor.constraint(equalTo: leading, constant: offset),
+            spine.widthAnchor.constraint(equalToConstant: Design.Chat.turnDividerHeight)
         ])
     }
 

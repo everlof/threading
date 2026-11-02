@@ -217,6 +217,60 @@ class MailTests(unittest.TestCase):
         self.assertEqual(stop["decision"], "block")
         self.wait(lambda: self.vps.call("launch-status", launch["executionID"])["presence"] == "stopped")
 
+    def test_owner_policy_and_prompt_recovery_are_visible_through_mail_mcp(self):
+        self.assertEqual(self.vps.call("mail-policy")["chainMessageLimit"], 50)
+        policy = self.vps.call("owner-rpc", stdin=json.dumps({
+            "command": "mail-policy-set", "arguments": [{"value": "1"}]
+        }))
+        self.assertEqual(policy["chainMessageLimit"], 1)
+        self.assertNotEqual(self.vps.call("mail-policy-set", "0", ok=False).returncode, 0)
+        a = "%s/session/%s" % (self.vps.id, uuid.uuid4())
+        b = "%s/session/%s" % (self.vps.id, uuid.uuid4())
+        for address, name in [(a, "A"), (b, "B")]:
+            self.vps.call("mail-register", address, name)
+            self.vps.call("mail-grant-set", address, "*", "0", "notify", "normal")
+        first_id = str(uuid.uuid4())
+        self.vps.call("mail-send", a, b, first_id, self.vps.file("first", "First"))
+        env = {"PATH": "/usr/bin:/bin", "THREADING_CONTROLLER_DATABASE": str(self.vps.db),
+               "THREADING_MAILBOX_ADDRESS": b, "THREADING_MAILBOX_CREDENTIAL": self.vps.call("mail-credential", b)}
+
+        def mcp(requests):
+            lines = [{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {
+                "protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}}]
+            lines.append({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            lines.extend(dict(jsonrpc="2.0", id=index + 1, **request) for index, request in enumerate(requests))
+            result = subprocess.run([CONTROLLER, "agent-mcp"], input="".join(json.dumps(l) + "\n" for l in lines),
+                                    capture_output=True, text=True, timeout=15, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return {r["id"]: r["result"] for r in map(json.loads, result.stdout.splitlines())}
+
+        def call(name, **arguments):
+            return {"method": "tools/call", "params": {"name": name, "arguments": arguments}}
+
+        replies = mcp([
+            {"method": "tools/list"}, call("mail_directory"), call("mail_inbox", after=0),
+            call("mail_send", to=a, id=str(uuid.uuid4()), text="Blocked reply", reply_to=first_id),
+            call("mail_policy_set", chainMessageLimit=999)
+        ])
+        send_tool = next(t for t in replies[1]["tools"] if t["name"] == "mail_send")
+        self.assertIn("new human prompt", send_tool["description"])
+        directory = json.loads(replies[2]["content"][0]["text"])
+        self.assertEqual(directory["mailPolicy"]["chainMessageLimit"], 1)
+        self.assertTrue(replies[4]["isError"])
+        refusal = replies[4]["content"][0]["text"]
+        for words in ["Message not sent", "limit of 1 messages", "Tell the user in the chat", "new human prompt", "old chain stays capped"]:
+            self.assertIn(words, refusal)
+        self.assertTrue(replies[5]["isError"])
+        self.assertEqual(self.vps.call("mailbox", a)["items"], [])
+        self.vps.call("mail-context-reset", b)
+        replies = mcp([
+            call("mail_send", to=a, id=str(uuid.uuid4()), text="Still old", reply_to=first_id),
+            call("mail_send", to=a, id=str(uuid.uuid4()), text="Fresh chain")
+        ])
+        self.assertTrue(replies[1]["isError"])
+        self.assertFalse(replies[2]["isError"])
+        self.assertEqual(len(self.vps.call("mailbox", a)["items"]), 1)
+
     def test_a_session_on_this_host_gets_only_mail_tools_from_agent_mcp(self):
         _, worker_address, _ = self.worker(self.vps, "Builder", "build:1")
         session = "%s/session/%s" % (self.vps.id, uuid.uuid4())

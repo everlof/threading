@@ -135,7 +135,7 @@ struct ControllerMailTests {
             _ = try await store.setMailGrant(recipient: address, sender: "*", expectedRevision: 0, mode: .notify, allowsInterrupt: false)
         }
         var chainID: UUID?
-        for index in 0..<MailLimits.chainMessages {
+        for index in 0..<MailPolicy.defaultChainMessageLimit {
             let sender = ring[index % ring.count].0, receiver = ring[(index + 1) % ring.count]
             let sent = try await store.sendMail(executionID: sender.execution.id, to: receiver.1, id: UUID(), text: "ping \(index)", replyTo: nil, priority: .normal)
             // Depth only counts: an exchange runs as deep as its chain's message fuse allows.
@@ -143,9 +143,9 @@ struct ControllerMailTests {
             chainID = sent.envelope.chainID
             _ = try await store.acknowledgeMail(executionID: receiver.0.execution.id, ids: [sent.envelope.id])
         }
-        let sender = ring[MailLimits.chainMessages % ring.count].0
-        let receiver = ring[(MailLimits.chainMessages + 1) % ring.count].1
-        await #expect(throws: ControllerError.invalidInput("chain_limit")) {
+        let sender = ring[MailPolicy.defaultChainMessageLimit % ring.count].0
+        let receiver = ring[(MailPolicy.defaultChainMessageLimit + 1) % ring.count].1
+        await #expect(throws: ControllerError.mailChainLimit(MailPolicy.defaultChainMessageLimit)) {
             try await store.sendMail(executionID: sender.execution.id, to: receiver, id: UUID(), text: "one too many", replyTo: nil, priority: .normal)
         }
     }
@@ -278,7 +278,7 @@ struct ControllerMailTests {
         // as it goes, until the chain's message fuse. Three senders stay under the send rate.
         let ring = [a, b, c]
         var last = try await store.sendMail(from: a, to: b, id: UUID(), text: "ping", replyTo: nil, priority: .normal, ownerAdmitted: true)
-        for index in 1..<MailLimits.chainMessages {
+        for index in 1..<MailPolicy.defaultChainMessageLimit {
             let from = ring[index % ring.count], to = ring[(index + 1) % ring.count]
             _ = try await store.acknowledgeMail(mailbox: from, ids: [last.envelope.id])
             let previous = last
@@ -290,7 +290,7 @@ struct ControllerMailTests {
         // Re-acknowledging and sending twice do not escape the bound.
         _ = try await store.acknowledgeMail(mailbox: looping, ids: [last.envelope.id])
         for _ in 0..<2 {
-            await #expect(throws: ControllerError.invalidInput("chain_limit")) {
+            await #expect(throws: ControllerError.mailChainLimit(MailPolicy.defaultChainMessageLimit)) {
                 try await store.sendMail(from: looping, to: a, id: UUID(), text: "loop", replyTo: nil, priority: .normal, ownerAdmitted: true)
             }
         }

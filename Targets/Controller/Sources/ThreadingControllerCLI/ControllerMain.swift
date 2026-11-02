@@ -131,6 +131,8 @@ struct ControllerMain {
     mail-send FROM_ADDRESS TO_ADDRESS MESSAGE_UUID TEXT_FILE [normal|interrupt [owner-admitted]]
     mail-ack ADDRESS MESSAGE_UUID
     mail-context-reset SESSION_ADDRESS   (a person started a new turn: the session's next mail starts a new chain)
+    mail-policy   (this host's current mail chain message limit)
+    mail-policy-set POSITIVE_MESSAGE_LIMIT   (owner policy; applies to the next send, including existing chains)
     mail-notice ADDRESS post-tool-use|stop|session-start|user-prompt-submit
     mail-outbound HOST_UUID
     mail-outbound-cancel MESSAGE_UUID   (stops delivering queued mail; it bounces to its sender as cancelled.
@@ -388,6 +390,12 @@ struct ControllerMain {
                                             replyTo: nil, priority: priority, ownerAdmitted: args.count == 6))
         case "mail-context-reset":
             try count(1); try await store.resetMailContext(MailAddress(args[0])); try output(["reset": args[0]])
+        case "mail-policy":
+            try count(0); try output(await store.mailPolicy())
+        case "mail-policy-set":
+            try count(1)
+            guard let limit = Int(args[0]) else { throw ControllerError.invalidInput("chain_message_limit") }
+            try output(await store.setMailPolicy(chainMessageLimit: limit))
         case "mail-ack":
             try count(2)
             guard let id = UUID(uuidString: args[1]) else { throw ControllerError.invalidInput("message_id") }

@@ -674,10 +674,21 @@ control rather than treating that tool visit as authority to move the parent.
 `SessionExecutionLocusTracker` reconciles both sources. An unchanged lifecycle path still costs one
 dictionary comparison. Terminal output does no process work: `SessionExecutionProcessObserver`
 coalesces every working session into one utility-queue process-table walk at most once per second,
-then retains at most the newest eight descendants per session for cwd reads. Expected load is one
+then reads the cwds of at most the newest eight descendants per session. Expected load is one
 to ten working sessions; even the stress case of every live session producing output keeps one
-shared table walk and eight syscalls per session. Roots are disjoint, parentage is built once, and
-the main actor only receives the bounded path values. Only changed external values are resolved to
+shared table walk and a bounded handful of syscalls per session. Roots are disjoint, parentage is
+built once, and the main actor only receives the bounded path values.
+
+**Absence from that window is not absence.** A chat whose agent kept a dozen polling loops in its
+own checkout and one long corpus run in a sibling was announced in that sibling **791 times on
+2026-10-31**, each time with a fresh Move Chat band: every loop restarting its `sleep` pushed the
+run out of the newest eight, the sample read as the chat coming home, and the next leaf the run
+spawned read as it leaving again. So a descendant found working outside the root's own directory
+is *anchored* — climbed to its oldest ancestor still working there or in a directory containing
+it, which is the job rather than the leaf that happened to be sampled — and re-read on every later
+sample, by pid and start time, until it exits or leaves (`SessionExecutionProcessSnapshot.sample`).
+At most eight such anchors are kept per session, one per directory, and `forget` drops them with
+the rest of the session's observation. The evidence now ends when the work does. Only changed external values are resolved to
 Git checkouts. A descendant sample naming one sibling is display evidence and may offer **Move
 Chat**, but never automatically changes ownership under any authority policy. A reviewer or a
 one-off command is still a descendant; its cwd cannot state where the parent should resume.
@@ -725,6 +736,13 @@ The receipt is a band rather than the modal the agent-initiated path raises. Tha
 a turn the user started a moment ago and answers a request a model made; this one can fire for any
 of a dozen background chats the moment an agent runs `cd`, and a stack of sheets for something
 nobody asked for is the wrong trade.
+
+The band is also asked **once per checkout per ownership** (`ObservedMoveOffers`). An offer is a
+standing question in the same way a pending move is a standing answer: re-asking it whenever the
+same checkout is observed again restarts nothing useful and, while the sampling above still
+flapped, is what put one band back on screen hundreds of times a day however often it was
+dismissed. The row's marker and menu carry the offer once the band has gone; a committed or
+cancelled move advances the tracker's ownership epoch, and with it the offer re-arms.
 
 **Following execution is a feedback loop, and it needs damping.** Committing a move changes what
 the next observation is measured against, and `forget` deliberately clears the memo that would

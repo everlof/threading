@@ -15,14 +15,22 @@ final class ConversationRhythmTests: XCTestCase {
             Design.Spacing.medium,
             "a bubble keeps its own step before the work that answers it"
         )
-        XCTAssertEqual(Rhythm.gap(between: .work, and: .work), Design.Spacing.tight)
-        XCTAssertEqual(Rhythm.gap(between: .work, and: .answer), Design.Chat.blockSpacing)
-        XCTAssertEqual(Rhythm.gap(between: .answer, and: .work), Design.Chat.blockSpacing)
+        XCTAssertEqual(Rhythm.gap(between: .work, and: .work), Design.Spacing.hairline)
+        XCTAssertEqual(
+            Rhythm.gap(between: .answer, and: .work),
+            Design.Spacing.tight,
+            "a sentence stands close to the calls it announced"
+        )
+        XCTAssertEqual(
+            Rhythm.gap(between: .work, and: .answer),
+            Design.Chat.stepSpacing,
+            "and the space belongs between one step and the next"
+        )
         XCTAssertEqual(Rhythm.gap(between: .answer, and: .boundary), Design.Chat.turnSpacing)
-        XCTAssertEqual(Rhythm.gap(between: .boundary, and: .exchange), Design.Spacing.small)
+        XCTAssertEqual(Rhythm.gap(between: .boundary, and: .exchange), Design.Spacing.medium)
         XCTAssertEqual(Rhythm.gap(between: .seam, and: .exchange), Design.Chat.turnSpacing)
         XCTAssertEqual(
-            Rhythm.gap(between: .answer, and: .answer),
+            Rhythm.gap(between: .answer, and: .answerBlock),
             Design.Chat.blockSpacing,
             "an answer split into rows keeps the document's block spacing"
         )
@@ -37,7 +45,7 @@ final class ConversationRhythmTests: XCTestCase {
             "a heading stands clear of the paragraph before it"
         )
         XCTAssertEqual(
-            Rhythm.gap(between: .heading, and: .answer),
+            Rhythm.gap(between: .heading, and: .answerBlock),
             Design.Chat.blockSpacing,
             "and asks nothing extra of the section beneath it"
         )
@@ -72,10 +80,10 @@ final class ConversationRhythmTests: XCTestCase {
             case .userMessage:
                 XCTAssertEqual(rhythm, .exchange)
                 seen.insert("exchange")
-            case .assistant:
-                XCTAssertEqual(rhythm, .answer)
+            case .assistant, .thinking:
+                XCTAssertEqual(rhythm, .answer, "a thought and a sentence open a step alike")
                 seen.insert("answer")
-            case .thinking, .toolCall:
+            case .toolCall:
                 XCTAssertEqual(rhythm, .work)
                 seen.insert("work")
             case .turnOutcome, .notice:
@@ -140,12 +148,12 @@ final class ConversationRhythmTests: XCTestCase {
         let expected: [CGFloat] = [
             Design.Spacing.small,       // navigator → heading: chrome meets the seam
             Design.Chat.turnSpacing,    // heading → the bubble: the transcript opens under the seam
-            Design.Spacing.medium,      // bubble → thinking: the bubble's own step, not the work's
-            Design.Spacing.tight,       // thinking → the tool fold: work against work
-            Design.Chat.blockSpacing,   // fold → the answer's first block
+            Design.Chat.stepSpacing,    // bubble → thinking: a thought opens a step
+            Design.Spacing.tight,       // thinking → the tool fold: a step and its own calls
+            Design.Chat.stepSpacing,    // fold → the answer's first block: the next step
             Design.Chat.blockSpacing,   // block → block of one answer
-            Design.Chat.blockSpacing,   // block → a lone tool call
-            Design.Chat.blockSpacing    // tool call → the final answer
+            Design.Spacing.tight,       // block → a lone tool call: its own call
+            Design.Chat.stepSpacing     // tool call → the final answer
         ]
         XCTAssertEqual(
             (1..<transcript.items.count).map { transcript.gap(above: $0) },
@@ -173,5 +181,89 @@ final class ConversationRhythmTests: XCTestCase {
                 "the gap above row \(row) is not the composed rhythm"
             )
         }
+    }
+
+    /// The fault the rhythm was rebuilt to remove: every assistant row wore an invisible action
+    /// line, so the gap under a sentence measured 24 points more than the same gap under a thought
+    /// and the page stepped between loose and tight for no reason a reader could see.
+    func testAnAgentMessageReservesNoLineForItsActions() {
+        let content = NSView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        content.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        let message = ConversationMessageContextView(content: content, speaker: .agent)
+        message.widthAnchor.constraint(equalToConstant: 400).isActive = true
+        XCTAssertEqual(message.fittingSize.height, 40, accuracy: 0.5)
+    }
+
+    func testAUserMessagesActionsStandBesideItsBubble() throws {
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
+        let message = ConversationMessageContextView(
+            content: ConversationRowView.userBubble("A short instruction"),
+            speaker: .user
+        )
+        host.addSubview(message)
+        NSLayoutConstraint.activate([
+            message.topAnchor.constraint(equalTo: host.topAnchor),
+            message.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            message.widthAnchor.constraint(equalToConstant: 600)
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        let plate = try XCTUnwrap(message.subviews.first { $0 is ConversationMessageActionPlate })
+        let row = try XCTUnwrap(descendant(ConversationUserRowView.self, in: message))
+        let bubble = row.bubble.convert(row.bubble.bounds, to: message)
+        XCTAssertLessThanOrEqual(plate.frame.maxX, bubble.minX, "the actions cover the bubble")
+        XCTAssertGreaterThanOrEqual(plate.frame.minX, 0, "the actions left the row")
+    }
+
+    func testAnUndrawnActionPlateDoesNotTakeAPressFromTheWordsBeneathIt() {
+        let plate = ConversationMessageActionPlate(actions: NSView())
+        plate.frame = NSRect(x: 0, y: 0, width: 40, height: 20)
+        XCTAssertNil(plate.hitTest(NSPoint(x: 10, y: 10)))
+        plate.alphaValue = 1
+        XCTAssertNotNil(plate.hitTest(NSPoint(x: 10, y: 10)))
+    }
+
+    /// The fill is one colour flattened against the ground, so nothing resolves it again by itself:
+    /// without its own observers a plate kept the ground and theme it was built under.
+    func testAnActionPlateIsMeasuredAgainWhenItsGroundOrThemeMoves() throws {
+        let previousTheme = AppThemePalette.current
+        let previousBackdrop = WindowBackdrop.ground
+        defer {
+            AppThemePalette.set(previousTheme)
+            WindowBackdrop.set(previousBackdrop)
+        }
+        // System's panel is translucent, so this is the theme where the ground decides the fill.
+        AppThemePalette.set(.system)
+        WindowBackdrop.set(.terminal(.black))
+        let plate = ConversationMessageActionPlate(actions: NSView())
+        let onBlack = try XCTUnwrap(plate.layer?.backgroundColor)
+
+        WindowBackdrop.set(.terminal(.white))
+        let onWhite = try XCTUnwrap(plate.layer?.backgroundColor)
+        XCTAssertNotEqual(onWhite, onBlack, "the plate kept the previous ground")
+        XCTAssertEqual(onWhite.alpha, 1, accuracy: 0.001, "the words beneath would show through")
+
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.cyberpunk.id))
+        XCTAssertNotEqual(plate.layer?.backgroundColor, onWhite, "the plate kept the previous theme")
+    }
+
+    /// Quiet to the eye only: the plate rests at zero alpha, and VoiceOver still reaches its actions.
+    func testActionsAtRestStayReachableByVoiceOver() throws {
+        let message = ConversationMessageContextView(content: NSView(), speaker: .agent)
+        message.copyText = "A reply"
+        let plate = try XCTUnwrap(message.subviews.first { $0 is ConversationMessageActionPlate })
+        let action = try XCTUnwrap(descendant(ThemedIconButton.self, in: plate))
+
+        XCTAssertEqual(plate.alphaValue, 0)
+        XCTAssertFalse(action.isHiddenOrHasHiddenAncestor)
+        XCTAssertEqual(action.accessibilityRole(), .button)
+        XCTAssertFalse(try XCTUnwrap(action.accessibilityTitle()).isEmpty)
+    }
+
+    private func descendant<T: NSView>(_ type: T.Type, in root: NSView) -> T? {
+        if let match = root as? T { return match }
+        return root.subviews.lazy.compactMap { self.descendant(type, in: $0) }.first
     }
 }

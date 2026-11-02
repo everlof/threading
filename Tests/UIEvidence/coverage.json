@@ -321,6 +321,43 @@
       }
     },
     {
+      "id": "conversation-working-turn",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Working turn at every pane width",
+      "description": "A long agent turn in the shipping virtualized conversation and reply box, showing one left edge, even spacing, summarized tool runs and a column that follows the pane.",
+      "states": [
+        "Summarized tool runs",
+        "Opened run on its rule",
+        "Opened tool call",
+        "Message actions over a reply",
+        "Message actions beside a bubble"
+      ],
+      "matrix": {
+        "themes": [
+          "Threading"
+        ],
+        "appearances": [
+          "Light",
+          "Dark"
+        ],
+        "sizes": [
+          "480-point to 2300-point conversation pane"
+        ]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ConversationWorkingTurnRenderTests.swift",
+        "tests": [
+          "ThreadingTests/ConversationWorkingTurnRenderTests/testRendersAWorkingTurnAtEveryPaneWidth",
+          "ThreadingTests/ConversationWorkingTurnRenderTests/testRendersOpenedWork"
+        ]
+      },
+      "capture": {
+        "glob": "working-turn/*.png"
+      }
+    },
+    {
       "id": "conversation-pane-width",
       "kind": "surface",
       "status": "implemented",
@@ -1277,8 +1314,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Tools settings",
-      "description": "The real virtualized Tools destination with MCP groups collapsed and unfolded, plus independent browser network capture controls in the product settings shell.",
-      "states": ["Collapsed groups", "Unfolded tool inventory", "Network capture metadata only", "Network capture enabled"],
+      "description": "The real virtualized Tools destination with MCP groups collapsed and unfolded, browser network capture controls and the owner-configured mail chain limit in the product settings shell.",
+      "states": ["Collapsed groups", "Unfolded tool inventory", "Network capture metadata only", "Network capture enabled", "Configured mail chain limit"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Neo Brutalism", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],

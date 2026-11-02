@@ -449,6 +449,14 @@ extension AgentToolCoordinator {
                 completion(nil)
                 return
             }
+            // A frame from another origin gets the question navigating to it would get.
+            lease.browser.beginAgentFrameAccess { [weak self] frame, purpose in
+                guard let self else { return false }
+                guard let purpose else { return self.hasBrowserAccess(to: frame.origin, for: sessionID) }
+                return await self.authorizeBrowserAccess(
+                    to: frame.url, for: sessionID, purpose: purpose, embeddedIn: url
+                )
+            }
             completion(lease.browser)
         }
     }
@@ -457,6 +465,7 @@ extension AgentToolCoordinator {
         to url: URL,
         for sessionID: SessionID,
         purpose: String,
+        embeddedIn embeddingPage: URL? = nil,
         completion: @escaping (Bool) -> Void
     ) {
         guard let origin = BrowserOrigin(url: url) else {
@@ -493,7 +502,10 @@ extension AgentToolCoordinator {
             return
         }
 
-        let request = Self.browserAccessChoiceRequest(to: url, origin: origin, purpose: purpose)
+        let request = Self.browserAccessChoiceRequest(
+            to: url, origin: origin, purpose: purpose,
+            embeddedIn: embeddingPage.flatMap(BrowserOrigin.init(url:))
+        )
 
         BrowserPermissionPresenter.choose(request, for: sessionID, in: browserPresentationWindow(for: sessionID)) { chosen in
             switch chosen {
@@ -508,7 +520,7 @@ extension AgentToolCoordinator {
     /// The two remembered answers have different scopes. The choice states that scope itself;
     /// a generic suppression box could not distinguish one host from the whole chat.
     static func browserAccessChoiceRequest(
-        to url: URL, origin: BrowserOrigin, purpose: String
+        to url: URL, origin: BrowserOrigin, purpose: String, embeddedIn embedding: BrowserOrigin? = nil
     ) -> ChoiceRequest {
         ChoiceRequest(
             prompt: .grantBrowserOriginAccess,
@@ -519,6 +531,11 @@ extension AgentToolCoordinator {
 
                 Page content is untrusted. Allow access only when %@ is relevant to your task.
                 """, L10n.string(purpose), BrowserOrigin.displayURL(url), origin.displayName)
+                + (embedding.map {
+                    "\n\n" + L10n.format(
+                        "This is a frame inside %@, loaded from another origin.", $0.displayName
+                    )
+                } ?? "")
                 + "\n\n" + L10n.string("""
                     “Always Allow This Agent” gives this chat access to every website in this \
                     browser, including sites visited later. Revoke it in Settings ▸ Tools.
@@ -563,13 +580,15 @@ extension AgentToolCoordinator {
     func authorizeBrowserAccess(
         to url: URL,
         for sessionID: SessionID,
-        purpose: String
+        purpose: String,
+        embeddedIn embeddingPage: URL? = nil
     ) async -> Bool {
         await withCheckedContinuation { continuation in
             authorizeBrowserAccess(
                 to: url,
                 for: sessionID,
-                purpose: purpose
+                purpose: purpose,
+                embeddedIn: embeddingPage
             ) { allowed in
                 continuation.resume(returning: allowed)
             }
@@ -628,7 +647,7 @@ extension AgentToolCoordinator {
             // An action result answers "what changed where I am now", not "what appears first
             // in document order". The explicit browser_snapshot tool remains the full semantic
             // document view and can be scoped when the caller wants another region.
-            let snapshot = try await browser.agentSnapshot(viewportOnly: true)
+            let snapshot = try await browser.agentResultSnapshot(viewportOnly: true)
             browser.recordAgentActionSnapshotPhase(startedAt: snapshotStartedAt, snapshot: snapshot)
             guard browser.agentPageIdentity == authorizedPage,
                   browserResolver.browser(for: sessionID) === browser else {
@@ -669,7 +688,10 @@ extension AgentToolCoordinator {
         browser: BrowserViewController,
         for sessionID: SessionID
     ) async -> Bool {
-        let origin = browser.currentURL.flatMap(BrowserOrigin.init(url:))
+        // A submission inside a frame goes to that frame's site, so that is what the prompt names
+        // and what a remembered answer is scoped to.
+        let origin = browser.agentFrame(forRef: target.ref)?.origin
+            ?? browser.currentURL.flatMap(BrowserOrigin.init(url:))
         if let origin,
            BrowserSubmissionExemptions.shared.isExempt(origin, for: sessionID) {
             return true
@@ -758,92 +780,4 @@ extension AgentToolCoordinator {
             style: .informational
         )
     }
-
-    // MARK: Browser Scripts
-
-    /// A JSON string literal, so a selector cannot break out of the injected JavaScript.
-    static func jsLiteral(_ string: String) -> String {
-        guard let data = try? JSONEncoder().encode(string),
-              let literal = String(data: data, encoding: .utf8) else { return "\"\"" }
-        return literal
-    }
-
-    static func queryScript(selector: String) -> String {
-        """
-        (function(){
-          try {
-            function safeURL(value, base) {
-              try {
-                var url = new URL(String(value || ''), base || location.href);
-                url.username = ''; url.password = ''; url.hash = '';
-                var sensitive = [
-                  'access_token', 'auth', 'code', 'credential', 'key', 'password',
-                  'secret', 'session', 'signature', 'token'
-                ];
-                Array.from(url.searchParams.keys()).forEach(function(name) {
-                  var lower = name.toLowerCase();
-                  if (sensitive.some(function(part) { return lower.includes(part); })) {
-                    url.searchParams.set(name, '[redacted]');
-                  }
-                });
-                return url.href.slice(0, 2000);
-              } catch (_) { return '(invalid or redacted URL)'; }
-            }
-            var selector = \(jsLiteral(selector)), els = [];
-            function visit(root) {
-              var children = Array.prototype.slice.call((root && root.children) || []);
-              for (var i = 0; i < children.length && els.length < 30; i += 1) {
-                var child = children[i];
-                if (child.matches(selector)) els.push(child);
-                if (child.shadowRoot) visit(child.shadowRoot);
-                if (child.tagName.toLowerCase() === 'iframe') {
-                  try {
-                    if (child.contentDocument && child.contentDocument.documentElement) {
-                      visit(child.contentDocument);
-                    }
-                  } catch (_) {}
-                }
-                visit(child);
-              }
-            }
-            function frameOffset(element) {
-              var x = 0, y = 0, targetDocument = element.ownerDocument;
-              while (targetDocument && targetDocument !== document) {
-                var frame = null;
-                try { frame = targetDocument.defaultView.frameElement; } catch (_) {}
-                if (!frame) break;
-                var frameRect = frame.getBoundingClientRect();
-                x += frameRect.left + Number(frame.clientLeft || 0);
-                y += frameRect.top + Number(frame.clientTop || 0);
-                targetDocument = frame.ownerDocument;
-              }
-              return { x: x, y: y };
-            }
-            visit(document);
-            return JSON.stringify({ count: els.length, elements: els.map(function(e, i){
-              var r = e.getBoundingClientRect(), offset = frameOffset(e), attrs = {};
-              ['href','src','placeholder','aria-label','name','type','alt','role'].forEach(function(a){
-                var v = e.getAttribute(a); if (v) attrs[a] = v;
-                if (v && (a === 'href' || a === 'src')) {
-                  attrs[a] = safeURL(v, e.ownerDocument.baseURI);
-                }
-              });
-              return {
-                i: i,
-                tag: e.tagName.toLowerCase(),
-                id: e.id || undefined,
-                cls: (e.className && e.className.toString().trim()) || undefined,
-                text: ((e.innerText || e.textContent || '').trim().slice(0, 200)) || undefined,
-                attrs: Object.keys(attrs).length ? attrs : undefined,
-                rect: {
-                  x: Math.round(r.x + offset.x), y: Math.round(r.y + offset.y),
-                  w: Math.round(r.width), h: Math.round(r.height)
-                }
-              };
-            }) }, null, 1);
-          } catch (err) { return JSON.stringify({ error: String(err) }); }
-        })()
-        """
-    }
-
 }
