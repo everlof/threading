@@ -55,6 +55,69 @@ final class CodexTerminalMailTests: XCTestCase {
         XCTAssertTrue(accepted, "A custom CLI must find its interpreter just as its terminal launch does")
     }
 
+    func testQueueAcceptsPrivateSocketAliasesAndRefusesUnsafeTargets() async throws {
+        let files = FileManager.default
+        let root = URL(fileURLWithPath: "/private/tmp/cma-\(UUID().uuidString.prefix(8))")
+        let endpoints = root.appendingPathComponent("endpoints")
+        let daemon = root.appendingPathComponent("daemon")
+        for directory in [root, endpoints, daemon] {
+            try files.createDirectory(at: directory, withIntermediateDirectories: false,
+                                      attributes: [.posixPermissions: 0o700])
+        }
+        defer { try? files.removeItem(at: root) }
+        let socket = daemon.appendingPathComponent("queue.sock")
+        let server = MCPServer(socketPath: socket.path)
+        let listening = expectation(description: "private queue socket exists")
+        server.start { listening.fulfill() }
+        defer { server.stop() }
+        await fulfillment(of: [listening], timeout: 10)
+        let alias = endpoints.appendingPathComponent("session.sock")
+        try files.createSymbolicLink(at: alias, withDestinationURL: socket)
+        let launcher = root.appendingPathComponent("codex")
+        try """
+        #!/bin/sh
+        endpoint=${3#unix://}
+        [ "$1" = queue ] && [ "$endpoint" -ef '\(socket.path)' ] && [ ! -L "$endpoint" ]
+
+        """
+            .write(to: launcher, atomically: true, encoding: .utf8)
+        try files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: launcher.path)
+        let threadID = UUID().uuidString
+        func enqueue(at endpoint: URL) async -> Bool {
+            let target = CodexTerminalMail.Target(executable: launcher.path, socketPath: endpoint.path,
+                                                 threadID: threadID, accountHome: root.path)
+            return await CodexMailQueue.enqueue(target, notice: "fixture notice")
+        }
+
+        let direct = await enqueue(at: socket)
+        let linked = await enqueue(at: alias)
+        XCTAssertTrue(direct)
+        XCTAssertTrue(linked, "Codex's private socket alias must reach the queue client")
+
+        try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: daemon.path)
+        let publicDestination = await enqueue(at: alias)
+        XCTAssertFalse(publicDestination)
+        try files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: daemon.path)
+        try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: endpoints.path)
+        let publicAlias = await enqueue(at: alias)
+        XCTAssertFalse(publicAlias)
+        try files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: endpoints.path)
+
+        let directoryAlias = root.appendingPathComponent("linked-directory")
+        try files.createSymbolicLink(at: directoryAlias, withDestinationURL: endpoints)
+        let linkedDirectory = await enqueue(at: directoryAlias.appendingPathComponent("session.sock"))
+        XCTAssertFalse(linkedDirectory)
+
+        try files.removeItem(at: alias)
+        try files.createSymbolicLink(at: alias, withDestinationURL: launcher)
+        let regularFile = await enqueue(at: alias)
+        XCTAssertFalse(regularFile)
+        try files.removeItem(at: alias)
+        try files.createSymbolicLink(at: alias, withDestinationURL: root.appendingPathComponent("missing"))
+        let dangling = await enqueue(at: alias)
+        XCTAssertFalse(dangling)
+    }
+
     func testIdleArrivalCoalescesBurstAndConsumesOnlyTheReceiptedNotice() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("codex-mail-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }

@@ -1550,8 +1550,13 @@ help is probed for Unix transport and queue support before use; older clients ke
 Native and remote-host launches do not use this supervisor. Existing embedded TUIs need one
 restart to gain the connection; an app relaunch alone only reattaches their old process.
 
-The socket is session-scoped inside `/tmp/threading-codex-<uid>`, checked for owner-only directory
-permissions and symlinks. A live socket refuses a second supervisor. A dead socket can be replaced;
+The endpoint is session-scoped inside `/tmp/threading-codex-<uid>`, checked for owner-only directory
+permissions. Codex 0.163 publishes it as a symlink into its own private socket directory.
+`CodexMailQueue` checks ownership of the endpoint and resolved socket, requires both containing
+directories to be owner-only real directories, and connects to the resolved socket. Dangling
+links, non-sockets and shared directories are refused. These fixed-count filesystem checks stay
+on the queue worker. The supervisor refuses an existing symlink; a live direct socket also refuses
+a second supervisor. A dead direct socket can be replaced;
 normal exit and signals retire the server with a two-second escalation bound and remove the socket.
 The selected executable is resolved before wrapping, and the account/token env prefix stays
 outside the long-lived shell script. A background-hosted PTY retains both server and TUI while
@@ -1572,12 +1577,18 @@ or ordinary hook; timeouts are not blindly replayed into duplicate model turns.
 
 The real Codex 0.163 TUI and queue command, with a disposable account and local mock Responses
 API, are exercised by `scripts/test_codex_terminal_mail.py --codex /absolute/path/to/codex`.
-It compiles the shipping supervisor generator and tests both fresh and resumed conversations:
+It compiles the shipping supervisor generator, `CodexMailQueue` and bounded child-process runner,
+and tests both fresh and resumed conversations:
 queue into an idle terminal containing an unsent draft, assert the notice started the model request
 without the draft, submit the intact draft, then check server cleanup and ordinary
 `UserPromptSubmit`/`Stop` hook execution. Its two fixture-owned hooks use invocation trust bypass
 on the fresh turn and persisted trust on resume; Codex 0.163 does not preserve invocation bypass
 on that remote resume path. This spends no provider usage and never touches a live user session.
+
+The queue adapter is part of this probe because invoking `codex queue` directly missed a real
+failure: the provider accepted its socket alias, while our `lstat` socket-only check rejected it
+before running the command. The probe failed through the shipping adapter before alias support;
+the private-directory, dangling-link and non-socket refusals are covered by `CodexTerminalMailTests`.
 
 **Scaling contract:** ordinary mail has a few open messages, with 1,000 allowed per inbox and
 10,000 activity edges as a stress case. Arrival/activity resolve only the affected session;

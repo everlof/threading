@@ -3,7 +3,7 @@
 
 python3 scripts/test_codex_terminal_mail.py --codex /absolute/path/to/codex
 
-Compiles the shipping supervisor generator, launches the actual TUI, queues a notice while
+Compiles the shipping supervisor and queue client, launches the actual TUI, queues a notice while
 an unsent draft is present, submits that draft, and asserts both model requests and cleanup.
 No user account, live session, real API or provider usage is involved.
 """
@@ -35,11 +35,30 @@ root = Path(scratch.name).resolve()
 home = root / 'home'
 home.mkdir()
 (root / 'main.swift').write_text("""import Foundation
+import os
 typealias SessionID = UUID
 final class ManagedAgentRuntimeStore {
+    let effectivePATH = "/usr/bin:/bin:/usr/sbin:/sbin"
     func resolve(_ command: ShellCommand) -> (command: ShellCommand, environment: [String: String]) {
         (command, [:])
     }
+}
+enum ManagedAgentCatalog { static let systemPATH = "/usr/bin:/bin:/usr/sbin:/sbin" }
+enum AgentLocalLaunch { static let store: ManagedAgentRuntimeStore? = nil }
+enum ThreadingLogger { static let agent = Logger(subsystem: "codes.threading.mail-probe", category: "agent") }
+enum CodexTerminalMail {
+    struct Target: Sendable {
+        let executable: String
+        let socketPath: String
+        let threadID: String
+        let accountHome: String
+    }
+}
+if CommandLine.arguments[1] == "--queue" {
+    let target = CodexTerminalMail.Target(executable: CommandLine.arguments[2],
+        socketPath: CommandLine.arguments[3], threadID: CommandLine.arguments[4],
+        accountHome: CommandLine.arguments[5])
+    exit(CodexMailQueue.enqueueBlocking(target, notice: CommandLine.arguments[6]) ? 0 : 1)
 }
 var server = ShellCommand(word: CommandLine.arguments[1])
 server.append(flag: "--dangerously-bypass-hook-trust")
@@ -47,7 +66,12 @@ server.append(word: "app-server")
 server.append(flag: "--listen", value: "unix://" + CommandLine.arguments[2])
 print(CodexTerminalLaunch.script(server: server, socketPath: CommandLine.arguments[2]))
 """)
-subprocess.run(['xcrun', 'swiftc', str(repo / 'Sources/Threading/Core/Agent/ShellCommand.swift'), str(repo / 'Sources/Threading/Core/Agent/CodexTerminalLaunch.swift'), str(root / 'main.swift'), '-o', str(root / 'generate')], check=True, timeout=60)
+subprocess.run(['xcrun', 'swiftc',
+    str(repo / 'Sources/Threading/Core/Agent/ShellCommand.swift'),
+    str(repo / 'Sources/Threading/Core/Agent/CodexTerminalLaunch.swift'),
+    str(repo / 'Sources/Threading/Core/Mail/CodexMailQueue.swift'),
+    str(repo / 'Sources/Threading/Core/Session/ChildProcessSpawn.swift'),
+    str(root / 'main.swift'), '-o', str(root / 'generate')], check=True, timeout=60)
 calls = []
 
 class Handler(BaseHTTPRequestHandler):
@@ -190,8 +214,9 @@ def run_terminal(previous=None):
                 typed = True
                 typed_at = elapsed
             if typed and not queued and elapsed > typed_at + 3:
-                q = subprocess.run([binary, 'queue', '--remote', 'unix://' + str(endpoint), '--thread', tid, '--message', notice], env=env, capture_output=True, text=True, timeout=10)
-                assert q.returncode == 0, q.stderr
+                q = subprocess.run([str(root / 'generate'), '--queue', binary, str(endpoint), tid,
+                                    str(home), notice], env=env, capture_output=True, text=True, timeout=15)
+                assert q.returncode == 0, 'Shipping queue client refused the endpoint: ' + q.stderr
                 queued = True
                 queued_at = elapsed
             if queued and not submitted and elapsed > queued_at + 6:
