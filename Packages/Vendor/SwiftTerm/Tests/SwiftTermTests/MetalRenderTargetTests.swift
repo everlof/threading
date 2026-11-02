@@ -12,6 +12,7 @@ import Testing
 
 #if os(macOS) && canImport(Metal)
 import Metal
+import MetalKit
 import QuartzCore
 
 @Suite("MetalRenderTarget")
@@ -81,6 +82,17 @@ struct MetalRenderTargetTests {
         view.onNeedsDisplay = { asked += 1 }
         view.requestDisplay()
         #expect(asked == 1)
+    }
+
+    /// Either surface covers the whole terminal, and AppKit makes the view a
+    /// click lands on first responder only if that view accepts it. A surface
+    /// that answered the hit kept the keyboard from the terminal.
+    @Test func surfacesLetClicksThroughToTheTerminal() {
+        let frame = CGRect(x: 0, y: 0, width: 200, height: 100)
+        let inside = CGPoint(x: frame.midX, y: frame.midY)
+        #expect(TerminalMetalLayerView(frame: frame).hitTest(inside) == nil)
+        let mtkView = TerminalMTKView(frame: frame, device: MTLCreateSystemDefaultDevice())
+        #expect(mtkView.hitTest(inside) == nil)
     }
 }
 #endif

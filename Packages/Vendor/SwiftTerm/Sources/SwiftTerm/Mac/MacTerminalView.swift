@@ -74,6 +74,16 @@ private final class OverlayScrollerIndicator: NSView {
     }
 }
 
+#if canImport(MetalKit)
+/// The `MTKView` surface. Like `TerminalMetalLayerView`, it only draws, so a
+/// click goes through it to the terminal, which takes the keyboard.
+final class TerminalMTKView: MTKView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+}
+#endif
+
 /**
  * TerminalView provides an AppKit front-end to the `Terminal` termininal emulator.
  * It is up to a subclass to either wire the terminal emulator to a remote terminal
@@ -838,7 +848,7 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
             layerView.renderContentsScale = metalRenderingScaleFactor()
             return layerView
         }
-        let mtkView = MTKView(frame: frame, device: device)
+        let mtkView = TerminalMTKView(frame: frame, device: device)
         mtkView.autoresizingMask = [.width, .height]
         mtkView.isPaused = true
         mtkView.enableSetNeedsDisplay = true

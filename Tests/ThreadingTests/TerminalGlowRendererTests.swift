@@ -1,15 +1,18 @@
 import AppKit
 import Metal
+import MetalKit
 import SwiftTerm
 import XCTest
 @testable import Threading
 
 /// The Mac terminal's renderer follows its palette's glow: Metal while it glows in a window, Core
 /// Graphics otherwise (a preview or a terminal not in a window), and a window snapshot — the
-/// inspector's and Report a Problem's — still shows a glowing terminal's text.
+/// inspector's and Report a Problem's — still shows a glowing terminal's text. A click on a
+/// glowing terminal still gives it the keyboard.
 ///
 /// Each fixture is an unshown borderless window: joining one is what `viewDidMoveToWindow`
-/// answers, and `cacheDisplay` needs nothing on screen.
+/// answers, and `cacheDisplay` needs nothing on screen. The click's is the exception, because a
+/// window that was never ordered in ignores clicks; it is parked off every display instead.
 @MainActor
 final class TerminalGlowRendererTests: XCTestCase {
 
@@ -18,6 +21,8 @@ final class TerminalGlowRendererTests: XCTestCase {
         static let glow = TerminalTextGlow(radius: 3, opacity: 0.5)
         static let text = "\u{1B}[?25l\u{1B}[38;2;0;255;0mphosphor green glyphs\r\nWWWW MMMM ####\u{1B}[0m"
         static let minimumGreenPixels = 200
+        static let focusHolderWidth: CGFloat = 100
+        static let parkedOrigin = NSPoint(x: -10_000, y: -10_000)
     }
 
     private func window(holding view: NSView) -> NSWindow {
@@ -91,6 +96,66 @@ final class TerminalGlowRendererTests: XCTestCase {
                              "the snapshot of a glowing terminal is empty")
     }
 
+    /// A glowing terminal is covered by the Metal surface it draws into, and a click makes the
+    /// view it lands on first responder only if that view takes the keyboard. The surface took
+    /// every click, so once a button or the sidebar had the keyboard, clicking the terminal could
+    /// not get it back. Only switching chats did, because attaching a chat focuses its terminal in
+    /// code. Both surfaces are asked, through the window's own click handling.
+    ///
+    /// The window reports key status itself, as `InspectorReportFocusTests`' does: the question is
+    /// which view the window gives the keyboard to, not whether the window server routes keys to
+    /// the window.
+    func testAClickOnAGlowingTerminalTakesTheKeyboard() throws {
+        try metalIsAvailable()
+        for usesLayerSurface in [true, false] {
+            let surface = usesLayerSurface ? "layer surface" : "MTKView surface"
+            let host = ClickFixtureWindow(
+                contentRect: NSRect(x: 0, y: 0, width: Fixture.focusHolderWidth + Fixture.frame.width,
+                                    height: Fixture.frame.height),
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            let holder = FocusHolder(frame: NSRect(x: 0, y: 0, width: Fixture.focusHolderWidth,
+                                                   height: Fixture.frame.height))
+            let terminal = EmojiFixedTerminalView(
+                frame: Fixture.frame.offsetBy(dx: Fixture.focusHolderWidth, dy: 0))
+            try terminal.setUsesMetalLayerSurface(usesLayerSurface)
+            host.contentView?.addSubview(holder)
+            host.contentView?.addSubview(terminal)
+            host.setFrameOrigin(Fixture.parkedOrigin)
+            host.orderFront(nil)
+            defer { host.orderOut(nil) }
+
+            terminal.setThemeTextGlow(Fixture.glow)
+            XCTAssertTrue(terminal.isUsingMetalRenderer, surface)
+            let local = NSPoint(x: terminal.bounds.midX, y: terminal.bounds.midY)
+            let cover = try XCTUnwrap(terminal.subviews.first { $0.layer is CAMetalLayer },
+                                      "a glowing terminal draws into a Metal surface")
+            XCTAssertEqual(cover is MTKView, !usesLayerSurface, surface)
+            XCTAssertTrue(cover.frame.contains(local), "the \(surface) covers the terminal")
+
+            XCTAssertTrue(host.makeFirstResponder(holder))
+            let point = terminal.convert(local, to: nil)
+            try click(host, at: point)
+            let owner = String(describing: host.firstResponder)
+            XCTAssertTrue(host.firstResponder === terminal,
+                          "a click on a glowing terminal (\(surface)) leaves the keyboard with \(owner)")
+            XCTAssertTrue(host.contentView?.hitTest(point) === terminal,
+                          "the window asks the \(surface), not the terminal, whether a first click counts")
+        }
+    }
+
+    private func click(_ window: NSWindow, at point: NSPoint) throws {
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            window.sendEvent(try XCTUnwrap(NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
+            )))
+        }
+    }
+
     /// Pixels that are the text's green — glyph or halo — rather than anything an empty
     /// terminal or the window's ground could produce.
     private func greenPixels(_ rep: NSBitmapImageRep) throws -> Int {
@@ -112,4 +177,15 @@ final class TerminalGlowRendererTests: XCTestCase {
         }
         return count
     }
+}
+
+/// Reports key status so the window treats a click as one in the window that has the keyboard.
+/// See the note above the click test.
+private final class ClickFixtureWindow: NSWindow {
+    override var isKeyWindow: Bool { true }
+}
+
+/// Stands in for the button or sidebar row that has the keyboard before the click.
+private final class FocusHolder: NSView {
+    override var acceptsFirstResponder: Bool { true }
 }

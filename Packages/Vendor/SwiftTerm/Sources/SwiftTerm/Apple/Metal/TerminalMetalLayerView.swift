@@ -162,6 +162,14 @@ final class TerminalMetalLayerView: TerminalMetalLayerViewBase {
 
     override var isOpaque: Bool { metalLayer.isOpaque }
 
+    /// The surface only draws, and it covers the whole terminal. AppKit makes
+    /// the view a click lands on first responder only if that view accepts
+    /// it, so a surface that answered the hit kept the keyboard from the
+    /// terminal, and answered `acceptsFirstMouse` for it as well.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         if let scale = window?.backingScaleFactor {

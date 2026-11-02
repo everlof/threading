@@ -105,6 +105,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     CPU render loop and uses the renderer's bounded idle wait before submitting its snapshot.
     Suspending the loop alone leaves the GPU's frame permit occupied, so a terminal remounted
     immediately after releasing its glow could silently skip the requested reallocation.
+  - **A view stacked over the terminal never takes a click.** AppKit makes the view a click
+    lands on first responder only if that view accepts it. The Metal surface covers the whole
+    terminal, so while it answered `hitTest(_:)` a glowing terminal could not be clicked back
+    into focus. `TerminalMetalLayerView` and `TerminalMTKView` return nil, as the caret, the
+    progress bar and the overlay scroller indicator already did. `TerminalGlowRendererTests`
+    clicks both surfaces through a window.
   - **BiDi cache identities outlive their keys.** A bare buffer address can be reused after a
     terminal is released, letting a new Arabic row inherit an old Hebrew row's unshaped layout.
     Paragraph keys retain `BufferRef`, which retains no scrollback, and both cache levels retain

@@ -2986,7 +2986,13 @@ terminal must draw nothing, so a capture says so: `WindowSnapshot` (the inspecto
 Problem) wraps its caching in `TerminalView.drawingForBitmapCapture`, inside which a Metal
 terminal draws the same frame through Core Graphics. Printing and PDF output need no scope. A
 capture taken any other way (the UI-scenario evidence capture among them) still shows a glowing
-terminal empty. `TerminalGlowRendererTests` covers the switch and the snapshot; SwiftTerm's
+terminal empty. The Metal surface covers the whole terminal, so both surfaces return nil from
+`hitTest(_:)` and a click lands on the terminal itself. AppKit makes the view a click lands on
+first responder only if that view accepts it. While the surface took the click, a glowing
+terminal could not be clicked back into focus once a button or the sidebar had the keyboard, and
+only switching chats, which focuses the attached terminal in code, gave it back. The surface also
+answered `acceptsFirstMouse`, so the first click on an inactive window did not reach the terminal.
+`TerminalGlowRendererTests` covers the switch, the snapshot and the click; SwiftTerm's
 `MetalTextGlowTests` the layout bounds, the release and both surfaces' captures, and
 `MetalSurfaceParityTests` that the halo lands only within its reach of the text that cast it, on
 both buffering modes.
