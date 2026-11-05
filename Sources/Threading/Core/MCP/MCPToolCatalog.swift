@@ -418,26 +418,28 @@ enum MCPToolCatalog {
     id: "device-log",
     family: .deviceLog,
     title: "Device logs",
-    summary: "Open shared Device Logs or discover Bluetooth packet tools for a paired iPhone.",
+    summary: "Configure and read shared Device Logs or Bluetooth packets in the user's panel.",
     symbol: "list.bullet.rectangle",
     tools: [],
     instruction: """
       When the user wants to see what an iOS app is actually saying, use Threading's Device logs \
-      pane rather than telling them to open Xcode or Console. Start with device_log_prepare: it \
-      reveals the pane and returns capture/setup guidance and an optional tap build setting.
+      pane. Start with device_logs action:state; it opens the panel without preparing a tap and \
+      remains available even when newly loaded plugin tools do not appear in your tool list.
 
-      Use plugin__devicelogs__state/configure/read/wait/reveal to inspect and control the same \
-      Regular Logs panel the user sees. Configure once, then read or wait with its revision and \
-      cursor; manual filter changes remain authoritative. Capture availability depends on the \
+      Whenever you choose or change filters while investigating logs, apply them first with \
+      device_logs action:configure so the user sees the same selection. Use exact identities from \
+      state, check the returned source/filter/capture status, then read or wait with its revision \
+      and cursor. Explain the selection briefly and reveal exact row IDs when citing evidence. \
+      Manual filter changes remain authoritative. If a separate reader is needed, explain its \
+      different coverage and mirror supported filters in the panel. Capture availability depends on the \
       source: unified logs do not automatically include print()/stdout/stderr, while an app-console \
       route may provide merged console output. Preparing a tap alone does not change a running app. \
-      If a tap is needed, add its returned OTHER_LDFLAGS as a command-line xcodebuild setting, \
+      If a tap is needed, call device_log_prepare and add its returned OTHER_LDFLAGS as a command-line xcodebuild setting, \
       since a target can override an xcconfig, then rebuild/reinstall and verify received entries.
 
-      For the Bluetooth panel, discover plugin__devicelogs__bluetooth_state, bluetooth_configure, \
-      bluetooth_read, bluetooth_wait and bluetooth_reveal. They target Bluetooth explicitly and \
-      share its packet filter and buffer. If the plugin tools are absent, device_log_prepare loads \
-      the log plugin; discover its tools again. Bluetooth captures phone-wide HCI packets, needs \
+      For Bluetooth use device_logs with stream:bluetooth and the same actions. The dynamically \
+      published plugin__devicelogs__ tools remain equivalent routes when available. \
+      Bluetooth captures phone-wide HCI packets, needs \
       a paired phone and Apple's logging profile, and does not require an app stdout tap. Check \
       capture state and received rows; an open tab or successful start alone proves neither.
       """

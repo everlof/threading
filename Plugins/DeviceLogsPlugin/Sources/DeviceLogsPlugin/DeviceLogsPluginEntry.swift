@@ -160,7 +160,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 detail: "Search, focus and fold the live log stream",
                 symbol: "list.bullet.rectangle",
                 summary: """
-                    Search everything the selected Device Logs tab has recorded, including rows that have scrolled out of view. Regular Logs and Bluetooth have separate histories. Substring match, case-insensitive. Use it to find out what the app under development actually printed rather than guessing.
+                    Search recorded history in the selected Device Logs tab, including rows no longer retained in the live buffer. Regular Logs and Bluetooth have separate histories. Substring match, case-insensitive. This does not change the visible filter. For a live investigation, configure the shared panel first and use read/wait so the user sees your selection; use this tool when you specifically need recorded history and explain that different scope.
                     """,
                 inputSchemaJSON: """
                     {"type":"object","properties":{ "text":{"type":"string","description":"Substring to look for."}, "limit":{"type":"integer","description":"Rows to return, newest last."}}, "required":["text"]}

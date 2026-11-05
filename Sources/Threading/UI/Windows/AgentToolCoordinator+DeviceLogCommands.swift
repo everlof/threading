@@ -3,6 +3,22 @@ import Foundation
 @MainActor
 extension AgentToolCoordinator {
 
+    func deviceLogs(
+        _ arguments: DeviceLogsArguments, for sessionID: SessionID,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        if let failure = DeviceLogPanelToolRouter.admissionFailure { completion(failure); return }
+        let pane = arguments.stream == .bluetooth
+            ? displayPaneController.activateBluetoothLog(for: sessionID)
+            : displayPaneController.activateDeviceLog(for: sessionID)
+        guard let pane else {
+            completion(.failure("Device Logs could not be opened for this session."))
+            return
+        }
+        revealDisplayPane(for: sessionID)
+        DeviceLogPanelToolRouter.invoke(arguments, for: sessionID, in: pane, completion: completion)
+    }
+
     /// Reveal the live log pane and return how to make the app under development say anything.
     /// The build stays the agent's own command, for the reason `simulator-pane.md` gives about
     /// `xcodebuild`. The *linked* tap additionally needs the user's own decision: it changes what

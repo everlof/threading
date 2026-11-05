@@ -4412,14 +4412,18 @@ them with `output_truncated` too. Patterns are limited to 512 UTF-8 bytes. Diffe
 levels combine with OR. Reads include the context rows and expanded folds currently shown when
 **Show context** is active, with the scope stated in the returned panel state.
 
-Agents use that same panel through `plugin__devicelogs__state`, `configure`, `read`, `wait` and
-`reveal` (each has the `plugin__devicelogs__` prefix). An agent can select the exact device and app,
+Agents use that same panel through `device_logs`, with actions `state`, `configure`, `read`,
+`wait` and `reveal`. This tool opens the panel and works even when the agent cannot discover tools
+from a newly loaded plugin. Agents are instructed to configure the visible panel whenever they
+choose or change a log filter, explain their selection, and highlight the rows they cite.
+Ordinary inspection needs no log-tap setup. The older `plugin__devicelogs__` tools remain available.
+An agent can select the exact device and app,
 set a filter once, read structured matching entries, wait for new matches, then highlight the
 exact rows it cites. The visible controls move with agent changes. Your manual edits are
 immediately authoritative; an agent using an old revision gets a refusal instead of overwriting
 them. Reads and waits leave the scroll position alone; reveal deliberately selects and scrolls
-to stable row identities. These tools use **Device Logs**, even if the separate Bluetooth tab
-was last selected. An agent can request **Rescan** through `state` with `refresh: true` after
+to stable row identities. The actions default to **Device Logs**, even if the separate Bluetooth
+tab was last selected; `stream: "bluetooth"` explicitly targets Bluetooth instead. An agent can request **Rescan** through `state` with `refresh: true` after
 connecting a device or installing/restarting an app, then inspect catalog freshness while discovery
 finishes. See the [tool contract](docs/device-log-tools.md) for arguments and examples.
 

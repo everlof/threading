@@ -297,6 +297,16 @@ final class NativePluginPaneViewController: NSViewController {
         loadViewContents()
     }
 
+    /// A section shares its owner's runtime registration, including across dock groups.
+    var toolOwner: NativePluginPaneViewController { sectionOwner ?? self }
+
+    /// Join the existing verification task. Installation/approval stays explicit in the pane;
+    /// callers inspect loaded/refusal afterward and never queue a mutation for a later install.
+    func waitForInitialLoad() async {
+        _ = view
+        await toolOwner.loadTask?.value
+    }
+
     private func loadViewContents() {
         if let sectionOwner {
             _ = sectionOwner.view

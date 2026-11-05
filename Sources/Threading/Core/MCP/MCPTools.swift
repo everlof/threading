@@ -6662,6 +6662,7 @@ enum MCPTools {
         required: []
       )
     ),
+    DeviceLogsToolDefinition.definition,
     MCPToolDefinition(
       tool: .deviceLogPrepare,
       name: "device_log_prepare",
@@ -6686,15 +6687,15 @@ enum MCPTools {
       },
       description: """
         Reveal this session's shared Device Logs panel and return truthful capture availability \
-        guidance plus the optional stdout/stderr tap's build or launch setting. Use the plugin's \
-        state/configure/read/wait/reveal tools to work with the same panel filter the user sees. \
+        guidance plus the optional stdout/stderr tap's build or launch setting. For ordinary log \
+        inspection, start with device_logs action:state; it opens the shared panel without tap \
+        preparation. Whenever you choose filters, use device_logs action:configure before read/wait \
+        so the user sees the same selection. This stable tool does not require plugin rediscovery. \
         Unified logs, app-console output and saved app logs are distinct sources; ordinary print() \
         does not reach unified logs automatically. Preparing the tap alone does not instrument or \
         relaunch an app. Apply the returned setting to your own build/launch, then verify received \
         output in the panel. Linking the tap into a device app requires the user's consent.
-        This also loads the plugin's Bluetooth packet tools: discover bluetooth_state, \
-        bluetooth_configure, bluetooth_read, bluetooth_wait and bluetooth_reveal afterward. \
-        Bluetooth HCI capture does not use the app stdout tap.
+        Bluetooth HCI capture uses device_logs with stream:bluetooth and does not use the app stdout tap.
         """,
       inputSchema: MCPInputSchema(
         properties: [

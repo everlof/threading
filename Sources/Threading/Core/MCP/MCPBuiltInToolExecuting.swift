@@ -163,6 +163,10 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
 
+  func deviceLogs(
+    _ arguments: DeviceLogsArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
   func deviceLogPrepare(
     _ arguments: DeviceLogPrepareArguments, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void

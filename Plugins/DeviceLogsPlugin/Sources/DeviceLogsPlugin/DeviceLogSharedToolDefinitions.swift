@@ -67,7 +67,7 @@ enum DeviceLogSharedToolDefinitions {
         default:
             operation = "Reveal the exact row_id from bluetooth_read or bluetooth_wait in the Bluetooth panel. Optional through_row_id selects an inclusive range of at most 200 capture rows. Missing/filtered/evicted rows and stale expected_revision are refused. This deliberately changes scroll and selection; reads do not."
         }
-        return operation + " Targets this session's Bluetooth stream regardless of the selected tab; the person sees the same filter. Capture is phone-wide HCI traffic, not app stdout. Starting capture does not prove packets arrived."
+        return operation + " Whenever you choose or change a filter, apply it with bluetooth_configure before reading so the user can follow your selection. Targets this session's Bluetooth stream regardless of the selected tab; the person sees the same filter. Capture is phone-wide HCI traffic, not app stdout. Starting capture does not prove packets arrived."
     }
 
     static let names: Set<String> = [
@@ -172,7 +172,9 @@ enum DeviceLogSharedToolDefinitions {
     private static func tool(_ name: String, symbol: String, summary: String, schema: String) -> PluginTool {
         PluginTool(
             name: name, title: "Device logs", detail: "Read and control this session's shared log panel",
-            symbol: symbol, summary: summary, inputSchemaJSON: schema, paneSectionToReveal: "regular"
+            symbol: symbol,
+            summary: summary + " Whenever you choose or change a filter, apply it with configure before reading so the user can follow your selection. Check the returned state; reveal exact row IDs when citing evidence.",
+            inputSchemaJSON: schema, paneSectionToReveal: "regular"
         )
     }
 }

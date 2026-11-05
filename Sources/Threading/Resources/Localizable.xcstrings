@@ -17168,6 +17168,28 @@
         }
       }
     },
+    "Configure and read shared Device Logs or Bluetooth packets in the user's panel." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurera och läs delade enhetsloggar eller Bluetooth-paket i användarens panel."
+          }
+        }
+      }
+    },
+    "Configure and read the same log panel the user sees." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurera och läs samma loggpanel som användaren ser."
+          }
+        }
+      }
+    },
     "Configure the sandbox for shell commands" : {
       "extractionState" : "manual",
       "localizations" : {

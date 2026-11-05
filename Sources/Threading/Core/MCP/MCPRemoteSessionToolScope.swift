@@ -44,7 +44,7 @@ enum MCPRemoteSessionToolScope {
 
         // A simulator and a device log are this Mac's; an app a Linux host built cannot be
         // installed on either, and there is nothing to inspect without one.
-        case .deviceLogPrepare, .simulatorPrepare, .simulatorInstallLaunch, .simulatorScreenshot,
+        case .deviceLogPrepare, .deviceLogs, .simulatorPrepare, .simulatorInstallLaunch, .simulatorScreenshot,
              .simulatorSnapshot, .simulatorAnnotations, .simulatorWait, .simulatorTap, .simulatorSwipe,
              .simulatorTypeText, .simulatorPressButton, .simulatorScenario, .listIOSDiagnosticDevices,
              .inspectIOSDiagnostics:

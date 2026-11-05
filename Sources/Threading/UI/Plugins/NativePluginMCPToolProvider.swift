@@ -67,11 +67,25 @@ final class NativePluginMCPToolProvider: MCPExternalToolProvider {
         for sessionID: SessionID,
         completion: @escaping (MCPExternalToolResponse) -> Void
     ) -> Bool {
+        invokeTool(named: name, arguments: arguments, for: sessionID, in: nil, completion: completion)
+    }
+
+    /// A built-in panel route already resolved its owner. Keep that identity through dispatch,
+    /// even if another window has the same plugin/session or another plugin has the same suffix.
+    @discardableResult
+    func invokeTool(
+        named name: String,
+        arguments: MCPJSONValue,
+        for sessionID: SessionID,
+        in pane: NativePluginPaneViewController?,
+        completion: @escaping (MCPExternalToolResponse) -> Void
+    ) -> Bool {
         guard let parsed = Naming.split(name) else { return false }
         let match = NativePluginRuntime.shared.loaded().first { loaded in
             let identifier = loaded.plugin.pluginIdentifier
             return Naming.qualified(identifier: identifier, tool: parsed.tool) == name
                 && loaded.sessionID == sessionID
+                && (pane == nil || loaded.controller === pane?.toolOwner)
         }
         guard let match else {
             // The name is ours, so answering is ours too. A plugin whose pane is closed is a

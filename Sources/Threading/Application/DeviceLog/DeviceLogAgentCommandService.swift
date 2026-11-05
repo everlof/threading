@@ -52,7 +52,7 @@ enum DeviceLogAgentCommandService {
         .failure("""
             The user did not allow the log tap to be linked into their app.
 
-            Device Logs is revealed. Use plugin__devicelogs__state to inspect its selected source \
+            Device Logs is revealed. Use device_logs with action:state to inspect its selected source \
             and capture status. System-log capture can read available unified logs, subject to \
             privacy redaction, but it does not capture ordinary stdout/stderr automatically. A \
             separate app-console route may provide merged console output and may relaunch the app. \
@@ -77,11 +77,13 @@ enum DeviceLogAgentCommandService {
             Device Logs is revealed for this session. Follow any installation or setup status \
             in the pane; revealing it does not prove a reader is connected or that output arrived.
 
-            Use plugin__devicelogs__state to inspect the actual device/source, process choices, \
-            current filter and capture availability. Change that same visible panel with \
-            plugin__devicelogs__configure, then use plugin__devicelogs__read or \
-            plugin__devicelogs__wait without repeating filters. Pass returned stable row IDs to \
-            plugin__devicelogs__reveal to highlight the exact evidence for the user.
+            Use device_logs with action:state to inspect the actual device/source, process choices, \
+            current filter and capture availability. Whenever you choose or change a filter, apply \
+            it to the visible panel with action:configure, then use action:read or action:wait \
+            without repeating filters. Check the returned state and explain the selection briefly. \
+            Pass returned stable row IDs to action:reveal to highlight the exact evidence for the user. \
+            device_logs is available without rediscovering plugin tools; the plugin__devicelogs__ \
+            tools are equivalent routes when present.
 
             System logs include available os_log/Logger entries and may redact private values; \
             ordinary print()/stdout/stderr do not automatically reach the unified log. An app's \

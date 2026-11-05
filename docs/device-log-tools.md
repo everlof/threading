@@ -1,7 +1,26 @@
 # Shared Device Logs tools
 
-`device_log_prepare` opens this session's Device Logs pane and explains capture setup. The native
-plugin then contributes the tools below. Their full names have the `plugin__devicelogs__` prefix;
+Start with `device_logs` and `{"action":"state"}`. This built-in tool is advertised before the
+plugin loads, opens this session's Device Logs pane and joins its initial verification task.
+It works with clients that keep their initial tool list and do not discover newly loaded plugins.
+Resume an existing chat after updating Threading if its client has not picked up this new built-in tool.
+Use `action: "state" | "configure" | "read" | "wait" | "reveal"` and `stream: "regular"`
+(default) or `"bluetooth"`; put that action's parameters beside `action`, as in the examples below.
+No tap preparation is needed to inspect or filter logs. Installation, approval or load failures
+are reported without applying or queuing the requested parameters; complete the panel's setup
+and retry `action:state`. Both host and plugin tool-group settings remain authoritative.
+
+**Whenever you choose or change a filter for an investigation, configure the shared panel first.**
+Explain the selected app/source and filter briefly, inspect the returned state, then read/wait.
+Use the observed subsystem/category to exclude framework noise inside an app's process. Prefer a
+stable bundle identity over a PID when available. Use `clear_filter:true` for a new investigation
+to remove previous predicates before applying the new ones; omitted fields otherwise retain their
+values. Respect manual edits with `expected_revision`. Reveal exact returned row IDs when citing
+evidence. If a separate capture route is necessary, explain its different coverage and mirror
+supported filters in the panel; do not imply that both readers contain identical rows.
+
+`device_log_prepare` is for optional stdout/stderr tap setup. The native plugin also contributes
+equivalent tools below. Their full names have the `plugin__devicelogs__` prefix;
 they act on the session-owned **Regular Logs** pane, including a pane moved into the drawer or
 dock. They use the pane's live buffer and its actual filter. The separate legacy `search` and
 `time_range` tools still query recorded history.
@@ -61,10 +80,10 @@ records the regex bounds. The panel's regex projection has a cooperative 250 ms 
 For example, after reading state, configure once:
 
 ```json
-{"device_id":"<device from state>","bundle_id":"com.example.chameleon","text":"AirLab","text_mode":"literal","follow":false,"expected_revision":12}
+{"action":"configure","device_id":"<device from state>","bundle_id":"com.example.chameleon","clear_filter":true,"text":"AirLab","text_mode":"literal","follow":true,"paused":false,"expected_revision":12}
 ```
 
-Then call `plugin__devicelogs__read` with `{"limit":50}`. Continue with its returned `cursor`.
+Then call `device_logs` with `{"action":"read","limit":50}`. Continue with its returned `cursor`.
 Use the same cursor with `wait` to observe the next events, and send returned row identities to
 `reveal`. Read and wait accept no repeated device/app/text filters and do not move the scroll
 position. A changed filter or replaced source rebases the cursor to the current retained buffer

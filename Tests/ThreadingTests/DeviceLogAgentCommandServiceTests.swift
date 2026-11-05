@@ -7,7 +7,7 @@ final class DeviceLogAgentCommandServiceTests: XCTestCase {
         let result = DeviceLogAgentCommandService.preparationResult(for: built)
         XCTAssertFalse(result.isError)
         for phrase in ["does not prove", "merged console", "redact private values", "rebuild/reinstall", "do not upgrade automatically",
-                       "plugin__devicelogs__state", "plugin__devicelogs__configure", "plugin__devicelogs__wait"] {
+                       "device_logs", "action:state", "action:configure", "action:wait", "without rediscovering"] {
             XCTAssertTrue(result.text.contains(phrase), "missing \(phrase)")
         }
         XCTAssertTrue(result.text.contains("OTHER_LDFLAGS='$(inherited)"))

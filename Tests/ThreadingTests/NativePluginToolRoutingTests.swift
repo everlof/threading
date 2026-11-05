@@ -12,7 +12,7 @@ import ThreadingPluginKit
 /// loads the shipped bundle, registers it the way a pane does, and asks the provider the questions
 /// the MCP dispatcher asks.
 @MainActor
-final class NativePluginToolRoutingTests: XCTestCase {
+final class NativePluginToolRoutingTests: HostedStoreTestCase {
 
     private var controller: NativePluginPaneViewController?
 
@@ -29,10 +29,7 @@ final class NativePluginToolRoutingTests: XCTestCase {
             "Threading ships no Device Logs plugin — Contents/PlugIns is empty"
         )
         let pane = NativePluginPaneViewController(bundleURL: bundle, owningSessionID: sessionID)
-        _ = pane.view                        // loadView is what loads and registers the plugin
-        for _ in 0..<200 where pane.loaded == nil && pane.refusal == nil {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await pane.waitForInitialLoad()
         controller = pane
         XCTAssertNil(pane.refusal, "the shipped plugin was refused: \(String(describing: pane.refusal))")
         return pane
@@ -65,6 +62,150 @@ final class NativePluginToolRoutingTests: XCTestCase {
             XCTAssertEqual(schema["type"], .string("object"), "\(tool.name)")
             XCTAssertFalse(tool.description.isEmpty, "\(tool.name) tells the agent nothing")
         }
+    }
+
+    func testStableDeviceLogsSchemaCoversEverySharedPluginParameter() async throws {
+        let pane = try await openPane(for: SessionID())
+        let tools = try XCTUnwrap(pane.loaded?.pluginTools)
+        let actions: Set<String> = ["state", "configure", "read", "wait", "reveal"]
+        var parameterTypes: [String: String] = [:]
+        for tool in tools where actions.contains(tool.name) || actions.contains(String(tool.name.dropFirst("bluetooth_".count))) {
+            let schema = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(tool.inputSchemaJSON.utf8)) as? [String: Any])
+            let properties = try XCTUnwrap(schema["properties"] as? [String: [String: Any]])
+            for (name, value) in properties { parameterTypes[name] = try XCTUnwrap(value["type"] as? String) }
+        }
+        let advertised = DeviceLogsToolDefinition.properties.filter { !["action", "stream"].contains($0.key) }
+        XCTAssertEqual(Set(advertised.keys), Set(parameterTypes.keys))
+        for (name, property) in advertised {
+            let type = try JSONDecoder().decode(String.self, from: JSONEncoder().encode(property.type))
+            XCTAssertEqual(type, parameterTypes[name], name)
+        }
+    }
+
+    func testStableDeviceLogsRouteJoinsColdLoadAndUsesTheVisibleSharedPanel() async throws {
+        let sessionID = SessionID()
+        let bundle = try XCTUnwrap(NativePluginCatalog.deviceLogsBundle)
+        let pane = NativePluginPaneViewController(bundleURL: bundle, owningSessionID: sessionID)
+        controller = pane
+        var sections: [String] = []
+        pane.onRevealSection = { sections.append($0); return true }
+
+        func call(_ json: String) async throws -> [String: Any] {
+            let arguments = try JSONDecoder().decode(DeviceLogsArguments.self, from: Data(json.utf8))
+            let answered = expectation(description: json)
+            var response: MCPToolResult?
+            DeviceLogPanelToolRouter.invoke(arguments, for: sessionID, in: pane) {
+                response = $0
+                answered.fulfill()
+            }
+            await fulfillment(of: [answered], timeout: 10)
+            let result = try XCTUnwrap(response)
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.text.utf8)) as? [String: Any], result.text)
+        }
+
+        XCTAssertNil(pane.loaded)
+        let cold = try await call(#"{"action":"state"}"#)
+        XCTAssertNotNil(pane.loaded)
+        XCTAssertEqual(cold["stream"] as? String, "regular")
+        let plugin = try XCTUnwrap(pane.loaded as? NSObject)
+        plugin.perform(NSSelectorFromString("installSharedDeviceLogsForTesting"))
+        let configured = try await call(#"{"action":"configure","clear_filter":true,"bundle_id":"com.example.chameleon","text":"AirLab","follow":false}"#)
+        let revision = try XCTUnwrap(configured["revision"] as? Int)
+        let read = try await call("{\"action\":\"read\",\"expected_revision\":\(revision)}")
+        XCTAssertEqual((read["rows"] as? [[String: Any]])?.compactMap { $0["id"] as? String },
+                       ["shared-log-tx-ns", "shared-log-rx-cp", "shared-log-tx-ds"])
+        let revealed = try await call(#"{"action":"reveal","row_id":"shared-log-rx-cp"}"#)
+        XCTAssertEqual(revealed["status"] as? String, "ok")
+        let changed = try await call(#"{"action":"configure","text":"ANCS"}"#)
+        let stale = try await call("{\"action\":\"configure\",\"text\":\"overwrite\",\"expected_revision\":\(revision)}")
+        XCTAssertEqual(stale["status"] as? String, "stale_revision")
+        XCTAssertEqual(stale["revision"] as? Int, changed["revision"] as? Int)
+        let rejected = try await call(#"{"action":"read","text":"hidden filter"}"#)
+        XCTAssertEqual(rejected["status"] as? String, "invalid_arguments")
+        let bluetooth = try await call(#"{"action":"state","stream":"bluetooth"}"#)
+        XCTAssertEqual(bluetooth["stream"] as? String, "bluetooth")
+        XCTAssertEqual(sections.last, "bluetooth")
+        XCTAssertTrue(sections.dropLast().allSatisfy { $0 == "regular" })
+        let regular = try await call(#"{"action":"read"}"#)
+        XCTAssertEqual(regular["stream"] as? String, "regular")
+        XCTAssertEqual((regular["rows"] as? [[String: Any]])?.compactMap { $0["id"] as? String }, ["shared-log-rx-cp"])
+        let cursor = try XCTUnwrap(regular["cursor"] as? String)
+        let waiting = try await call("{\"action\":\"wait\",\"cursor\":\"\(cursor)\",\"timeout_seconds\":0}")
+        XCTAssertNil(waiting["error"])
+        XCTAssertEqual(waiting["count"] as? Int, 0)
+        XCTAssertEqual(waiting["stream"] as? String, "regular")
+        XCTAssertEqual(sections.last, "regular")
+    }
+
+    func testStableDeviceLogsRouteCannotBypassDisabledPluginTools() async throws {
+        let sessionID = SessionID()
+        let pane = NativePluginPaneViewController(
+            bundleURL: try XCTUnwrap(NativePluginCatalog.deviceLogsBundle), owningSessionID: sessionID
+        )
+        let group = NativePluginManagedOffer.deviceLogs.identifier
+        let wasEnabled = AppSettings.shared.isToolGroupEnabled(group)
+        AppSettings.shared.setToolGroup(group, enabled: false)
+        defer { AppSettings.shared.setToolGroup(group, enabled: wasEnabled) }
+        let args = try JSONDecoder().decode(DeviceLogsArguments.self, from: Data(#"{"action":"state"}"#.utf8))
+        var response: MCPToolResult?
+        DeviceLogPanelToolRouter.invoke(args, for: sessionID, in: pane) { response = $0 }
+        XCTAssertTrue(try XCTUnwrap(response).isError)
+        XCTAssertFalse(pane.isViewLoaded, "a disabled group must not open or load its pane")
+    }
+
+    func testStableDeviceLogsRouteKeepsTheExactOwnerAcrossWindows() async throws {
+        let sessionID = SessionID()
+        let first = try await openPane(for: sessionID)
+        let second = NativePluginPaneViewController(bundleURL: first.bundleURL, owningSessionID: sessionID)
+        await second.waitForInitialLoad()
+        defer { NativePluginRuntime.shared.deregister(second) }
+        for pane in [first, second] {
+            let plugin = try XCTUnwrap(pane.loaded as? NSObject)
+            plugin.perform(NSSelectorFromString("installSharedDeviceLogsForTesting"))
+            pane.onRevealSection = { _ in true }
+        }
+        func call(_ json: String, in pane: NativePluginPaneViewController) async throws -> [String: Any] {
+            let args = try JSONDecoder().decode(DeviceLogsArguments.self, from: Data(json.utf8))
+            let answered = expectation(description: json)
+            var response: MCPToolResult?
+            DeviceLogPanelToolRouter.invoke(args, for: sessionID, in: pane) { response = $0; answered.fulfill() }
+            await fulfillment(of: [answered], timeout: 10)
+            let result = try XCTUnwrap(response)
+            XCTAssertFalse(result.isError, result.text)
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.text.utf8)) as? [String: Any])
+        }
+        _ = try await call(#"{"action":"configure","clear_filter":true,"text":"ANCS"}"#, in: first)
+        _ = try await call(#"{"action":"configure","clear_filter":true,"text":"AirLab"}"#, in: second)
+        let firstRead = try await call(#"{"action":"read"}"#, in: first)
+        let secondRead = try await call(#"{"action":"read"}"#, in: second)
+        XCTAssertEqual((firstRead["rows"] as? [[String: Any]])?.count, 1)
+        XCTAssertEqual((secondRead["rows"] as? [[String: Any]])?.count, 3)
+    }
+
+    func testStableDeviceLogsRouteReportsLoadFailureAndRejectsAnotherSessionsPane() async throws {
+        let sessionID = SessionID()
+        let pane = NativePluginPaneViewController(
+            bundleURL: URL(fileURLWithPath: "/tmp/device-log-refused-fixture.bundle"),
+            owningSessionID: sessionID, resolveStore: { nil },
+            loadPlugin: { _ in .failure(.wrongProtocol) }
+        )
+        let args = try JSONDecoder().decode(DeviceLogsArguments.self, from: Data(#"{"action":"configure","text":"needle"}"#.utf8))
+        var wrongSession: MCPToolResult?
+        DeviceLogPanelToolRouter.invoke(args, for: SessionID(), in: pane) { wrongSession = $0 }
+        XCTAssertTrue(try XCTUnwrap(wrongSession).isError)
+        XCTAssertFalse(pane.isViewLoaded)
+
+        let answered = expectation(description: "load refusal")
+        var failure: MCPToolResult?
+        DeviceLogPanelToolRouter.invoke(args, for: sessionID, in: pane) {
+            failure = $0
+            answered.fulfill()
+        }
+        await fulfillment(of: [answered], timeout: 5)
+        let result = try XCTUnwrap(failure)
+        XCTAssertTrue(result.isError)
+        XCTAssertTrue(result.text.contains("No panel parameters were applied"), result.text)
+        XCTAssertNil(pane.loaded)
     }
 
     func testACallReachesThePluginAndComesBack() async throws {

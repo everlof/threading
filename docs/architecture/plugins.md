@@ -584,6 +584,23 @@ reloading the plugin.
 
 ### One Device Logs view for people and agents
 
+`device_logs` is the stable built-in entry point for state/configure/read/wait/reveal, with an
+explicit regular/Bluetooth stream. Some clients keep the initial tool list even after the host
+announces a plugin load, so ordinary log work must not depend on rediscovering plugin tools.
+The host opens the existing session section, joins its existing verification task, checks both
+tool-group settings, then invokes the plugin's declared tool through the ordinary provider.
+The plugin still owns argument validation, revisions, filters, capture and row selection. The
+host façade's parameter types are checked against the shipped plugin's schemas. It neither
+prepares a tap nor queues a mutation across installation/approval; unavailable setup returns a
+failure and the caller retries state after setup. Dynamic plugin tools remain compatible.
+
+Tool guidance requires applying each investigative filter to the shared panel before reading,
+checking the actual returned state, explaining the selection and revealing cited row identities.
+Separate-reader fallbacks disclose their different coverage and mirror supported panel filters.
+This is an extension of the existing native-plugin surface, with unchanged host ownership of
+session authority, trust, placement, device execution and tap consent. It adds one fixed tool
+declaration and routing metadata per call; capture/query bounds and viewport behavior are unchanged.
+
 Bluetooth uses `bluetooth_state`, `bluetooth_configure`, `bluetooth_read`, `bluetooth_wait` and
 `bluetooth_reveal`, generated from the same bounded tool contract and routed to the Bluetooth
 controller explicitly. Each declaration reveals the `bluetooth` host section; the regular names

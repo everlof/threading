@@ -464,6 +464,14 @@ connection first, plugin load second, notification, relisting and live group rem
 The SSE handshake includes an initial comment so streaming HTTP clients finish opening the
 channel before the first notification; it carries no JSON-RPC message.
 
+For Device Logs, `device_logs` also provides a stable built-in route present before any plugin
+loads. `DeviceLogPanelToolRouter` opens no independent capture: the coordinator reveals the
+session's existing regular/Bluetooth section and the router joins initial verification before
+forwarding state/configure/read/wait/reveal to the declared plugin tool. This handles clients
+that do not refresh their initial tool list despite notifications. Both tool-group settings
+remain enforced. `device_log_prepare` remains the optional tap-preparation path; ordinary panel
+inspection does not need tap consent. See [plugins.md](plugins.md#one-device-logs-view-for-people-and-agents).
+
 `MCPToolCall` remains only as a compatibility alias at the transport boundary.
 `AgentToolCoordinator` implements the narrow typed execution protocol and common observation
 policy, while capability extensions own project, display, panel, extension-authoring,
