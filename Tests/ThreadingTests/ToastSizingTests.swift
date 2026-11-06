@@ -88,6 +88,32 @@ final class ToastSizingTests: XCTestCase {
         XCTAssertEqual(toast.request.detail, report)
     }
 
+    func testBothCheckoutOfferActionsFitAtTheMinimumSidebarWidth() throws {
+        for theme in [.system, AppThemeStyles.cyberpunk, AppThemeStyles.swissMinimalist,
+                      AppThemeStyles.claymorphism, AppThemeStyles.win98] {
+            AppThemePalette.set(theme)
+            let (host, presenter, window) = pane(width: SidebarDefaults.minWidth)
+            defer { presenter.invalidate() }
+            presenter.present(SessionCoordinator.observedMoveOfferToast(
+                for: AgentSession(kind: .codex, title: "VERIFICATION"),
+                checkout: ObservedCheckout(root: "/fixture/sonda", worktreeIdentity: "sonda",
+                                           repositoryIdentity: "fixture", branch: "sonda",
+                                           displayName: "sonda-746-q1"),
+                move: {}, mute: {}, muteAll: {}
+            ))
+            host.layoutSubtreeIfNeeded()
+            let toast = try XCTUnwrap(presenter.current)
+            let buttons = descendants(in: toast).compactMap { $0 as? ThemedButton }
+            XCTAssertEqual(buttons.count, 2)
+            for button in buttons {
+                XCTAssertTrue(toast.bounds.contains(button.convert(button.bounds, to: toast)), theme.name)
+                // AppKit can align a fractional symbol width down by half a point.
+                XCTAssertGreaterThanOrEqual(button.frame.width, button.intrinsicContentSize.width - 0.5, theme.name)
+            }
+            XCTAssertFalse(window.isVisible)
+        }
+    }
+
     /// A line cap alone still hands AppKit the complete input. Include a single enormous
     /// grapheme as well as ordinary prose so the preparation bound is in scalars, not letters.
     func testLargeInputsAreBoundedBeforeTextLayout() throws {

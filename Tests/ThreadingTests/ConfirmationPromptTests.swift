@@ -82,6 +82,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "connectTriggerSource",
             "approveTriggerActivation",
             "approveWorkroomOpening",
+            "extendWorkroomInvitation",
             "changeWorkerBudget",
             "changeMailAccess",
             "shareChatLink",

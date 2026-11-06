@@ -109,7 +109,7 @@ with log_path.open('w') as log:
         new_session = next(item for item in descendants() if item.get_accessible_id() == 'linux.placeholder.action')
         assert title.get_accessible_id() == 'linux.composer.greeting' and title.get_name()
         assert new_session.get_name() == 'Start Session'
-        assert new_session.get_role_name() == 'push button'
+        assert new_session.get_role() == Atspi.Role.PUSH_BUTTON
         assert new_session.get_accessible_id() == 'linux.placeholder.action'
         assert new_session.get_action_iface().get_n_actions() == 0
         assert not new_session.get_state_set().contains(Atspi.StateType.ENABLED)
@@ -122,7 +122,7 @@ with log_path.open('w') as log:
                 and 0 <= action_bounds.y < 480
                 and action_bounds.y + action_bounds.height <= 480), \
             action_bounds
-        assert button.get_role_name() == 'push button'
+        assert button.get_role() == Atspi.Role.PUSH_BUTTON
         assert button.get_state_set().contains(Atspi.StateType.ENABLED)
         bounds = button.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
         pane_bounds = listing().get_component_iface().get_extents(Atspi.CoordType.WINDOW)
@@ -132,7 +132,7 @@ with log_path.open('w') as log:
         add_project = eventually(lambda: next((item for item in descendants()
                                                if item.get_accessible_id() == 'linux.add-project'), None),
                                  'Add project control')
-        assert add_project.get_role_name() == 'push button'
+        assert add_project.get_role() == Atspi.Role.PUSH_BUTTON
         assert add_project.get_name() == 'Add Project'
         assert add_project.get_state_set().contains(Atspi.StateType.ENABLED)
         add_bounds = add_project.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
@@ -162,7 +162,7 @@ with log_path.open('w') as log:
         eventually(lambda: listing().get_name() == normal_name, 'Actions menu close')
         project_row = listing().get_child_at_index(0)
         project_button = project_row.get_child_at_index(1)
-        assert project_button.get_role_name() == 'push button'
+        assert project_button.get_role() == Atspi.Role.PUSH_BUTTON
         assert project_button.get_name() == 'Project actions'
         assert project_button.get_accessible_id() == (
             'sidebar.project.actions.' + project_row.get_accessible_id())
@@ -174,7 +174,7 @@ with log_path.open('w') as log:
         eventually(lambda: listing().get_name() == normal_name, 'project-row menu close')
         project_row = listing().get_child_at_index(0)
         create_button = project_row.get_child_at_index(0)
-        assert create_button.get_role_name() == 'push button'
+        assert create_button.get_role() == Atspi.Role.PUSH_BUTTON
         assert create_button.get_name() == 'New chat or terminal'
         assert create_button.get_accessible_id() == (
             'sidebar.project.create.' + project_row.get_accessible_id())

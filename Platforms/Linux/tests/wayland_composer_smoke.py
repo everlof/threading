@@ -3,6 +3,7 @@ import base64
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import sqlite3
 import struct
@@ -298,7 +299,7 @@ try:
         eventually(lambda: child_input.is_file(), 'terminal received post-launch input')
         assert child_input.read_bytes() == b'q', child_input.read_bytes()
         protocol = log_path.read_text()
-        assert 'wl_keyboard@' in protocol and '.key(' in protocol, 'no Wayland keyboard delivery'
+        assert re.search(r'\bwl_keyboard[@#]\d+\.key\(', protocol), 'no Wayland keyboard delivery'
         assert '.axis(' in protocol and '.axis_source(' in protocol and '.axis_stop(' in protocol, (
             'no compositor scroll/stop delivery')
         print('PASS installed Wayland Unicode composer, wheel and smooth scrolling, '

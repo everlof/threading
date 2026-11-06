@@ -9,10 +9,15 @@ mode=${1:-render}
 }
 mkdir -p out
 evidence=$(mktemp -d "$PWD/out/wayland-smoke.XXXXXXXX")
-package=${THREADING_WAYLAND_PACKAGE:-$PWD/out/threading-linux-preview-ubuntu24.04-arm64.deb}
+architecture=${THREADING_LINUX_ARCH:-arm64}
+[[ $architecture == arm64 || $architecture == amd64 ]] || {
+  echo 'wayland-smoke: architecture must be arm64 or amd64' >&2; exit 64;
+}
+runtime_image=${THREADING_LINUX_RUNTIME_IMAGE:-ubuntu:24.04}
+package=${THREADING_WAYLAND_PACKAGE:-$PWD/out/threading-linux-preview-ubuntu24.04-$architecture.deb}
 [[ -f $package ]] || { echo "missing Wayland package: $package" >&2; exit 1; }
 printf 'Wayland evidence: %s\n' "$evidence"
-docker run --rm -i --platform linux/arm64 \
+docker run --rm -i --platform "linux/$architecture" \
   -e "THREADING_WAYLAND_SMOKE_MODE=$mode" \
   -e THREADING_WAYLAND_CAIRO_PLUGIN \
   -e SDL_VIDEO_WAYLAND_PREFER_LIBDECOR \
@@ -24,13 +29,19 @@ docker run --rm -i --platform linux/arm64 \
   -v "$PWD/tests/wayland_input_module.c:/wayland_input_module.c:ro" \
   -v "$PWD/tests/wayland_input_smoke.py:/wayland_input_smoke.py:ro" \
   -v "$PWD/tests/wayland_composer_smoke.py:/wayland_composer_smoke.py:ro" \
-  -v "$evidence:/evidence" ubuntu:24.04 bash -s <<'RUN'
+  -v "$evidence:/evidence" "$runtime_image" bash -s <<'RUN'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
 apt-get update -qq >/dev/null
+source /etc/os-release
+case ${VERSION_ID:-} in
+  24.04) weston_module=libweston-13 ;;
+  26.04) weston_module=libweston-14 ;;
+  *) echo "Unsupported Weston test runtime: ${VERSION_ID:-unknown}" >&2; exit 1 ;;
+esac
 apt-get install -y -qq /preview.deb weston dbus-x11 python3-gi gir1.2-atspi-2.0 \
-  libsdl2-dev libweston-13-dev build-essential >/dev/null
-plugin=/usr/lib/aarch64-linux-gnu/libdecor/plugins-1/libdecor-cairo.so
+  libsdl2-dev "$weston_module-dev" build-essential >/dev/null
+plugin=/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/libdecor/plugins-1/libdecor-cairo.so
 packaged_plugin=/opt/threading-linux-preview/libdecor-cairo-only/libdecor-cairo.so
 test -L "$packaged_plugin"
 test "$(readlink "$packaged_plugin")" = "$plugin"
@@ -49,8 +60,11 @@ test -x /usr/bin/wl-copy
 test -z "$(command -v swift || true)"
 cc -shared -fPIC -O2 -Wall -Wextra -o /tmp/wayland_capture.so \
   /wayland_capture.c -ldl -lSDL2
+# Weston is a system dependency. GCC 15 diagnoses its deprecated typedef attributes;
+# keep -Werror for our fixture without promoting diagnostics in the distro's headers.
 cc -shared -fPIC -O2 -Wall -Wextra -Werror -o /tmp/wayland_input_module.so \
-  /wayland_input_module.c $(pkg-config --cflags --libs libweston-13)
+  -isystem "$(pkg-config --variable=includedir "$weston_module")/$weston_module" \
+  /wayland_input_module.c $(pkg-config --cflags --libs "$weston_module")
 mkdir -p /tmp/xdg-run
 chmod 700 /tmp/xdg-run
 export XDG_RUNTIME_DIR=/tmp/xdg-run WAYLAND_DISPLAY=wayland-0 SDL_VIDEODRIVER=wayland
@@ -67,7 +81,7 @@ weston --backend=headless-backend.so --renderer=pixman --socket=wayland-0 \
 weston_pid=$!
 trap 'kill "$weston_pid" 2>/dev/null || true; wait "$weston_pid" 2>/dev/null || true' EXIT
 for ((attempt=0; attempt<100; attempt++)); do
-  [[ -S /tmp/xdg-run/wayland-0 ]] && break
+  [[ -S /tmp/xdg-run/wayland-0 && -S $THREADING_WESTON_INPUT_SOCKET ]] && break
   kill -0 "$weston_pid" || { cat /evidence/weston.log; exit 1; }
   sleep .1
 done

@@ -197,6 +197,8 @@ private func measured(_ text: String, scale: CGFloat = 1) -> TATMetrics {
     private(set) var changes = 0
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        precondition(NSAppearance.currentDrawing().name == effectiveAppearance.name,
+                     "appearance callbacks must resolve frozen layer colors in the new appearance")
         changes += 1
     }
 }

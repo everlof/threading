@@ -137,7 +137,10 @@ final class SidebarBackdropView: NSView, ThemedComponent, SystemChromeBoundary {
     private func apply() {
         #if os(Linux)
         fill.applySurface(fill: Design.Surface.background, radius: .fixed(0), bevel: .none)
-        gradientLayer.colors = SidebarAppearance.backgroundColors.map(\.cgColor)
+        // App-theme notifications can arrive outside an appearance callback or draw pass.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            gradientLayer.colors = SidebarAppearance.backgroundColors.map(\.cgColor)
+        }
         gradientLayer.locations = [0, 1]
         // The exported house gradient starts at the visible top of the sidebar.
         gradientLayer.startPoint = CGPoint(x: 0.5, y: 1)

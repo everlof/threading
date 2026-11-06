@@ -57,6 +57,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case includesAttachmentsOutsideProject
     case capturesPageBeforeAgentActions
     case sessionCheckoutAuthorityPolicy
+    case checkoutNoticesMuted
     case disabledToolGroupIDs
     case usesContainedExtensionLauncher
     case usesMCPStdioBridge
@@ -1043,6 +1044,11 @@ enum AppSettingDefinitions {
             ["checkout", "worktree", "move chat", "project", "approval"]
         )]
     )
+    static let checkoutNoticesMuted = AppSettingDescriptor<Bool>(
+        identity: .checkoutNoticesMuted,
+        persistenceKey: "checkoutNoticesMuted",
+        absence: .falseValue
+    )
     static let disabledToolGroupIDs = AppSettingDescriptor<[String]>(
         identity: .disabledToolGroupIDs,
         persistenceKey: "disabledToolGroupIDs",
@@ -1673,6 +1679,7 @@ enum AppSettingDefinitions {
         .init(silencesAllSounds), .init(disabledAttachmentDetectionAgentKinds),
         .init(includesAttachmentsOutsideProject), .init(capturesPageBeforeAgentActions),
         .init(sessionCheckoutAuthorityPolicy),
+        .init(checkoutNoticesMuted),
         .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),
         .init(usesMCPStdioBridge), .init(showsMainThreadStallHUD), .init(ptyHostEnabled),
         .init(developerRemoteHostBinaryDirectory),

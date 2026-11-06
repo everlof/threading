@@ -40,6 +40,7 @@ final class WorkroomsPreferencesViewController: NSViewController {
     private let roomCards = NSStackView()
     private var statusField: NSTextField?
     private var personButtons: [ObjectIdentifier: WorkroomPersonID] = [:]
+    private var invitationButtons: [ObjectIdentifier: WorkroomLinkExtension.Target] = [:]
     private var roomButtons: [ObjectIdentifier: WorkroomID] = [:]
     private var copiedPerson: WorkroomPersonID?
     private var addMessage: String?
@@ -204,6 +205,7 @@ final class WorkroomsPreferencesViewController: NSViewController {
             return responder === control || (control as? NSTextField)?.currentEditor() === responder
         }
         personButtons.removeAll()
+        invitationButtons.removeAll()
         roomButtons.removeAll()
         replaceCard(in: peopleCards, rows: peopleRows())
         replaceCard(in: roomCards, rows: roomRows())
@@ -273,8 +275,15 @@ final class WorkroomsPreferencesViewController: NSViewController {
             let signOut = SettingsUI.button("Sign Out", target: self, action: #selector(signOut(_:)))
             signOut.isEnabled = !entry.devices.isEmpty
             personButtons[ObjectIdentifier(signOut)] = person.id
+            var controls = [copy]
+            if let invitation = entry.invitation, invitation.state == .pending {
+                let extend = SettingsUI.button("Extend Link…", target: self, action: #selector(extendLink(_:)))
+                invitationButtons[ObjectIdentifier(extend)] = .init(person: person, invitation: invitation)
+                controls.append(extend)
+            }
+            controls.append(signOut)
             return SettingsUI.row(title: person.name, subtitle: personLine(entry),
-                                  control: SettingsUI.controlGroup([copy, signOut], spacing: Design.Spacing.small),
+                                  control: SettingsUI.controlGroup(controls, spacing: Design.Spacing.small),
                                   localizes: false)
         }
         if snapshot.morePeople {
@@ -295,9 +304,13 @@ final class WorkroomsPreferencesViewController: NSViewController {
         if let device = entry.devices.first {
             parts.append(L10n.format("%d browsers, last %@", entry.devices.count, Self.short(device.lastSeenAt)))
             parts.append(device.label)
-        } else if let invitation = entry.invitation, invitation.state == .pending {
-            parts.append(L10n.format("link sent, unused until %@", Self.short(invitation.expiresAt)))
-        } else {
+        }
+        if let invitation = entry.invitation, invitation.state == .pending {
+            let expired = ISO8601DateFormatter().date(from: invitation.expiresAt).map { $0 <= Date() } ?? true
+            parts.append(expired
+                ? L10n.format("unused link expired %@", Self.short(invitation.expiresAt))
+                : L10n.format("link sent, unused until %@", Self.short(invitation.expiresAt)))
+        } else if entry.devices.isEmpty, entry.invitation == nil {
             parts.append(L10n.string("no link yet"))
         }
         return parts.joined(separator: " · ")
@@ -416,6 +429,11 @@ final class WorkroomsPreferencesViewController: NSViewController {
             }
             self?.load()
         }
+    }
+
+    @objc private func extendLink(_ sender: ThemedButton) {
+        guard let target = invitationButtons[ObjectIdentifier(sender)] else { return }
+        WorkroomLinkExtension.start(target: target, in: view.window)
     }
 
     @objc private func closeRoom(_ sender: ThemedButton) {

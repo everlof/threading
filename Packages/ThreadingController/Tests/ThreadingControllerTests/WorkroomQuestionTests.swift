@@ -238,6 +238,78 @@ struct WorkroomQuestionTests {
         #expect(wins == 1)
     }
 
+    @Test func extendingAnInvitationPreservesItsTokenAcrossRestartAndItsSingleUse() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let (original, token) = try await f.store.issueWorkroomInvitation(person: f.person.id)
+        let expiry = try #require(ControllerStore.date(original.expiresAt))
+        let extended = try await f.store.extendWorkroomInvitation(
+            person: f.person.id, invitationID: original.id, expectedExpiry: original.expiresAt,
+            now: expiry.addingTimeInterval(-60)
+        )
+        #expect(extended.id == original.id && extended.issuedAt == original.issuedAt)
+        #expect(extended.expiresAt == ControllerStore.timestamp(expiry.addingTimeInterval(WorkroomLimits.invitationLifetime)))
+        await #expect(throws: ControllerError.conflict) {
+            try await f.store.extendWorkroomInvitation(person: f.person.id, invitationID: original.id,
+                                                       expectedExpiry: original.expiresAt)
+        }
+        let reopened = try ControllerStore(path: f.directory.appendingPathComponent("controller.db").path)
+        #expect(try await reopened.latestWorkroomInvitation(person: f.person.id) == extended)
+        let redeemed = try await reopened.redeemWorkroomInvitation(token, deviceLabel: "Safari", now: expiry.addingTimeInterval(1))
+        #expect(redeemed.0.person.id == f.person.id)
+        await #expect(throws: ControllerError.notFound) {
+            try await reopened.redeemWorkroomInvitation(token, deviceLabel: "Again", now: expiry.addingTimeInterval(2))
+        }
+        await #expect(throws: ControllerError.notFound) {
+            try await reopened.extendWorkroomInvitation(person: f.person.id, invitationID: extended.id,
+                                                        expectedExpiry: extended.expiresAt)
+        }
+        for name in ["controller.db", "controller.db-wal"] {
+            let bytes = (try? Data(contentsOf: f.directory.appendingPathComponent(name))) ?? Data()
+            #expect(bytes.range(of: Data(token.utf8)) == nil)
+        }
+    }
+
+    @Test func expiredPendingLinksCanBeExtendedWithoutReopeningRooms() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let (original, token) = try await f.store.issueWorkroomInvitation(person: f.person.id)
+        let now = try #require(ControllerStore.date(original.expiresAt)).addingTimeInterval(60)
+        await #expect(throws: ControllerError.notFound) {
+            try await f.store.redeemWorkroomInvitation(token, deviceLabel: "Expired", now: now)
+        }
+        let closed = try await f.store.closeWorkroom(f.room.id)
+        let extended = try await f.store.extendWorkroomInvitation(
+            person: f.person.id, invitationID: original.id, expectedExpiry: original.expiresAt, now: now
+        )
+        #expect(extended.expiresAt == ControllerStore.timestamp(now.addingTimeInterval(WorkroomLimits.invitationLifetime)))
+        #expect(try await f.store.workroomSummary(f.room.id).publication == closed)
+        _ = try await f.store.redeemWorkroomInvitation(token, deviceLabel: "Renewed", now: now.addingTimeInterval(1))
+    }
+
+    @Test func invitationExtensionRefusesStaleIdentityRemovedPeopleAndInvalidDurations() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let (original, _) = try await f.store.issueWorkroomInvitation(person: f.person.id)
+        for duration in [0, -1, Double.infinity, Double.nan, WorkroomLimits.invitationLifetime + 1] {
+            await #expect(throws: ControllerError.invalidInput("lifetime")) {
+                try await f.store.extendWorkroomInvitation(person: f.person.id, invitationID: original.id,
+                                                           expectedExpiry: original.expiresAt, by: duration)
+            }
+        }
+        let (replacement, _) = try await f.store.issueWorkroomInvitation(person: f.person.id)
+        await #expect(throws: ControllerError.notFound) {
+            try await f.store.extendWorkroomInvitation(person: f.person.id, invitationID: original.id,
+                                                       expectedExpiry: original.expiresAt)
+        }
+        #expect(try await f.store.latestWorkroomInvitation(person: f.person.id) == replacement)
+        _ = try await f.store.removeWorkroomPerson(id: f.person.id)
+        await #expect(throws: ControllerError.notFound) {
+            try await f.store.extendWorkroomInvitation(person: f.person.id, invitationID: replacement.id,
+                                                       expectedExpiry: replacement.expiresAt)
+        }
+    }
+
     @Test func personMailNeverLeavesThisHostOrComesFromMailSend() async throws {
         let f = try await fixture()
         defer { try? FileManager.default.removeItem(at: f.directory) }

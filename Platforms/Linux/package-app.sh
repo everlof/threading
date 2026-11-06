@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
-# Build a source-tree-independent preview for the Ubuntu Noble arm64 validation target.
+# Build a source-tree-independent preview using the Ubuntu Noble ABI baseline.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 source /etc/os-release
-if [[ ${ID:-} != ubuntu || ${VERSION_ID:-} != 24.04 || $(uname -m) != aarch64 ]]; then
-  echo 'package-app: build inside Ubuntu 24.04 arm64 (swift:6.3.2-noble)' >&2
+if [[ ${ID:-} != ubuntu || ${VERSION_ID:-} != 24.04 ]]; then
+  echo 'package-app: build inside Ubuntu 24.04 (swift:6.3.2-noble)' >&2
   exit 1
 fi
+architecture=$(dpkg --print-architecture)
+case "$architecture:$(uname -m)" in
+  arm64:aarch64) multiarch=aarch64-linux-gnu ;;
+  amd64:x86_64) multiarch=x86_64-linux-gnu ;;
+  *) echo "package-app: unsupported or mismatched architecture: $architecture/$(uname -m)" >&2; exit 1 ;;
+esac
+jobs=${THREADING_LINUX_BUILD_JOBS:-2}
+[[ $jobs =~ ^[1-9][0-9]*$ ]] || { echo 'package-app: build jobs must be positive' >&2; exit 1; }
 
 ./vendor-core.sh --verify
 ./vendor.sh --verify
@@ -27,6 +35,11 @@ if [[ ! $revision =~ ^[0-9a-f]{40,64}$ || ( $dirty != true && $dirty != false ) 
 fi
 package=threading-linux-preview
 version=0.0.1+git${revision:0:12}
+source_digest=${THREADING_LINUX_SOURCE_DIGEST:-}
+if [[ -n $source_digest ]]; then
+  [[ $source_digest =~ ^[0-9a-f]{64}$ ]] || { echo 'package-app: invalid source digest' >&2; exit 1; }
+  version+=.alpha.${source_digest:0:12}
+fi
 # Linux has no embedded Info.plist. Give the daemon the same compiled generation contract as
 # scripts/test-ptyd-linux.sh; a dirty source tree must not claim to be the clean commit.
 generation_revision=$revision
@@ -48,29 +61,38 @@ daemon_build_flags=(
   -Xcc "-DTHREADING_PTYD_BUNDLE_VERSION=\"$version\""
   -Xcc "-DTHREADING_PTYD_SOURCE_REVISION=\"$generation_revision\""
 )
-swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product WindowHarness
-swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product LinuxHost
+swift build -j "$jobs" -c release --static-swift-stdlib -Xswiftc -enable-testing --product WindowHarness
+swift build -j "$jobs" -c release --static-swift-stdlib -Xswiftc -enable-testing --product LinuxHost
 swift build --package-path ../../Targets/PTYHost -c release --static-swift-stdlib \
-  "${daemon_build_flags[@]}" --product threading-ptyd
+  -j "$jobs" "${daemon_build_flags[@]}" --product threading-ptyd
 
 bin_dir=$(swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --show-bin-path)
 daemon_dir=$(swift build --package-path ../../Targets/PTYHost -c release \
   --static-swift-stdlib "${daemon_build_flags[@]}" --show-bin-path)
-name=threading-linux-preview-ubuntu24.04-arm64
+name=threading-linux-preview-ubuntu24.04-$architecture
 mkdir -p out
 staging=$(mktemp -d "$PWD/out/.bundle.XXXXXXXX")
 trap 'rm -rf -- "$staging"' EXIT
 bundle=$staging/$name
 mkdir -p "$bundle/bin" "$bundle/libdecor-cairo-only"
-ln -s /usr/lib/aarch64-linux-gnu/libdecor/plugins-1/libdecor-cairo.so \
+ln -s /usr/lib/$multiarch/libdecor/plugins-1/libdecor-cairo.so \
   "$bundle/libdecor-cairo-only/libdecor-cairo.so"
 install -m 0755 run-app.sh "$bundle/run-app.sh"
 install -m 0755 "$bin_dir/WindowHarness" "$bundle/bin/WindowHarness"
-cp -a "$bin_dir/LinuxAppKitSpike_WindowHarness.resources" "$bundle/bin/"
-cp -a "$bin_dir/LinuxAppKitSpike_AppKit.resources" "$bundle/bin/"
+for resource_name in LinuxAppKitSpike_WindowHarness.resources LinuxAppKitSpike_AppKit.resources; do
+  resources=$bundle/bin/$resource_name
+  cp -a "$bin_dir/$resource_name" "$resources"
+  # SwiftPM preserves the checkout's permissions. A developer's private umask must not
+  # make fonts, theme data or artwork unreadable once dpkg installs them as root.
+  find "$resources" -type d -exec chmod 0755 {} +
+  find "$resources" -type f -exec chmod 0644 {} +
+done
 install -m 0755 "$bin_dir/LinuxHost" "$bundle/bin/LinuxHost"
 install -m 0755 "$daemon_dir/threading-ptyd" "$bundle/bin/threading-ptyd"
 install -m 0644 BUNDLE_README.md "$bundle/README.md"
+install -m 0644 ALPHA_README.md "$bundle/ALPHA_README.md"
+install -m 0755 collect-diagnostics.py "$bundle/collect-diagnostics.py"
+install -m 0755 run-diagnostic.py "$bundle/run-diagnostic.py"
 mkdir -p "$bundle/licenses/Inter"
 install -m 0644 Sources/AppKit/Resources/Fonts/Inter/LICENSE.txt "$bundle/licenses/Inter/LICENSE.txt"
 install -m 0644 Sources/AppKit/Resources/Fonts/Inter/SOURCE.md "$bundle/licenses/Inter/SOURCE.md"
@@ -83,9 +105,11 @@ install -m 0644 .build/checkouts/swift-crypto/NOTICE.txt "$bundle/licenses/swift
 install -m 0644 licenses/BoringSSL-LICENSE "$bundle/licenses/swift-crypto/BoringSSL-LICENSE"
 cat > "$bundle/BUNDLE-MANIFEST" <<EOF
 format=threading-linux-preview-1
-target=ubuntu-24.04-aarch64
+target=ubuntu-24.04-$architecture
+package_version=$version
 source_revision=$revision
 source_dirty=$dirty
+source_digest=$source_digest
 daemon_generation=$daemon_generation
 EOF
 
@@ -117,14 +141,14 @@ Package: $package
 Version: $version
 Section: devel
 Priority: optional
-Architecture: arm64
-Depends: libsqlite3-0, libcurl4t64, zlib1g, libstdc++6, libsdl2-2.0-0, libx11-6, libpangocairo-1.0-0, libpangoft2-1.0-0, libfontconfig1, libatk-bridge2.0-0t64, libglib2.0-0t64, libgdk-pixbuf-2.0-0, librsvg2-common, libdecor-0-plugin-1-cairo, zenity, fonts-dejavu-core, fonts-noto-color-emoji, util-linux, git, wl-clipboard
+Architecture: $architecture
+Depends: libsqlite3-0, libcurl4t64, zlib1g, libstdc++6, libsdl2-2.0-0, libx11-6, libpangocairo-1.0-0, libpangoft2-1.0-0, libfontconfig1, libatk-bridge2.0-0t64, libglib2.0-0t64, libgdk-pixbuf-2.0-0, librsvg2-common, libdecor-0-plugin-1-cairo, zenity, fonts-dejavu-core, fonts-noto-color-emoji, util-linux, git, wl-clipboard, python3
 Maintainer: David Everlöf <support@mjukis.dev>
 Description: Experimental native Linux host for Threading
  Local projects, terminals and coding-agent sessions in a desktop window.
- This preview currently targets Ubuntu 24.04 arm64.
+ This preview uses the Ubuntu 24.04 ABI baseline on $architecture.
 EOF
-deb=$PWD/out/$package-ubuntu24.04-arm64.deb
+deb=$PWD/out/$name.deb
 dpkg-deb --root-owner-group --build "$package_root" "$deb"
 echo "package-app: $output"
 echo "package-app: $PWD/out/$name.tar.gz"

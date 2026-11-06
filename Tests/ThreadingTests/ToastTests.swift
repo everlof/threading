@@ -419,6 +419,73 @@ final class ToastTests: XCTestCase {
         XCTAssertNil(toast.superview, "the band stayed in the pane after its action was taken")
     }
 
+    func testTheSecondaryActionDismissesAndRunsOnlyItsOwnResponse() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        defer { presenter.invalidate() }
+        var moved = 0
+        var muted = 0
+        presenter.present(ToastRequest(
+            message: "Working in another checkout", actionTitle: "Move Chat", action: { moved += 1 },
+            secondaryActionTitle: "Mute this chat",
+            secondaryActions: [ToastAction(title: "Mute this chat", perform: { muted += 1 })],
+            identifier: "sidebar.toast.execution-drift.offer"
+        ))
+        let toast = try XCTUnwrap(presenter.current)
+        let mute = try XCTUnwrap(buttons(in: toast).first { $0.title == "Mute this chat" })
+        XCTAssertEqual(mute.accessibilityIdentifier(), "sidebar.toast.execution-drift.offer.secondary-action")
+        XCTAssertTrue(mute.canBecomeKeyView || mute.acceptsFirstResponder)
+        mute.performClick()
+        XCTAssertEqual(moved, 0)
+        XCTAssertEqual(muted, 1)
+        XCTAssertNil(presenter.current)
+    }
+
+    func testMuteMenuOffersOnlyTheTwoCheckoutScopesAndHoldsTheNotice() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        defer { presenter.invalidate() }
+        var mutedChat = 0
+        var mutedAll = 0
+        presenter.present(SessionCoordinator.observedMoveOfferToast(
+            for: AgentSession(kind: .codex, title: "VERIFICATION"),
+            checkout: ObservedCheckout(root: "/fixture/sonda", worktreeIdentity: "sonda",
+                                       repositoryIdentity: "fixture", branch: "sonda", displayName: "sonda"),
+            move: {}, mute: { mutedChat += 1 }, muteAll: { mutedAll += 1 }
+        ))
+        let toast = try XCTUnwrap(presenter.current)
+        try XCTUnwrap(buttons(in: toast).first { $0.title == "Mute…" }).performClick()
+        let rows = descendants(of: host).filter { $0.accessibilityRole() == .menuItem }
+        XCTAssertEqual(rows.compactMap { $0.accessibilityTitle() }, ["Mute this chat", "Mute all checkout notices"])
+        XCTAssertTrue(presenter.isHeldOpen)
+        let choice = try XCTUnwrap(rows.last as? ThemedControl)
+        XCTAssertTrue(choice.accessibilityPerformPress())
+        XCTAssertEqual(mutedChat, 0)
+        XCTAssertEqual(mutedAll, 1)
+        XCTAssertNil(presenter.current)
+    }
+
+    func testMutingSkipsAlreadyQueuedNoticesAndPreservesUnrelatedReceipts() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        defer { presenter.invalidate() }
+        var muted = false
+        presenter.present(ToastRequest(
+            message: "First checkout offer", actionTitle: "Move Chat", action: {},
+            secondaryActionTitle: "Mute this chat",
+            secondaryActions: [ToastAction(title: "Mute this chat", perform: { muted = true })]
+        ))
+        presenter.present(ToastRequest(
+            message: "Queued checkout offer", actionTitle: "Move Chat", action: {},
+            isStillRelevant: { !muted }
+        ))
+        presenter.present(archiveRequest(message: "Unrelated archive"))
+        let toast = try XCTUnwrap(presenter.current)
+        try XCTUnwrap(buttons(in: toast).first { $0.title == "Mute this chat" }).performClick()
+        XCTAssertEqual(presenter.current?.request.message, "Unrelated archive")
+        XCTAssertTrue(presenter.queued.isEmpty)
+    }
+
     func testTheBandLeavesOnItsOwnWhenTheDwellRunsOut() throws {
         let (host, bottom, _) = pane()
         let presenter = ToastPresenter(host: host, above: bottom)

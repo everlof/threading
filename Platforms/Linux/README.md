@@ -1,6 +1,6 @@
 # Linux preview host and AppKit compatibility layer
 
-> **Maintained Linux platform code for an Ubuntu arm64 preview, not a release app.** No Xcode
+> **Maintained Linux platform code for an Ubuntu arm64/amd64 preview, not a release app.** No Xcode
 > target references this directory. Shared portable changes live in the product's `Sources/`
 > and `Tests/`, or in local packages; the core slice links its selected app sources directly.
 > `docs/feature-drafts/linux-host-runtime.md` records the original architecture and measurements.
@@ -648,7 +648,7 @@ marker-backed `HOME/.codex-*` homes, with a one-time worker scan when the window
 the chooser can replace it. The selection lasts for this window only. Saved sessions retain their
 own account handle, so opening one never follows a later chooser change.
 
-`./package-app.sh` builds a static-Swift archive and installable `.deb` for Ubuntu 24.04 arm64;
+`./package-app.sh` builds a static-Swift archive and installable `.deb` on Ubuntu 24.04 arm64 or amd64;
 `./bundle-smoke.sh` builds both in the pinned Swift container, then exercises the extracted
 archive and installed package in a fresh Ubuntu runtime container with no Swift toolchain or
 source checkout. It also runs the packaged project-row layout fixture through an 800/320/800
@@ -657,6 +657,26 @@ pixel sidebar resize. The outputs are `out/threading-linux-preview-ubuntu24.04-a
 adds a desktop entry and icon, but has no updater or distro-wide compatibility claim. Its host
 binaries currently require Swift's `-enable-testing` build flag because the
 experimental host imports the core slice with `@testable`; product modularization remains open.
+
+The Intel alpha uses `./build-alpha.sh` and then `./alpha-smoke.sh`. The builder pins the amd64
+Swift 6.3.2 Noble image, limits compilation to two jobs by default, and fingerprints source inputs
+before and after the build. The alpha version includes that fingerprint alongside its base commit;
+uncommitted sources remain explicitly marked dirty. Its outputs use the `ubuntu24.04-amd64` suffix
+because Noble is the ABI baseline. The separate acceptance lane installs that exact `.deb` into
+a pinned Ubuntu 26.04 image without Swift and runs non-root startup, saved-terminal restart,
+native Codex/Claude replay and resume, and Codex permission journeys. These use deterministic
+provider peers, not authenticated accounts. Evidence is retained in `out/alpha-smoke.*`.
+For native Wayland, run `THREADING_LINUX_ARCH=amd64 THREADING_LINUX_RUNTIME_IMAGE=ubuntu:26.04
+tests/wayland_smoke.sh --actions`; the runner selects the runtime's Weston development ABI and
+checks the package's architecture-specific Cairo decoration plugin.
+
+`ALPHA_README.md` is the Swedish handoff guide. The package includes a diagnostic launcher with
+two rotating 1 MiB logs and a local support-report collector. Its default report contains only
+bounded build/OS/display metadata and fixed runtime package versions. `--include-logs` admits
+up to three 64 KiB tails, with best-effort redaction and explicit review before sharing; account
+files, transcripts, databases, process inventories and the full environment are never collected.
+The Python regression suite checks privacy, log size, symlink/device refusal and launcher exit
+propagation. This host-only packaging/support path defines no extension presentation component.
 
 The project list's
 import action is deliberately host-only: Threading owns directory identity, duplicate detection,

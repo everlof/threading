@@ -1050,6 +1050,12 @@ final class AppSettings {
         }
     }
 
+    /// Silences automatic checkout-move notices across chats without changing move authority.
+    var checkoutNoticesMuted: Bool {
+        get { AppSettingDefinitions.checkoutNoticesMuted.read(from: defaults) ?? false }
+        set { AppSettingDefinitions.checkoutNoticesMuted.write(newValue, to: defaults) }
+    }
+
     func setAttachmentReferenceDetection(for kind: AgentKind, enabled: Bool) {
         var disabled = disabledAttachmentDetectionAgentKinds
         if enabled {

@@ -636,8 +636,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Sidebar toast receipts",
-      "description": "The real sidebar receipt surface at its standing and user-expanded widths, covering running and dormant archives, an agent-authored archive, queued and opened decks, storage progress, the multi-provider update action, and a long automation report in the main-window sidebar.",
-      "states": ["Running archive", "Dormant archive", "Agent archive", "Queued deck", "Opened deck", "Cleanup progress", "Agent update action", "Long automation report", "Main-window sidebar"],
+      "description": "The real sidebar receipt surface at its standing and user-expanded widths, covering running and dormant archives, an agent-authored archive, queued and opened decks, storage progress, the multi-provider update action, a long automation report, and checkout-move offers with chat mute in the main-window sidebar.",
+      "states": ["Running archive", "Dormant archive", "Agent archive", "Queued deck", "Opened deck", "Cleanup progress", "Agent update action", "Long automation report", "Checkout offer and mute", "Main-window sidebar"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist", "Claymorphism", "Win98"],
         "appearances": ["Light", "Dark"],
@@ -648,7 +648,9 @@
         "tests": [
           "ThreadingTests/ToastRenderTests/testRendersTheArchiveToastStorybook",
           "ThreadingTests/ToastRenderTests/testRendersTheArchiveToastInADraggedColumn",
-          "ThreadingTests/ToastRenderTests/testRendersLongReportInTheMainWindowSidebar"
+          "ThreadingTests/ToastRenderTests/testRendersLongReportInTheMainWindowSidebar",
+          "ThreadingTests/ToastRenderTests/testRendersCheckoutMoveInTheMainWindowSidebar",
+          "ThreadingTests/ToastRenderTests/testRendersCheckoutMuteMenuInTheMainWindowSidebar"
         ]
       },
       "capture": {
@@ -910,13 +912,17 @@
       "status": "implemented",
       "priority": "important",
       "title": "Workrooms settings",
-      "description": "Settings ▸ Workrooms — the switch, the public address, people and rooms — at both supported review widths.",
+      "description": "Settings ▸ Workrooms at both review widths, plus an expired invitation and Extend Link in the product Settings shell and confirmation sheet.",
       "states": [
-        "Settings overview"
+        "Settings overview",
+        "Expired unused invitation",
+        "Extend existing link confirmation"
       ],
       "matrix": {
         "themes": [
-          "System"
+          "System",
+          "Cyberpunk",
+          "Win98"
         ],
         "appearances": [
           "Light",

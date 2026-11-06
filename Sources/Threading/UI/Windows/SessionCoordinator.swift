@@ -125,11 +125,11 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                   let self,
                   let session = self.environment.projectStore.session(withID: event.sessionID)
             else { return }
-            self.toastPresenter(Self.observedMoveCompletedToast(
+            self.presentCheckoutNotice(Self.observedMoveCompletedToast(
                 for: session,
                 checkoutDisplayName: event.checkoutDisplayName,
                 requestID: event.requestID
-            ))
+            ), for: event.sessionID)
         }
         appEvents.observe(SessionCheckoutMoveDidFail.self) { [weak self] event in
             guard let self,

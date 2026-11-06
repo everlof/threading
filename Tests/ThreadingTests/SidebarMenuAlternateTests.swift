@@ -76,6 +76,21 @@ final class SidebarMenuAlternateTests: HostedStoreTestCase {
         )
     }
 
+    func testSessionOptionsCanMuteAndUnmuteCheckoutNotices() throws {
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: scratchFolder()))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(to: project.id, kind: .codex))
+        let sidebar = mountedSidebar()
+        let options = try item(titled: "Session Options", in: sidebar.sessionActionEntries(for: session))
+        let mute = try item(titled: "Mute Checkout Notices", in: try XCTUnwrap(options.submenu))
+        try XCTUnwrap(mute.onChoose)()
+        let muted = try XCTUnwrap(ProjectStore.shared.session(withID: session.id))
+        XCTAssertTrue(muted.checkoutNoticesMuted)
+        let mutedOptions = try item(titled: "Session Options", in: sidebar.sessionActionEntries(for: muted))
+        let unmute = try item(titled: "Unmute Checkout Notices", in: try XCTUnwrap(mutedOptions.submenu))
+        try XCTUnwrap(unmute.onChoose)()
+        XCTAssertFalse(try XCTUnwrap(ProjectStore.shared.session(withID: session.id)).checkoutNoticesMuted)
+    }
+
     // MARK: - Helpers
 
     private func mountedSidebar() -> ProjectSidebarViewController {

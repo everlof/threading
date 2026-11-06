@@ -755,6 +755,22 @@ flapped, is what put one band back on screen hundreds of times a day however oft
 dismissed. The row's marker and menu carry the offer once the band has gone; a committed or
 cancelled move advances the tracker's ownership epoch, and with it the offer re-arms.
 
+The offer's **Mute…** menu has exactly two checkout-only choices. **Mute this chat** stores
+`AgentSession.checkoutNoticesMuted` through the exact-row
+`ProjectStore` mutation. Admission checks it before recording an offer, so a muted observation
+does not spend the next offer when notices are re-enabled. The flag survives windows, restarts
+and ownership changes; it does not suppress drift observations, move authority, explicit failure
+recovery or completion notifications. The same notice gate covers automatic pending/completed
+move receipts and abandonment reports. Session Options and `session.toggleCheckoutNotices`
+expose the same preference. **Mute all checkout notices** sets the typed app preference
+`checkoutNoticesMuted`; Session Options and `app.toggleCheckoutNotices` can re-enable it. The
+global flag overrides per-chat admission without rewriting chat preferences. Queued offers
+recheck both flags before promotion, so a mute cannot be followed by an already waiting offer.
+This is an existing host-only checkout control: themes own the toast's
+material and buttons, while Threading keeps session identity, durable suppression, observation,
+validation and ownership authority. Admission remains O(1) per changed observation; muting writes
+one session row, without a catalogue scan or process work.
+
 **Following execution is a feedback loop, and it needs damping.** Committing a move changes what
 the next observation is measured against, and `forget` deliberately clears the memo that would
 otherwise suppress a repeat — so the two signals can chase each other. They did: on 2026-09-04 one

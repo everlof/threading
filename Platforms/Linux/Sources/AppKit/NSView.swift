@@ -279,7 +279,11 @@ open class NSView: NSResponder, NSLayoutItem {
 
     func notifyEffectiveAppearanceChanged(from previous: NSAppearance.Name) {
         guard effectiveAppearance.name != previous else { return }
-        viewDidChangeEffectiveAppearance()
+        // Components may freeze named colors into layer colors from this callback.
+        // AppKit supplies the new appearance here as well as during drawing.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            viewDidChangeEffectiveAppearance()
+        }
         needsDisplay = true
         for child in subviews where child.appearance == nil {
             child.notifyEffectiveAppearanceChanged(from: previous)

@@ -1110,6 +1110,16 @@ extension ProjectSidebarViewController {
         if let interface = interfaceEntry(for: session) { submenu.append(interface) }
         if let remote = remoteControlEntry(for: session) { submenu.append(remote) }
         submenu.append(muteEntry(for: session))
+        submenu.append(checkoutNoticesEntry(for: session))
+        submenu.append(action(
+            AppSettings.shared.checkoutNoticesMuted
+                ? L10n.string("Unmute All Checkout Notices")
+                : L10n.string("Mute All Checkout Notices"),
+            symbol: AppSettings.shared.checkoutNoticesMuted ? "bell" : "bell.slash",
+            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.toggleAllCheckoutNotices)
+        ) {
+            AppSettings.shared.checkoutNoticesMuted.toggle()
+        })
         submenu.append(limitRecoveryEntry(for: session))
         // Beside the limit fold rather than after Attachments: both answer "what happens to this
         // chat when nobody is watching", and the pair reads as one subject — the difference being
@@ -1137,6 +1147,25 @@ extension ProjectSidebarViewController {
                 ? "bell"
                 : "bell.slash"
         ) { [weak self] in self?.toggleMutedClicked() }
+    }
+
+    private func checkoutNoticesEntry(for session: AgentSession) -> ThemedMenuEntry {
+        action(
+            session.checkoutNoticesMuted
+                ? L10n.string("Unmute Checkout Notices")
+                : L10n.string("Mute Checkout Notices"),
+            symbol: session.checkoutNoticesMuted ? "bell" : "bell.slash",
+            shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.toggleCheckoutNotices)
+        ) { [weak self] in
+            guard let self,
+                  let current = self.projectStore.session(withID: session.id) else { return }
+            guard self.projectStore.setCheckoutNoticesMuted(
+                !current.checkoutNoticesMuted, forSessionID: current.id
+            ).succeeded else {
+                self.presentProjectNotice(L10n.string("The project data could not be saved."))
+                return
+            }
+        }
     }
 
     /// What this conversation does the next time its provider refuses it over a usage limit.

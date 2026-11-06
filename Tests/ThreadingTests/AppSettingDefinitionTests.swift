@@ -260,6 +260,7 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "sessionCheckoutAuthorityPolicy",
                 valueType: .string
             ),
+            .checkoutNoticesMuted: .init(key: "checkoutNoticesMuted", valueType: .boolean),
             .disabledToolGroupIDs: .init(key: "disabledToolGroupIDs", valueType: .stringArray),
             .usesContainedExtensionLauncher: .init(
                 key: "usesContainedExtensionLauncher",

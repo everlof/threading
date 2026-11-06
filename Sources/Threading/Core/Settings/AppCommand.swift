@@ -189,6 +189,8 @@ enum AppCommands {
         static let addProject = "project.add"
         static let closeSession = "session.close"
         static let renameSession = "session.rename"
+        static let toggleCheckoutNotices = "session.toggleCheckoutNotices"
+        static let toggleAllCheckoutNotices = "app.toggleCheckoutNotices"
         static let closeTab = "tab.close"
         static let find = "edit.find"
         static let findNext = "edit.findNext"
@@ -197,6 +199,7 @@ enum AppCommands {
         static let openIn = "session.openIn"
         static let commandPalette = "app.commandPalette"
         static let newMarkdown = "markdown.new"
+        static let extendWorkroomLink = "workroom.extendLink"
         static let openMarkdown = "markdown.open"
         static let saveMarkdown = "markdown.save"
         static let saveMarkdownAs = "markdown.saveAs"
@@ -289,6 +292,8 @@ enum AppCommands {
 
     /// Threading's own commands, in the order the page lists them.
     static let editable: [AppCommand] = [
+        AppCommand(id: ID.extendWorkroomLink, group: .system, title: "Extend Workroom Link…",
+                   defaultShortcut: nil, isEditable: true, iconName: "calendar.badge.clock"),
         AppCommand(id: ID.newMarkdown, group: .system, title: "New Markdown Document",
                    defaultShortcut: nil, isEditable: true, iconName: "doc.badge.plus"),
         AppCommand(id: ID.openMarkdown, group: .system, title: "Open Markdown Document…",
@@ -335,6 +340,12 @@ enum AppCommands {
         AppCommand(id: ID.renameSession, group: .session, title: "Rename Session…",
                    defaultShortcut: KeyboardShortcut(key: "r", modifiers: .command),
                    isEditable: true, scope: .session),
+        AppCommand(id: ID.toggleCheckoutNotices, group: .session, title: "Toggle Checkout Notices",
+                   detail: "Mutes or unmutes checkout-move notices for this chat.",
+                   defaultShortcut: nil, isEditable: true, scope: .session),
+        AppCommand(id: ID.toggleAllCheckoutNotices, group: .session, title: "Toggle All Checkout Notices",
+                   detail: "Mutes or unmutes checkout-move notices across all chats.",
+                   defaultShortcut: nil, isEditable: true),
         AppCommand(id: ID.find, group: .session, title: "Find…",
                    defaultShortcut: KeyboardShortcut(key: "f", modifiers: .command), isEditable: true),
         AppCommand(id: ID.findNext, group: .session, title: "Find Next",

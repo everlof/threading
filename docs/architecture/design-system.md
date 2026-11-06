@@ -61,6 +61,12 @@ opaque navigator well starts at the header's bottom edge. The full-column gradie
 coordinate space without recalculating three child frames on every resize. The backdrop now
 mounts the same fill and decoration views as macOS; the AppKit shim paints its retained
 `CAGradientLayer` from the checked house-theme export.
+The Linux shim scopes appearance-change callbacks to the view's new drawing appearance, as
+AppKit does. The shared backdrop also scopes its frozen gradient colors explicitly, since an
+app-theme notification can arrive outside that callback. Otherwise a native conversation's
+notification restores the light header during a dark switch. The text-label fixture checks
+callback context through inheritance and reparenting; the installed native-workspace journey
+checks the header pixels after both paths run.
 The row, text, and menu overlay layers are likewise pinned to the navigator root on all four
 edges. The outline's disclosure glyph is centred on its cell with a constrained leading offset
 that changes with indentation. These are parent relationships, so a root resize or row reuse
@@ -1357,6 +1363,15 @@ oldest dropped first, because the queue is measured in dwells and a receipt surf
 minute after the click is news rather than a receipt); a band with **nothing to offer** is still
 replaced where it stands, since nothing is lost and the newer line is the one that describes the
 state the user is in — the navigator's error arriving behind its own progress message.
+
+A request can also carry an optional secondary response or a small fixed menu of responses. It
+uses a tertiary themed button below the primary action, so a narrow sidebar and a theme's larger
+type cannot squeeze either title away. Multiple responses open the existing themed menu and hold
+the dwell until it closes; departure and teardown close the anchored menu. Replacement checks both
+action slots and reads current callbacks. A response runs before dismissal so its updated policy
+can discard queued notices through their relevance predicate; a refused write can queue its own
+error receipt. Checkout-move offers use this for **Mute this chat** and **Mute all checkout notices**;
+suppression and the target chat remain host-owned.
 
 **A queue nobody can see is a promise nobody can act on, so the waiting receipts are drawn.** A
 band with three behind it looked exactly like a band that was the last thing that happened, and

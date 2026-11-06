@@ -1687,6 +1687,17 @@
         }
       }
     },
+    "%@ · expires %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · går ut %@"
+          }
+        }
+      }
+    },
     "%@ · failed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6913,6 +6924,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägg till svaret i chatten"
+          }
+        }
+      }
+    },
+    "Add seven days to this unused link’s expiry, or seven days from now if it has expired. The same link will work once. Room closing dates and signed-in browsers are unchanged." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förläng den oanvända länken med sju dagar, eller sju dagar från nu om den har gått ut. Samma länk fungerar en gång. Rummens slutdatum och inloggade webbläsare ändras inte."
           }
         }
       }
@@ -25064,6 +25086,50 @@
         }
       }
     },
+    "Extend Link" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förläng länk"
+          }
+        }
+      }
+    },
+    "Extend Link…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förläng länk…"
+          }
+        }
+      }
+    },
+    "Extend Workroom Link" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förläng Workroom-länk"
+          }
+        }
+      }
+    },
+    "Extend Workroom Link…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förläng Workroom-länk…"
+          }
+        }
+      }
+    },
     "Extension %@ data version could not be saved and verified." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30876,6 +30942,17 @@
         }
       }
     },
+    "Invitation link" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inbjudningslänk"
+          }
+        }
+      }
+    },
     "Invite someone in the Threading app, from any network." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35868,6 +35945,28 @@
         }
       }
     },
+    "Mute All Checkout Notices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tysta alla aviseringar om arbetskopior"
+          }
+        }
+      }
+    },
+    "Mute Checkout Notices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tysta aviseringar om arbetskopior"
+          }
+        }
+      }
+    },
     "Mute Notifications" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35875,6 +35974,61 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tysta notifikationer"
+          }
+        }
+      }
+    },
+    "Mute all checkout notices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tysta alla aviseringar om arbetskopior"
+          }
+        }
+      }
+    },
+    "Mute this chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tysta den här chatten"
+          }
+        }
+      }
+    },
+    "Mutes or unmutes checkout-move notices across all chats." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slår av eller på aviseringar om flytt mellan arbetskopior i alla chattar."
+          }
+        }
+      }
+    },
+    "Mutes or unmutes checkout-move notices for this chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slår av eller på aviseringar om flytt mellan arbetskopior för den här chatten."
+          }
+        }
+      }
+    },
+    "Mute…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tysta…"
           }
         }
       }
@@ -38279,6 +38433,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inga ändringar som inte är incheckade på %@."
+          }
+        }
+      }
+    },
+    "No unused invitation links are available to extend." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det finns inga oanvända inbjudningslänkar att förlänga."
           }
         }
       }
@@ -63210,6 +63375,17 @@
         }
       }
     },
+    "The link could not be extended. It may have been used, replaced or changed. Refresh Workrooms and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Länken kunde inte förlängas. Den kan ha använts, ersatts eller ändrats. Uppdatera Workrooms och försök igen."
+          }
+        }
+      }
+    },
     "The list of hosts couldn’t be written, so the change was not kept." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -70409,6 +70585,28 @@
         }
       }
     },
+    "Toggle All Checkout Notices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slå av eller på alla aviseringar om arbetskopior"
+          }
+        }
+      }
+    },
+    "Toggle Checkout Notices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slå av eller på aviseringar om arbetskopior"
+          }
+        }
+      }
+    },
     "Toggle Sidebar" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -71799,6 +71997,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ljud på"
+          }
+        }
+      }
+    },
+    "Unmute All Checkout Notices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera alla aviseringar om arbetskopior"
+          }
+        }
+      }
+    },
+    "Unmute Checkout Notices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera aviseringar om arbetskopior"
           }
         }
       }
@@ -81465,6 +81685,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "till %@"
+          }
+        }
+      }
+    },
+    "unused link expired %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "oanvänd länk gick ut %@"
           }
         }
       }

@@ -1292,6 +1292,20 @@ final class ProjectStore {
     }
 
     @discardableResult
+    func setCheckoutNoticesMuted(_ muted: Bool, forSessionID sessionID: SessionID) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        guard projects[location.projectIndex].sessions[location.sessionIndex].checkoutNoticesMuted
+            != muted else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex].checkoutNoticesMuted = muted
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
+            return .persistenceRefused
+        }
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
+        return .applied
+    }
+
+    @discardableResult
     func setProjectHidden(_ hidden: Bool, projectID: ProjectID) -> ProjectMutationResult {
         setProjectHidden(hidden, projectID: projectID, publishesChange: true)
     }

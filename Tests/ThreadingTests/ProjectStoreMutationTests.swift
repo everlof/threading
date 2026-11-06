@@ -52,6 +52,7 @@ final class ProjectStoreMutationTests: XCTestCase {
         XCTAssertEqual(store.setTerminalRenderer(true, for: session.id), .applied)
         XCTAssertEqual(store.setPermissionMode(.plan, for: session.id), .applied)
         XCTAssertEqual(store.setNotificationsMuted(true, forSessionID: session.id), .applied)
+        XCTAssertEqual(store.setCheckoutNoticesMuted(true, forSessionID: session.id), .applied)
         XCTAssertEqual(store.setNotificationsMuted(false, forProjectID: project.id), .applied)
         XCTAssertEqual(
             store.setAccountHandle(.named("work"), for: session.id),
@@ -72,6 +73,7 @@ final class ProjectStoreMutationTests: XCTestCase {
         XCTAssertEqual(standing.fullscreenRenderer, true)
         XCTAssertEqual(standing.permissionMode, .plan)
         XCTAssertEqual(standing.notificationsMuted, true)
+        XCTAssertTrue(standing.checkoutNoticesMuted)
         XCTAssertEqual(standing.accountHandle, .named("work"))
         XCTAssertEqual(standing.themeID, themeID)
         let reopenedProject = try XCTUnwrap(reopened.project(withID: project.id))
@@ -344,6 +346,8 @@ final class ProjectStoreMutationTests: XCTestCase {
             .persistenceRefused
         )
         XCTAssertNil(recovery.session(withID: session.id)?.notificationsMuted)
+        XCTAssertEqual(recovery.setCheckoutNoticesMuted(true, forSessionID: session.id), .persistenceRefused)
+        XCTAssertFalse(try XCTUnwrap(recovery.session(withID: session.id)).checkoutNoticesMuted)
         XCTAssertEqual(
             recovery.setNotificationsMuted(true, forProjectID: project.id),
             .persistenceRefused

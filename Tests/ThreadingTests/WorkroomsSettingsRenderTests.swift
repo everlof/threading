@@ -1,11 +1,12 @@
 import AppKit
+import ThreadingController
 import XCTest
 @testable import Threading
 
 /// Settings ▸ Workrooms, drawn light and dark at the pane's two widths, plus the rows its search
 /// entries promise. The page is the only owner surface for people outside this Mac, so what it
 /// must never lose is the switch, the public address and the way to close everything.
-final class WorkroomsSettingsRenderTests: XCTestCase {
+final class WorkroomsSettingsRenderTests: HostedStoreTestCase {
 
     private static let widths: [CGFloat] = [420, SettingsUIDefaults.pageWidth]
     private static let height: CGFloat = 1400
@@ -65,7 +66,7 @@ final class WorkroomsSettingsRenderTests: XCTestCase {
     }
 
     @MainActor
-    func testRendersWorkroomsSettingsToImages() throws {
+    func testRendersWorkroomsSettingsToImages() async throws {
         try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
         var written = 0
         for width in Self.widths {
@@ -86,6 +87,63 @@ final class WorkroomsSettingsRenderTests: XCTestCase {
             }
         }
         XCTAssertEqual(written, Self.widths.count * 2)
+        try await renderLinkExtensionInProductShell()
+    }
+
+    @MainActor
+    private func renderLinkExtensionInProductShell() async throws {
+        let store = try await MacMailbox.shared.controllerStore()
+        let person = try await store.addWorkroomPerson(id: WorkroomPersonID(), handle: "link-review",
+                                                       name: "Viktor", language: "sv")
+        let issuedAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-01-01T12:00:00Z"))
+        _ = try await store.issueWorkroomInvitation(person: person.id, now: issuedAt)
+        let previousTheme = AppThemePalette.current
+        let previousMotion = Design.Motion.reduceMotionOverrideForTesting
+        defer {
+            AppThemePalette.set(previousTheme)
+            Design.Motion.reduceMotionOverrideForTesting = previousMotion
+        }
+        Design.Motion.reduceMotionOverrideForTesting = true
+        let shell = makeMainWindowController()
+        let window = try XCTUnwrap(shell.window)
+        window.setContentSize(NSSize(width: 1400, height: 1000))
+        shell.showSettingsPage(id: SettingsPages.workroomsID)
+        let content = try XCTUnwrap(window.contentView)
+        for _ in 0..<200 {
+            if Self.button(in: content, titled: "Extend Link…") != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let extend = try XCTUnwrap(Self.button(in: content, titled: "Extend Link…"))
+        XCTAssertTrue(extend.isEnabled, "an expired unused invitation can be extended")
+        let variants: [(String, AppTheme, NSAppearance.Name)] = [
+            ("system-light", .system, .aqua), ("system-dark", .system, .darkAqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua), ("win98", AppThemeStyles.win98, .aqua)
+        ]
+        do {
+            for (name, theme, appearance) in variants {
+                AppThemePalette.set(theme)
+                content.appearance = NSAppearance(named: appearance)
+                AppThemeRefresh.repaint(content)
+                content.layoutSubtreeIfNeeded()
+                SettingsRowReveal.reveal(title: person.name, in: content)
+                content.layoutSubtreeIfNeeded()
+                try XCTUnwrap(Self.png(of: content)).write(to: Self.directory.appendingPathComponent("workrooms-shell-\(name).png"))
+                XCTAssertTrue(extend.performPrimaryAction())
+                for _ in 0..<200 {
+                    if window.childWindows?.isEmpty == false { break }
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+                let panel = try XCTUnwrap(window.childWindows?.first)
+                let dialog = try XCTUnwrap(panel.contentView)
+                dialog.layoutSubtreeIfNeeded()
+                try XCTUnwrap(Self.png(of: dialog)).write(to: Self.directory.appendingPathComponent("workrooms-extend-\(name).png"))
+                panel.cancelOperation(nil)
+            }
+            _ = try await store.removeWorkroomPerson(id: person.id)
+        } catch {
+            _ = try? await store.removeWorkroomPerson(id: person.id)
+            throw error
+        }
     }
 
     // MARK: - Helpers
@@ -138,13 +196,19 @@ final class WorkroomsSettingsRenderTests: XCTestCase {
     @MainActor
     private static func button(in view: NSView, titled title: String) -> ThemedButton? {
         if let button = view as? ThemedButton, button.title == L10n.string(title) { return button }
-        return view.subviews.lazy.compactMap { button(in: $0, titled: title) }.first
+        for subview in view.subviews {
+            if let found = button(in: subview, titled: title) { return found }
+        }
+        return nil
     }
 
     @MainActor
     private static func toggle(in view: NSView) -> ThemedToggle? {
         if let toggle = view as? ThemedToggle { return toggle }
-        return view.subviews.lazy.compactMap(toggle(in:)).first
+        for subview in view.subviews {
+            if let found = toggle(in: subview) { return found }
+        }
+        return nil
     }
 
     @MainActor

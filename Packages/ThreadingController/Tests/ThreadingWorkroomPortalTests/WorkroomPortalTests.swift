@@ -95,6 +95,24 @@ struct WorkroomPortalTests {
         #expect(unavailable.header("Content-Security-Policy")?.contains("default-src 'none'") == true)
     }
 
+    @Test func extendedExpiredLinkSignsInThroughTheSamePortalURL() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let (invitation, token) = try await f.store.issueWorkroomInvitation(
+            person: f.person.id, now: Date().addingTimeInterval(-2 * WorkroomLimits.invitationLifetime)
+        )
+        let url = "/join/\(token)"
+        #expect(await f.portal.handle(request("POST", url)).status == 404)
+        _ = try await f.store.extendWorkroomInvitation(person: f.person.id, invitationID: invitation.id,
+                                                       expectedExpiry: invitation.expiresAt)
+        let response = await f.portal.handle(request("POST", url))
+        #expect(response.status == 303)
+        let cookie = try #require(response.header("Set-Cookie"))
+        let session = String(try #require(cookie.split(separator: ";").first?.split(separator: "=", maxSplits: 1).last))
+        #expect(await f.portal.handle(request("GET", "/q/\(f.question.id)", cookie: session)).status == 200)
+        #expect(await f.portal.handle(request("POST", url)).status == 404)
+    }
+
     @Test func joiningNeedsAPostFromThePublishedOriginAndWorksOnce() async throws {
         let f = try await fixture()
         defer { try? FileManager.default.removeItem(at: f.directory) }

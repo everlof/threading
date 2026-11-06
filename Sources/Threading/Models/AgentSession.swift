@@ -800,6 +800,9 @@ struct AgentSession: Codable, Identifiable {
   /// See `AttentionAlertScope`.
   var notificationsMuted: Bool?
 
+  /// Suppresses automatic checkout-move notices for this chat, independently of completion alerts.
+  var checkoutNoticesMuted = false
+
   /// Sounds this conversation overrides. Absent — the common case — inherits everything.
   /// Keys are `SoundEvent` raw values plus the reserved `all`, `bell` and `alert`; values are
   /// `SoundChoice` stored strings. See `SoundResolution`.
@@ -959,7 +962,7 @@ struct AgentSession: Codable, Identifiable {
     case forkParent
     case continuationSource, continuationSourceKind
     case handoff
-    case themeID, themeName, notificationsMuted, soundOverrides
+    case themeID, themeName, notificationsMuted, soundOverrides, checkoutNoticesMuted
     case limitRecoveryPolicy
     case curfewRule, curfewState
     case managedWorkspace
@@ -1310,6 +1313,7 @@ struct AgentSession: Codable, Identifiable {
       Bool.self,
       forKey: .notificationsMuted
     )
+    checkoutNoticesMuted = try container.decodeIfPresent(Bool.self, forKey: .checkoutNoticesMuted) ?? false
     soundOverrides = try container.decodeIfPresent(
       [String: String].self,
       forKey: .soundOverrides
@@ -1404,6 +1408,9 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(handoff, forKey: .handoff)
     try container.encodeIfPresent(themeID, forKey: .themeID)
     try container.encodeIfPresent(notificationsMuted, forKey: .notificationsMuted)
+    if checkoutNoticesMuted {
+      try container.encode(true, forKey: .checkoutNoticesMuted)
+    }
     try container.encodeIfPresent(soundOverrides, forKey: .soundOverrides)
     try container.encodeIfPresent(limitRecoveryPolicy, forKey: .limitRecoveryPolicy)
     try container.encodeIfPresent(curfewRule, forKey: .curfewRule)

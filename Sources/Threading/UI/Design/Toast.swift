@@ -228,7 +228,12 @@ struct ToastComparisonRow: Equatable {
     let targetValue: String
 }
 
-/// What a toast says, and the one explicit response it may offer.
+struct ToastAction {
+    let title: String
+    let perform: () -> Void
+}
+
+/// What a toast says and the explicit responses it may offer.
 ///
 /// Most actions are ways back from a completed change. A bounded notification may instead offer
 /// the action that starts its work, as agent updates do; pressing that plainly titled button is
@@ -248,10 +253,14 @@ struct ToastRequest {
     /// Repeated current/target facts whose alignment carries meaning that body prose cannot.
     var comparison: ToastComparison? = nil
 
-    /// The one response. Titled by the caller, since "Undo" is right for an archive and "Update"
+    /// The primary response. Titled by the caller, since "Undo" is right for an archive and "Update"
     /// is right for a release notice.
     var actionTitle: String?
     var action: (() -> Void)?
+
+    /// An optional, quieter response such as silencing future notices from this source.
+    var secondaryActionTitle: String? = nil
+    var secondaryActions: [ToastAction] = []
 
     /// How long this band holds, where the presenter's own dwell is the wrong length for what it
     /// reports. Nil takes the presenter's.
@@ -278,6 +287,9 @@ struct ToastRequest {
     /// announcements for every item.
     var replacementID: String? = nil
 
+    /// Rechecked when a queued notice reaches the front, since its source may have been muted.
+    var isStillRelevant: (() -> Bool)? = nil
+
     /// What VoiceOver is told when the band arrives. The band is transient and takes no focus,
     /// so nothing else would ever read it out.
     var announcement: String {
@@ -285,6 +297,7 @@ struct ToastRequest {
     }
 
     var hasAction: Bool { actionTitle != nil && action != nil }
+    var hasSecondaryAction: Bool { secondaryActionTitle != nil && !secondaryActions.isEmpty }
 }
 
 // MARK: - Departure
@@ -335,6 +348,7 @@ final class ToastView: NSView {
 
     /// Pressed the action. The presenter dismisses the band; the caller performs the response.
     var onAction: (() -> Void)?
+    var onSecondaryAction: ((Int) -> Void)?
 
     private let themeEvents = AppEventObservations()
 
@@ -381,6 +395,8 @@ final class ToastView: NSView {
     private let detailLabel: NSTextField?
     private let comparisonView: ToastComparisonView?
     private let actionButton: ThemedButton?
+    private let secondaryActionButton: ThemedButton?
+    private var secondaryMenuSession: AnyObject?
     private let progressBar: ThemedProgressBar?
 
     /// The way out, as against the way back.
@@ -415,6 +431,9 @@ final class ToastView: NSView {
         comparisonView = request.comparison.map(ToastComparisonView.init)
         actionButton = request.hasAction
             ? ThemedButton(title: request.actionTitle ?? "", target: nil, action: nil)
+            : nil
+        secondaryActionButton = request.hasSecondaryAction
+            ? ThemedButton(title: request.secondaryActionTitle ?? "", target: nil, action: nil)
             : nil
         progressBar = request.progress.map { progress in
             let bar = ThemedProgressBar()
@@ -463,15 +482,19 @@ final class ToastView: NSView {
         guard (detailLabel != nil) == (request.detail != nil),
               (comparisonView != nil) == (request.comparison != nil),
               (actionButton != nil) == request.hasAction,
+              (secondaryActionButton != nil) == request.hasSecondaryAction,
               (progressBar != nil) == (request.progress != nil) else { return false }
 
         if let comparison = request.comparison,
            comparisonView?.update(with: comparison) != true { return false }
 
+        closeSecondaryMenu()
         self.request = request
         messageLabel.stringValue = ToastDefaults.textPreview(request.message)
         detailLabel?.stringValue = request.detail.map(ToastDefaults.textPreview) ?? ""
         actionButton?.title = request.actionTitle ?? ""
+        secondaryActionButton?.title = request.secondaryActionTitle ?? ""
+        secondaryActionButton?.showsSubmenuIndicator = request.secondaryActions.count > 1
         progressBar?.progress = request.progress ?? 0
         setAccessibilityLabel(request.announcement)
         needsLayout = true
@@ -557,7 +580,7 @@ final class ToastView: NSView {
     /// fact — see `onHoldChanged`. Reported only on a change, so a pointer crossing a band that
     /// its own carry already holds does not hand the presenter a second pause to spend.
     private func reportHold() {
-        let held = isHovered || isCarried
+        let held = isHovered || isCarried || secondaryMenuSession != nil
         guard held != isHeld else { return }
         isHeld = held
         onHoldChanged?(held)
@@ -806,6 +829,10 @@ final class ToastView: NSView {
         dwellRail.stop()
     }
 
+    func closeSecondaryMenu() {
+        ThemedMenuPresenter.dismiss(secondaryMenuSession)
+    }
+
     // MARK: - Private Methods
 
     private func configureLabels() {
@@ -842,6 +869,16 @@ final class ToastView: NSView {
     }
 
     private func configureAction() {
+        if let secondaryActionButton {
+            secondaryActionButton.translatesAutoresizingMaskIntoConstraints = false
+            secondaryActionButton.emphasis = .tertiary
+            secondaryActionButton.showsSubmenuIndicator = request.secondaryActions.count > 1
+            secondaryActionButton.target = self
+            secondaryActionButton.action = #selector(secondaryActionPressed)
+            if let identifier = request.identifier {
+                secondaryActionButton.setAccessibilityIdentifier("\(identifier).secondary-action")
+            }
+        }
         guard let actionButton else { return }
         actionButton.translatesAutoresizingMaskIntoConstraints = false
         // Secondary: the band reports one thing and offers one action, so the action is the
@@ -868,6 +905,7 @@ final class ToastView: NSView {
         detailLabel.map { addSubview($0) }
         comparisonView.map { addSubview($0) }
         actionButton.map { addSubview($0) }
+        secondaryActionButton.map { addSubview($0) }
         progressBar.map { addSubview($0) }
         addSubview(closeButton)
         addSubview(dwellRail)
@@ -999,12 +1037,32 @@ final class ToastView: NSView {
                 actionButton.leadingAnchor.constraint(
                     greaterThanOrEqualTo: leadingAnchor,
                     constant: inset
-                ),
-                bottomAnchor.constraint(equalTo: actionButton.bottomAnchor, constant: inset)
+                )
             ]
-        } else {
-            constraints.append(bottomAnchor.constraint(equalTo: lastText.bottomAnchor, constant: inset))
+            lastText = actionButton
         }
+
+        if let secondaryActionButton {
+            // A second response gets its own line so narrow sidebars and larger theme fonts
+            // cannot squeeze either action out. Align its plain text with the content edge.
+            constraints += under(
+                lastText.bottomAnchor,
+                by: Design.Spacing.hairline,
+                clearingClose: lastText === messageLabel
+            )(secondaryActionButton.topAnchor)
+            constraints += [
+                secondaryActionButton.trailingAnchor.constraint(
+                    equalTo: trailingAnchor,
+                    constant: -(inset - secondaryActionButton.opticalHorizontalInset)
+                ),
+                secondaryActionButton.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: leadingAnchor,
+                    constant: inset - secondaryActionButton.opticalHorizontalInset
+                )
+            ]
+            lastText = secondaryActionButton
+        }
+        constraints.append(bottomAnchor.constraint(equalTo: lastText.bottomAnchor, constant: inset))
 
         constraints += [messageHeight, detailHeight].compactMap { $0 }
         NSLayoutConstraint.activate(constraints)
@@ -1045,6 +1103,27 @@ final class ToastView: NSView {
 
     @objc private func actionPressed() {
         onAction?()
+    }
+
+    @objc private func secondaryActionPressed() {
+        guard request.secondaryActions.count > 1, let secondaryActionButton else {
+            onSecondaryAction?(0)
+            return
+        }
+        let entries = request.secondaryActions.map { option in
+            ThemedMenuEntry.item(ThemedMenuItem(title: option.title, onChoose: {}))
+        }
+        secondaryMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: secondaryActionButton.bounds.width),
+            from: secondaryActionButton,
+            selectedEntryIndex: nil,
+            onChoose: { [weak self] index, _ in self?.onSecondaryAction?(index) },
+            onDismiss: { [weak self] in
+                self?.secondaryMenuSession = nil
+                self?.reportHold()
+            }
+        )
+        reportHold()
     }
 }
 
@@ -1966,7 +2045,7 @@ final class ToastPresenter {
     /// each one stands behind the band as a card edge (`ToastWaitingCardView`), so a band with more
     /// coming no longer looks like the last thing that happened.
     func present(_ request: ToastRequest) {
-        guard host != nil else { return }
+        guard host != nil, request.isStillRelevant?() != false else { return }
 
         guard let current else { return show(request) }
         if let replacementID = request.replacementID,
@@ -1982,7 +2061,7 @@ final class ToastPresenter {
             if shouldAnnounce { announce(request) }
             return
         }
-        guard current.request.hasAction else {
+        guard current.request.hasAction || current.request.hasSecondaryAction else {
             removeCurrent()
             return show(request)
         }
@@ -2007,12 +2086,14 @@ final class ToastPresenter {
         // leaving takes the open fan with it rather than leaving a list hanging over the slot
         // its own successor is about to rise into.
         closeDeck()
+        toast.closeSecondaryMenu()
         stopClock()
         toast.stopDwell()
         // The departing band answers to nobody from here. Its gesture is spent, and its hover
         // must stop mattering *now*: with a successor taking over, a pointer crossing a card on
         // its way out would otherwise hold the next receipt's clock.
         toast.onAction = nil
+        toast.onSecondaryAction = nil
         toast.onDismiss = nil
         toast.onHoldChanged = nil
         current = nil
@@ -2021,6 +2102,7 @@ final class ToastPresenter {
         // Whatever was waiting takes over in the same motion the departure makes — the front
         // card leaves and the deck steps forward behind it, which is what a deck of cards does.
         // One band *at rest* is still the rule; two sharing a departure is the departure.
+        pending.removeAll { $0.isStillRelevant?() == false }
         guard pending.isEmpty else {
             return promote(pending.removeFirst(), replacing: toast, by: departure)
         }
@@ -2165,6 +2247,7 @@ final class ToastPresenter {
     /// local object's debug lifetime beyond its lexical scope while its layer work is committed.
     func invalidate() {
         closeDeck()
+        current?.closeSecondaryMenu()
         stopClock()
         pending.removeAll()
         current?.stopDwell()
@@ -2242,9 +2325,17 @@ final class ToastPresenter {
     /// way out and the throw dismiss directly, and both holds — pointer and carry — arrive as
     /// the one signal the view reports.
     private func makeToast(for request: ToastRequest) -> ToastView {
+        // A hold belongs to one band, including the menu anchored to it.
+        isBandHeld = false
         let toast = ToastView(request: request)
         toast.onAction = { [weak self, weak toast] in
             toast?.request.action?()
+            self?.dismiss()
+        }
+        toast.onSecondaryAction = { [weak self, weak toast] index in
+            guard let actions = toast?.request.secondaryActions, actions.indices.contains(index) else { return }
+            let action = actions[index].perform
+            action()
             self?.dismiss()
         }
         toast.onDismiss = { [weak self] departure in
@@ -2340,6 +2431,7 @@ final class ToastPresenter {
     /// it reads as a glitch rather than as a replacement.
     private func removeCurrent() {
         closeDeck()
+        current?.closeSecondaryMenu()
         stopClock()
         current?.stopDwell()
         current?.removeFromSuperview()

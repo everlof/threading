@@ -783,12 +783,13 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
 
     private func makeWindowCoordinator(
         checkout: SessionCheckoutCoordinator, tracker: SessionExecutionLocusTracker,
-        policy: SessionCheckoutAuthorityPolicy, toast: @escaping (ToastRequest) -> Void = { _ in }
+        policy: SessionCheckoutAuthorityPolicy, settings: AppSettings? = nil,
+        toast: @escaping (ToastRequest) -> Void = { _ in }
     ) -> SessionCoordinator {
         let suite = "checkout-window-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
-        let settings = AppSettings(defaults: defaults)
+        let settings = settings ?? AppSettings(defaults: defaults)
         settings.sessionCheckoutAuthorityPolicy = policy
         return SessionCoordinator(
             sidebar: ProjectSidebarViewController(projectStore: store),
@@ -863,6 +864,84 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         observe([main.path, sibling.path], arrivingIn: true)
         XCTAssertEqual(offers, 2, "a change of ownership asks afresh")
         withExtendedLifetime(window) {}
+    }
+
+    func testMutingCheckoutOffersSurvivesANewWindowAndKeepsOtherChatsAudible() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let otherSession = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let checkout = makeCoordinator()
+        let tracker = SessionExecutionLocusTracker(projects: store)
+        var receipts: [ToastRequest] = []
+        let window = makeWindowCoordinator(checkout: checkout, tracker: tracker, policy: .alwaysAsk) {
+            receipts.append($0)
+        }
+        let destination = try observed(sibling, branch: "feature/move", name: "sibling")
+        func drift(for sessionID: SessionID) -> SessionExecutionDriftDidChange {
+            SessionExecutionDriftDidChange(
+                sessionID: sessionID, phase: .executing(observedAt: Date()),
+                drift: .siblingCheckout(destination), source: .descendantProcess
+            )
+        }
+        window.reconcileObservedExecutionDrift(drift(for: session.id))
+        let offer = try XCTUnwrap(receipts.last)
+        XCTAssertEqual(offer.secondaryActions.map(\.title), ["Mute this chat", "Mute all checkout notices"])
+        try XCTUnwrap(offer.secondaryActions.first).perform()
+        XCTAssertTrue(try XCTUnwrap(store.session(withID: session.id)).checkoutNoticesMuted)
+        XCTAssertNil(store.session(withID: session.id)?.notificationsMuted)
+
+        let reopened = ProjectStore(stateManager: state)
+        XCTAssertTrue(try XCTUnwrap(reopened.session(withID: session.id)).checkoutNoticesMuted)
+        let nextWindow = makeWindowCoordinator(checkout: checkout, tracker: tracker, policy: .alwaysAsk) {
+            receipts.append($0)
+        }
+        nextWindow.reconcileObservedExecutionDrift(drift(for: session.id))
+        XCTAssertEqual(receipts.count, 1, "a new window must honor the durable mute")
+        nextWindow.reconcileObservedExecutionDrift(drift(for: otherSession.id))
+        XCTAssertEqual(receipts.count, 2, "only the named chat is silenced")
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
+
+        nextWindow.toggleCheckoutNotices(for: session.id)
+        nextWindow.reconcileObservedExecutionDrift(drift(for: session.id))
+        XCTAssertEqual(receipts.count, 3, "unmuting permits a new offer")
+        XCTAssertFalse(try XCTUnwrap(store.session(withID: session.id)).checkoutNoticesMuted)
+    }
+
+    func testMuteAllCheckoutOffersIsDurableAndDoesNotChangeChatPreferences() throws {
+        let suite = "checkout-notices-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertFalse(settings.checkoutNoticesMuted)
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let otherSession = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let checkout = makeCoordinator()
+        let tracker = SessionExecutionLocusTracker(projects: store)
+        let destination = try observed(sibling, branch: "feature/move", name: "sibling")
+        var receipts: [ToastRequest] = []
+        let window = makeWindowCoordinator(checkout: checkout, tracker: tracker,
+                                           policy: .alwaysAsk, settings: settings) { receipts.append($0) }
+        func drift(for sessionID: SessionID) -> SessionExecutionDriftDidChange {
+            SessionExecutionDriftDidChange(sessionID: sessionID, phase: .executing(observedAt: Date()),
+                                          drift: .siblingCheckout(destination), source: .descendantProcess)
+        }
+        window.reconcileObservedExecutionDrift(drift(for: session.id))
+        let muteAll = try XCTUnwrap(receipts.first?.secondaryActions.last)
+        XCTAssertEqual(muteAll.title, "Mute all checkout notices")
+        muteAll.perform()
+        let reopened = AppSettings(defaults: defaults)
+        XCTAssertTrue(reopened.checkoutNoticesMuted)
+        let nextWindow = makeWindowCoordinator(checkout: checkout, tracker: tracker,
+                                               policy: .alwaysAsk, settings: reopened) { receipts.append($0) }
+        nextWindow.reconcileObservedExecutionDrift(drift(for: otherSession.id))
+        XCTAssertEqual(receipts.count, 1)
+        XCTAssertFalse(try XCTUnwrap(store.session(withID: session.id)).checkoutNoticesMuted)
+        XCTAssertNil(store.session(withID: session.id)?.notificationsMuted)
+        reopened.checkoutNoticesMuted = false
+        nextWindow.reconcileObservedExecutionDrift(drift(for: otherSession.id))
+        XCTAssertEqual(receipts.count, 2)
     }
 
     func testSubagentLifecycleCannotMoveTheParentThroughTheWindowRoute() throws {

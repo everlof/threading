@@ -117,6 +117,8 @@ enum ConfirmationPrompt: String, CaseIterable {
     /// Opening a Linked Workroom makes its questions reachable from the internet by a named
     /// person, through a tunnel whose provider can read the traffic.
     case approveWorkroomOpening
+    /// Adds time to the exact unused bearer invitation without replacing its token.
+    case extendWorkroomInvitation
     /// An owner-set daily token budget for a remote host's worker. Raising or removing it lets
     /// a machine that runs without this Mac start more paid work unattended.
     case changeWorkerBudget
@@ -328,6 +330,7 @@ enum ConfirmationPrompt: String, CaseIterable {
              .connectTriggerSource,
              .approveTriggerActivation,
              .approveWorkroomOpening,
+             .extendWorkroomInvitation,
              // A budget is spend authority for a host that keeps working while this Mac is
              // away; the sheet names the worker, the host and the exact new limit each time.
              .changeWorkerBudget,

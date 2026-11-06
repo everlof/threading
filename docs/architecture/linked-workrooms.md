@@ -128,6 +128,27 @@ chats are not guarded yet: their questions reach the app's own permission card.
 
 ## Records (schema v12)
 
+### Extending an invitation
+
+Settings' **Extend Link…** and the `workroom.extendLink` command share
+`WorkroomLinkExtension` and a native `extendWorkroomInvitation` security-grant confirmation.
+The owner adds seven days to the later of the existing expiry and now. The store updates the
+same digest-keyed record, retaining its public ID, issue time and single-use state. No plaintext
+token is recovered, stored or copied. Pending expired invitations may be renewed; redeemed,
+replaced, revoked and removed-person invitations cannot. An exact invitation ID and expected
+expiry are revalidated inside the write transaction, preventing stale screens and duplicate
+approvals from extending a different link or adding time twice.
+
+This extends the existing host-only Workrooms Settings surface. Themes style its existing
+controls; identity, token custody, expiry changes and confirmation remain host-owned. Room
+publication and browser session expiry are independent and unchanged. A rotating tunnel address
+cannot be repaired by extending the token; a reserved domain is still needed across restarts.
+
+The owner action is infrequent and O(1) indexed reads/writes even with a long invitation history.
+The command examines at most the same 50 people as Settings, with one indexed latest-invitation
+lookup each; the expected set is a handful. It creates no unbounded views or timer, and database
+work stays on `ControllerStore`'s actor. Settings retains its existing bounded page refresh.
+
 | Record (`record.kind`) | Key | Notes |
 |---|---|---|
 | `workroomPerson` | person UUID; `key` = handle | owner-added, or added on an approved opening; `removed` revokes every device and invitation |

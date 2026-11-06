@@ -441,6 +441,13 @@ or matching browser binary is absent the tool returns the exact install command 
 download anything implicitly. Optional final screenshots are size-bounded, cached with the
 existing rolling browser artifacts, and can be returned as an MCP image.
 
+Chromium runs use the installed stable Chrome channel with `chromium_sandbox=True`, including
+the persistent attached path. They never fall back to Playwright's downloaded Chromium or retry
+without the sandbox. Chrome receives security updates independently of the Playwright package;
+each one-shot run starts a new process, so an already-running old Chrome cannot be reused.
+Firefox and WebKit retain their engine-specific local binaries. An isolated context separates
+browser state; it is not an OS boundary for the Python helper or the agent's other tools.
+
 The subprocess boundary returns a typed two-case outcome: success owns the formatted result and
 optional screenshot, while failure owns only an actionable diagnostic. A boolean beside nullable
 payloads is deliberately avoided here, so callers cannot treat failure text as page output or

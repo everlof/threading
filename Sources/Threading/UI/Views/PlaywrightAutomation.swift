@@ -109,10 +109,9 @@ final class PlaywrightAutomationRunner: Sendable {
             capturesScreenshot: arguments.screenshot == true,
             timeout: Self.processTimeout,
             failureIntro: "Isolated Playwright scenario failed",
-            failureHint: """
-                If the browser binary is missing, run: python3 -m playwright install \
-                \(arguments.engine ?? "chromium")
-                """
+            failureHint: (arguments.engine ?? "chromium") == "chromium"
+                ? "Install or update Google Chrome. Chromium runs require Chrome with its sandbox enabled."
+                : "If the browser binary is missing, run: python3 -m playwright install \(arguments.engine ?? "chromium")"
         ) { _ in [:] }
     }
 
@@ -343,9 +342,8 @@ final class PlaywrightAutomationRunner: Sendable {
                 code: 2,
                 userInfo: [NSLocalizedDescriptionKey:
                     """
-                    Playwright is not installed. Install Python Playwright and its browser binaries \
-                    (`python3 -m pip install playwright` then \
-                    `python3 -m playwright install chromium`), or set \
+                    Playwright is not installed. Install Python Playwright \
+                    (`python3 -m pip install playwright`) and Google Chrome, or set \
                     THREADING_PLAYWRIGHT_PYTHON to that Python executable.
                     """]
             )

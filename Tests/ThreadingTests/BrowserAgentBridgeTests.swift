@@ -3641,8 +3641,8 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             .browserRunIsolated(firstArguments),
             sessionID: sessionID
         )
-        if first.isError && first.text.contains("playwright install") {
-            throw XCTSkip("The matching local Playwright Chromium binary is not installed.")
+        if first.isError && first.text.contains("distribution 'chrome' is not found") {
+            throw XCTSkip("Google Chrome is not installed.")
         }
         XCTAssertFalse(first.isError, first.text)
         XCTAssertTrue(first.text.contains("\"backend\" : \"playwright_isolated\""), first.text)
@@ -3686,11 +3686,9 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         )
     }
 
-    /// The origin fence is the whole of the attached backend's safety, so it is exercised for
-    /// real rather than asserted about.
+    /// The origin fence is exercised against the same sandboxed Chrome channel as production.
     ///
-    /// Playwright's bundled Chromium stands in for Chrome — the channel is what differs, not the
-    /// enforcement — and two loopback servers give two genuinely different origins on the same
+    /// Two loopback servers give two genuinely different origins on the same
     /// host, which is the case a host-only comparison would wave through. The profile is a
     /// throwaway directory: nothing here is ever signed into anything.
     func testAttachedRunStopsAtTheFirstOriginTheUserDidNotAllow() async throws {
@@ -3729,11 +3727,9 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             .appendingPathComponent("attach-profile-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: profileDirectory) }
         let runner = PlaywrightAutomationRunner()
-        // An empty channel means Playwright's own Chromium: the test needs enforcement, not a
-        // real Google Chrome, and asking a machine to have one would make this untestable.
         let profile = PlaywrightAutomationRunner.AttachProfile(
             userDataDirectory: profileDirectory,
-            channel: "",
+            channel: ChromeAutomationDefaults.channel,
             allowedOrigins: [allowedOrigin]
         )
 
@@ -3748,9 +3744,8 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         let permittedText: String
         switch permitted {
         case .failure(message: let message):
-            if message.contains("playwright install")
-                || message.contains("Executable doesn't exist") {
-                throw XCTSkip("The matching local Playwright browser binary is not installed.")
+            if message.contains("distribution 'chrome' is not found") {
+                throw XCTSkip("Google Chrome is not installed.")
             }
             XCTFail(message)
             return

@@ -5,7 +5,7 @@ left; the selected session's terminal fills the pane on the right.
 
 ## Linux Preview
 
-The Ubuntu arm64 preview supports local projects, saved agents and persistent terminals.
+The Ubuntu arm64/amd64 preview supports local projects, saved agents and persistent terminals.
 Its shared pane header has `+` for Add Project and `⋯` for Actions; Ctrl+Shift+Space also
 opens Actions. The preview still uses a fixed palette and does not include the complete
 macOS UI. See the [Linux preview guide](Platforms/Linux/BUNDLE_README.md) for installation,
@@ -23,6 +23,11 @@ Tab and Shift+Tab reach the project and identity choices, editor, model/effort, 
 submit button. Space or Return opens a focused choice; Escape closes it. In the model grid,
 arrows skip unsupported combinations and Home/End or Page Up/Down reveal distant rows.
 Those navigation keys move within the brief when the editor has focus.
+
+The Intel alpha has a [Swedish test guide](Platforms/Linux/ALPHA_README.md) and an installed-package
+acceptance lane for Ubuntu 26.04. Packages include `run-diagnostic.py` to launch with bounded
+rotating logs and `collect-diagnostics.py` to create a local support report. Log excerpts require
+`--include-logs` and should be reviewed before sharing; nothing is uploaded automatically.
 
 ## First Launch
 
@@ -1773,6 +1778,13 @@ A tool process working in another checkout offers a **Move Chat** button. It nev
 parent chat automatically: a reviewer may inspect another agent's worktree, and a command may
 visit an old checkout temporarily. This holds under every Project authority setting. Selecting
 the button is an explicit move request and waits for the turn and background work to settle.
+
+The offer appears once per checkout until the chat changes ownership. Its **Mute…** menu offers
+**Mute this chat** for that conversation and **Mute all checkout notices** for every chat. Both
+choices survive app restarts and affect automatic checkout-move notices. **Working in** markers, manual
+move controls, completion notifications and sounds keep their usual behavior. Turn notices back
+on with **Session Options ▸ Unmute Checkout Notices** or **Unmute All Checkout Notices**, or use
+**Toggle Checkout Notices** / **Toggle All Checkout Notices** in the command palette.
 
 A change reported by the parent runtime itself can still follow the Project authority policy.
 Threading waits for the final Git checkpoint, shows a pending receipt, moves the chat, and
@@ -3931,6 +3943,12 @@ switch it on in **Settings ▸ Workrooms**.
   stays open and the agent's reason. Approve, then copy the person's link from **Settings ▸
   Workrooms** (Copy Link) and send it yourself. Each link works once and signs in that browser;
   copying a new one cancels an unused earlier one. **Sign Out** ends a person's browsers.
+- **Extending a link.** In **Settings ▸ Workrooms**, choose **Extend Link…** beside a person,
+  or use **Extend Workroom Link…** in the command palette. This adds seven days to the existing
+  unused invitation, keeping the same URL. An expired unused link gets seven days from now.
+  Used or replaced invitations cannot be extended. Room closing dates and signed-in browser
+  sessions have their own lifetimes; extending an invitation does not change either. The public
+  address must still be available, so use a reserved domain to keep links valid across restarts.
 - **Answering.** The person sees only their own questions in rooms open to them, answers in the
   form, can change an answer, ask the agent for clarification, or decline. The page follows their
   language (Swedish or English) and they can switch it.

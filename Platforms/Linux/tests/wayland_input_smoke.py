@@ -2,6 +2,7 @@
 import os
 import json
 from pathlib import Path
+import re
 import socket
 import sqlite3
 import struct
@@ -351,8 +352,8 @@ with log_path.open('w') as log:
         assert other_image.read_bytes() != revealed_image.read_bytes(), \
             'page title reveal did not change the Wayland frame'
         protocol_log = log_path.read_text()
-        assert 'wl_pointer@' in protocol_log and '.button(' in protocol_log, 'no Wayland pointer button event'
-        assert 'wl_keyboard@' in protocol_log and '.key(' in protocol_log, 'no Wayland keyboard key event'
+        assert re.search(r'\bwl_pointer[@#]\d+\.button\(', protocol_log), 'no Wayland pointer button event'
+        assert re.search(r'\bwl_keyboard[@#]\d+\.key\(', protocol_log), 'no Wayland keyboard key event'
         print('PASS installed Wayland controls, shell title render, title reveal, row right-click, Shift+F10 and drag release')
     finally:
         if process.poll() is None:

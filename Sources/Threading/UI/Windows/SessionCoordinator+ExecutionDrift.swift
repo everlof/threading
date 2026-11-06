@@ -58,11 +58,11 @@ extension SessionCoordinator {
             // a different one, which is the same class of lie this whole feature exists to stop.
             // It happens for real: an agent that visits a second worktree and moves on again.
             guard move.worktreeIdentity == checkout.worktreeIdentity else { return }
-            toastPresenter(Self.observedMovePendingToast(
+            presentCheckoutNotice(Self.observedMovePendingToast(
                 for: session,
                 checkout: checkout,
                 requestID: move.requestID
-            ))
+            ), for: sessionID)
         case .alreadyPending:
             // Repeated process observations describe the standing request; they are not a new
             // transition and must not restart its toast's dismissal clock.
@@ -72,12 +72,13 @@ extension SessionCoordinator {
             // time the same checkout is observed is how one background job put the same band
             // back on screen hundreds of times a day, however often the user dismissed it. The
             // row's marker and menu carry it from here; a move re-arms it by advancing the epoch.
-            guard observedMoveOffers.admit(
+            guard !environment.settings.checkoutNoticesMuted,
+                  !session.checkoutNoticesMuted, observedMoveOffers.admit(
                 sessionID: sessionID,
                 worktreeIdentity: checkout.worktreeIdentity,
                 ownershipEpoch: epoch
             ) else { break }
-            toastPresenter(Self.observedMoveOfferToast(
+            let offer = Self.observedMoveOfferToast(
                 for: session,
                 checkout: checkout,
                 move: { [weak self] in
@@ -85,8 +86,15 @@ extension SessionCoordinator {
                           self.executionLocusTracker.ownershipEpoch(forSessionID: sessionID) == epoch,
                           self.executionLocusTracker.drift(forSessionID: sessionID) == event.drift else { return }
                     self.approveObservedMove(sessionID, to: checkout, phase: event.phase)
+                },
+                mute: { [weak self] in
+                    self?.setCheckoutNoticesMuted(true, for: sessionID)
+                },
+                muteAll: { [weak self] in
+                    self?.environment.settings.checkoutNoticesMuted = true
                 }
-            ))
+            )
+            presentCheckoutNotice(offer, for: sessionID)
         case .denied, .failed:
             // The row keeps its marker and the user keeps the row menu. A refusal here is
             // ordinary — a worktree removed between the report and the reconcile, a detached
@@ -99,8 +107,37 @@ extension SessionCoordinator {
             // to collapse repeated drift receipts into one row, and a permanent decision must not
             // be overwritten by the next ordinary reading about the same chat.
             guard checkoutCoordinator.hasAbandonedFollowing(sessionID: sessionID) else { break }
-            toastPresenter(Self.abandonedFollowingToast(for: session))
+            presentCheckoutNotice(Self.abandonedFollowingToast(for: session), for: sessionID)
         }
+    }
+
+    // MARK: - Checkout Notice Preference
+
+    func presentCheckoutNotice(_ request: ToastRequest, for sessionID: SessionID) {
+        var notice = request
+        notice.isStillRelevant = { [weak self] in
+            guard let self,
+                  let session = self.environment.projectStore.session(withID: sessionID) else { return false }
+            return !self.environment.settings.checkoutNoticesMuted && !session.checkoutNoticesMuted
+        }
+        guard notice.isStillRelevant?() == true else { return }
+        toastPresenter(notice)
+    }
+
+    @discardableResult
+    func setCheckoutNoticesMuted(_ muted: Bool, for sessionID: SessionID) -> Bool {
+        guard environment.projectStore.setCheckoutNoticesMuted(
+            muted, forSessionID: sessionID
+        ).succeeded else {
+            toastPresenter(ToastRequest(message: L10n.string("The project data could not be saved.")))
+            return false
+        }
+        return true
+    }
+
+    func toggleCheckoutNotices(for sessionID: SessionID) {
+        guard let session = environment.projectStore.session(withID: sessionID) else { return }
+        setCheckoutNoticesMuted(!session.checkoutNoticesMuted, for: sessionID)
     }
 
     // MARK: - Private Methods
@@ -229,7 +266,9 @@ extension SessionCoordinator {
     static func observedMoveOfferToast(
         for session: AgentSession,
         checkout: ObservedCheckout,
-        move: @escaping () -> Void
+        move: @escaping () -> Void,
+        mute: @escaping () -> Void,
+        muteAll: @escaping () -> Void
     ) -> ToastRequest {
         ToastRequest(
             message: L10n.format(
@@ -243,6 +282,11 @@ extension SessionCoordinator {
             ),
             actionTitle: L10n.string("Move Chat"),
             action: move,
+            secondaryActionTitle: L10n.string("Mute…"),
+            secondaryActions: [
+                ToastAction(title: L10n.string("Mute this chat"), perform: mute),
+                ToastAction(title: L10n.string("Mute all checkout notices"), perform: muteAll)
+            ],
             dwell: ToastDefaults.unattendedDwell,
             identifier: "sidebar.toast.execution-drift.offer",
             replacementID: "execution-drift.\(session.id.uuidString)"

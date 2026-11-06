@@ -1,7 +1,9 @@
 # Threading Linux preview
 
 The archive and `.deb` run the native Linux window and PTY daemon without a Swift toolchain or
-source checkout. They currently target Ubuntu 24.04 on arm64. This is a preview of the Linux host,
+source checkout. Builds use Ubuntu 24.04 on arm64 or amd64 (Intel/AMD). The Intel alpha acceptance
+lane runs the installed package on Ubuntu 26.04; see `ALPHA_README.md` for its handoff checklist.
+This is a preview of the Linux host,
 not the full macOS product UI. The graphical path has been validated under Xvfb/X11. A headless
 Weston/Wayland run of the installed package also opened native windows and rendered two distinct
 project states; its Actions overlay opened and closed through AT-SPI, and the current project
@@ -16,6 +18,18 @@ Install the `.deb` with `sudo apt install ./threading-linux-preview-ubuntu24.04-
 open **Threading Linux Preview** from the desktop application menu. The package installs the
 runtime dependencies, launcher, binaries and icon. To open a particular directory directly, run
 `/opt/threading-linux-preview/run-app.sh [PROJECT_DIRECTORY]`.
+For Intel/AMD, use `threading-linux-preview-ubuntu24.04-amd64.deb` instead. `ubuntu24.04` names
+the build's ABI baseline; the handoff's verification record names the tested runtime.
+
+To capture a problem, close the window and run
+`/opt/threading-linux-preview/run-diagnostic.py [PROJECT_DIRECTORY]`. This opens the ordinary
+app and retains at most two 1 MiB output logs in the app's data directory. Then run
+`/opt/threading-linux-preview/collect-diagnostics.py --output "$HOME/Downloads"` for a local
+system/build report. Add `--include-logs` to include at most the last 64 KiB of each app/daemon
+log. The command leaves a readable directory and a `.tar.gz`; review it before sharing because
+log redaction is best effort. It never uploads anything or collects account files, transcripts,
+databases, the complete environment or process lists. Python 3 is installed with the `.deb`;
+archive users need to install it separately.
 
 For the standalone `.tar.gz` archive, install the Ubuntu runtime packages, then run
 `./run-app.sh [PROJECT_DIRECTORY]` from the extracted bundle:

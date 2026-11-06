@@ -13,7 +13,7 @@ public struct WorkroomInvitation: Codable, Equatable, Sendable {
     public let id: UUID
     public let person: WorkroomPersonID
     public let issuedAt: String
-    public let expiresAt: String
+    public internal(set) var expiresAt: String
     public internal(set) var state: WorkroomInvitationState
     public internal(set) var redeemedAt: String?
     public internal(set) var deviceID: UUID?
@@ -79,15 +79,16 @@ extension ControllerStore {
     /// A fresh single-use link for `person`. Any invitation of theirs still pending is revoked
     /// in the same transaction, so only the newest copied link works.
     public func issueWorkroomInvitation(person: WorkroomPersonID,
-                                        lifetime: TimeInterval = WorkroomLimits.invitationLifetime) throws -> (WorkroomInvitation, String) {
+                                        lifetime: TimeInterval = WorkroomLimits.invitationLifetime,
+                                        now: Date = Date()) throws -> (WorkroomInvitation, String) {
         guard lifetime > 0, lifetime <= WorkroomLimits.invitationLifetime else { throw ControllerError.invalidInput("lifetime") }
         return try db.transaction {
             let value: WorkroomPerson = try required("workroomPerson", person.description)
             guard value.state == .active else { throw ControllerError.notFound }
             try revokePendingInvitations(person: person)
             let token = WorkroomToken.mint()
-            let invitation = WorkroomInvitation(id: UUID(), person: person, issuedAt: Self.now(),
-                                                expiresAt: Self.timestamp(Date().addingTimeInterval(lifetime)),
+            let invitation = WorkroomInvitation(id: UUID(), person: person, issuedAt: Self.timestamp(now),
+                                                expiresAt: Self.timestamp(now.addingTimeInterval(lifetime)),
                                                 state: .pending, redeemedAt: nil, deviceID: nil)
             try insert("workroomInvitation", WorkroomToken.digest(token), parent: person.description,
                        state: invitation.state.rawValue, value: invitation)
@@ -101,6 +102,34 @@ extension ControllerStore {
             SELECT payload FROM record INDEXED BY record_ready
             WHERE kind='workroomDevice' AND parent=? AND state='active' ORDER BY sequence DESC LIMIT ?
             """, [.text(person.description), .integer(Int64(WorkroomLimits.devicesPerPerson))]).map { try decode($0.text(0)) }
+    }
+
+    /// Extend the exact unused invitation the owner reviewed, keeping its token digest and
+    /// identity. Expired pending invitations may be renewed; redeemed or replaced links cannot.
+    /// Checking the prior expiry also makes a repeated approval fail instead of adding time twice.
+    public func extendWorkroomInvitation(person: WorkroomPersonID, invitationID: UUID,
+                                         expectedExpiry: String,
+                                         by lifetime: TimeInterval = WorkroomLimits.invitationLifetime,
+                                         now: Date = Date()) throws -> WorkroomInvitation {
+        guard lifetime.isFinite, lifetime > 0, lifetime <= WorkroomLimits.invitationLifetime,
+              now.timeIntervalSince1970.isFinite else { throw ControllerError.invalidInput("lifetime") }
+        return try db.transaction {
+            let owner: WorkroomPerson = try required("workroomPerson", person.description)
+            guard owner.state == .active else { throw ControllerError.notFound }
+            // The index bounds this lookup even after years of replaced invitations.
+            guard let row = try db.rows("""
+                SELECT id,payload FROM record INDEXED BY record_parent
+                WHERE kind='workroomInvitation' AND parent=? ORDER BY sequence DESC LIMIT 1
+                """, [.text(person.description)]).first else { throw ControllerError.notFound }
+            var invitation: WorkroomInvitation = try decode(row.text(1))
+            guard invitation.id == invitationID, invitation.state == .pending else { throw ControllerError.notFound }
+            guard invitation.expiresAt == expectedExpiry else { throw ControllerError.conflict }
+            guard let expiry = Self.date(invitation.expiresAt) else { throw ControllerError.unsupportedSchema }
+            invitation.expiresAt = Self.timestamp(max(now, expiry).addingTimeInterval(lifetime))
+            try update("workroomInvitation", try row.text(0), state: invitation.state.rawValue, value: invitation)
+            try event("workroom.invitation_extended", person.description)
+            return invitation
+        }
     }
 
     /// The newest invitation of this person, whatever its state: what the owner's list shows.

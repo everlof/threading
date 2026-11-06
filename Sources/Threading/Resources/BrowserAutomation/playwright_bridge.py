@@ -354,7 +354,12 @@ def run(request: dict) -> dict:
     page = None
     with sync_playwright() as playwright:
         browser_type = getattr(playwright, engine_name)
-        browser = browser_type.launch(headless=bool(request.get("headless", True)))
+        launch_options = {"headless": bool(request.get("headless", True))}
+        if engine_name == "chromium":
+            # Use Chrome's update channel and keep its OS sandbox. Never fall back to the
+            # version-coupled test browser or retry a failed launch without the sandbox.
+            launch_options.update(channel="chrome", chromium_sandbox=True)
+        browser = browser_type.launch(**launch_options)
         try:
             context = browser.new_context(**context_options(request))
             try:
@@ -510,9 +515,9 @@ def run_attached(request: dict) -> dict:
     user_data_dir = str(request.get("user_data_dir") or "")
     if not user_data_dir.startswith("/"):
         raise ValueError("user_data_dir must be an absolute path")
-    channel = request.get("channel")
-    if channel is not None and (not isinstance(channel, str) or len(channel) > 32):
-        raise ValueError("channel must be a short string such as chrome")
+    channel = request.get("channel", "chrome")
+    if channel != "chrome":
+        raise ValueError("Attached browsing requires the installed stable Chrome channel")
     steps = request.get("steps")
     if not isinstance(steps, list) or not 1 <= len(steps) <= MAX_STEPS:
         raise ValueError(f"steps must contain between 1 and {MAX_STEPS} entries")
@@ -529,14 +534,13 @@ def run_attached(request: dict) -> dict:
     # thing this design refuses to build.
     options: dict = {
         "headless": False,
+        "channel": channel,
+        "chromium_sandbox": True,
         "accept_downloads": False,
         "strict_selectors": True,
         "no_viewport": True,
         "args": ["--no-first-run", "--no-default-browser-check"],
     }
-    if channel:
-        options["channel"] = channel
-
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(user_data_dir, **options)
         try:
@@ -561,7 +565,7 @@ def run_attached(request: dict) -> dict:
             return {
                 "ok": True,
                 "backend": ATTACH_BACKEND,
-                "channel": channel or "chromium",
+                "channel": channel,
                 "playwright_version": playwright_version,
                 "allowed_origins": allowed,
                 "final_url": redact_url(page.url),

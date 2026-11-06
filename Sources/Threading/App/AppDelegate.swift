@@ -3655,6 +3655,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             case AppCommands.ID.renameSession:
                 controller.renameSession(sessionID)
                 return .invoked(commandID: id)
+            case AppCommands.ID.toggleCheckoutNotices:
+                controller.sessionCoordinator.toggleCheckoutNotices(for: sessionID)
+                return .invoked(commandID: id)
             case AppCommands.ID.makeManager:
                 guard !ControlGrantStore.shared.isManager(sessionID) else {
                     return .refused(
@@ -3735,6 +3738,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.newProject: mainWindowController?.newProject()
         case AppCommands.ID.addProject: mainWindowController?.addProject()
         case AppCommands.ID.renameSession: mainWindowController?.renameCurrentSession()
+        case AppCommands.ID.toggleCheckoutNotices:
+            if let controller = mainWindowController, let sessionID = controller.currentSessionID {
+                controller.sessionCoordinator.toggleCheckoutNotices(for: sessionID)
+            }
+        case AppCommands.ID.toggleAllCheckoutNotices:
+            AppSettings.shared.checkoutNoticesMuted.toggle()
         case AppCommands.ID.closeSession: mainWindowController?.closeCurrentSession()
         case AppCommands.ID.closeTab:
             if let browser = standaloneBrowserWindows.active { browser.close() }
@@ -3902,6 +3911,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                     alert.runModal()
                 }
             }
+        case AppCommands.ID.extendWorkroomLink:
+            WorkroomLinkExtension.start(in: mainWindowController?.window)
         case "system.preferences": mainWindowController?.toggleSettingsFromCommand()
         case "system.hide": NSApp.hide(nil)
         case "system.quit": NSApp.terminate(nil)

@@ -69,6 +69,7 @@ final class ToastRenderTests: HostedStoreTestCase {
             case cleanup
             case agentUpdates = "agent-updates"
             case longReport = "long-report"
+            case checkoutMove = "checkout-move"
         }
 
         /// Automation summaries are provider text, and can be entire reports rather than the
@@ -168,6 +169,18 @@ final class ToastRenderTests: HostedStoreTestCase {
     }
 
     func testRendersLongReportInTheMainWindowSidebar() throws {
+        try renderInMainWindowSidebar(story: .longReport)
+    }
+
+    func testRendersCheckoutMoveInTheMainWindowSidebar() throws {
+        try renderInMainWindowSidebar(story: .checkoutMove)
+    }
+
+    func testRendersCheckoutMuteMenuInTheMainWindowSidebar() throws {
+        try renderInMainWindowSidebar(story: .checkoutMove, menuOpen: true)
+    }
+
+    private func renderInMainWindowSidebar(story: Render.Story, menuOpen: Bool = false) throws {
         let previousTheme = AppThemeLibrary.current
         let previousMotion = Design.Motion.reduceMotionOverrideForTesting
         Design.Motion.reduceMotionOverrideForTesting = true
@@ -181,29 +194,43 @@ final class ToastRenderTests: HostedStoreTestCase {
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 1_100, height: 760))
         let content = try XCTUnwrap(window.contentView)
+        let session = AgentSession(kind: .codex, title: "VERIFICATION")
         for (themeName, theme) in Render.themes {
             AppThemePalette.set(theme)
             for (appearanceName, appearanceID) in Render.appearances {
                 let appearance = try XCTUnwrap(NSAppearance(named: appearanceID))
                 content.appearance = appearance
-                controller.sidebarViewController.presentToast(ToastRequest(
-                    message: "Automation completed",
-                    detail: Render.longReport,
-                    persistsUntilDismissed: true
-                ))
+                var receipt = request(for: story, session: session)
+                receipt.persistsUntilDismissed = true
+                controller.sidebarViewController.presentToast(receipt)
                 AppThemeRefresh.repaint(content)
                 content.layoutSubtreeIfNeeded()
                 let sidebar = controller.sidebarViewController.view
                 let toast = try XCTUnwrap(descendants(in: sidebar).compactMap { $0 as? ToastView }.first)
-                print("Long report toast \(themeName)-\(appearanceName): \(toast.frame.height)pt")
-                XCTAssertLessThan(toast.frame.height, 150, "A report must remain a sidebar receipt")
+                XCTAssertLessThan(toast.frame.height, story == .longReport ? 150 : 180,
+                                  "The notice must remain a sidebar receipt")
                 XCTAssertTrue(sidebar.bounds.contains(toast.convert(toast.bounds, to: sidebar)))
+                for button in descendants(in: toast).compactMap({ $0 as? ThemedButton }) {
+                    XCTAssertTrue(toast.bounds.contains(button.convert(button.bounds, to: toast)))
+                    XCTAssertGreaterThanOrEqual(button.frame.width, button.intrinsicContentSize.width - 0.5)
+                }
+                if menuOpen {
+                    let mute = try XCTUnwrap(descendants(in: toast).compactMap { $0 as? ThemedButton }
+                        .first { $0.title == "Mute…" })
+                    mute.performClick()
+                    content.layoutSubtreeIfNeeded()
+                    let options = descendants(in: content).filter { $0.accessibilityRole() == .menuItem }
+                    XCTAssertEqual(options.compactMap { $0.accessibilityTitle() },
+                                   ["Mute this chat", "Mute all checkout notices"])
+                }
                 let bitmap = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
                 appearance.performAsCurrentDrawingAppearance {
                     content.cacheDisplay(in: content.bounds, to: bitmap)
                 }
                 try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(
-                    to: directory.appendingPathComponent("toast-shell-long-report-\(themeName)-\(appearanceName).png")
+                    to: directory.appendingPathComponent(
+                        "toast-shell-\(story.rawValue)\(menuOpen ? "-menu" : "")-\(themeName)-\(appearanceName).png"
+                    )
                 )
             }
         }
@@ -295,6 +322,16 @@ final class ToastRenderTests: HostedStoreTestCase {
             ], runUpdates: { _ in })
         case .longReport:
             return ToastRequest(message: "Automation completed", detail: Render.longReport)
+        case .checkoutMove:
+            return SessionCoordinator.observedMoveOfferToast(
+                for: session,
+                checkout: ObservedCheckout(
+                    root: "/fixture/sonda-746-q1", worktreeIdentity: "fixture-worktree",
+                    repositoryIdentity: "fixture-repository", branch: "sonda-746-q1",
+                    displayName: "sonda-746-q1"
+                ),
+                move: {}, mute: {}, muteAll: {}
+            )
         }
     }
 

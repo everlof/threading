@@ -1,6 +1,7 @@
 """Prove the installed Wayland window presents two distinct project states."""
 import os
 from pathlib import Path
+import re
 import socket
 import struct
 import subprocess
@@ -81,7 +82,9 @@ def render(project_name, state):
                     process.wait(timeout=5)
     content = log_path.read_text()
     assert 'get_toplevel(new id xdg_toplevel' in content, 'no Wayland toplevel'
-    assert 'wl_surface@' in content and '.commit()' in content, 'no Wayland buffer commit'
+    # libwayland uses @ in older debug logs and # in Ubuntu 26.04. Match an actual
+    # surface commit in either format rather than unrelated surface/method substrings.
+    assert re.search(r'\bwl_surface[@#]\d+\.commit\(\)', content), 'no Wayland buffer commit'
     assert f'Threading experiment - {project}' in content, 'wrong selected project title'
     bitmap = image.read_bytes()
     assert bitmap[:2] == b'BM' and len(bitmap) > 320 * 180 * 3, 'invalid SDL render readback'
