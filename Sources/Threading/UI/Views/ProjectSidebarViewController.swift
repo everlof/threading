@@ -2515,6 +2515,11 @@ extension ProjectSidebarViewController {
 
     /// Refreshes a single session's row, used for frequent updates such as title changes.
     func refreshRow(sessionID: SessionID) {
+        if let parentID = projectStore.session(withID: sessionID)?.subagentParentID,
+           let parentNode = sessionNode(for: parentID) {
+            let parentRow = outlineView.row(forItem: parentNode)
+            if parentRow >= 0 { reconfigureRow(at: parentRow) }
+        }
         // Loading raises and activity edges both funnel through here, and the selected
         // session's beam is a fact derived from exactly those two — restated even when the
         // row itself has no live view, because a beam can need clearing after its wearer left.
@@ -4252,7 +4257,25 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
                 isLoading: loadingState.isLoading(sessionNode.sessionID),
                 conduct: RowConductSummary.forSession(session, in: projectStore),
                 executionHost: projectStore.project(forSessionID: session.id)?.executionHost?.destination,
-                isScheduledStart: scheduledStart != nil
+                isScheduledStart: scheduledStart != nil,
+                subagentParentTitle: session.subagentParentID.flatMap {
+                    projectStore.session(withID: $0)?.displayTitle
+                },
+                subagentIsLastChild: (outlineView.parent(forItem: sessionNode) as? SessionNode).map {
+                    $0.childNodes.last?.sessionID == session.id
+                }
+            )
+            // Admission permits four live subagents. The count is precomputed during tree
+            // construction; viewport refreshes inspect at most that many runtime values.
+            let childActivity = sessionNode.subagentIDs.prefix(SubagentChatDefaults.maximumLiveSubagents)
+                .map { AgentRuntime.shared.activity(sessionID: $0) }
+            cell.setSubagentSummary(
+                count: sessionNode.subagentIDs.count,
+                working: childActivity.filter { $0 == .working }.count,
+                attention: childActivity.filter {
+                    $0 == .awaitingUser || $0 == .needsAttention || $0 == .limitReached
+                }.count,
+                collapsed: !outlineView.isItemExpanded(sessionNode)
             )
             cell.onAction = { [weak self] sessionID, anchor in
                 self?.showRowActions(for: sessionID, from: anchor)
@@ -4407,6 +4430,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
         if let sessionNode = notification.userInfo?["NSObject"] as? SessionNode {
             collapsedSideChatParents.remove(sessionNode.sessionID)
+            reloadRow(for: sessionNode)
             return
         }
 
@@ -4439,6 +4463,7 @@ extension ProjectSidebarViewController: NSOutlineViewDelegate {
 
         if let sessionNode = notification.userInfo?["NSObject"] as? SessionNode {
             collapsedSideChatParents.insert(sessionNode.sessionID)
+            reloadRow(for: sessionNode)
             return
         }
 

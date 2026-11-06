@@ -298,6 +298,19 @@ its own agent's icon, since it may run a different provider; the hover card says
 …** with its brief. You can open it, read along, type into it or stop it like any chat. It runs
 on its own login and counts against that login's usage.
 
+Subagent rows have a branch connector even with **Compact Tree** enabled. Their parent shows
+the number of subagents; when folded, it summarizes children working or waiting for attention.
+
+A subagent on its parent's provider and account starts without an extra account question.
+Another account or provider requires **Approve and Start** in the parent chat. The card names
+the exact account and model, shows its usage windows, reset times, your limits and the reading's
+timestamp, and offers **Refresh Usage**. Unknown, failed, exhausted or old readings cannot be
+approved; providers without usage reporting say so explicitly. “Best” is resolved to a specific
+account before you decide. Approval covers only that start; **Deny** starts nothing. The card
+cannot be approved by another agent or by the provider's automatic permission mode. Pending
+requests expire after five minutes and are cancelled when the parent's turn or session ends.
+A terminal parent shows the same controls in a confirmation naming the parent.
+
 When a turn its parent started finishes, Threading sends the subagent's final reply back to the
 parent as **mail from the subagent**. The parent is told mail is waiting and reads it when it can,
 so the reply never appears in the parent's conversation as if you had typed it. A turn *you* type

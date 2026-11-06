@@ -165,6 +165,32 @@ grant stays, so a restore returns the authority but not the fleet.
 
 ## Subagents: delegation without a grant
 
+### Account choice requires owner approval
+
+`SupervisionCommandService` freezes the child's plan before admission. A different provider or
+account from the parent's requires a `SubagentAccountApproval`; an inherited identity retains
+the ordinary usage admission path. Named account proposals reach the card even if usage is
+unknown or spent. `best` resolves once against refreshed usage before presentation and is never
+ranked again after approval. The post-answer admission checks the exact account's availability,
+usage and current parent authority before creating a session. Preflight does not spend the start
+rate budget; only final admission does. If the parent changes accounts while an inherited start
+is being checked, that start refuses rather than silently gaining another-account authority.
+
+This is owner authority, outside `PermissionBroker`, auto approval and manager permission
+resolution. `ConversationSubagentApprovals` retains at most four requests and mounts one card;
+the same pending state drives the parent's waiting marker. Usage refresh respects the shared
+service's pacing, shows `observedAt`, keeps Start disabled during refresh and requires a current
+reading at most 120 seconds old with headroom. Unknown providers explicitly disclose that usage
+is unavailable. Press-time age/limit checks cannot turn a refresh into approval. Each answer
+is spent once. Turn/session termination and a five-minute deadline deny outstanding requests.
+Terminal parents use the same card in an always-asking `.approveSubagentAccount` confirmation.
+Their queue also caps each parent's requests at four (128 across windows) and constructs only
+the currently presented card. The same launch lifetime cancels both native and terminal waits.
+
+The account and usage decision is deliberately host-owned; themes style the card, while agents
+and extensions cannot answer it. `SubagentAccountApprovalTests` exercises the actual tool service,
+bounded queue, owner-only action, late answers, and the real main-window presentation.
+
 Any chat may start a **subagent** (`start_subagent`): a chat of its own, on any runtime that
 can report back, nested under it and recorded as its responsibility. Managing reaches other
 chats and is conferred by the user; delegating reaches only what the chat itself starts, so it

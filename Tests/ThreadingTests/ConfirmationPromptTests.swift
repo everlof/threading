@@ -74,6 +74,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "approveProxyClient",
             "approveBrowserNetworkCapture",
             "approveToolPermission",
+            "approveSubagentAccount",
             "approveSessionCheckoutMove",
             "installUnsignedExtension",
             "updateExtensionCapabilities",

@@ -152,6 +152,7 @@ final class ProjectAutomationsNode: NSObject, SidebarOutlineNode {
 /// Reference-typed wrapper for a session row.
 final class SessionNode: NSObject {
     let sessionID: SessionID
+    var subagentIDs: [SessionID] = []
 
     /// Side chats forked from this session. Empty for almost every row, and a row with none
     /// is not expandable — the same "earns its level" rule the repository and branch groups
@@ -187,6 +188,7 @@ extension SessionNode: SidebarOutlineNode {
     ) {
         guard let rebuilt = rebuilt as? SessionNode else { return }
         childNodes = rebuilt.childNodes.map(substituting.callAsFunction)
+        subagentIDs = rebuilt.subagentIDs
     }
 }
 
@@ -1099,6 +1101,9 @@ enum SidebarTreeBuilder {
             }
 
             parent.childNodes.append(node)
+            if NativeSidebarParity.fact(.sessionParent, session.subagentParentID) != nil {
+                parent.subagentIDs.append(node.sessionID)
+            }
         }
 
         return (topSessions, topNodes)

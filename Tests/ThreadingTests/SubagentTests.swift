@@ -82,6 +82,9 @@ final class SubagentAdmissionTests: XCTestCase {
         let fixture = Fixture()
         let plane = fixture.plane()
         let now = Date(timeIntervalSince1970: 1_000_000)
+        for _ in 0..<20 {
+            XCTAssertNil(plane.admitSubagent(fixture.plan(), from: fixture.actor, at: now, recordStart: false))
+        }
 
         // A refused start must not count against the window.
         XCTAssertNotNil(plane.admitSubagent(fixture.plan(delivery: .mergeAndCleanUp), from: fixture.actor, at: now))

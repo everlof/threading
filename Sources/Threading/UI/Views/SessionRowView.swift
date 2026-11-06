@@ -20,6 +20,20 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// Keep that stable slot cheap and materialize the indicator's attention/limit subviews and
     /// constraints only after a state has pixels to contribute.
     private let assembly = SidebarSessionRowAssembly()
+    private var subagentConnector: SidebarSubagentConnectorView?
+    private var subagentSummary: SidebarSubagentSummaryView?
+
+    func setSubagentSummary(count: Int, working: Int, attention: Int, collapsed: Bool) {
+        guard count > 0 else { subagentSummary?.isHidden = true; return }
+        let summary = subagentSummary ?? SidebarSubagentSummaryView()
+        if subagentSummary == nil {
+            subagentSummary = summary
+            rowContentStack.addArrangedSubview(summary)
+        }
+        summary.isHidden = false
+        summary.configure(count: count, working: working, attention: attention, collapsed: collapsed)
+        summary.applyInk(on: SidebarHoverRowView.contentGround(for: self))
+    }
     private var trailingSlot: SidebarSessionTrailingSlot { assembly.trailingSlot }
     private var statusSlot: NSView { trailingSlot.statusSlot }
     private var statusIndicator: SessionStatusIndicator?
@@ -848,7 +862,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         isLoading: Bool = false,
         conduct: RowConductSummary? = nil,
         executionHost: String? = nil,
-        isScheduledStart: Bool = false
+        isScheduledStart: Bool = false,
+        subagentParentTitle: String? = nil,
+        subagentIsLastChild: Bool? = nil
     ) {
         let hoverSession = NativeSidebarParity.host(.hoverContent, session)
         let rowIsPinned = NativeSidebarParity.fact(.sessionPinned, session.isPinned)
@@ -863,6 +879,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         let conductDetail = NativeSidebarParity.host(.conductDetail, conduct)
         let rowExecutionHost = NativeSidebarParity.host(.executionPlacement, executionHost)
         let isSideChat = NativeSidebarParity.fact(.sessionParent, session.isSideChat)
+        let subagentParentID = NativeSidebarParity.fact(.sessionParent, session.subagentParentID)
+        let parentTitle = NativeSidebarParity.fact(.sessionTitle, subagentParentTitle)
+        let isLastChild = NativeSidebarParity.host(.identityPresentation, subagentIsLastChild)
         let row = AgentSessionRowPresentation(
             id: NativeSidebarParity.host(.entityIdentity, session.id),
             kind: NativeSidebarParity.fact(.sessionProvider, session.kind),
@@ -894,6 +913,21 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             && titleLabel.stringValue != row.title
 
         sessionID = row.id
+        if subagentParentID != nil, let isLastChild {
+            let connector = subagentConnector ?? SidebarSubagentConnectorView()
+            if subagentConnector == nil {
+                subagentConnector = connector
+                connector.contrastGround = { [weak self] in
+                    self.map { SidebarHoverRowView.contentGround(for: $0) } ?? Design.Surface.background
+                }
+                rowContentStack.insertArrangedSubview(connector, at: 0)
+            }
+            connector.isHidden = false
+            connector.isLastChild = isLastChild
+            connector.toolTip = parentTitle.map { L10n.format("Subagent of %@", $0) }
+        } else {
+            subagentConnector?.isHidden = true
+        }
         nativeTitle = row.title
         showsUntitledName = NativeSidebarParity.fact(.sessionTitle, session.isUnnamed)
         nativeToolTip = nil
@@ -910,15 +944,9 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         setConductMark(hasCustomConduct ? conductDetail : nil)
         setExecutionHostMark(rowExecutionHost)
         // A subagent keeps its own agent mark (it may run another provider than its parent), so
-        // the lineage is spoken rather than drawn. It outranks "managed by": the chat that
+        // the lineage is also spoken. It outranks "managed by": the chat that
         // started it is the one responsible for it, and the more specific word.
-        let subagentParentID = NativeSidebarParity.fact(.sessionParent, session.subagentParentID)
-        if let subagentParentID,
-           let subagentParent: AgentSession = NativeSidebarParity.fact(
-               .sessionTitle,
-               ProjectStore.shared.session(withID: subagentParentID)
-           ) {
-            let parentTitle = NativeSidebarParity.fact(.sessionTitle, subagentParent.displayTitle)
+        if subagentParentID != nil, let parentTitle {
             titleLabel.setAccessibilityLabel(
                 L10n.format("%@, subagent of %@", row.title, parentTitle)
             )
@@ -1418,6 +1446,8 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// filled shape alone.
     private func applyTextColors() {
         titleLabel.refreshTextColor()
+        subagentConnector?.needsDisplay = true
+        subagentSummary?.applyInk(on: SidebarHoverRowView.contentGround(for: self))
 
         // The row's own buttons sit on whatever the row is filled with, and selection changes
         // that out from under them — see `BackdropThemedControl.hostGround`. Only the emphasized

@@ -102,6 +102,7 @@ final class SupervisionCommandService {
     private let usage: AccountUsageService
     private let transcriptUsage: TranscriptUsageService
     private let actions: SupervisionActionRegistry
+    private let discoverAccounts: (AgentKind) -> [AgentAccount]
 
     init(
         projects: ProjectStore,
@@ -110,7 +111,8 @@ final class SupervisionCommandService {
         subscriptions: SupervisionSubscriptionCenter,
         usage: AccountUsageService,
         transcriptUsage: TranscriptUsageService,
-        actions: SupervisionActionRegistry
+        actions: SupervisionActionRegistry,
+        accounts: @escaping (AgentKind) -> [AgentAccount] = { AgentAccountDiscovery.accounts(for: $0) }
     ) {
         self.projects = projects
         self.control = control
@@ -119,6 +121,7 @@ final class SupervisionCommandService {
         self.usage = usage
         self.transcriptUsage = transcriptUsage
         self.actions = actions
+        self.discoverAccounts = accounts
     }
 
     func listAccounts(
@@ -369,7 +372,16 @@ final class SupervisionCommandService {
         if parent.isSubagent {
             return completion(.failure(ControlRefusal.subagentCannotDelegate.toolWords))
         }
-        resolveChildPlan(arguments.plan, caller: parent, project: project) { [weak self] result in
+        let lifetime = SubagentLaunchLifetime(parentID: sessionID)
+        let finish: @MainActor @Sendable (MCPToolResult) -> Void = { result in
+            lifetime.finish()
+            completion(result)
+        }
+        resolveChildPlan(arguments.plan, caller: parent, project: project, requiresFreshUsage: false) { [weak self] result in
+            let completion = finish
+            guard !lifetime.isCancelled else {
+                return completion(.failure("The parent turn ended before the subagent could start."))
+            }
             guard let self else { return completion(.failure("The command ended before launch.")) }
             let plan: ScheduledSessionPlan
             let accountName: String
@@ -377,10 +389,66 @@ final class SupervisionCommandService {
             case .success(let resolved): (plan, accountName) = resolved
             case .failure(let failure): return completion(.failure(failure.words))
             }
-            if let refusal = self.control.admitSubagent(plan, from: .agentSession(sessionID)) {
+            if let refusal = self.control.admitSubagent(
+                plan, from: .agentSession(sessionID), recordStart: false
+            ) {
                 return completion(.failure(refusal.toolWords))
             }
-            switch action.spawnSubagent(plan, brief, sessionID) {
+            let needsApproval = SubagentAccountApproval.requiresApproval(plan: plan, parent: parent)
+            let launch: (Bool) -> Void = { [weak self] approved in
+                guard let self else { return completion(.failure("The command ended before launch.")) }
+                guard approved else {
+                    return completion(.failure("The subagent's account choice was not approved. No subagent was started. Do not retry with another account unless the user asks."))
+                }
+                self.launchApprovedSubagent(plan, brief: brief, parentID: sessionID,
+                    accountName: accountName, hasAccountApproval: needsApproval,
+                    lifetime: lifetime, completion: completion)
+            }
+            guard needsApproval else {
+                return launch(true)
+            }
+            let account = self.discoverAccounts(plan.kind).first { $0.handle == plan.accountHandle }
+            guard account != nil || !plan.kind.supportsAccounts else {
+                return completion(.failure(ControlRefusal.accountUnknown.toolWords))
+            }
+            let request = SubagentAccountApproval(
+                parentID: sessionID, plan: plan, brief: brief, accountName: accountName, account: account,
+                read: { account.map { self.usage.reading(for: $0) } ?? .notFetched },
+                refresh: { done in
+                    guard let account else { return done() }
+                    self.usage.refresh(account, force: true, settled: done)
+                },
+                limits: { account.map { CustomLimitSettings.shared.rules(for: $0.id) } ?? [] },
+                completion: launch
+            )
+            lifetime.onCancel = { [weak request] in request?.deny() }
+            action.approveSubagentAccount(request)
+        }
+    }
+
+    /// Recheck the exact plan after the human wait. Never re-resolve `best`, substitute a login,
+    /// or create a row before the account and the parent's current authority have been checked.
+    private func launchApprovedSubagent(
+        _ plan: ScheduledSessionPlan, brief: String, parentID: SessionID, accountName: String,
+        hasAccountApproval: Bool,
+        lifetime: SubagentLaunchLifetime,
+        completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+    ) {
+        let launch = { [weak self] in
+            guard !lifetime.isCancelled else {
+                return completion(.failure("The parent turn ended before the subagent could start."))
+            }
+            guard let self, let parent = self.projects.session(withID: parentID),
+                  !parent.isArchived, let action = self.actions.current() else {
+                return completion(.failure("The parent chat is no longer available."))
+            }
+            guard hasAccountApproval || !SubagentAccountApproval.requiresApproval(plan: plan, parent: parent) else {
+                return completion(.failure("The parent chat changed accounts before launch. Request the subagent again so its account can be reviewed."))
+            }
+            if let refusal = self.control.admitSubagent(plan, from: .agentSession(parentID)) {
+                return completion(.failure(refusal.toolWords))
+            }
+            switch action.spawnSubagent(plan, brief, parentID) {
             case .success(let child):
                 let id = child.id.uuidString.lowercased()
                 completion(.success("""
@@ -393,6 +461,27 @@ final class SupervisionCommandService {
                 completion(.failure(failure.words))
             }
         }
+        guard plan.kind.supportsAccounts else { return launch() }
+        if hasAccountApproval {
+            // The card just checked a fresh reading on this actor. Recheck that exact reading
+            // and enabled identity synchronously, so Stop cannot race another network wait
+            // after the card has retired its cancellation callback.
+            guard let account = discoverAccounts(plan.kind).first(where: {
+                $0.isEnabled && $0.handle == plan.accountHandle
+            }), case .current(let reading) = usage.reading(for: account),
+                  Date().timeIntervalSince(reading.observedAt) <= SubagentAccountApproval.maximumReadingAge,
+                  LimitEscapeRanking.hasHeadroom(.init(accountID: account.id, usage: reading,
+                    limits: CustomLimitSettings.shared.rules(for: account.id)), metering: plan.model) else {
+                return completion(.failure("The approved account is no longer available with fresh usage and headroom. No subagent was started."))
+            }
+            return launch()
+        }
+        resolveAccount(plan.accountHandle.name, provider: plan.kind, model: plan.model, excluding: nil) { result in
+            switch result {
+            case .success: launch()
+            case .failure(let failure): completion(.failure(failure.words))
+            }
+        }
     }
 
     /// A child's frozen plan from the caller's choices: `SpawnChildChoices` for what was left
@@ -402,6 +491,7 @@ final class SupervisionCommandService {
         _ arguments: SpawnSessionPlanArguments?,
         caller: AgentSession,
         project: Project,
+        requiresFreshUsage: Bool = true,
         completion: @escaping @MainActor (
             Result<(plan: ScheduledSessionPlan, accountName: String), SupervisionActionFailure>
         ) -> Void
@@ -437,7 +527,8 @@ final class SupervisionCommandService {
                 requested,
                 provider: choices.kind,
                 model: choices.model,
-                excluding: nil
+                excluding: nil,
+                requiresFreshUsage: requiresFreshUsage
             ) { result in
                 switch result {
                 case .success(let resolved):
@@ -616,11 +707,12 @@ final class SupervisionCommandService {
         provider: AgentKind,
         model: String?,
         excluding handle: AccountHandle?,
+        requiresFreshUsage: Bool = true,
         completion: @escaping @MainActor (
             Result<ResolvedAccount, SupervisionActionFailure>
         ) -> Void
     ) {
-        let accounts = AgentAccountDiscovery.accounts(for: provider).filter { $0.handle != handle }
+        let accounts = discoverAccounts(provider).filter { $0.isEnabled && $0.handle != handle }
         guard !accounts.isEmpty else {
             return completion(.failure(.init(
                 "No other enabled \(provider.displayName) account is available."
@@ -639,6 +731,13 @@ final class SupervisionCommandService {
                 return completion(.failure(.init(ControlRefusal.accountUnknown.toolWords)))
             }
             candidates = [match]
+        }
+
+        // A named proposal must reach the owner even when its usage is unknown or exhausted.
+        // The approval card refreshes it and keeps Start disabled until admission is possible.
+        if !requiresFreshUsage, requested.caseInsensitiveCompare("best") != .orderedSame,
+           let account = candidates.first {
+            return completion(.success(.init(account: account, ranking: nil)))
         }
 
         var remaining = candidates.count

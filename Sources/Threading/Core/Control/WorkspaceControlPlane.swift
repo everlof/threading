@@ -687,7 +687,8 @@ final class WorkspaceControlPlane {
     func admitSubagent(
         _ plan: ScheduledSessionPlan,
         from actor: ControlActor,
-        at now: Date = Date()
+        at now: Date = Date(),
+        recordStart: Bool = true
     ) -> ControlRefusal? {
         if let refusal = authorize(actor, operation: .startSubagent) { return refusal }
         guard case .agentSession(let parentID) = actor,
@@ -731,7 +732,7 @@ final class WorkspaceControlPlane {
                 minutes: Int(SubagentChatDefaults.startWindow / 60)
             )
         }
-        recentSubagentStarts[parentID] = retained + [now]
+        if recordStart { recentSubagentStarts[parentID] = retained + [now] }
         return nil
     }
 

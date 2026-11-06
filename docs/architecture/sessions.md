@@ -188,7 +188,18 @@ subagent's insertion takes the project-structure path a side chat takes.
 
 A subagent keeps its **own agent mark**. The fork glyph's reason, "a fork necessarily runs its
 parent's agent", does not hold for a subagent, and the provider is the one thing about it that
-may differ from the row above. The lineage is spoken instead:
+may differ from the row above.
+
+The native sidebar also gives subagents a dedicated connector slot before the provider mark.
+It remains visible when Compact Tree flattens outline indentation and when native identity
+content is customized. The parent row names its subagent count; collapsed it summarizes working
+or attention states. The tree builder indexes subagent children once, and a materialized row
+reads at most the four admitted live children's activities. An activity change refreshes the
+parent even when its child is collapsed. Child rows receive the parent title from their sidebar's
+store rather than looking it up in the global store. Light/dark main-window captures live in
+`SubagentAccountApprovalTests` and the `subagent-account-approval` evidence entry.
+
+The relationship is also stated in words:
 
 - the accessibility label reads *…, subagent of …*;
 - the hover reads *Subagent of …* with the brief while the parent's tenure lasts;

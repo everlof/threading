@@ -74,6 +74,7 @@ enum NativeSidebarFactInputAlias: String, CaseIterable, Sendable {
     case rowActivity = "SessionRowView.configure.activity"
     case rowConduct = "SessionRowView.configure.conduct"
     case rowScheduledStart = "SessionRowView.configure.isScheduledStart"
+    case rowSubagentParentTitle = "SessionRowView.configure.subagentParentTitle"
     case rootProjects = "SidebarTreeBuilder.rootNodes.projects"
     case projectNodeProjects = "SidebarTreeBuilder.projectNode.projects"
 }
@@ -210,6 +211,7 @@ enum HostFactCatalog {
         .rowActivity: .sessionActivity,
         .rowConduct: .sessionConduct,
         .rowScheduledStart: .sessionScheduledStart,
+        .rowSubagentParentTitle: .sessionTitle,
         .rootProjects: .projectManualOrder,
         .projectNodeProjects: .projectManualOrder,
     ]

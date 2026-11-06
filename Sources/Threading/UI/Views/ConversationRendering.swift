@@ -665,9 +665,13 @@ extension ConversationViewController {
     }
 
     /// Shows the next queued request, unless one is already on screen awaiting an answer.
-    private func showNextPermissionIfIdle() {
+    func showNextPermissionIfIdle() {
         defer { refreshDecisionStatus() }
-        guard activePermissionCard == nil, !permissionQueue.isEmpty else { return }
+        guard activePermissionCard == nil, activeSubagentAccountCard == nil else { return }
+        guard !permissionQueue.isEmpty else {
+            showNextSubagentAccountApproval()
+            return
+        }
 
         let pending = permissionQueue.removeFirst()
 

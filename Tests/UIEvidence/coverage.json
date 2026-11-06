@@ -4,6 +4,25 @@
   "platform": "macOS",
   "entries": [
     {
+      "id": "subagent-account-approval",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Subagent account approval and hierarchy",
+      "description": "The owner-only account decision with usage evidence in the shipping conversation and main-window sidebar, including persistent child connectors in the compact tree.",
+      "states": ["Fresh usage", "Explicit one-start approval", "Nested subagents", "Compact tree", "Collapsed parent", "Usage unavailable", "Usage exhausted"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["1120×760-point main window", "900×700-point main window"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SubagentAccountApprovalTests.swift",
+        "tests": ["ThreadingTests/SubagentAccountApprovalTests/testRendersApprovalAndSubagentHierarchyInShippingShell"]
+      },
+      "capture": { "glob": "subagent-approval-*.png" }
+    },
+    {
       "id": "worktree-creation-prompt",
       "kind": "surface",
       "status": "implemented",

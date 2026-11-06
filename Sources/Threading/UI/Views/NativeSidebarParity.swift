@@ -70,6 +70,7 @@ enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
     case rowLoading = "SessionRowView.configure.isLoading"
     case rowConduct = "SessionRowView.configure.conduct"
     case rowExecutionHost = "SessionRowView.configure.executionHost"
+    case rowSubagentIsLastChild = "SessionRowView.configure.subagentIsLastChild"
     case rootVisibility = "SidebarTreeBuilder.rootNodes.visibility"
     case rootExclusions = "SidebarTreeBuilder.rootNodes.excludingSessionIDs"
     case rootClock = "SidebarTreeBuilder.rootNodes.date"
@@ -132,6 +133,7 @@ enum NativeSidebarParity {
         .rowLoading: .transientLoading,
         .rowConduct: .conductDetail,
         .rowExecutionHost: .executionPlacement,
+        .rowSubagentIsLastChild: .identityPresentation,
         .rootVisibility: .visibilityScope,
         .rootExclusions: .transientExclusion,
         .rootClock: .clock,

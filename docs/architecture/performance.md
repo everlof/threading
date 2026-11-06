@@ -1455,6 +1455,15 @@ and mirrored JPEGs and removal while preparation is pending.
 
 ## Implementation-time scaling gate
 
+Subagent account decisions expect one pending request and stress four per parent; the fifth is
+refused before constructing a card. One card is mounted per conversation. Each refresh goes
+through `AccountUsageService`'s existing bounded worker/pacing contract; no timer polls usage.
+Displayed window rows are capped at eight before text/view construction. Sidebar subagent
+connectors are created only on materialized child rows. The tree builder indexes child identity
+once; visible parent refreshes inspect at most four runtime values, and a child activity edge
+updates its parent and its own row without rebuilding the tree. The shipping-shell fixture
+exercises both outline densities, and queue tests stress four pending plus refusal of the fifth.
+
 Settings sidebar pages can come from installed extensions: 256 packages with eight pages each
 means 2,048 destinations. The resting sidebar used to build an `NSStackView` row and its
 constraints for every page before anybody searched. In a hosted `-O` test at 2,048 pages it held

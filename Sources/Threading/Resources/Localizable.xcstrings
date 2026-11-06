@@ -155,6 +155,17 @@
         }
       }
     },
+    " · Your limit: %lld%%" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " · Din gräns: %lld%%"
+          }
+        }
+      }
+    },
     "#%lld · %@ · %@ · SHA-256 linked" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2898,6 +2909,17 @@
         }
       }
     },
+    "%lld more usage windows" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld fler användningsperioder"
+          }
+        }
+      }
+    },
     "%lld need attention" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3360,6 +3382,17 @@
         }
       }
     },
+    "%lld subagents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld subagenter"
+          }
+        }
+      }
+    },
     "%lld tools" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3461,6 +3494,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld%% serveras från cache"
+          }
+        }
+      }
+    },
+    "%lld%% used" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld%% använt"
           }
         }
       }
@@ -3890,6 +3934,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 källa"
+          }
+        }
+      }
+    },
+    "1 subagent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 subagent"
           }
         }
       }
@@ -4693,6 +4748,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ett fast semantiskt rutnät för transkriptinnehåll. Gör galleriet smalare för att radbryta cellerna; den vågräta rullisten visas först när kolumnerna når sin läsbara minimibredd, och alla värden förblir markerbara."
+          }
+        }
+      }
+    },
+    "A fresh reading with room under your limits is required. Refresh usage to try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En färsk avläsning med utrymme under dina gränser krävs. Uppdatera användningen för att försöka igen."
           }
         }
       }
@@ -9515,6 +9581,17 @@
         }
       }
     },
+    "Approval applies only to this start and this account." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkännandet gäller bara den här starten och det här kontot."
+          }
+        }
+      }
+    },
     "Approval lets the agent run commands and change files without asking you." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9537,6 +9614,17 @@
         }
       }
     },
+    "Approve and Start" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänn och starta"
+          }
+        }
+      }
+    },
     "Approve one retry of a recent auto-review denial" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9544,6 +9632,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Godkänn ett nytt försök efter ett nekat automatiskt granskningsanrop"
+          }
+        }
+      }
+    },
+    "Approve subagent account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänn subagentens konto"
           }
         }
       }
@@ -31918,6 +32017,17 @@
         }
       }
     },
+    "Last reading: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senast avläst: %@"
+          }
+        }
+      }
+    },
     "Last revision was shared" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38169,6 +38279,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inga ändringar som inte är incheckade på %@."
+          }
+        }
+      }
+    },
+    "No usage reading yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen användning avläst ännu"
           }
         }
       }
@@ -46887,6 +47008,17 @@
         }
       }
     },
+    "Refresh Usage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdatera användning"
+          }
+        }
+      }
+    },
     "Refresh artifact map" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46966,6 +47098,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uppdaterar %@… (%lld av %lld)"
+          }
+        }
+      }
+    },
+    "Refreshing usage…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hämtar användning…"
           }
         }
       }
@@ -48651,6 +48794,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återställningstid saknas"
+          }
+        }
+      }
+    },
+    "Reset time unknown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återställningstid okänd"
           }
         }
       }
@@ -58570,6 +58724,17 @@
         }
       }
     },
+    "Subagent task" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subagentens uppgift"
+          }
+        }
+      }
+    },
     "Subagent transcript" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -68173,6 +68338,17 @@
         }
       }
     },
+    "This provider does not report account usage to Threading." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här leverantören rapporterar inte kontoanvändning till Threading."
+          }
+        }
+      }
+    },
     "This raises no limit. The same window still holds the same allowance, and the weekly cap above it does not move at all: an extra window pulled into the day is a week spent faster, which is why the poke stands down when the weekly limit is running ahead of the clock. It never fires while a window is already open, while a session is busy, or more than three times a day. Offered for Claude only, because Claude is the runtime whose short window has been measured to open on the first message rather than slide continuously, and there is nothing to move on a window that slides." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -68345,6 +68521,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här engångsinbjudan öppnar bara den här konversationen och upphör efter 24 timmar om ingen accepterar den. När den har accepterats behåller medlemmen åtkomsten tills du slutar dela. Ge bara rätt att godkänna behörigheter till någon du litar på. Starta konversationen innan du skapar en skrivskyddad länk; visningsåtkomst startar aldrig en agentprocess."
+          }
+        }
+      }
+    },
+    "This starts one subagent on the account below." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detta startar en subagent på kontot nedan."
           }
         }
       }
@@ -72117,6 +72304,17 @@
         }
       }
     },
+    "Usage could not be refreshed. Try again before approving." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Användningen kunde inte uppdateras. Försök igen innan du godkänner."
+          }
+        }
+      }
+    },
     "Usage curfew (%@)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -72213,6 +72411,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Användningssektion"
+          }
+        }
+      }
+    },
+    "Usage unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Användning saknas"
           }
         }
       }
@@ -79991,6 +80200,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "återställ"
+          }
+        }
+      }
+    },
+    "resets %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "återställs %@"
           }
         }
       }

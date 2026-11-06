@@ -58,6 +58,11 @@ extension MCPTools {
         runtime's defaults unless plan names them. permission_mode may not exceed this chat's \
         own. At most 4 live subagents, 6 starts per 10 minutes, and a subagent cannot start \
         subagents of its own.
+
+        A different login or provider requires the user's one-time approval in Threading. \
+        The user sees the exact account, model and refreshed usage before it starts. Even \
+        best is resolved to one account before approval. An inherited account needs no extra \
+        approval. A denial starts nothing; do not retry another account unless the user asks.
         """,
       inputSchema: MCPInputSchema(properties: [
         "brief": MCPPropertySchema(

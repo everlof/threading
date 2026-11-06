@@ -700,6 +700,13 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
+**Subagent account approval** is deliberately host-only. The frozen provider/account/model,
+usage freshness and limits, refresh pacing, one-start decision, queue and cancellation remain
+Threading-owned. Neither an extension nor a supervising agent can answer it. The inline card
+uses shared themed controls, and the terminal fallback uses an always-asking confirmation.
+The sidebar connector and child-count summary are host-owned relationship chrome outside the
+replaceable session identity content; existing parent/activity facts remain the public data seam.
+
 **Shared Device Logs controls and agent reads** extend the existing approved native plugin pane.
 The plugin owns the single capture buffer, filter engine, revisioned configuration and exact-row
 selection used by its controls and tools. Themes style the existing DesignKit controls; this adds

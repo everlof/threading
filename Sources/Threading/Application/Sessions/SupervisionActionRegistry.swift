@@ -27,6 +27,7 @@ final class SupervisionActionRegistry {
         let resume: (SessionID) -> Bool
         let move: (SessionID, AgentAccount, SessionID) async -> Result<String, SupervisionActionFailure>
         let finish: (SessionID, SessionID) -> Bool
+        var approveSubagentAccount: @MainActor (SubagentAccountApproval) -> Void = { $0.deny() }
     }
 
     static let shared = SupervisionActionRegistry()

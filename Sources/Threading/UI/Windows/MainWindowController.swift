@@ -1400,6 +1400,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                     sessionID,
                     managerID: managerID
                 ) ?? false
+            },
+            approveSubagentAccount: { [weak self] request in
+                guard let self else {
+                    request.deny()
+                    return
+                }
+                SubagentAccountApprovalPresenter.present(request, in: self.window)
             }
         ))
     }

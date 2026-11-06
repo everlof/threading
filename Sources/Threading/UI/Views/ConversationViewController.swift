@@ -928,6 +928,8 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     /// The approval card on screen, if any. Only one is shown at a time.
     var activePermissionCard: PermissionRequestView?
+    var subagentAccountApprovals: [SubagentAccountApproval] = []
+    var activeSubagentAccountCard: SubagentAccountApprovalCard?
     var questionCards: [UUID: ConversationQuestionCard] = [:]
     var questionOrder: [UUID] = []
 
@@ -937,7 +939,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     /// Whether anything is waiting on the user, on screen or queued behind it.
     var hasPendingPermission: Bool {
-        activePermissionCard != nil || !permissionQueue.isEmpty
+        activePermissionCard != nil || !permissionQueue.isEmpty || !subagentAccountApprovals.isEmpty
     }
 
     var hasPendingUserDecision: Bool {
@@ -2262,6 +2264,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // which would otherwise create a new unresolved card in the middle of shutdown.
         let queuedPermissions = permissionQueue
         permissionQueue.removeAll()
+        cancelSubagentAccountApprovals()
         for id in Array(questionCards.keys) { removeQuestion(id: id) }
 
         activePermissionCard?.resolve(.deny(reason: "The session ended before the request was answered."))
@@ -3103,6 +3106,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// `ConversationTimeline`'s, and tested there.
     private func handle(_ event: StreamEvent) {
         if !isReplaying, case .turnFinished = event {
+            cancelSubagentAccountApprovals()
             if project.executionHost != nil {
                 RemoteTranscriptMirror.shared.refresh(sessionID: sessionID, then: {})
             }
