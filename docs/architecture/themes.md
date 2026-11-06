@@ -630,6 +630,17 @@ the same 48-point gutter as panels, now inside the popover's transparent child w
 Neo Brutalist offsets and Claymorphism's paired soft light are not clipped to the card. The full
 block round-trips through `popover_style`/`remove_popover_style` in the app-theme tools.
 
+**The popover's highlight obeys the companion rule above, drawn rather than layered.** Its
+silhouette carries an arrow, so `ThemedPopoverChromeView` cannot hang a rounded
+`ThemeShadowLayer`; it draws the highlight in its own `draw(_:)`, before the fill, through the
+same `ExteriorHalo` clip-and-inset construction, while the primary half stays the chrome layer's
+own shadow beneath that fill. Before this it kept a path-only highlight sublayer — the
+construction ruled out for cards — and Cyberpunk's toolbar usage popover came up a solid
+`#00FF88` slab under pale text. No offscreen render can show that defect: `cacheDisplay` and
+`CALayer.render(in:)` both omit a sublayer's shadow, which is why the chrome's render tests
+passed throughout. `ThemedPresentationTests` therefore captures a parked borderless window
+through the window server for this assertion.
+
 `floatingSurface` is the colour role paired with that grammar. It derives from `elevated`, so old
 and sparse documents keep their previous surface exactly; a theme can state it independently when
 the period component genuinely differs. Windows 98 does: its compact, square, stemless,

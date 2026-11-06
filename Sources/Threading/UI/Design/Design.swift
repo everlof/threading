@@ -3075,6 +3075,53 @@ private final class ThemeBackdropPatternLayer: CALayer {
     private static func convergenceMask() -> CGImage? { cachedConvergenceMask }
 }
 
+/// The one construction an exterior-only halo is drawn with.
+///
+/// `ThemeShadowLayer` hangs it off a rounded surface; `ThemedPopoverChromeView` draws it around
+/// a silhouette with an arrow, which no rounded rect describes. Two copies of the clip would be
+/// two answers to where a halo may paint, and the popover once kept the answer "across the face".
+enum ExteriorHalo {
+
+    /// Casts `caster`'s shadow and keeps only what falls outside `silhouette`.
+    ///
+    /// The caster exists only to manufacture the outside shadow, so it is confined to the
+    /// outside by a clip rather than painted across the surface and erased afterwards.
+    ///
+    /// `.clear` removes the coverage it is given, not the coverage already there: an
+    /// antialiased edge pixel that took `α` of the opaque caster gives back `α` of what it
+    /// now holds, and keeps `α(1 − α)` — a quarter of a black caster at half coverage, and
+    /// half of one where a material states a highlight companion as well, since both
+    /// casters stack. On a square material that residue lands under a hairline nobody sees.
+    /// Around a pill it is a dark line tracing the whole control, which is what clay showed
+    /// as a broken border on every chip, button and card that haloes.
+    ///
+    /// `caster` should stop one device pixel inside `silhouette`, for the reason
+    /// `ThemeShadowLayer.makeCasterPath()` gives.
+    static func draw(
+        in context: CGContext,
+        canvas: CGRect,
+        silhouette: CGPath,
+        caster: CGPath,
+        color: CGColor,
+        blur: CGFloat,
+        offset: CGSize
+    ) {
+        context.saveGState()
+        defer { context.restoreGState() }
+
+        let outside = CGMutablePath()
+        outside.addRect(canvas)
+        outside.addPath(silhouette)
+        context.addPath(outside)
+        context.clip(using: .evenOdd)
+
+        context.setShadow(offset: offset, blur: blur, color: color)
+        context.setFillColor(NSColor.black.cgColor)
+        context.addPath(caster)
+        context.fillPath()
+    }
+}
+
 /// An exterior-only companion layer for one half of a material shadow.
 ///
 /// A transparent `CALayer` with only a `shadowPath` sounds like a shape-only caster, but Core
@@ -3172,31 +3219,15 @@ private final class ThemeShadowLayer: CALayer {
     }
 
     override func draw(in context: CGContext) {
-        let path = makeSurfacePath()
-
-        context.saveGState()
-        defer { context.restoreGState() }
-
-        // The caster exists only to manufacture the outside shadow, so it is confined to the
-        // outside by a clip rather than painted across the surface and erased afterwards.
-        //
-        // `.clear` removes the coverage it is given, not the coverage already there: an
-        // antialiased edge pixel that took `α` of the opaque caster gives back `α` of what it
-        // now holds, and keeps `α(1 − α)` — a quarter of a black caster at half coverage, and
-        // half of one where a material states a highlight companion as well, since both
-        // casters stack. On a square material that residue lands under a hairline nobody sees.
-        // Around a pill it is a dark line tracing the whole control, which is what clay showed
-        // as a broken border on every chip, button and card that haloes.
-        let outside = CGMutablePath()
-        outside.addRect(bounds)
-        outside.addPath(path)
-        context.addPath(outside)
-        context.clip(using: .evenOdd)
-
-        context.setShadow(offset: haloOffset, blur: haloRadius, color: haloColor)
-        context.setFillColor(NSColor.black.cgColor)
-        context.addPath(makeCasterPath())
-        context.fillPath()
+        ExteriorHalo.draw(
+            in: context,
+            canvas: bounds,
+            silhouette: makeSurfacePath(),
+            caster: makeCasterPath(),
+            color: haloColor,
+            blur: haloRadius,
+            offset: haloOffset
+        )
     }
 
     private var surfaceRect: CGRect {

@@ -864,7 +864,11 @@ public final class ThemedPopoverChromeView: NSView, ThemedComponent {
             cornerRadius: radius,
             strokeWidth: width
         )
-        applyMaterialShadow(material.glow, to: outline, enabled: placement.hasMaterialShadow)
+        let glow = placement.hasMaterialShadow ? material.glow : nil
+        applyMaterialShadow(glow, to: outline)
+        if let highlight = glow?.highlight {
+            drawHighlight(highlight, around: placement, cornerRadius: radius)
+        }
 
         if materialEdge {
             // A bevel is one edge around one rectilinear/rounded silhouette. Themes choosing it
@@ -888,17 +892,13 @@ public final class ThemedPopoverChromeView: NSView, ThemedComponent {
         }
     }
 
-    private func applyMaterialShadow(
-        _ glow: AppTheme.Glow?,
-        to outline: NSBezierPath,
-        enabled: Bool
-    ) {
-        let highlightName = "threading.popoverGlow.highlight"
-        let existingHighlight = layer?.sublayers?.first { $0.name == highlightName }
-        guard enabled, let glow, let layer else {
+    /// The primary half of the material shadow is this layer's own. Core Animation draws a
+    /// layer's shadow *beneath* the layer's content, so the body filled in `draw(_:)` covers
+    /// its interior and only the halo outside the silhouette shows.
+    private func applyMaterialShadow(_ glow: AppTheme.Glow?, to outline: NSBezierPath) {
+        guard let glow, let layer else {
             layer?.shadowOpacity = 0
             layer?.shadowPath = nil
-            existingHighlight?.removeFromSuperlayer()
             return
         }
 
@@ -908,23 +908,44 @@ public final class ThemedPopoverChromeView: NSView, ThemedComponent {
         layer.shadowOpacity = Float(glow.opacity)
         layer.shadowOffset = CGSize(width: glow.offsetX, height: glow.offsetY)
         layer.shadowPath = outline.threadingCGPath
+    }
 
-        guard let highlight = glow.highlight else {
-            existingHighlight?.removeFromSuperlayer()
-            return
-        }
-        let highlightLayer = existingHighlight ?? CALayer()
-        highlightLayer.name = highlightName
-        highlightLayer.frame = layer.bounds
-        highlightLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        applyLayerShadow(AppThemePalette.current.resolved(highlight.role), to: highlightLayer)
-        highlightLayer.shadowRadius = highlight.radius
-        highlightLayer.shadowOpacity = Float(highlight.opacity)
-        highlightLayer.shadowOffset = CGSize(width: highlight.offsetX, height: highlight.offsetY)
-        highlightLayer.shadowPath = outline.threadingCGPath
-        if existingHighlight == nil {
-            layer.insertSublayer(highlightLayer, at: 0)
-        }
+    /// The highlight half, drawn with the rest of the silhouette and only outside it.
+    ///
+    /// It used to be a transparent sublayer carrying the outline as its `shadowPath` — the
+    /// construction `themes.md` rules out for cards. A sublayer composites *above* the fill this
+    /// view draws, and a path-only shadow is the whole shape blurred, so Cyberpunk's centred,
+    /// full-strength accent light filled the body: the usage popover came up a neon-green slab
+    /// under pale text, and Clay's and Industrial's white lifts washed theirs. Neither
+    /// `cacheDisplay` nor `CALayer.render(in:)` composites a sublayer's shadow, which is how
+    /// every offscreen render of this chrome stayed clean while the window server showed it.
+    private func drawHighlight(
+        _ highlight: AppTheme.Glow.Highlight,
+        around placement: ThemedPopoverLayout.Placement,
+        cornerRadius: CGFloat
+    ) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let pixel = 1 / max(1, abs(context.userSpaceToDeviceSpaceTransform.a))
+        let silhouette = ThemedPopoverLayout.outline(
+            for: placement,
+            cornerRadius: cornerRadius,
+            strokeWidth: 0
+        )
+        let caster = ThemedPopoverLayout.outline(
+            for: placement,
+            cornerRadius: max(0, cornerRadius - pixel),
+            strokeWidth: 2 * pixel
+        )
+        let color = AppThemePalette.current.resolved(highlight.role).cgColor
+        ExteriorHalo.draw(
+            in: context,
+            canvas: bounds,
+            silhouette: silhouette.threadingCGPath,
+            caster: caster.threadingCGPath,
+            color: color.copy(alpha: color.alpha * CGFloat(highlight.opacity)) ?? color,
+            blur: highlight.radius,
+            offset: CGSize(width: highlight.offsetX, height: highlight.offsetY)
+        )
     }
 }
 

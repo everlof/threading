@@ -287,6 +287,84 @@ final class ThemedPresentationTests: XCTestCase {
         }
     }
 
+    /// A material's highlight lights the popover's edge and never its face.
+    ///
+    /// Cyberpunk's highlight is its accent at full strength, centred on the silhouette. Cast
+    /// from a transparent sublayer holding the outline as its `shadowPath`, it composited
+    /// *above* the fill the chrome draws, and the toolbar's usage popover came up a solid
+    /// #00FF88 slab under #E0E0E0 text. `cacheDisplay` and `CALayer.render(in:)` both leave a
+    /// sublayer's shadow out, so every offscreen render of this chrome stayed clean; only the
+    /// window server composites what a person sees. The fixture is therefore a real window,
+    /// borderless and parked off every display (see CLAUDE.md), captured through the server.
+    func testMaterialHighlightLightsThePopoverEdgeAndNeverItsFace() throws {
+        let previous = AppThemePalette.current
+        defer { AppThemePalette.set(previous) }
+        let theme = AppThemeStyles.cyberpunk
+        AppThemePalette.set(theme)
+
+        let material = theme.material
+        let highlight = try XCTUnwrap(material.glow?.highlight)
+        XCTAssertGreaterThanOrEqual(
+            highlight.opacity, 0.5,
+            "the fixture needs a highlight strong enough to flood the face it must stay off"
+        )
+        let placement = ThemedPopoverLayout.place(
+            anchor: NSRect(x: 590, y: 560, width: 20, height: 20),
+            contentSize: NSSize(width: 220, height: 140),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_200, height: 800),
+            preferredEdge: .minY,
+            style: material.popoverStyle,
+            hasMaterialShadow: material.glow != nil,
+            bevelWidth: material.bevel?.width
+        )
+        XCTAssertTrue(placement.hasMaterialShadow)
+
+        let window = NSWindow(
+            contentRect: NSRect(
+                origin: NSPoint(x: -10_000, y: -10_000),
+                size: placement.panelFrame.size
+            ),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.animationBehavior = .none
+        window.appearance = NSAppearance(named: .darkAqua)
+        let chrome = ThemedPopoverChromeView(
+            frame: NSRect(origin: .zero, size: placement.panelFrame.size)
+        )
+        chrome.placement = placement
+        window.contentView = chrome
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+
+        let rep = try windowServerCapture(of: window)
+        try writeRender(of: rep, named: "popover-chrome-cyberpunk-highlight")
+
+        let body = placement.bodyFrame
+        let face = try XCTUnwrap(
+            try pixel(of: rep, at: NSPoint(x: body.midX, y: body.midY), in: chrome)
+                .usingColorSpace(.sRGB)
+        )
+        XCTAssertLessThan(
+            face.greenComponent, 0.5,
+            "the highlight flooded the popover's face with the accent (\(face.hexString))"
+        )
+
+        let edge = try XCTUnwrap(
+            try pixel(of: rep, at: NSPoint(x: body.maxX + 0.5, y: body.midY), in: chrome)
+                .usingColorSpace(.sRGB)
+        )
+        XCTAssertGreaterThan(edge.alphaComponent, 0.1, "nothing lights the popover's edge")
+        XCTAssertGreaterThan(
+            edge.greenComponent, edge.redComponent,
+            "the light outside the edge is not the accent's (\(edge.hexString))"
+        )
+    }
+
     // MARK: - Dismissal and focus
 
     func testPopoverEscapeClosesOnceAndReturnsFocus() throws {
@@ -1150,6 +1228,27 @@ final class ThemedPresentationTests: XCTestCase {
         let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: rep))
         view.displayIgnoringOpacity(view.bounds, in: context)
         return rep
+    }
+
+    /// What the window server composited for `window` — the one render that includes a layer's
+    /// shadows and its sublayers'. Polled briefly, because the first frame reaches the server a
+    /// commit after the window is ordered.
+    private func windowServerCapture(of window: NSWindow) throws -> NSBitmapImageRep {
+        window.displayIfNeeded()
+        CATransaction.flush()
+        let deadline = Date().addingTimeInterval(2)
+        repeat {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            if let image = CGWindowListCreateImage(
+                .null, .optionIncludingWindow, CGWindowID(window.windowNumber),
+                [.boundsIgnoreFraming, .bestResolution]
+            ) {
+                let rep = NSBitmapImageRep(cgImage: image)
+                let centre = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)
+                if (centre?.alphaComponent ?? 0) > 0.9 { return rep }
+            }
+        } while Date() < deadline
+        throw XCTSkip("the window server never composited the parked fixture")
     }
 
     /// The rep's colour under a point given in the view's own (unflipped) coordinates.
