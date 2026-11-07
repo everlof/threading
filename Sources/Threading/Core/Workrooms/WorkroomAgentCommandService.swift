@@ -98,17 +98,23 @@ final class WorkroomAgentCommandService {
             let links = try await store.workroomLinks(roomID: room.id).items.map(LinkRow.init)
             var counts: [String: Int] = [:]
             var after: Int64 = 0
+            var historyComplete = false
             for _ in 0..<WorkroomToolDefaults.maximumQuestionPages {
                 let page = try await store.workroomAsks(roomID: room.id, after: after, limit: 50)
                 for question in page.items { counts[question.state.rawValue, default: 0] += 1 }
-                guard page.items.count == 50 else { break }
+                if page.items.isEmpty { historyComplete = true; break }
                 after = page.next
             }
+            if !historyComplete {
+                historyComplete = try await store.workroomAsks(roomID: room.id, after: after, limit: 1).items.isEmpty
+            }
+            counts[WorkroomQuestionState.open.rawValue] = summary.openQuestions
             return .success(await Self.json(ContextResult(
                 id: room.id.description, title: room.title, purpose: room.purpose,
                 createdByThisSession: room.createdBy == caller.address.description,
                 state: Self.state(summary.publication), openUntil: summary.publication.expiresAt,
-                people: summary.people.map(PersonRow.init), links: links, questions: counts
+                people: summary.people.map(PersonRow.init), links: links, questions: counts,
+                questionHistoryComplete: historyComplete
             )))
         }
     }
@@ -170,6 +176,7 @@ final class WorkroomAgentCommandService {
             let publication = try await store.workroomPublication(room.id)
             let access = try await store.workroomAccess(room.id)
             let visible = publication.isOpen() && access.contains { $0.person == person.id && $0.state == .granted }
+            if visible { await WorkroomAppNotifier.notify(.asked, about: question) }
             let waiting = visible
                 ? "\(person.name) can see it now."
                 : "It waits, invisible, until the user opens this room to \(person.name) (workroom_request_opening)."
@@ -215,17 +222,23 @@ final class WorkroomAgentCommandService {
         }
         run(sessionID, completion) { caller, store in
             switch arguments.action {
-            case "clarify":
-                guard let text = Self.nonEmpty(arguments.text) else { return .failure("text is required to clarify.") }
+            // `clarify` is the earlier name, kept so a session that learned it still works.
+            case "message", "clarify":
+                guard let text = Self.nonEmpty(arguments.text) else { return .failure("text is required for a message.") }
                 _ = try await store.respondToWorkroomQuestion(id, asker: caller.address, text: text)
                 NotificationCenter.default.post(WorkroomStatusDidChange())
-                return .success("Your reply was added to the question's conversation; the person sees it beside the question.")
+                await WorkroomAppNotifier.notify(.agentMessage(text: text),
+                                                 about: try await store.workroomQuestionDetail(id).question)
+                return .success("""
+                    Sent. It is in the question's conversation, and the person's inbox shows it as a new \
+                    message; an open page shows it within seconds. Their reply arrives as mail.
+                    """)
             case "withdraw":
                 _ = try await store.withdrawWorkroomQuestion(id, asker: caller.address, reason: arguments.text ?? "")
                 NotificationCenter.default.post(WorkroomStatusDidChange())
                 return .success("Withdrew question \(id). The person sees it as withdrawn.")
             default:
-                return .failure("action must be clarify or withdraw.")
+                return .failure("action must be message or withdraw.")
             }
         }
     }
@@ -297,6 +310,7 @@ final class WorkroomAgentCommandService {
             } else { throw ControllerError.notFound }
             _ = try await store.openWorkroom(room.id, people: [person.id] + (owner.map { [$0.id] } ?? []),
                                              expiresAt: Date().addingTimeInterval(TimeInterval(days) * 86_400))
+            await WorkroomAppNotifier.roomOpened(room.id, to: person.id)
             WorkroomHost.shared.refresh()
             NotificationCenter.default.post(WorkroomStatusDidChange())
             self.revealSettings()
@@ -328,7 +342,7 @@ final class WorkroomAgentCommandService {
             do {
                 let address = try await mailbox.register(sessionID, name: name)
                 let store = try await mailbox.controllerStore()
-                let caller = Caller(scope: Self.scope(for: project.id), projectName: project.name,
+                let caller = Caller(scope: Self.scope(for: project), projectName: project.name,
                                     address: address, directory: directory)
                 completion(try await body(caller, store))
             } catch {
@@ -339,7 +353,18 @@ final class WorkroomAgentCommandService {
 
     // MARK: - Helpers
 
-    static func scope(for project: ProjectID) -> String { "project:\(project)" }
+    /// Which rooms a session reaches: its repository's, so every checkout and worktree of one
+    /// repository shares them and a chat that moves to another checkout keeps its rooms. A
+    /// folder Git has never verified as a repository keeps rooms of its own.
+    static func scope(for project: Project) -> String {
+        if let repository = project.lastKnownRepositoryIdentity {
+            return WorkroomScope.repositoryPrefix + repository
+        }
+        return legacyScope(for: project.id)
+    }
+
+    /// The scope rooms were created in before they belonged to a repository.
+    static func legacyScope(for project: ProjectID) -> String { WorkroomScope.projectPrefix + "\(project)" }
 
     private static func room(_ text: String?, caller: Caller, store: ControllerStore) async throws -> LinkedWorkroom {
         guard let text, let id = try? WorkroomID(text) else { throw ControllerError.invalidInput("room_id") }
@@ -357,15 +382,7 @@ final class WorkroomAgentCommandService {
 
     private static func openQuestionCount(room: WorkroomID, person: WorkroomPersonID?, store: ControllerStore) async throws -> Int {
         guard let person else { return 0 }
-        var count = 0
-        var after: Int64 = 0
-        for _ in 0..<WorkroomToolDefaults.maximumQuestionPages {
-            let page = try await store.workroomAsks(roomID: room, after: after, limit: 50)
-            count += page.items.filter { $0.person == person && $0.state == .open }.count
-            guard page.items.count == 50 else { break }
-            after = page.next
-        }
-        return count
+        return try await store.openWorkroomQuestionCount(room, person: person)
     }
 
     static func state(_ publication: WorkroomPublication) -> String {
@@ -435,8 +452,7 @@ final class WorkroomAgentCommandService {
         case .forbidden: return "Not allowed."
         case .invalidInput(let field):
             switch field {
-            case "ask_rate": return "A session may ask at most \(WorkroomLimits.asksPerHour) questions an hour. Combine them."
-            case "room_full": return "This room already has \(WorkroomLimits.openQuestionsPerRoom) open questions."
+            case "room_full": return "This room already has \(WorkroomLimits.openQuestionsPerRoom) open questions. Answer, decline or withdraw an open question to make room; waiting does not free capacity."
             case "language": return "language must be a BCP-47 tag such as sv or en-GB."
             case "handle": return "person must be lowercase letters, digits, . - or _."
             case "field_kind": return "Each field's kind must be single_choice, multi_choice, yes_no, number, short_text, long_text or confirm."
@@ -518,6 +534,7 @@ final class WorkroomAgentCommandService {
         let people: [PersonRow]
         let links: [LinkRow]
         let questions: [String: Int]
+        let questionHistoryComplete: Bool
     }
 
     struct QuestionRow: Encodable, Sendable {
@@ -599,4 +616,34 @@ enum WorkroomToolDefaults {
     static let defaultOpenDays = 14
     static let maximumOpenDays = 60
     static let declineCooldown: TimeInterval = 15 * 60
+}
+
+enum WorkroomScope {
+    static let repositoryPrefix = "repository:"
+    static let projectPrefix = "project:"
+}
+
+/// Rooms created in one checkout before rooms belonged to a repository move to their
+/// repository's scope, once each, as soon as the checkout's repository is known. Bounded by the
+/// same room scan Settings uses; a room whose project is gone or not a repository stays put.
+@MainActor
+enum WorkroomScopeMigration {
+    static func run(projects: ProjectStore = .shared) async {
+        guard let store = try? await MacMailbox.shared.controllerStore() else { return }
+        var after: Int64 = 0
+        for _ in 0..<WorkroomsPageDefaults.roomPages {
+            guard let page = try? await store.allWorkrooms(after: after, limit: 50) else { return }
+            for room in page.items where room.scope.hasPrefix(WorkroomScope.projectPrefix) {
+                guard let id = UUID(uuidString: String(room.scope.dropFirst(WorkroomScope.projectPrefix.count))),
+                      let project = projects.project(withID: ProjectID(id)),
+                      project.lastKnownRepositoryIdentity != nil else { continue }
+                let target = WorkroomAgentCommandService.scope(for: project)
+                if (try? await store.rescopeWorkroom(room.id, from: room.scope, to: target)) == true {
+                    ThreadingLogger.app.info("Workroom moved to its repository's scope")
+                }
+            }
+            guard page.items.count == 50 else { return }
+            after = page.next
+        }
+    }
 }

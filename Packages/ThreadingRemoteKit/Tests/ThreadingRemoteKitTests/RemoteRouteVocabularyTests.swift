@@ -39,6 +39,7 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             case .hostedDeviceCredential: expected = "api/hosted-device-credential"
             case .settings: expected = "api/settings"
             case .mirrorEnd: expected = "api/mirror/end"
+            case .workroom: expected = "api/workroom"
             }
             XCTAssertEqual(route.rawValue, expected)
             // The host matches a rooted path; the client appends an unrooted one. Both come
@@ -46,7 +47,7 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             XCTAssertEqual(route.absolutePath, "/" + expected)
             XCTAssertEqual(route.prefix, "/" + expected + "/")
         }
-        XCTAssertEqual(RemoteRoute.allCases.count, 18)
+        XCTAssertEqual(RemoteRoute.allCases.count, 19)
     }
 
     func testEverySocketRouteKeepsItsWireSpelling() {
@@ -162,6 +163,9 @@ final class RemoteRouteVocabularyTests: XCTestCase {
             case .mirrorEnd:
                 built = link.mirrorEndURL
                 expected = "\(origin)/api/mirror/end"
+            case .workroom:
+                built = link.workroomInboxURL(open: 40)
+                expected = "\(origin)/api/workroom/inbox?open=40"
             case .settings:
                 // Host-only today: the Mac serves `/api/settings/<key>` and no client here
                 // builds it. The route still belongs to the shared vocabulary so the host has
@@ -170,6 +174,21 @@ final class RemoteRouteVocabularyTests: XCTestCase {
                 expected = nil
             }
             XCTAssertEqual(built?.absoluteString, expected, "route \(route.rawValue)")
+        }
+    }
+
+    func testWorkroomURLsAreBuiltFromThePathVocabulary() throws {
+        let link = try makeLink()
+        let question = "6f1c1b6e-2c5a-4f39-9a0e-1d3b2a4c5d6e"
+        XCTAssertEqual(link.workroomInboxURL().absoluteString, "\(origin)/api/workroom/inbox")
+        XCTAssertEqual(link.workroomInboxURL(replies: 7, recent: 3).absoluteString,
+                       "\(origin)/api/workroom/inbox?new=7&recent=3")
+        XCTAssertEqual(link.workroomStateURL.absoluteString, "\(origin)/api/workroom/state")
+        XCTAssertEqual(link.workroomQuestionURL(questionID: question).absoluteString,
+                       "\(origin)/api/workroom/question/\(question)")
+        for action in RemoteWorkroomPath.Action.allCases {
+            XCTAssertEqual(link.workroomActionURL(questionID: question, action: action).absoluteString,
+                           "\(origin)/api/workroom/question/\(question)/\(action.rawValue)")
         }
     }
 

@@ -259,9 +259,15 @@ public enum WorkroomLimits {
     public static let pathBytes = 512
     public static let subjectBytes = 300
     public static let answerRevisions = 20
-    public static let notes = 20
-    public static let openQuestionsPerRoom = 50
-    public static let asksPerHour = 10
+    /// Messages in one question's conversation, both sides. A chat about one decision rarely
+    /// passes ten; a question page still renders every one of them.
+    public static let notes = 60
+    /// How much of the agent's newest message a person's inbox row previews.
+    public static let replyPreviewBytes = 280
+    /// Open questions examined when a person asks for the next one after an answer.
+    public static let nextQuestionScan = 100
+    /// A complete review batch fits without a timed quota; inbox reads remain paginated.
+    public static let openQuestionsPerRoom = 500
     public static let devicesPerPerson = 20
     public static let languageBytes = 35
     /// Index rows one inbox request may examine, whatever it returns. A cap on output is not a

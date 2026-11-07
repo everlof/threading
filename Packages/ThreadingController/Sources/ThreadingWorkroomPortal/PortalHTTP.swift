@@ -61,6 +61,9 @@ public protocol WorkroomParticipantBackend: Sendable {
     func clarify(person: WorkroomPersonID, id: QuestionID, text: String) async throws -> WorkroomParticipantReceipt
     func decline(person: WorkroomPersonID, id: QuestionID, reason: String) async throws -> WorkroomParticipantReceipt
     func setLanguage(person: WorkroomPersonID, language: String) async throws -> WorkroomPerson
+    func nextQuestion(person: WorkroomPersonID, after id: QuestionID) async throws -> QuestionID?
+    func inboxVersion(person: WorkroomPersonID) async throws -> String
+    func questionVersion(person: WorkroomPersonID, id: QuestionID) async throws -> String
 }
 
 /// The store itself, as a backend. A host that must react to a person's write (deliver the mail
@@ -94,6 +97,15 @@ public struct StoreParticipantBackend: WorkroomParticipantBackend {
     }
     public func setLanguage(person: WorkroomPersonID, language: String) async throws -> WorkroomPerson {
         try await store.participantSetLanguage(person: person, language: language)
+    }
+    public func nextQuestion(person: WorkroomPersonID, after id: QuestionID) async throws -> QuestionID? {
+        try await store.participantNextQuestion(person: person, after: id)
+    }
+    public func inboxVersion(person: WorkroomPersonID) async throws -> String {
+        try await store.participantInboxVersion(person: person)
+    }
+    public func questionVersion(person: WorkroomPersonID, id: QuestionID) async throws -> String {
+        try await store.participantQuestionVersion(person: person, id: id)
     }
 }
 

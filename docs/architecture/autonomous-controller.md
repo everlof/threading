@@ -736,7 +736,10 @@ what the controller implements. `ControllerMail.swift` holds the model and store
   colliding with it. Wake admission keys on the newest open message that may wake the worker
   and whose chain is within budget, not on whichever message arrived last. Fuses
   that need no reading: an owner-configured message limit (default 50) and 16 wakes per chain on a host, 20 sends a minute
-  per sender, 1,000 open messages per inbox. Updating the message count preserves the wake count;
+  per sender, 1,000 open messages per inbox. The internal Linked Workroom question/reply route
+  uses its own room and portal bounds instead of the agent send-rate fuse, so a human review
+  batch can be submitted together; see [Linked Workrooms](linked-workrooms.md#review-batches).
+  Updating the message count preserves the wake count;
   replacing the chain record would reset the wake fuse on every message. A chain has no depth
   limit: the depth a message carries is shown in its
   header and nothing more. A limit of 4 shipped first and refused ordinary unattended exchanges

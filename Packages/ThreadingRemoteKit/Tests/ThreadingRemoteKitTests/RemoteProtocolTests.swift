@@ -150,6 +150,7 @@ final class RemoteProtocolTests: XCTestCase {
             [
                 "sharedSession", "permissionRequest", "agentQuestion", "turnCompleted",
                 "agentMessage", "attentionRequest", "secretApproval", "mirrorInvite",
+                "workroom",
             ]
         )
         // Sent the moment keyvault asks, never deferred, never retracted: it dies with the request.

@@ -5,7 +5,7 @@ export type FailureReason = "invalidValue" | "unknownField" | "invalidJSON" | "e
   | "bodyNotObject" | "bodyTooLarge" | "invalidContentLength" | "outsideTimeWindow"
   | "invalidShape";
 
-export type FailureField = "request" | "playsSound" | "soundName" | "registrationID"
+export type FailureField = "request" | "playsSound" | "soundName" | "badge" | "registrationID"
   | "deviceToken" | "environment" | "event" | "event.type" | "event.id" | "event.kind"
   | "event.hostID" | "event.sessionID" | "event.title" | "event.body" | "event.createdAt"
   | "event.turnGeneration" | "retraction" | "retraction.type" | "retraction.hostID"

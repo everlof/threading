@@ -263,7 +263,9 @@ struct PairedRemoteHost: Codable, Hashable, Identifiable, Sendable {
     }
 
     var menuTitle: String {
-        isOwnerDevice ? name : MobileL10n.string("%@ · Shared chat", name)
+        if isOwnerDevice { return name }
+        if isWorkroomParticipant { return MobileL10n.string("Questions from %@", name) }
+        return MobileL10n.string("%@ · Shared chat", name)
     }
 
     /// What became of the fingerprints an owner response carried.

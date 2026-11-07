@@ -163,7 +163,9 @@ final class WorkroomHostTests: XCTestCase {
         XCTAssertEqual(field.options?.first?.consequence, "Granskas")
         XCTAssertThrowsError(try WorkroomAgentCommandService.field(WorkroomFieldArgument(
             id: "x", kind: "slider", label: "X", help: nil, required: nil, options: nil, unit: nil, minimum: nil, maximum: nil)))
-        XCTAssertTrue(WorkroomAgentCommandService.words(for: ControllerError.invalidInput("ask_rate")).contains("an hour"))
+        let capacityMessage = WorkroomAgentCommandService.words(for: ControllerError.invalidInput("room_full"))
+        XCTAssertTrue(capacityMessage.contains("\(WorkroomLimits.openQuestionsPerRoom) open questions"))
+        XCTAssertTrue(capacityMessage.contains("waiting does not free capacity"))
     }
 
     // MARK: - Helpers

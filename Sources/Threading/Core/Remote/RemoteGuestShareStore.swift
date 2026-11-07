@@ -8,6 +8,8 @@ import ThreadingRemoteKit
 struct RemoteGuestShareRecord: Codable, Equatable, Sendable {
     enum TargetKind: String, Codable, Equatable, Sendable {
         case projectTerminal
+        /// `sessionID` holds the Linked Workroom person's id.
+        case workroomPerson
     }
 
     struct Member: Codable, Equatable, Sendable {
@@ -184,7 +186,9 @@ final class RemoteGuestShareKeychainStore: RemoteGuestSharePersisting {
         return shares.allSatisfy { share in
             (share.targetKind == .projectTerminal
                 ? TerminalID(uuidString: share.sessionID) != nil
-                : SessionID(uuidString: share.sessionID) != nil)
+                : share.targetKind == .workroomPerson
+                    ? UUID(uuidString: share.sessionID) != nil
+                    : SessionID(uuidString: share.sessionID) != nil)
                 && !share.id.isEmpty
                 && share.invitationToken.map(RemoteInboundPolicy.acceptsBearerToken) ?? true
                 && share.members.allSatisfy { member in

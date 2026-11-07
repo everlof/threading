@@ -8,7 +8,10 @@ import { assertExactKeys, bearerToken, json, readJSON } from "./http";
 import { validateIdentifier } from "./protocol";
 import { registeredPushRecipient, revokePushRegistration } from "./push-registrations";
 
-const requestKeys = ["registrationID", "playsSound", "soundName", "event"];
+const requestKeys = ["registrationID", "playsSound", "soundName", "badge", "event"];
+// The largest app-icon number a host may set. A person's waiting questions are bounded far
+// below this; the bound keeps a malformed request from reaching APNs.
+const maximumBadge = 9_999;
 const eventKeys = [
   "type", "id", "kind", "hostID", "sessionID", "title", "body",
   "titleLocalization", "bodyLocalization", "destination", "createdAt",
@@ -32,6 +35,9 @@ export enum NotificationKind {
   // The person turned Mirror on at the Mac while Threading was not open on the phone. The Mac
   // withdraws it when the phone joins, the mirror ends or two minutes pass.
   mirrorInvite = "mirrorInvite",
+  // A Linked Workroom question or message waits for a person who answers in the app. Its
+  // session slot is the question's id; the request carries the person's waiting count as badge.
+  workroom = "workroom",
 }
 type RetractableNotificationKind = NotificationKind.turnCompleted
   | NotificationKind.agentQuestion | NotificationKind.permissionRequest
@@ -49,6 +55,7 @@ function supportsRetraction(kind: NotificationKind): kind is RetractableNotifica
     case NotificationKind.agentMessage:
     case NotificationKind.attentionRequest:
     case NotificationKind.secretApproval:
+    case NotificationKind.workroom:
       return false;
   }
   const unclassified: never = kind;
@@ -114,6 +121,9 @@ export async function handleAPNSPush(request: Request, env: Env): Promise<Respon
   const soundName = body.soundName;
   if (soundName !== undefined && (typeof soundName !== "string"
     || !/^threading-theme-[0-9a-f]{64}\.caf$/u.test(soundName))) invalid("soundName is invalid", "soundName");
+  const badge = body.badge;
+  if (badge !== undefined && (typeof badge !== "number" || !Number.isInteger(badge)
+    || badge < 0 || badge > maximumBadge)) invalid("badge is invalid", "badge");
   const event = normalizedEvent(requiredObject(body.event, "event"));
   if (event.hostID !== principal.hostID) {
     throw new HttpError(403, "forbidden", "Notification host does not match credential");
@@ -125,7 +135,8 @@ export async function handleAPNSPush(request: Request, env: Env): Promise<Respon
     env,
   );
 
-  const apnsBody = await encodedAPNSBody(event, body.playsSound, soundName as string | undefined);
+  const apnsBody = await encodedAPNSBody(event, body.playsSound, soundName as string | undefined,
+    badge as number | undefined);
   const host = registration.environment === "sandbox"
     ? "api.sandbox.push.apple.com"
     : "api.push.apple.com";
@@ -344,12 +355,13 @@ function optionalLocalization(
   };
 }
 
-async function encodedAPNSBody(event: NotificationEvent, playsSound: boolean, soundName?: string): Promise<Uint8Array> {
+async function encodedAPNSBody(event: NotificationEvent, playsSound: boolean, soundName?: string,
+  badge?: number): Promise<Uint8Array> {
   let delivered = event;
-  let encoded = encodeEnvelope(delivered, playsSound, soundName);
+  let encoded = encodeEnvelope(delivered, playsSound, soundName, badge);
   if (encoded.byteLength > 4_096) {
     delivered = { ...event, body: truncateUTF8(event.body, 400) };
-    encoded = encodeEnvelope(delivered, playsSound, soundName);
+    encoded = encodeEnvelope(delivered, playsSound, soundName, badge);
   }
   if (encoded.byteLength > 4_096) {
     throw new HttpError(413, "pushTooLarge", "Notification does not fit the APNs payload limit");
@@ -357,7 +369,8 @@ async function encodedAPNSBody(event: NotificationEvent, playsSound: boolean, so
   return encoded;
 }
 
-function encodeEnvelope(event: NotificationEvent, playsSound: boolean, soundName?: string): Uint8Array {
+function encodeEnvelope(event: NotificationEvent, playsSound: boolean, soundName?: string,
+  badge?: number): Uint8Array {
   return new TextEncoder().encode(JSON.stringify({
     aps: {
       alert: {
@@ -373,6 +386,7 @@ function encodeEnvelope(event: NotificationEvent, playsSound: boolean, soundName
         } : {}),
       },
       ...(playsSound ? { sound: soundName ?? "default" } : {}),
+      ...(badge !== undefined ? { badge } : {}),
       "thread-id": event.sessionID,
       category: event.kind === "permissionRequest" ? "THREADING_PERMISSION" : "THREADING_SESSION",
       ...(interruptionLevel(event.kind) ? { "interruption-level": interruptionLevel(event.kind) } : {}),

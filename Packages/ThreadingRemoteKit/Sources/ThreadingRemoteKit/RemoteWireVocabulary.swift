@@ -184,6 +184,8 @@ public enum RemoteShareScope: RemoteLosslessStringToken {
     case all
     case session
     case terminal
+    /// One Linked Workroom person: their questions, answered as them. No chat, no terminal.
+    case workroom
     case unknown(String)
 
     public init(rawValue: String) {
@@ -191,6 +193,7 @@ public enum RemoteShareScope: RemoteLosslessStringToken {
         case "all": self = .all
         case "session": self = .session
         case "terminal": self = .terminal
+        case "workroom": self = .workroom
         default: self = .unknown(rawValue)
         }
     }
@@ -200,6 +203,7 @@ public enum RemoteShareScope: RemoteLosslessStringToken {
         case .all: return "all"
         case .session: return "session"
         case .terminal: return "terminal"
+        case .workroom: return "workroom"
         case let .unknown(value): return value
         }
     }
@@ -679,6 +683,8 @@ public enum RemoteRoute: String, CaseIterable, Sendable {
     case projectDefaultAccounts = "api/project/default-accounts"
     /// Ends a mirror over REST, for the Live Activity's **End** while the events socket is closed.
     case mirrorEnd = "api/mirror/end"
+    /// Linked Workroom questions for a participant or the owner; see `RemoteWorkroomPath`.
+    case workroom = "api/workroom"
 
     /// The rooted path a host matches an incoming request against.
     public var absolutePath: String { "/" + rawValue }

@@ -1666,6 +1666,9 @@ public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
     /// socket, and `mirror/end` ends one. A phone paired with a Mac that does not say so shows no
     /// Mirror settings.
     case mirror
+    /// `workroom/…` answers. For an owner: Linked Workrooms is on, so the phone shows its
+    /// Workrooms list and may comment. For a workroom participant it is always present.
+    case workrooms
 }
 
 /// The size a thumbnail is asked at, and the most a Mac will answer with.
@@ -3946,6 +3949,10 @@ public enum RemoteNotificationKind: String, Codable, CaseIterable, Sendable {
     /// session slot is the mirror's id; a tap opens the stage directly, and the Mac withdraws it
     /// when the phone joins, the mirror ends or two minutes pass.
     case mirrorInvite
+    /// A Linked Workroom question or message is waiting for this person. Its session slot is the
+    /// question's id; a tap opens that question. Delivered only to a workroom participant, and
+    /// only through a broker that knows the kind and the badge that comes with it.
+    case workroom
 }
 
 /// The authenticated in-app destination a notification opens.

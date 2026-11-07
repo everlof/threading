@@ -74,7 +74,8 @@ struct WorkroomPortalTests {
 
     @Test func routeTableHasOnlyParticipantRoutes() {
         #expect(WorkroomPortal.routes == [
-            "GET /assets/portal.css", "GET /join/<token>", "POST /join/<token>", "GET /", "GET /q/<id>",
+            "GET /assets/portal.css", "GET /assets/portal.js", "GET /join/<token>", "POST /join/<token>", "GET /",
+            "GET /state", "GET /q/<id>", "GET /q/<id>/state",
             "POST /q/<id>/answer", "POST /q/<id>/clarify", "POST /q/<id>/decline", "POST /language"
         ])
         for route in WorkroomPortal.routes {
@@ -167,6 +168,175 @@ struct WorkroomPortalTests {
         #expect(try await f.store.inbox(f.session).items.count == 1)
         let shown = await f.portal.handle(request("GET", "/q/\(f.question.id)?saved=1", cookie: session))
         #expect(body(shown).contains("Ditt svar är sparat") && body(shown).contains("Uppdatera svar"))
+    }
+
+    @Test func aCompleteReviewBatchIsPagedAndTheLastDecisionCanBeAnswered() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let reviewCount = 211
+        var questions = [f.question]
+        for index in 1..<reviewCount {
+            questions.append(try await f.store.askWorkroom(
+                id: QuestionID(), roomID: f.room.id, scope: "p", asker: f.session, personHandle: "expert",
+                draft: WorkroomQuestionDraft(title: "Decision \(index)", prompt: "Does this match?", language: "sv",
+                                             form: f.question.draft.form), gitContext: nil
+            ))
+        }
+        let session = try await signIn(f)
+        let questionLinks = try NSRegularExpression(pattern: #"href="/q/([a-z0-9-]+)""#)
+        let nextLink = try NSRegularExpression(pattern: #"href="(/\?new=[0-9]+&amp;open=[0-9]+&amp;recent=[0-9]+)""#)
+        var target = "/"
+        var seen: [String] = []
+        var visited = Set<String>()
+        for _ in 0...reviewCount / 20 {
+            #expect(visited.insert(target).inserted)
+            let response = await f.portal.handle(request("GET", target, cookie: session))
+            #expect(response.status == 200)
+            let html = body(response) as NSString
+            let range = NSRange(location: 0, length: html.length)
+            let ids = questionLinks.matches(in: html as String, range: range).map { html.substring(with: $0.range(at: 1)) }
+            #expect(ids.count <= 20)
+            seen += ids
+            guard let next = nextLink.firstMatch(in: html as String, range: range) else { break }
+            target = html.substring(with: next.range(at: 1)).replacingOccurrences(of: "&amp;", with: "&")
+        }
+        #expect(seen == questions.map { $0.id.description })
+        let last = try #require(questions.last)
+        let answered = await f.portal.handle(request(
+            "POST", "/q/\(last.id)/answer", cookie: session,
+            form: [("_form", WorkroomToken.formToken(for: session)), ("f.rule", "review"), ("comment", "Confirmed")]
+        ))
+        #expect(answered.status == 303)
+        #expect(try await f.store.workroomQuestionDetail(last.id).question.state == .answered)
+        let reply = try #require(await f.store.inbox(f.session).items.first)
+        #expect(reply.message.envelope.replyTo == last.mailID)
+        #expect(reply.message.wake == true)
+    }
+
+    @Test func aQuestionIsAConversationThatReachesTheAgentAndComesBack() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let session = try await signIn(f)
+        let token = WorkroomToken.formToken(for: session)
+        let page = "/q/\(f.question.id)"
+        let unanswered = body(await f.portal.handle(request("GET", page, cookie: session)))
+        // Before an answer the form leads and writing to the agent waits behind a disclosure.
+        #expect(unanswered.contains("Behöver du fråga något innan du svarar?"))
+        #expect(unanswered.contains("data-poll=\"\(page)/state\"") && unanswered.contains("data-version=\"\(f.question.pageVersion)\""))
+
+        let sent = await f.portal.handle(request("POST", "\(page)/clarify", cookie: session,
+                                                 form: [("_form", token), ("text", "Gäller det <b>alla</b> labb?")]))
+        #expect(sent.status == 303 && sent.header("Location") == "\(page)#latest")
+        let mail = try #require(try await f.store.inbox(f.session).items.first)
+        #expect(mail.message.envelope.text.contains("Gäller det <b>alla</b> labb?"))
+
+        _ = try await f.store.respondToWorkroomQuestion(f.question.id, asker: f.session, text: "Ja, alla ackrediterade labb.")
+        let inbox = body(await f.portal.handle(request("GET", "/", cookie: session)))
+        #expect(inbox.contains("Nya meddelanden") && inbox.contains("Ja, alla ackrediterade labb."))
+        #expect(inbox.contains("href=\"\(page)#latest\"") && inbox.contains("Nytt meddelande"))
+
+        let conversation = body(await f.portal.handle(request("GET", page, cookie: session)))
+        let mine = try #require(conversation.range(of: "Gäller det &lt;b&gt;alla&lt;/b&gt; labb?"))
+        let theirs = try #require(conversation.range(of: "Ja, alla ackrediterade labb."))
+        #expect(mine.lowerBound < theirs.lowerBound)
+        #expect(conversation.contains("class=\"msg agent\" id=\"latest\""))
+        #expect(conversation.contains("Ticket sweep <span class=\"tag\">AI-agent</span>"))
+        #expect(conversation.contains("Skriv till Ticket sweep") && !conversation.contains("Behöver du fråga något"))
+        // Opening it read the reply.
+        #expect(!body(await f.portal.handle(request("GET", "/", cookie: session))).contains("Nya meddelanden"))
+    }
+
+    @Test func pagesPollAFingerprintThatMatchesWhatTheyShow() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let session = try await signIn(f)
+        let questionState = await f.portal.handle(request("GET", "/q/\(f.question.id)/state", cookie: session))
+        #expect(questionState.status == 200)
+        #expect(questionState.header("Content-Type") == "application/json; charset=utf-8")
+        #expect(questionState.header("Cache-Control") == "no-store")
+        #expect(body(questionState) == #"{"v":"\#(f.question.pageVersion)"}"#)
+        let inboxVersion = try await f.store.participantInboxVersion(person: f.person.id)
+        #expect(body(await f.portal.handle(request("GET", "/state", cookie: session))) == #"{"v":"\#(inboxVersion)"}"#)
+        #expect(body(await f.portal.handle(request("GET", "/", cookie: session))).contains("data-version=\"\(inboxVersion)\""))
+        #expect(await f.portal.handle(request("GET", "/q/\(QuestionID())/state", cookie: session)).status == 404)
+        #expect(await f.portal.handle(request("GET", "/state")).status == 401)
+
+        let script = await f.portal.handle(request("GET", "/assets/portal.js"))
+        #expect(script.status == 200 && script.header("Content-Type") == "text/javascript; charset=utf-8")
+        let policy = try #require(script.header("Content-Security-Policy"))
+        #expect(policy.contains("script-src 'self'") && policy.contains("connect-src 'self'") && !policy.contains("unsafe"))
+        // The script never writes markup; it only reads the fingerprint.
+        #expect(!PortalScript.js.contains("innerHTML") && !PortalScript.js.contains("insertAdjacent") && !PortalScript.js.contains("eval"))
+        #expect(body(await f.portal.handle(request("GET", "/", cookie: session))).contains("/assets/portal.js?v=\(PortalAssets.version)"))
+    }
+
+    @Test func savingAnAnswerOffersTheNextOpenQuestion() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let second = try await f.store.askWorkroom(id: QuestionID(), roomID: f.room.id, scope: "p", asker: f.session,
+                                                   personHandle: "expert",
+                                                   draft: WorkroomQuestionDraft(title: "Andra", prompt: "Stämmer det?", language: "sv",
+                                                                                form: WorkroomForm(fields: [WorkroomField(id: "ok", kind: .yesNo, label: "OK?")])),
+                                                   gitContext: nil)
+        let session = try await signIn(f)
+        let token = WorkroomToken.formToken(for: session)
+        _ = await f.portal.handle(request("POST", "/q/\(f.question.id)/answer", cookie: session,
+                                          form: [("_form", token), ("f.rule", "keep")]))
+        let saved = body(await f.portal.handle(request("GET", "/q/\(f.question.id)?saved=1", cookie: session)))
+        #expect(saved.contains("Ditt svar är sparat") && saved.contains("class=\"button\" href=\"/q/\(second.id)\""))
+        // The answer is in the conversation in the person's words, and changing it is one step away.
+        #expect(saved.contains("<dt>Regel</dt><dd>Behåll</dd>") && saved.contains("Ändra ditt svar"))
+        let answered = await f.portal.handle(request("POST", "/q/\(second.id)/answer", cookie: session,
+                                                     form: [("_form", token), ("f.ok", "yes")]))
+        #expect(answered.status == 303)
+        let last = body(await f.portal.handle(request("GET", "/q/\(second.id)?saved=1", cookie: session)))
+        #expect(last.contains("Det var den sista öppna frågan") && last.contains("<dd>Ja</dd>"))
+    }
+
+    /// Writes a signed-in inbox and conversation, with the stylesheet and script beside them, to
+    /// `THREADING_RENDER_OUT` for review at phone width. Without it the pages are only checked.
+    @Test func rendersTheInboxAndAConversationForReview() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let session = try await signIn(f)
+        let token = WorkroomToken.formToken(for: session)
+        let other = try await f.store.askWorkroom(
+            id: QuestionID(), roomID: f.room.id, scope: "p", asker: f.session, personHandle: "expert",
+            draft: WorkroomQuestionDraft(title: "Stämmer sammanfattningen av SONDA-753?",
+                                         prompt: "Prover med bara PAH-summa går nu alltid till granskning.", language: "sv",
+                                         form: WorkroomForm(fields: [WorkroomField(id: "ok", kind: .confirm, label: "Sammanfattningen")])),
+            gitContext: nil)
+        _ = await f.portal.handle(request("POST", "/q/\(f.question.id)/clarify", cookie: session,
+                                          form: [("_form", token), ("text", "Gäller det även prover från 2023?")]))
+        _ = try await f.store.respondToWorkroomQuestion(f.question.id, asker: f.session,
+                                                        text: "Ja, alla prover oavsett år. Bara summan redovisas för dem.")
+        _ = await f.portal.handle(request("POST", "/q/\(f.question.id)/answer", cookie: session,
+                                          form: [("_form", token), ("f.rule", "review"), ("f.limit", "0,5"),
+                                                 ("comment", "Granska alltid när bara summan finns.")]))
+        _ = try await f.store.respondToWorkroomQuestion(f.question.id, asker: f.session,
+                                                        text: "Tack! Ska gränsen 0,5 mg/kg gälla även för asfalt med tjära?")
+        let pages = [
+            ("inbox.html", "/"),
+            ("question.html", "/q/\(f.question.id)"),
+            ("unanswered.html", "/q/\(other.id)")
+        ]
+        let out = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map { URL(fileURLWithPath: $0) }
+        if let out {
+            try FileManager.default.createDirectory(at: out.appendingPathComponent("assets"), withIntermediateDirectories: true)
+            try Data(PortalStyle.css.utf8).write(to: out.appendingPathComponent("assets/portal.css"))
+            try Data(PortalScript.js.utf8).write(to: out.appendingPathComponent("assets/portal.js"))
+        }
+        for (name, path) in pages {
+            let response = await f.portal.handle(request("GET", path, cookie: session))
+            #expect(response.status == 200)
+            if let out { try response.body.write(to: out.appendingPathComponent(name)) }
+            guard name == "question.html" else { continue }
+            // Everything happened within one second: the order is the store's, not the clock's.
+            let html = body(response)
+            let order = ["Gäller det även prover från 2023?", "Ja, alla prover oavsett år.", "<dt>Regel</dt>", "Tack! Ska gränsen"]
+                .compactMap { html.range(of: $0)?.lowerBound }
+            #expect(order.count == 4 && order == order.sorted())
+        }
     }
 
     @Test func foreignAndMissingQuestionsLookTheSame() async throws {

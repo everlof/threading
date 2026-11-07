@@ -289,10 +289,8 @@ extension ControllerStore {
     public func workroomSummary(_ roomID: WorkroomID) throws -> WorkroomSummary {
         let room: LinkedWorkroom = try required("workroom", roomID.description)
         let people = try workroomAccess(roomID).filter { $0.state == .granted }.map { try workroomPerson($0.person) }
-        let open = try db.rows("""
-            SELECT COUNT(*) FROM (SELECT 1 FROM workroom_ask WHERE room=? AND state='open' LIMIT ?)
-            """, [.text(roomID.description), .integer(Int64(WorkroomLimits.openQuestionsPerRoom))]).first?.integers[0] ?? 0
-        return WorkroomSummary(room: room, publication: try workroomPublication(roomID), people: people, openQuestions: Int(open))
+        let open = try openWorkroomQuestionCount(roomID)
+        return WorkroomSummary(room: room, publication: try workroomPublication(roomID), people: people, openQuestions: open)
     }
 
     // MARK: - Ties

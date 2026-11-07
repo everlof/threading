@@ -216,7 +216,7 @@ struct PairingView: View {
             Label("Paste a link", systemImage: "link")
                 .font(.headline)
 
-            Text("Use the private link from your Mac or an invited chat.")
+            Text("Use the private link from your Mac, a shared chat or an invitation to answer questions.")
                 .font(.footnote)
                 .foregroundStyle(theme.secondaryLabel)
 
@@ -329,6 +329,11 @@ struct PairingView: View {
                 symbol: "bubble.left",
                 title: "Shared chat",
                 detail: "A shared link opens one chat and can never manage your Mac."
+            )
+            PairingHelpRow(
+                symbol: "questionmark.bubble",
+                title: "Questions for you",
+                detail: "An invitation to answer questions shows only the questions asked of you, never anything else on the Mac."
             )
         }
         .padding(.horizontal, MobileDesign.Spacing.tight)

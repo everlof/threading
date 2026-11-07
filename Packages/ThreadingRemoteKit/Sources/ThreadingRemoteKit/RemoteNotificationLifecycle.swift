@@ -14,7 +14,7 @@ public extension RemoteNotificationKind {
         switch self {
         case .turnCompleted: return .completedTurn
         case .agentQuestion, .permissionRequest: return .responseRequest
-        case .sharedSession, .agentMessage, .attentionRequest, .secretApproval: return .independentEvent
+        case .sharedSession, .agentMessage, .attentionRequest, .secretApproval, .workroom: return .independentEvent
         case .mirrorInvite: return .expiringOffer
         }
     }

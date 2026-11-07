@@ -35,20 +35,21 @@ public enum PortalLanguage: String, CaseIterable, Sendable {
 }
 
 enum PortalKey: CaseIterable {
-    case signedInAs, language, saveLanguage
-    case inboxTitle, inboxEmpty, recentTitle, more, from
+    case language, saveLanguage
+    case inboxTitle, inboxEmpty, repliesTitle, openTitle, recentTitle, more, from, newMessage
     case stateOpen, stateAnswered, stateDeclined, stateWithdrawn
-    case backToInbox, background, evidence, sourceToVerify
-    case yourAnswer, comment, answerText, submit, update, optional, choose
+    case backToInbox, nextQuestion, allDone, background, evidence, sourceToVerify
+    case yourAnswer, answerChanged, changeAnswer, comment, answerText, submit, update, optional
     case yes, no, agree, disagree, unsure
-    case answeredRevision, saved
-    case clarifyTitle, clarifyHelp, clarifySubmit, clarifySent
+    case saved, freshNotice, freshShow
+    case composeTo, composeHelp, composeSubmit, composeFirst
     case declineTitle, declineHelp, declineSubmit, declinedBanner, withdrawnBanner
-    case thread, noteYou, noteAgent
+    case thread, noteYou, noteAgent, noteOwner
     case errorRequired, errorChoice, errorNumber, errorText, errorRevisions, errorNotes, errorClosed, errorGeneric
     case signInTitle, signInBody, joinTitle, joinBody, joinContinue, linkExpired
     case notFoundTitle, notFoundBody, tooManyTitle, tooManyBody, unavailableTitle, unavailableBody
     case privacy
+    case pushNewQuestion, pushMessage, pushComment, pushWaitingOne, pushWaitingMany
 }
 
 struct PortalText {
@@ -63,40 +64,46 @@ struct PortalText {
     }
 
     static let english: [PortalKey: String] = [
-        .signedInAs: "Signed in as %@",
         .language: "Language",
         .saveLanguage: "Change",
         .inboxTitle: "Your questions",
         .inboxEmpty: "No open questions right now.",
+        .repliesTitle: "New messages",
+        .openTitle: "Waiting for your answer",
         .recentTitle: "Answered and closed",
         .more: "Show more",
         .from: "From %@ · %@",
+        .newMessage: "New message",
         .stateOpen: "Open",
         .stateAnswered: "Answered",
         .stateDeclined: "Declined",
         .stateWithdrawn: "Withdrawn",
         .backToInbox: "← All questions",
+        .nextQuestion: "Next question →",
+        .allDone: "That was the last open question. Thank you!",
         .background: "Background",
         .evidence: "Evidence",
         .sourceToVerify: "Source to verify: %@",
         .yourAnswer: "Your answer",
+        .answerChanged: "Changed answer",
+        .changeAnswer: "Change your answer",
         .comment: "Comment (optional)",
         .answerText: "Your answer",
         .submit: "Send answer",
         .update: "Update answer",
         .optional: "optional",
-        .choose: "Choose one",
         .yes: "Yes",
         .no: "No",
         .agree: "Agree",
         .disagree: "Disagree",
         .unsure: "Not sure",
-        .answeredRevision: "Answered %@ (revision %d). You can change your answer.",
         .saved: "Your answer is saved. The agent that asked has received it.",
-        .clarifyTitle: "Need more information?",
-        .clarifyHelp: "Ask the agent. The question stays open.",
-        .clarifySubmit: "Ask for clarification",
-        .clarifySent: "Your question was sent to the agent.",
+        .freshNotice: "Something new has arrived.",
+        .freshShow: "Show it",
+        .composeTo: "Write to %@",
+        .composeHelp: "Ask something, add a fact or reply. The agent reads it and answers here.",
+        .composeSubmit: "Send",
+        .composeFirst: "Need to ask something before you answer?",
         .declineTitle: "Can't answer this?",
         .declineHelp: "Say why, for example that someone else should answer. The question closes.",
         .declineSubmit: "Decline the question",
@@ -104,7 +111,8 @@ struct PortalText {
         .withdrawnBanner: "The agent withdrew this question.",
         .thread: "Conversation",
         .noteYou: "You",
-        .noteAgent: "The agent",
+        .noteAgent: "AI agent",
+        .noteOwner: "owner",
         .errorRequired: "Fill in every field that is not marked optional.",
         .errorChoice: "Choose one of the options.",
         .errorNumber: "Enter a number within the stated range.",
@@ -125,44 +133,55 @@ struct PortalText {
         .tooManyBody: "Wait a moment and try again.",
         .unavailableTitle: "Not available",
         .unavailableBody: "This service is not available right now. Try again later.",
-        .privacy: "Your answers are stored on the owner's computer and read by the agent that asked. They are information, not approvals."
+        .privacy: "Your answers are stored on the owner's computer and read by the agent that asked. They are information, not approvals.",
+        .pushNewQuestion: "New question from %@",
+        .pushMessage: "%@ wrote",
+        .pushComment: "%@ commented",
+        .pushWaitingOne: "A question is waiting for you",
+        .pushWaitingMany: "%d questions are waiting for you"
     ]
 
     static let swedish: [PortalKey: String] = [
-        .signedInAs: "Inloggad som %@",
         .language: "Språk",
         .saveLanguage: "Byt",
         .inboxTitle: "Dina frågor",
         .inboxEmpty: "Inga öppna frågor just nu.",
+        .repliesTitle: "Nya meddelanden",
+        .openTitle: "Väntar på ditt svar",
         .recentTitle: "Besvarade och stängda",
         .more: "Visa fler",
         .from: "Från %@ · %@",
+        .newMessage: "Nytt meddelande",
         .stateOpen: "Öppen",
         .stateAnswered: "Besvarad",
         .stateDeclined: "Avböjd",
         .stateWithdrawn: "Återkallad",
         .backToInbox: "← Alla frågor",
+        .nextQuestion: "Nästa fråga →",
+        .allDone: "Det var den sista öppna frågan. Tack!",
         .background: "Bakgrund",
         .evidence: "Underlag",
         .sourceToVerify: "Källa att verifiera: %@",
         .yourAnswer: "Ditt svar",
+        .answerChanged: "Ändrat svar",
+        .changeAnswer: "Ändra ditt svar",
         .comment: "Kommentar (valfri)",
         .answerText: "Ditt svar",
         .submit: "Skicka svar",
         .update: "Uppdatera svar",
         .optional: "valfritt",
-        .choose: "Välj ett alternativ",
         .yes: "Ja",
         .no: "Nej",
         .agree: "Stämmer",
         .disagree: "Stämmer inte",
         .unsure: "Osäker",
-        .answeredRevision: "Besvarad %@ (version %d). Du kan ändra ditt svar.",
         .saved: "Ditt svar är sparat. Agenten som frågade har fått det.",
-        .clarifyTitle: "Behöver du mer information?",
-        .clarifyHelp: "Fråga agenten. Frågan förblir öppen.",
-        .clarifySubmit: "Be om förtydligande",
-        .clarifySent: "Din fråga är skickad till agenten.",
+        .freshNotice: "Det har kommit något nytt.",
+        .freshShow: "Visa",
+        .composeTo: "Skriv till %@",
+        .composeHelp: "Fråga något, lägg till en uppgift eller svara. Agenten läser det och svarar här.",
+        .composeSubmit: "Skicka",
+        .composeFirst: "Behöver du fråga något innan du svarar?",
         .declineTitle: "Kan du inte svara?",
         .declineHelp: "Skriv varför, till exempel att någon annan bör svara. Frågan stängs.",
         .declineSubmit: "Avböj frågan",
@@ -170,7 +189,8 @@ struct PortalText {
         .withdrawnBanner: "Agenten har dragit tillbaka frågan.",
         .thread: "Samtal",
         .noteYou: "Du",
-        .noteAgent: "Agenten",
+        .noteAgent: "AI-agent",
+        .noteOwner: "ägare",
         .errorRequired: "Fyll i alla fält som inte är markerade som valfria.",
         .errorChoice: "Välj ett av alternativen.",
         .errorNumber: "Ange ett tal inom det angivna intervallet.",
@@ -191,6 +211,35 @@ struct PortalText {
         .tooManyBody: "Vänta en stund och försök igen.",
         .unavailableTitle: "Inte tillgänglig",
         .unavailableBody: "Tjänsten är inte tillgänglig just nu. Försök igen senare.",
-        .privacy: "Dina svar sparas på ägarens dator och läses av agenten som frågade. De är information, inte godkännanden."
+        .privacy: "Dina svar sparas på ägarens dator och läses av agenten som frågade. De är information, inte godkännanden.",
+        .pushNewQuestion: "Ny fråga från %@",
+        .pushMessage: "%@ skrev",
+        .pushComment: "%@ kommenterade",
+        .pushWaitingOne: "En fråga väntar på dig",
+        .pushWaitingMany: "%d frågor väntar på dig"
     ]
+}
+
+/// The titles of the notifications a person's phone shows, in their language. The same table as
+/// the portal's words, so a person reads one vocabulary on the web and on the lock screen.
+public enum WorkroomNotificationText {
+    public static func newQuestion(from asker: String, language: String) -> String {
+        text(language).format(.pushNewQuestion, asker)
+    }
+
+    public static func message(from author: String, language: String) -> String {
+        text(language).format(.pushMessage, author)
+    }
+
+    public static func comment(from owner: String, language: String) -> String {
+        text(language).format(.pushComment, owner)
+    }
+
+    public static func waiting(_ count: Int, language: String) -> String {
+        count == 1 ? text(language)[.pushWaitingOne] : text(language).format(.pushWaitingMany, count)
+    }
+
+    private static func text(_ language: String) -> PortalText {
+        PortalText(language: PortalLanguage.first(of: [language]) ?? .en)
+    }
 }

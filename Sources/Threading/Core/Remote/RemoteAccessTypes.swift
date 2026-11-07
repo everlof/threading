@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingController
 import ThreadingExtensionKit
 import ThreadingRemoteKit
 
@@ -88,12 +89,15 @@ enum RemoteScope: Equatable, Sendable {
     case session(SessionID)
     /// A guest share of exactly one standalone project terminal.
     case projectTerminal(TerminalID)
+    /// One Linked Workroom person, in the iPhone app: their questions, answered as them. It
+    /// reaches no chat and no terminal; only the `workroom/…` routes read it.
+    case workroomPerson(WorkroomPersonID)
 
     func covers(_ sessionID: SessionID) -> Bool {
         switch self {
         case .allSessions: return true
         case let .session(allowed): return allowed == sessionID
-        case .projectTerminal: return false
+        case .projectTerminal, .workroomPerson: return false
         }
     }
 
@@ -101,8 +105,14 @@ enum RemoteScope: Equatable, Sendable {
         switch self {
         case .allSessions: return true
         case let .projectTerminal(allowed): return allowed == terminalID
-        case .session: return false
+        case .session, .workroomPerson: return false
         }
+    }
+
+    /// The workroom person this share answers as, if it is a workroom membership.
+    var workroomPerson: WorkroomPersonID? {
+        if case let .workroomPerson(person) = self { return person }
+        return nil
     }
 }
 

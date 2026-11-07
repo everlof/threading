@@ -1651,6 +1651,66 @@ struct RemoteClient {
         )
     }
 
+    // MARK: Linked Workrooms
+
+    func workroomInbox(cursors: MobileWorkroomInboxCursors = MobileWorkroomInboxCursors()) async throws
+        -> RemoteWorkroomInboxDTO {
+        try await get(
+            RemoteWorkroomInboxDTO.self,
+            from: link.workroomInboxURL(replies: cursors.replies, open: cursors.open, recent: cursors.recent)
+        )
+    }
+
+    func workroomState() async throws -> RemoteWorkroomStateDTO {
+        try await get(RemoteWorkroomStateDTO.self, from: link.workroomStateURL)
+    }
+
+    func workroomQuestion(id: String) async throws -> RemoteWorkroomQuestionDTO {
+        try await get(RemoteWorkroomQuestionDTO.self, from: link.workroomQuestionURL(questionID: try Self.workroomQuestionID(id)))
+    }
+
+    func answerWorkroomQuestion(
+        id: String,
+        _ answer: RemoteWorkroomAnswerRequestDTO,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteWorkroomQuestionDTO {
+        try await postResponse(
+            answer,
+            to: link.workroomActionURL(questionID: try Self.workroomQuestionID(id), action: .answer),
+            requestID: requestID
+        )
+    }
+
+    func messageWorkroomQuestion(
+        id: String,
+        text: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteWorkroomQuestionDTO {
+        try await postResponse(
+            RemoteWorkroomMessageRequestDTO(text: text),
+            to: link.workroomActionURL(questionID: try Self.workroomQuestionID(id), action: .message),
+            requestID: requestID
+        )
+    }
+
+    func declineWorkroomQuestion(
+        id: String,
+        reason: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteWorkroomQuestionDTO {
+        try await postResponse(
+            RemoteWorkroomMessageRequestDTO(text: reason),
+            to: link.workroomActionURL(questionID: try Self.workroomQuestionID(id), action: .decline),
+            requestID: requestID
+        )
+    }
+
+    /// A question id is a UUID; anything else never becomes a path, so it cannot name a sibling.
+    static func workroomQuestionID(_ id: String) throws -> String {
+        guard UUID(uuidString: id) != nil else { throw RemoteClientError.invalidResponse }
+        return id.lowercased()
+    }
+
     /// Ends a mirror on the Mac while the events socket is closed — the Live Activity's **End**.
     func endMirror(mirrorID: String) async throws {
         let _: [String: Bool] = try await postResponse(

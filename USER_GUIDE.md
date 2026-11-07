@@ -3931,13 +3931,17 @@ colleague who does not use Threading — and get their answers back as mail. It 
 switch it on in **Settings ▸ Workrooms**.
 
 - **Rooms.** Ask an agent to create a workroom for something you want reviewed or decided, such as
-  a batch of tickets. A room belongs to the session's project and is private.
+  a batch of tickets. A room belongs to the session's repository — every checkout and worktree of it
+  reaches the same rooms, so a chat that moves to another worktree keeps them — and is private.
 - **People.** Add people in **Settings ▸ Workrooms** with a name, a short handle and their
   language, or let an agent propose one when it asks to open a room.
 - **Questions.** The agent writes each question in the person's language, with an answer form —
   choices with their consequences, yes or no, a number with a unit, text, or agree / disagree /
   not sure — plus background and evidence. Threading records the branch, commits and changed files
-  the question was asked about, for the agent and you; the person never sees code.
+  the question was asked about, for the agent and you; the person never sees code. A room can
+  hold up to **500 open questions**, with no hourly quota or wait between batches. Keep separate
+  decisions as separate questions. Answering, declining or withdrawing a question frees a slot;
+  waiting does not. The participant's inbox stays paginated.
 - **Opening a room.** Nothing is reachable from outside this Mac until you approve it. When an agent
   asks, a sheet names the room, the person, how many questions are waiting, the tunnel, how long it
   stays open and the agent's reason. Approve, then copy the person's link from **Settings ▸
@@ -3950,11 +3954,26 @@ switch it on in **Settings ▸ Workrooms**.
   sessions have their own lifetimes; extending an invitation does not change either. The public
   address must still be available, so use a reserved domain to keep links valid across restarts.
 - **Answering.** The person sees only their own questions in rooms open to them, answers in the
-  form, can change an answer, ask the agent for clarification, or decline. The page follows their
-  language (Swedish or English) and they can switch it.
-- **Back to the agent.** Each answer, clarification request or decline arrives as mail to the
-  session that asked, the same way mail between sessions does. The answer is information, never an
-  approval or a permission.
+  form, can change an answer, or decline. After saving, **Next question** goes straight to their
+  next open one, so a long review is answer, next, answer. The page follows their language
+  (Swedish or English) and they can switch it. It is made for a phone first.
+- **A conversation per question.** Each question is a chat between the person and the agent that
+  asked: they can write to it before or after answering — ask what something means, add a fact,
+  reply to a follow-up — and the agent can write back or ask about their answer. The agent's
+  messages are labelled as coming from an AI agent. A new message from the agent puts the question
+  under **New messages** at the top of their inbox, with its first lines, until they open it. An
+  open page picks up a new message or question by itself within seconds; if they are in the middle
+  of typing, it shows a banner instead of reloading.
+- **In the Threading app.** Instead of the web page, a person can answer in the Threading iPhone app,
+  with notifications and a badge for what waits for them. In **Settings ▸ Workrooms**, choose
+  **Invite to App** beside the person and send them the copied link; it works once, within 24
+  hours, and opens the app. They need no account and never see your chats. Remote Access must be
+  on. **Sign Out** ends their app access and their browsers. On your own paired iPhone, Workrooms
+  lists every question; you can read the conversation and **comment** — the person and the agent
+  both see it — but you never answer for the person.
+- **Back to the agent.** Each answer, message or decline arrives as mail to the session that asked,
+  the same way mail between sessions does, and wakes it if it is idle. The answer is information,
+  never an approval or a permission.
 - **No waiting in the terminal.** A chat that created or asked in an open workroom routes its
   questions through the workroom instead of stopping on them: Claude's question prompt is refused
   with that instruction, and a turn that ends on a question is sent back once to ask it through

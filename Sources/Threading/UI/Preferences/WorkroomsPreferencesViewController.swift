@@ -15,6 +15,8 @@ final class WorkroomsPreferencesViewController: NSViewController {
         let person: WorkroomPerson
         let devices: [WorkroomDevice]
         let invitation: WorkroomInvitation?
+        /// Phones answering in the Threading app, and whether an app invitation is unused.
+        let app: RemoteAccessCoordinator.SessionAccess
     }
 
     private struct RoomEntry {
@@ -43,6 +45,7 @@ final class WorkroomsPreferencesViewController: NSViewController {
     private var invitationButtons: [ObjectIdentifier: WorkroomLinkExtension.Target] = [:]
     private var roomButtons: [ObjectIdentifier: WorkroomID] = [:]
     private var copiedPerson: WorkroomPersonID?
+    private var copiedAppPerson: WorkroomPersonID?
     private var addMessage: String?
 
     private lazy var enabledToggle = SettingsUI.toggle(isOn: AppSettings.shared.workroomsEnabled,
@@ -113,7 +116,8 @@ final class WorkroomsPreferencesViewController: NSViewController {
             for person in people.items.prefix(WorkroomsPageDefaults.people) {
                 snapshot.people.append(PersonEntry(person: person,
                                                    devices: try await store.workroomDevices(person: person.id),
-                                                   invitation: try await store.latestWorkroomInvitation(person: person.id)))
+                                                   invitation: try await store.latestWorkroomInvitation(person: person.id),
+                                                   app: await RemoteAccessCoordinator.shared.access(forWorkroomPerson: person.id)))
             }
             // Newest rooms last in storage order; the page shows the newest few.
             var rooms: [LinkedWorkroom] = []
@@ -272,10 +276,13 @@ final class WorkroomsPreferencesViewController: NSViewController {
                                          action: #selector(copyLink(_:)))
             copy.isEnabled = WorkroomHost.shared.publishedOrigin != nil
             personButtons[ObjectIdentifier(copy)] = person.id
+            let invite = SettingsUI.button(copiedAppPerson == person.id ? "Copied" : "Invite to App",
+                                           target: self, action: #selector(inviteToApp(_:)))
+            personButtons[ObjectIdentifier(invite)] = person.id
             let signOut = SettingsUI.button("Sign Out", target: self, action: #selector(signOut(_:)))
-            signOut.isEnabled = !entry.devices.isEmpty
+            signOut.isEnabled = !entry.devices.isEmpty || !entry.app.members.isEmpty || !entry.app.links.isEmpty
             personButtons[ObjectIdentifier(signOut)] = person.id
-            var controls = [copy]
+            var controls = [copy, invite]
             if let invitation = entry.invitation, invitation.state == .pending {
                 let extend = SettingsUI.button("Extend Link…", target: self, action: #selector(extendLink(_:)))
                 invitationButtons[ObjectIdentifier(extend)] = .init(person: person, invitation: invitation)
@@ -310,8 +317,13 @@ final class WorkroomsPreferencesViewController: NSViewController {
             parts.append(expired
                 ? L10n.format("unused link expired %@", Self.short(invitation.expiresAt))
                 : L10n.format("link sent, unused until %@", Self.short(invitation.expiresAt)))
-        } else if entry.devices.isEmpty, entry.invitation == nil {
+        } else if entry.devices.isEmpty, entry.invitation == nil, entry.app.members.isEmpty {
             parts.append(L10n.string("no link yet"))
+        }
+        if !entry.app.members.isEmpty {
+            parts.append(L10n.format("%d phones in the app", entry.app.members.count))
+        } else if let link = entry.app.links.last {
+            parts.append(L10n.format("app invitation unused until %@", link.expiresAt.formatted(date: .abbreviated, time: .shortened)))
         }
         return parts.joined(separator: " · ")
     }
@@ -420,8 +432,33 @@ final class WorkroomsPreferencesViewController: NSViewController {
         }
     }
 
+    /// An app invitation on the clipboard: one person, single use, accepted in the Threading
+    /// app. It reaches their questions and nothing else on this Mac, until Sign Out.
+    @objc private func inviteToApp(_ sender: ThemedButton) {
+        guard let person = personButtons[ObjectIdentifier(sender)] else { return }
+        sender.isEnabled = false
+        Task { [weak self] in
+            switch await RemoteAccessCoordinator.shared.prepareWorkroomShare(for: person) {
+            case let .success(created):
+                ShareInvitationText.copy(created.url)
+                self?.copiedAppPerson = person
+                self?.load()
+            case let .failure(error):
+                sender.isEnabled = true
+                // States an outcome and asks nothing, so a plain themed alert.
+                let alert = ThemedAlert()
+                alert.alertStyle = .warning
+                alert.messageText = L10n.string("The app invitation could not be created")
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: L10n.string("OK"))
+                if let window = self?.view.window { alert.beginSheetModal(for: window) }
+            }
+        }
+    }
+
     @objc private func signOut(_ sender: ThemedButton) {
         guard let person = personButtons[ObjectIdentifier(sender)] else { return }
+        RemoteAccessCoordinator.shared.revokeWorkroomShares(person)
         Task { [weak self] in
             guard let store = try? await MacMailbox.shared.controllerStore() else { return }
             for device in (try? await store.workroomDevices(person: person)) ?? [] {

@@ -55,6 +55,10 @@ public struct WorkroomQuestion: Codable, Equatable, Sendable {
 
     /// The question's own mail to the person; every reply from the person answers this one.
     public var mailID: UUID { id.rawValue }
+
+    /// Changes whenever the person's page of this question would: its state, an answer revision
+    /// or a message. A rendered page carries it, and polls `participantQuestionVersion` for it.
+    public var pageVersion: String { "\(state.rawValue).\(answerRevision).\(noteCount)" }
 }
 
 public struct WorkroomAnswer: Codable, Equatable, Sendable {
@@ -66,8 +70,10 @@ public struct WorkroomAnswer: Codable, Equatable, Sendable {
     public let at: String
 }
 
-public enum WorkroomNoteAuthor: String, Codable, Sendable { case person, agent }
-public enum WorkroomNoteKind: String, Codable, Sendable { case clarification, response, decline, withdrawal }
+/// `owner` is whoever owns this Mac, commenting from a paired device; it is not a person of the
+/// room and never answers or declines.
+public enum WorkroomNoteAuthor: String, Codable, Sendable { case person, agent, owner }
+public enum WorkroomNoteKind: String, Codable, Sendable { case clarification, response, decline, withdrawal, comment }
 
 public struct WorkroomNote: Codable, Equatable, Sendable {
     public let id: UUID
@@ -76,6 +82,22 @@ public struct WorkroomNote: Codable, Equatable, Sendable {
     public let kind: WorkroomNoteKind
     public let text: String
     public let at: String
+    /// The owner's name on a comment, as it was when written. Nil for the person and the agent,
+    /// whose names the question already carries.
+    public var name: String? = nil
+}
+
+/// One page of the owner's view: questions newest first, across every room.
+public struct WorkroomOwnerPage: Codable, Equatable, Sendable {
+    public let items: [WorkroomOwnerItem]
+    public let next: Int64
+    public let more: Bool
+}
+
+public struct WorkroomOwnerItem: Codable, Equatable, Sendable {
+    public let question: WorkroomQuestion
+    public let roomTitle: String
+    public let personName: String
 }
 
 public struct WorkroomQuestionDetail: Codable, Equatable, Sendable {
@@ -84,6 +106,18 @@ public struct WorkroomQuestionDetail: Codable, Equatable, Sendable {
     public let personName: String
     public let answers: [WorkroomAnswer]
     public let notes: [WorkroomNote]
+    /// `answers` and `notes` interleaved in the order they were stored. Their times have whole
+    /// seconds, so a quick exchange cannot be ordered by time alone. Not encoded: a reader of the
+    /// JSON has both lists and their times.
+    public internal(set) var timeline: [WorkroomTimelineEntry] = []
+
+    enum CodingKeys: String, CodingKey { case question, room, personName, answers, notes }
+}
+
+/// One step of a question's conversation: an index into its detail's `answers` or `notes`.
+public enum WorkroomTimelineEntry: Equatable, Sendable {
+    case answer(Int)
+    case note(Int)
 }
 
 /// The result of a person's write: what changed, and the session mailbox that now has mail,
@@ -104,11 +138,22 @@ public struct WorkroomInboxPage: Codable, Equatable, Sendable {
 public struct WorkroomInboxItem: Codable, Equatable, Sendable {
     public let question: WorkroomQuestion
     public let roomTitle: String
+    /// The start of the agent's newest message, when the person has not opened it yet.
+    public var reply: String? = nil
 }
 
-public enum WorkroomInboxFilter: Sendable { case open, recent }
+/// Each question is in exactly one: an unseen agent reply puts it in `replies`, whatever its
+/// state; otherwise an open question is `open` and the rest are `recent`.
+public enum WorkroomInboxFilter: Sendable { case replies, open, recent }
 
-struct WorkroomAskRate: Codable { var windowStart: Double; var count: Int }
+/// The agent wrote on a question since its person last opened it. One per question, parented by
+/// the person so an inbox reads a person's through `record_parent`. Each reply writes it again,
+/// so the newest sorts first; opening the question or acting on it removes it.
+struct WorkroomReplyMark: Codable {
+    let question: QuestionID
+    let preview: String
+    let at: String
+}
 
 extension ControllerStore {
     // MARK: - Asking (on behalf of an agent's mailbox)
@@ -130,11 +175,9 @@ extension ControllerStore {
                       prior.draft == draft else { throw ControllerError.conflict }
                 return prior
             }
-            let open = try db.rows("""
-                SELECT COUNT(*) FROM (SELECT 1 FROM workroom_ask WHERE room=? AND state='open' LIMIT ?)
-                """, [.text(roomID.description), .integer(Int64(WorkroomLimits.openQuestionsPerRoom))]).first?.integers[0] ?? 0
-            guard open < Int64(WorkroomLimits.openQuestionsPerRoom) else { throw ControllerError.invalidInput("room_full") }
-            try spendAskRate(asker)
+            guard try openWorkroomQuestionCount(roomID) < WorkroomLimits.openQuestionsPerRoom else {
+                throw ControllerError.invalidInput("room_full")
+            }
             let askerName = try localMailboxName(asker)
             let now = Self.now()
             let question = WorkroomQuestion(id: id, roomID: roomID, asker: asker, askerName: askerName, person: person.id,
@@ -164,6 +207,7 @@ extension ControllerStore {
             guard question.state == .open || question.state == .answered else { throw ControllerError.conflict }
             let note = try addNote(&question, author: .agent, kind: .response, text: text)
             try saveQuestion(question)
+            try markReply(question, text: text)
             try event("workroom.responded", id.description)
             return note
         }
@@ -179,12 +223,104 @@ extension ControllerStore {
             question.state = .withdrawn
             try saveQuestion(question)
             try settleQuestionMail(question)
+            try clearReply(id)
             try event("workroom.withdrawn", id.description)
             return question
         }
     }
 
+    /// The owner comments on a question from a paired device. The person sees it as a new
+    /// message; the asking session hears it as a reply on the question's mail, written as from
+    /// the owner, so an agent following the exchange knows the owner joined it. Only while the
+    /// question is open or answered.
+    public func ownerCommentOnWorkroomQuestion(_ id: QuestionID, ownerName: String, text: String) throws -> WorkroomNote {
+        try Limits.text(text, field: "note", maximum: WorkroomLimits.noteBytes)
+        try Limits.text(ownerName, field: "name", maximum: 128)
+        return try db.transaction {
+            var question: WorkroomQuestion = try required("workroomAsk", id.description)
+            guard question.state == .open || question.state == .answered else { throw ControllerError.conflict }
+            let note = try addNote(&question, author: .owner, kind: .comment, text: text, name: ownerName)
+            try saveQuestion(question)
+            try markReply(question, text: "\(ownerName): \(text)")
+            let person = try workroomPerson(question.person)
+            try replyAsPerson(person, question: question, text: Self.clipped("""
+                “\(Self.fenced(ownerName))”, who owns this Mac, commented on “\(Self.fenced(question.draft.title))” \
+                (question \(id)); \(Self.fenced(person.name)) sees it too:
+                \(text)
+                Reply with workroom_respond, action message, if it changes what you ask them.
+                """))
+            try event("workroom.commented", id.description)
+            return note
+        }
+    }
+
     // MARK: - Reading (owner and agents)
+
+    /// Every question, newest first, for the owner's phone. Reads the record table's page index,
+    /// so a page costs `limit` rows whatever the history holds.
+    public func ownerWorkroomQuestions(before cursor: Int64 = 0, limit: Int = 20) throws -> WorkroomOwnerPage {
+        try Limits.page(max(cursor, 0), limit)
+        let rows = try db.rows("""
+            SELECT sequence,payload FROM record INDEXED BY record_page
+            WHERE kind='workroomAsk' AND (?=0 OR sequence<?) ORDER BY sequence DESC LIMIT ?
+            """, [.integer(cursor), .integer(cursor), .integer(Int64(limit + 1))], pageByteLimit: 1_048_576)
+        var rooms: [WorkroomID: String] = [:]
+        var people: [WorkroomPersonID: String] = [:]
+        var items: [WorkroomOwnerItem] = []
+        for row in rows.prefix(limit) {
+            let question: WorkroomQuestion = try decode(row.text(1))
+            if rooms[question.roomID] == nil {
+                rooms[question.roomID] = (try optional("workroom", question.roomID.description) as LinkedWorkroom?)?.title ?? ""
+            }
+            if people[question.person] == nil { people[question.person] = try workroomPerson(question.person).name }
+            items.append(WorkroomOwnerItem(question: question, roomTitle: rooms[question.roomID] ?? "",
+                                           personName: people[question.person] ?? ""))
+        }
+        let next = rows.prefix(limit).last?.integers[0] ?? cursor
+        return WorkroomOwnerPage(items: items, next: next, more: rows.count > limit)
+    }
+
+    /// What waits for a person in rooms open to them: open questions and unread messages,
+    /// each counted once. The badge on their phone. Examines at most `inboxScan` rows of each.
+    public func participantWaitingCount(person: WorkroomPersonID) throws -> Int {
+        var rooms: [WorkroomID: Bool] = [:]
+        func visible(_ room: String) throws -> Bool {
+            let id = try WorkroomID(room)
+            if let known = rooms[id] { return known }
+            let allowed = try participantMayUse(id, person: person)
+            rooms[id] = allowed
+            return allowed
+        }
+        var count = 0
+        let open = try db.rows("""
+            SELECT room FROM workroom_ask INDEXED BY workroom_ask_person WHERE person=? AND state='open' LIMIT ?
+            """, [.text(person.description), .integer(Int64(WorkroomLimits.inboxScan))])
+        for row in open where try visible(row.text(0)) { count += 1 }
+        let marked = try db.rows("""
+            SELECT a.room FROM record AS m INDEXED BY record_parent JOIN workroom_ask AS a ON a.question=m.id
+            WHERE m.kind='\(Self.replyKind)' AND m.parent=? AND a.state<>'open' LIMIT ?
+            """, [.text(person.description), .integer(Int64(WorkroomLimits.inboxScan))])
+        for row in marked where try visible(row.text(0)) { count += 1 }
+        return count
+    }
+
+    /// Counts the bounded open set through its index, without loading question payloads or
+    /// scanning historical questions. Owner approval can restrict the count to one person.
+    public func openWorkroomQuestionCount(_ roomID: WorkroomID, person: WorkroomPersonID? = nil) throws -> Int {
+        let column = person == nil ? "1" : "person"
+        let filter = person == nil ? "" : "WHERE person=?"
+        var values: [ControllerDatabase.Value] = [
+            .text(roomID.description), .integer(Int64(WorkroomLimits.openQuestionsPerRoom))
+        ]
+        if let person { values.append(.text(person.description)) }
+        let count = try db.rows("""
+            SELECT COUNT(*) FROM (
+                SELECT \(column) FROM workroom_ask INDEXED BY workroom_ask_room_state
+                WHERE room=? AND state='open' LIMIT ?
+            ) \(filter)
+            """, values).first?.integers[0] ?? 0
+        return Int(count)
+    }
 
     /// Questions in one room, oldest first. The caller has already checked the room's scope.
     public func workroomAsks(roomID: WorkroomID, after: Int64 = 0, limit: Int = 50) throws -> ControllerPage<WorkroomQuestion> {
@@ -227,23 +363,36 @@ extension ControllerStore {
         let pageSize = 100
         while examined < WorkroomLimits.inboxScan, items.count < limit {
             // The scan reads index columns only; a payload is decoded for a row that is shown.
+            // Column 0 is the cursor: the reply mark's position for `replies`, the question's
+            // otherwise. Column 4 says whether the question has an unseen reply, so it shows
+            // only there.
             let rows: [ControllerDatabase.Row]
+            let marked = "EXISTS(SELECT 1 FROM record AS r WHERE r.kind='\(Self.replyKind)' AND r.id=a.question)"
             switch filter {
+            case .replies:
+                // Newest reply first; a zero cursor means "from the newest".
+                rows = try db.rows("""
+                    SELECT m.sequence,a.room,a.question,a.state,1,m.payload FROM record AS m INDEXED BY record_parent
+                    JOIN workroom_ask AS a ON a.question=m.id
+                    WHERE m.kind='\(Self.replyKind)' AND m.parent=? AND (?=0 OR m.sequence<?)
+                    ORDER BY m.sequence DESC LIMIT ?
+                    """, [.text(person.description), .integer(position), .integer(position), .integer(Int64(pageSize))])
             case .open:
                 rows = try db.rows("""
-                    SELECT sequence,room,question,state FROM workroom_ask INDEXED BY workroom_ask_person
-                    WHERE person=? AND state='open' AND sequence>? ORDER BY sequence LIMIT ?
+                    SELECT a.sequence,a.room,a.question,a.state,\(marked) FROM workroom_ask AS a INDEXED BY workroom_ask_person
+                    WHERE a.person=? AND a.state='open' AND a.sequence>? ORDER BY a.sequence LIMIT ?
                     """, [.text(person.description), .integer(position), .integer(Int64(pageSize))])
             case .recent:
                 // Newest first; a zero cursor means "from the newest".
                 rows = try db.rows("""
-                    SELECT sequence,room,question,state FROM workroom_ask INDEXED BY workroom_ask_person_all
-                    WHERE person=? AND (?=0 OR sequence<?) ORDER BY sequence DESC LIMIT ?
+                    SELECT a.sequence,a.room,a.question,a.state,\(marked) FROM workroom_ask AS a INDEXED BY workroom_ask_person_all
+                    WHERE a.person=? AND (?=0 OR a.sequence<?) ORDER BY a.sequence DESC LIMIT ?
                     """, [.text(person.description), .integer(position), .integer(position), .integer(Int64(pageSize))])
             }
             for row in rows {
                 examined += 1
                 position = row.integers[0]
+                if filter != .replies, row.integers[4] != 0 { continue }
                 if filter == .recent, try row.text(3) == WorkroomQuestionState.open.rawValue { continue }
                 let roomID = try WorkroomID(row.text(1))
                 if rooms[roomID] == nil {
@@ -251,8 +400,9 @@ extension ControllerStore {
                         ? (try required("workroom", roomID.description) as LinkedWorkroom) : nil
                 }
                 guard let room = rooms[roomID] ?? nil else { continue }
+                let reply = filter == .replies ? (try decode(row.text(5)) as WorkroomReplyMark).preview : nil
                 let question: WorkroomQuestion = try required("workroomAsk", try row.text(2))
-                items.append(WorkroomInboxItem(question: question, roomTitle: room.title))
+                items.append(WorkroomInboxItem(question: question, roomTitle: room.title, reply: reply))
                 if items.count == limit { break }
             }
             if rows.count < pageSize, items.count < limit { return WorkroomInboxPage(items: items, next: position, more: false) }
@@ -263,7 +413,61 @@ extension ControllerStore {
     /// One question, if it is addressed to this person in a room open to them. Anything else is
     /// the same not-found, so a person cannot probe for questions that are not theirs.
     public func participantQuestion(person: WorkroomPersonID, id: QuestionID) throws -> WorkroomQuestionDetail {
-        try detail(try participantOwned(id, person: person))
+        let question = try participantOwned(id, person: person)
+        // Opening a question is reading its replies. Written only when there is a mark, so an
+        // ordinary page view stays a read.
+        if try hasReplyMark(id) { try db.transaction { try clearReply(id) } }
+        return try detail(question)
+    }
+
+    /// The person's next open question after this one, wrapping to the first, in a room open to
+    /// them; nil when this was the last. Examines at most `WorkroomLimits.nextQuestionScan` rows.
+    public func participantNextQuestion(person: WorkroomPersonID, after id: QuestionID) throws -> QuestionID? {
+        let current = try db.rows("SELECT sequence FROM workroom_ask WHERE question=? LIMIT 1",
+                                  [.text(id.description)]).first?.integers[0] ?? 0
+        var rooms: [WorkroomID: Bool] = [:]
+        var examined = 0
+        for (lower, upper) in [(current, Int64.max), (Int64(0), current)] where examined < WorkroomLimits.nextQuestionScan {
+            let rows = try db.rows("""
+                SELECT room,question FROM workroom_ask INDEXED BY workroom_ask_person
+                WHERE person=? AND state='open' AND sequence>? AND sequence<? ORDER BY sequence LIMIT ?
+                """, [.text(person.description), .integer(lower), .integer(upper),
+                      .integer(Int64(WorkroomLimits.nextQuestionScan - examined))])
+            for row in rows {
+                examined += 1
+                let roomID = try WorkroomID(row.text(0))
+                if rooms[roomID] == nil { rooms[roomID] = try participantMayUse(roomID, person: person) }
+                if rooms[roomID] == true { return try QuestionID(row.text(1)) }
+            }
+        }
+        return nil
+    }
+
+    /// A fingerprint of what this person's inbox shows. It changes when a question arrives, is
+    /// answered or closed, when the agent replies, and when the owner grants or revokes a room;
+    /// an open page polls it rather than re-rendering. Every count is bounded.
+    public func participantInboxVersion(person: WorkroomPersonID) throws -> String {
+        let id = ControllerDatabase.Value.text(person.description)
+        let scan = ControllerDatabase.Value.integer(Int64(WorkroomLimits.inboxScan))
+        let asks = try db.rows("""
+            SELECT (SELECT IFNULL(MAX(sequence),0) FROM workroom_ask INDEXED BY workroom_ask_person_all WHERE person=?),
+                   (SELECT COUNT(*) FROM (SELECT 1 FROM workroom_ask INDEXED BY workroom_ask_person
+                                          WHERE person=? AND state='open' LIMIT ?))
+            """, [id, id, scan]).first?.integers ?? []
+        let replies = try db.rows("""
+            SELECT COUNT(*),IFNULL(MAX(sequence),0) FROM (SELECT sequence FROM record INDEXED BY record_parent
+                WHERE kind='\(Self.replyKind)' AND parent=? ORDER BY sequence DESC LIMIT ?)
+            """, [id, scan]).first?.integers ?? []
+        let access = try db.rows("""
+            SELECT COUNT(*),IFNULL(SUM(revision),0) FROM (SELECT revision FROM workroom_access INDEXED BY workroom_access_person
+                WHERE person=? LIMIT ?)
+            """, [id, scan]).first?.integers ?? []
+        return (asks + replies + access).map(String.init).joined(separator: ".")
+    }
+
+    /// A fingerprint of one question's page: its state, answer revision and conversation length.
+    public func participantQuestionVersion(person: WorkroomPersonID, id: QuestionID) throws -> String {
+        try participantOwned(id, person: person).pageVersion
     }
 
     /// An answer revision. Re-submitting what the latest revision already says returns it, so a
@@ -291,6 +495,7 @@ extension ControllerStore {
             question.state = .answered
             try saveQuestion(question)
             try settleQuestionMail(question)
+            try clearReply(id)
             let personRecord = try workroomPerson(person)
             try replyAsPerson(personRecord, question: question, text: answerSummary(question, answer: answer, name: personRecord.name))
             try event("workroom.answered", id.description)
@@ -298,7 +503,9 @@ extension ControllerStore {
         }
     }
 
-    /// The person asks the agent to clarify; the question stays open.
+    /// The person writes to the agent in the question's conversation: a request for
+    /// clarification, extra facts, or a reply to the agent's message. The question's state is
+    /// unchanged. Stored with the v12 kind `clarification`, which every reader decodes.
     public func participantClarify(person: WorkroomPersonID, id: QuestionID, text: String) throws -> WorkroomParticipantReceipt {
         try Limits.text(text, field: "note", maximum: WorkroomLimits.noteBytes)
         return try db.transaction {
@@ -306,12 +513,13 @@ extension ControllerStore {
             guard question.state == .open || question.state == .answered else { throw ControllerError.conflict }
             _ = try addNote(&question, author: .person, kind: .clarification, text: text)
             try saveQuestion(question)
+            try clearReply(id)
             let personRecord = try workroomPerson(person)
             try replyAsPerson(personRecord, question: question, text: Self.clipped("""
-                “\(Self.fenced(personRecord.name))” asks for clarification on “\(Self.fenced(question.draft.title))” \
-                (question \(id)):
+                “\(Self.fenced(personRecord.name))” wrote about “\(Self.fenced(question.draft.title))” \
+                (question \(id), \(question.state == .open ? "not answered yet" : "answered")):
                 \(text)
-                Answer with workroom_respond.
+                Reply with workroom_respond, action message; they see it in the question's conversation.
                 """))
             try event("workroom.clarification", id.description)
             return WorkroomParticipantReceipt(question: question, notified: question.asker)
@@ -328,6 +536,7 @@ extension ControllerStore {
             question.state = .declined
             try saveQuestion(question)
             try settleQuestionMail(question)
+            try clearReply(id)
             let personRecord = try workroomPerson(person)
             try replyAsPerson(personRecord, question: question, text: Self.clipped("""
                 “\(Self.fenced(personRecord.name))” declined “\(Self.fenced(question.draft.title))” (question \(id)):
@@ -339,6 +548,24 @@ extension ControllerStore {
     }
 
     // MARK: - Helpers
+
+    static let replyKind = "workroomReply"
+
+    private func markReply(_ question: WorkroomQuestion, text: String) throws {
+        try clearReply(question.id)
+        let mark = WorkroomReplyMark(question: question.id, preview: Self.clipped(text, to: WorkroomLimits.replyPreviewBytes),
+                                     at: Self.now())
+        try insert(Self.replyKind, question.id.description, parent: question.person.description, value: mark)
+    }
+
+    private func clearReply(_ id: QuestionID) throws {
+        try db.run("DELETE FROM record WHERE kind=? AND id=?", [.text(Self.replyKind), .text(id.description)])
+    }
+
+    private func hasReplyMark(_ id: QuestionID) throws -> Bool {
+        try !db.rows("SELECT 1 FROM record WHERE kind=? AND id=? LIMIT 1",
+                     [.text(Self.replyKind), .text(id.description)]).isEmpty
+    }
 
     private func askedBy(_ id: QuestionID, asker: MailAddress) throws -> WorkroomQuestion {
         let question: WorkroomQuestion = try required("workroomAsk", id.description)
@@ -354,22 +581,36 @@ extension ControllerStore {
     }
 
     private func detail(_ question: WorkroomQuestion) throws -> WorkroomQuestionDetail {
-        let answers: [WorkroomAnswer] = try db.rows("""
-            SELECT payload FROM record WHERE kind='workroomAnswer' AND parent=? ORDER BY sequence LIMIT ?
-            """, [.text(question.id.description), .integer(Int64(WorkroomLimits.answerRevisions))]).map { try decode($0.text(0)) }
-        let notes: [WorkroomNote] = try db.rows("""
-            SELECT payload FROM record WHERE kind='workroomNote' AND parent=? ORDER BY sequence LIMIT ?
-            """, [.text(question.id.description), .integer(Int64(WorkroomLimits.notes + 2))]).map { try decode($0.text(0)) }
-        return WorkroomQuestionDetail(question: question, room: try required("workroom", question.roomID.description),
-                                      personName: try workroomPerson(question.person).name, answers: answers, notes: notes)
+        // Both kinds in one pass, in the order they were stored; each is bounded by its own limit.
+        let rows = try db.rows("""
+            SELECT kind,payload FROM record WHERE kind IN ('workroomAnswer','workroomNote') AND parent=?
+            ORDER BY sequence LIMIT ?
+            """, [.text(question.id.description), .integer(Int64(WorkroomLimits.answerRevisions + WorkroomLimits.notes + 2))])
+        var answers: [WorkroomAnswer] = []
+        var notes: [WorkroomNote] = []
+        var timeline: [WorkroomTimelineEntry] = []
+        for row in rows {
+            if try row.text(0) == "workroomAnswer" {
+                timeline.append(.answer(answers.count))
+                answers.append(try decode(row.text(1)))
+            } else {
+                timeline.append(.note(notes.count))
+                notes.append(try decode(row.text(1)))
+            }
+        }
+        var detail = WorkroomQuestionDetail(question: question, room: try required("workroom", question.roomID.description),
+                                            personName: try workroomPerson(question.person).name, answers: answers, notes: notes)
+        detail.timeline = timeline
+        return detail
     }
 
     private func addNote(_ question: inout WorkroomQuestion, author: WorkroomNoteAuthor, kind: WorkroomNoteKind,
-                         text: String) throws -> WorkroomNote {
+                         text: String, name: String? = nil) throws -> WorkroomNote {
         // A closing note (decline, withdrawal) is always allowed, so a full thread can still end.
         let closing = kind == .decline || kind == .withdrawal
         guard closing || question.noteCount < WorkroomLimits.notes else { throw ControllerError.invalidInput("notes") }
-        let note = WorkroomNote(id: UUID(), questionID: question.id, author: author, kind: kind, text: text, at: Self.now())
+        var note = WorkroomNote(id: UUID(), questionID: question.id, author: author, kind: kind, text: text, at: Self.now())
+        note.name = name
         try insert("workroomNote", note.id.uuidString.lowercased(), parent: question.id.description, value: note)
         question.noteCount += 1
         return note
@@ -407,19 +648,8 @@ extension ControllerStore {
             lines.append("- \(field.label): \(Self.clipped(shown, to: 600))")
         }
         if !answer.comment.isEmpty { lines.append("Comment: \(Self.clipped(answer.comment, to: 4_000))") }
-        lines.append("Read the full record with workroom_questions.")
+        lines.append("Read the full record with workroom_questions; ask a follow-up with workroom_respond, action message.")
         return Self.clipped(lines.joined(separator: "\n"))
-    }
-
-    private func spendAskRate(_ asker: MailAddress) throws {
-        let now = Date().timeIntervalSince1970
-        let prior: WorkroomAskRate? = try optional("workroomAskRate", asker.description)
-        var rate = prior ?? WorkroomAskRate(windowStart: now, count: 0)
-        if now - rate.windowStart >= 3_600 { rate = WorkroomAskRate(windowStart: now, count: 0) }
-        guard rate.count < WorkroomLimits.asksPerHour else { throw ControllerError.invalidInput("ask_rate") }
-        rate.count += 1
-        if prior == nil { try insert("workroomAskRate", asker.description, value: rate) }
-        else { try update("workroomAskRate", asker.description, value: rate) }
     }
 
     /// Mail text is bounded by `Limits.text`'s default; a summary is cut to fit, never refused.

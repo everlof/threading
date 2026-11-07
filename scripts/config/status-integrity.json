@@ -5,13 +5,13 @@
     "Sources/ThreadingMobile/MobileIssueReporting.swift": 3,
     "Sources/ThreadingMobile/MobileLoadingPlaceholder.swift": 1,
     "Sources/ThreadingMobile/MobileRunPlanDisclosure.swift": 1,
+    "Sources/ThreadingMobile/MobileSecretApprovals.swift": 1,
     "Sources/ThreadingMobile/MobileSessionSettingsView.swift": 1,
     "Sources/ThreadingMobile/MobileSettingsView.swift": 2,
-    "Sources/ThreadingMobile/MobileSecretApprovals.swift": 1,
     "Sources/ThreadingMobile/MobileUniversalSearchView.swift": 2,
     "Sources/ThreadingMobile/PairingView.swift": 1,
     "Sources/ThreadingMobile/RemoteAttachmentGallery.swift": 1,
-  "Sources/ThreadingMobile/RemoteBrowserFollowView.swift": 1,
+    "Sources/ThreadingMobile/RemoteBrowserFollowView.swift": 1,
     "Sources/ThreadingMobile/RemoteDiagnostics.swift": 2,
     "Sources/ThreadingMobile/RemoteGitReviewView.swift": 1,
     "Sources/ThreadingMobile/RemoteNotifications.swift": 1,
@@ -19,6 +19,8 @@
     "Sources/ThreadingMobile/SessionDashboard.swift": 1,
     "Sources/ThreadingMobile/SessionDetailView.swift": 3,
     "Sources/ThreadingMobile/SessionDraftView.swift": 1,
-    "Sources/ThreadingMobile/ShareChatSheet.swift": 1
+    "Sources/ThreadingMobile/ShareChatSheet.swift": 1,
+    "Sources/ThreadingMobile/WorkroomInboxView.swift": 3,
+    "Sources/ThreadingMobile/WorkroomQuestionView.swift": 3
   }
 }

@@ -925,7 +925,52 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if path.hasPrefix(RemoteRoute.workroom.prefix) {
+            handleWorkroom(request, subpath: String(path.dropFirst(RemoteRoute.workroom.prefix.count)),
+                           respond: respond)
+            return
+        }
+
         respond(.respond(RemoteRouter.error(404, "Not Found")))
+    }
+
+    /// Linked Workroom questions for a workroom participant or the owner. The route is parsed
+    /// and the body bounded before anything is read; who may do what is decided on the main
+    /// actor against the current authorization and the Workrooms switch, and the store checks
+    /// the person, the room and the question again on every operation.
+    private func handleWorkroom(
+        _ request: HTTPRequest,
+        subpath: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard request.body.count <= RemoteWorkroomLimits.maximumRequestBytes else {
+            respond(.respond(RemoteRouter.error(413, "Payload Too Large")))
+            return
+        }
+        guard let route = WorkroomRemoteRoute(
+            method: request.method, subpath: subpath,
+            query: { RemoteRouter.queryValue(named: $0, in: request.path) },
+            body: request.body
+        ) else {
+            respond(.respond(RemoteRouter.error(request.method == "POST" ? 400 : 404,
+                                                request.method == "POST" ? "Bad Request" : "Not Found")))
+            return
+        }
+        Task {
+            let admission: Result<WorkroomRemoteViewer?, RemoteWorkroomRefusal> = await MainActor.run {
+                guard self.authorizer?.isCurrent(authorization) == true else { return .failure(.revoked) }
+                return .success(WorkroomRemoteViewer(authorization))
+            }
+            switch admission {
+            case .failure:
+                respond(.respond(RemoteRouter.error(401, "Unauthorized")))
+            case .success(nil):
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+            case let .success(viewer?):
+                respond(.respond(await WorkroomRemoteBridge.respond(to: route, viewer: viewer)))
+            }
+        }
     }
 
     private func handleSecretApproval(

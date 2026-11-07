@@ -977,6 +977,17 @@
         }
       }
     },
+    "(optional)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(valfritt)"
+          }
+        }
+      }
+    },
     "+%@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1501,6 +1512,17 @@
         }
       }
     },
+    "AI agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI-agent"
+          }
+        }
+      }
+    },
     "APNs device token" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1925,6 +1947,17 @@
         }
       }
     },
+    "Agree" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stämmer"
+          }
+        }
+      }
+    },
     "All Accounts · %lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2131,6 +2164,17 @@
         }
       }
     },
+    "An invitation to answer questions shows only the questions asked of you, never anything else on the Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En inbjudan att svara på frågor visar bara frågorna som ställs till dig, aldrig något annat på Macen."
+          }
+        }
+      }
+    },
     "Another composer sent first. Your draft is still here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2149,6 +2193,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En annan deltagare"
+          }
+        }
+      }
+    },
+    "Answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Svar"
+          }
+        }
+      }
+    },
+    "Answered" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Besvarad"
+          }
+        }
+      }
+    },
+    "Answered and closed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Besvarade och stängda"
           }
         }
       }
@@ -2455,6 +2532,28 @@
         }
       }
     },
+    "At least %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Minst %@"
+          }
+        }
+      }
+    },
+    "At most %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Högst %@"
+          }
+        }
+      }
+    },
     "Attach a photo or file" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2576,6 +2675,17 @@
         }
       }
     },
+    "Background" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bakgrund"
+          }
+        }
+      }
+    },
     "Banked reset" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2616,6 +2726,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sparad användningsåterställning"
+          }
+        }
+      }
+    },
+    "Between %@ and %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mellan %@ och %@"
           }
         }
       }
@@ -2991,6 +3112,17 @@
         }
       }
     },
+    "Can’t answer this? Decline the question" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kan du inte svara? Avböj frågan"
+          }
+        }
+      }
+    },
     "Can’t reach this Mac" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3041,6 +3173,17 @@
         }
       }
     },
+    "Change your answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändra ditt svar"
+          }
+        }
+      }
+    },
     "Changed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3048,6 +3191,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ändrad"
+          }
+        }
+      }
+    },
+    "Changed answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändrat svar"
           }
         }
       }
@@ -3229,6 +3383,17 @@
         }
       }
     },
+    "Check your answer and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontrollera ditt svar och försök igen."
+          }
+        }
+      }
+    },
     "Checking banked reset…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3302,6 +3467,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj konto"
+          }
+        }
+      }
+    },
+    "Choose one of the options." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj ett av alternativen."
           }
         }
       }
@@ -3677,6 +3853,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kommando"
+          }
+        }
+      }
+    },
+    "Comment (optional)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kommentar (valfri)"
           }
         }
       }
@@ -4464,6 +4651,17 @@
         }
       }
     },
+    "Couldn’t load the questions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att hämta frågorna"
+          }
+        }
+      }
+    },
     "Couldn’t open attachment" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4514,6 +4712,17 @@
         }
       }
     },
+    "Couldn’t open the question" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att öppna frågan"
+          }
+        }
+      }
+    },
     "Couldn’t prepare report" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4554,6 +4763,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte spara bilden"
+          }
+        }
+      }
+    },
+    "Couldn’t send" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det gick inte att skicka"
           }
         }
       }
@@ -4835,6 +5055,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Debug-prototyp. Kräver en fysisk iPhone med Face ID och en HTTPS-anslutning vars certifikat är låst till din Mac. När vyn stängs glöms telefonens godkännandenyckel. Stoppa och starta Mac-experimentet för att registrera igen."
+          }
+        }
+      }
+    },
+    "Decline" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avböj"
+          }
+        }
+      }
+    },
+    "Decline the question" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avböj frågan"
+          }
+        }
+      }
+    },
+    "Declined" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avböjd"
           }
         }
       }
@@ -5153,6 +5406,17 @@
         }
       }
     },
+    "Disagree" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stämmer inte"
+          }
+        }
+      }
+    },
     "Disconnected" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5436,6 +5700,28 @@
         }
       }
     },
+    "Enter a number within the stated range for “%@”." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange ett tal inom det angivna intervallet för ”%@”."
+          }
+        }
+      }
+    },
+    "Enter a number within the stated range." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange ett tal inom det angivna intervallet."
+          }
+        }
+      }
+    },
     "Enter all eight digits from the Mac’s current experiment code." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5554,6 +5840,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Underlag"
+          }
+        }
+      }
+    },
+    "Evidence (%ld)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Underlag (%ld)"
           }
         }
       }
@@ -5956,6 +6253,17 @@
         }
       }
     },
+    "Fill in every field that is not marked optional." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fyll i alla fält som inte är markerade som valfria."
+          }
+        }
+      }
+    },
     "Find a file" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6339,6 +6647,28 @@
         }
       }
     },
+    "From %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Från %@"
+          }
+        }
+      }
+    },
+    "From %@ · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Från %@ · %@"
+          }
+        }
+      }
+    },
     "From Clipboard" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6346,6 +6676,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Från urklipp"
+          }
+        }
+      }
+    },
+    "Get a notification when you’re asked something" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Få en notis när du får en fråga"
           }
         }
       }
@@ -7127,6 +7468,17 @@
         }
       }
     },
+    "Latest questions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senaste frågorna"
+          }
+        }
+      }
+    },
     "Latest reply" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7233,6 +7585,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Länken är klar"
+          }
+        }
+      }
+    },
+    "Linked Workrooms" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linked Workrooms"
           }
         }
       }
@@ -8090,6 +8453,28 @@
         }
       }
     },
+    "New message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nytt meddelande"
+          }
+        }
+      }
+    },
+    "New messages" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nya meddelanden"
+          }
+        }
+      }
+    },
     "New session" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8185,6 +8570,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nästa modellsida"
+          }
+        }
+      }
+    },
+    "Next question" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nästa fråga"
           }
         }
       }
@@ -8448,6 +8844,17 @@
         }
       }
     },
+    "No questions right now" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga frågor just nu"
+          }
+        }
+      }
+    },
     "No recent destinations" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8635,6 +9042,17 @@
         }
       }
     },
+    "Not sure" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osäker"
+          }
+        }
+      }
+    },
     "Not yet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8720,6 +9138,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Notiser"
+          }
+        }
+      }
+    },
+    "Notifications are off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notiserna är avstängda"
           }
         }
       }
@@ -9417,6 +9846,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Parkoppla din egen Mac eller öppna en chatt som någon har delat med dig."
+          }
+        }
+      }
+    },
+    "Pair your own Mac, or open a link someone sent you." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parkoppla din egen Mac eller öppna en länk som någon har skickat till dig."
           }
         }
       }
@@ -10203,6 +10643,17 @@
         }
       }
     },
+    "Question" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fråga"
+          }
+        }
+      }
+    },
     "Question %lld of %lld" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10216,6 +10667,61 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fråga %lld av %lld"
+          }
+        }
+      }
+    },
+    "Questions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågor"
+          }
+        }
+      }
+    },
+    "Questions agents ask in open workrooms appear here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågor som agenter ställer i öppna workrooms visas här."
+          }
+        }
+      }
+    },
+    "Questions for me" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågor till mig"
+          }
+        }
+      }
+    },
+    "Questions for you" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågor till dig"
+          }
+        }
+      }
+    },
+    "Questions from %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågor från %@"
           }
         }
       }
@@ -10392,6 +10898,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Redo för spegling"
+          }
+        }
+      }
+    },
+    "Reason" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anledning"
           }
         }
       }
@@ -11373,6 +11890,17 @@
         }
       }
     },
+    "Say why, for example that someone else should answer. The question closes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv varför, till exempel att någon annan bör svara. Frågan stängs."
+          }
+        }
+      }
+    },
     "Scan a QR code" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11617,6 +12145,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Se den aktiva Mac-fliken när den är delbar, utan att flytta privata flikar från Mac-datorn."
+          }
+        }
+      }
+    },
+    "Send" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka"
           }
         }
       }
@@ -12300,6 +12839,17 @@
         }
       }
     },
+    "Show more" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa fler"
+          }
+        }
+      }
+    },
     "Show more (%lld)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12583,6 +13133,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ljud"
+          }
+        }
+      }
+    },
+    "Source: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Källa: %@"
           }
         }
       }
@@ -13530,6 +14091,17 @@
         }
       }
     },
+    "That text is too long." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Texten är för lång."
+          }
+        }
+      }
+    },
     "That theme is no longer available on the Mac." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13537,6 +14109,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Det temat är inte längre tillgängligt på Macen."
+          }
+        }
+      }
+    },
+    "That was the last open question. Thank you!" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det var den sista öppna frågan. Tack!"
           }
         }
       }
@@ -14056,6 +14639,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenten anger om den använde färskt eller cachelagrat underlag från telefonen."
+          }
+        }
+      }
+    },
+    "The agent withdrew this question." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten har dragit tillbaka frågan."
           }
         }
       }
@@ -14734,6 +15328,17 @@
         }
       }
     },
+    "This answer can’t be changed again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Svaret kan inte ändras fler gånger."
+          }
+        }
+      }
+    },
     "This archived conversation is available on the Mac." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14879,6 +15484,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här konversationen är redan öppen någon annanstans på Macen. Stäng den där först."
+          }
+        }
+      }
+    },
+    "This conversation is full." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konversationen är full."
           }
         }
       }
@@ -15306,6 +15922,17 @@
         }
       }
     },
+    "This question is closed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågan är stängd."
+          }
+        }
+      }
+    },
     "This question is read only on this device." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15319,6 +15946,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Frågan kan bara läsas på den här enheten."
+          }
+        }
+      }
+    },
+    "This question isn’t available any more." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågan är inte tillgänglig längre."
+          }
+        }
+      }
+    },
+    "This question was declined." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågan avböjdes."
           }
         }
       }
@@ -15510,6 +16159,17 @@
         }
       }
     },
+    "Threading tells you when a new question or message arrives, and nothing else." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading säger till när en ny fråga eller ett nytt meddelande kommer, och inget annat."
+          }
+        }
+      }
+    },
     "Threading tried every saved way to reach this Mac. Make sure the Mac app is open, then try again. If it still fails, scan its current QR code." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15528,6 +16188,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Via Threadings tjänst"
+          }
+        }
+      }
+    },
+    "To %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Till %@"
+          }
+        }
+      }
+    },
+    "To %@ · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Till %@ · %@"
           }
         }
       }
@@ -15737,6 +16419,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Förvandla TODO till klart…"
+          }
+        }
+      }
+    },
+    "Turn them on in Settings to hear about new questions." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slå på dem i Inställningar för att få veta när nya frågor kommer."
           }
         }
       }
@@ -16039,6 +16732,17 @@
         }
       }
     },
+    "Update answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppdatera svar"
+          }
+        }
+      }
+    },
     "Update this app to reconnect" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16239,6 +16943,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använd den privata länken från din Mac eller en inbjuden chatt."
+          }
+        }
+      }
+    },
+    "Use the private link from your Mac, a shared chat or an invitation to answer questions." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd den privata länken från din Mac, en delad chatt eller en inbjudan att svara på frågor."
           }
         }
       }
@@ -16544,6 +17259,17 @@
         }
       }
     },
+    "When an AI agent needs your help, the question appears here and you get a notification." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När en AI-agent behöver din hjälp dyker frågan upp här och du får en notis."
+          }
+        }
+      }
+    },
     "When enabled on this iPhone and its paired Mac, Threading can send bounded connection evidence over the local network. Turning it off stops new requests immediately." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16711,6 +17437,17 @@
         }
       }
     },
+    "Withdrawn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återkallad"
+          }
+        }
+      }
+    },
     "Woke" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16799,6 +17536,17 @@
         }
       }
     },
+    "Write a comment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv en kommentar"
+          }
+        }
+      }
+    },
     "Write the test I should have written…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16806,6 +17554,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skriv testet jag borde ha skrivit…"
+          }
+        }
+      }
+    },
+    "Write to %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv till %@"
+          }
+        }
+      }
+    },
+    "Write why you decline, so the agent knows what to do next." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv varför du avböjer, så att agenten vet hur den ska gå vidare."
+          }
+        }
+      }
+    },
+    "Write your answer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv ditt svar."
           }
         }
       }
@@ -16910,6 +17691,28 @@
         }
       }
     },
+    "You can’t do that on this question." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det kan du inte göra på den här frågan."
+          }
+        }
+      }
+    },
+    "You declined this question." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du avböjde den här frågan."
+          }
+        }
+      }
+    },
     "Your Mac" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16983,6 +17786,17 @@
         }
       }
     },
+    "Your answer is saved. %@ has received it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ditt svar är sparat. %@ har fått det."
+          }
+        }
+      }
+    },
     "Your code, within reach" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17023,6 +17837,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Din beskrivning delas exakt som den är skriven i en separat textfil."
+          }
+        }
+      }
+    },
+    "Your questions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dina frågor"
           }
         }
       }
@@ -17354,6 +18179,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "eller klistra in en privat länk"
+          }
+        }
+      }
+    },
+    "owner" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ägare"
           }
         }
       }

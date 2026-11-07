@@ -1575,6 +1575,11 @@ Pairing and sharing are deliberately different actions:
   folder is only the shell's starting directory, not a security boundary. A terminal capability
   can never approve an AI permission request, discover chats or other terminals, manage the host,
   or create another share.
+- **Invite to App** beside a person in Settings ▸ Workrooms creates the same kind of membership,
+  scoped to one Linked Workroom person rather than a chat. It reaches no chat and no terminal; its
+  catalogue is empty and the phone shows that person's questions instead, through the
+  `workroom/…` routes. It prefers Hosted Direct like a chat share, and **Sign Out** on that page
+  revokes it. See [Linked Workrooms](architecture/linked-workrooms.md#in-the-threading-app).
 - **One HTTPS invitation opens the app or a public landing page.** `/join#…` on
   `remote.threading.codes` or `dev.remote.threading.codes` carries a base64url app payload only in
   the fragment. The Worker serves a static, no-store page and the exact iPhone association at

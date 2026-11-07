@@ -99,13 +99,17 @@ enum MobileNavigationRoute: Hashable {
     case terminal(String)
     /// A chat being drafted, and — once Start has been answered — the chat it started.
     case draft(MobileSessionDraft)
+    /// The owner's list of Linked Workroom questions. A participant's inbox is their root.
+    case workroomInbox
+    /// One Linked Workroom question and its conversation, by question id.
+    case workroomQuestion(String)
 
     /// The session this route names by itself. A draft names one only through the model,
     /// which is where the started session's id is known; ask `RemoteAppModel.sessionID(for:)`.
     var sessionID: String? {
         switch self {
         case let .session(id), let .sessionWorkspace(id, _): return id
-        case .project, .searchProject, .terminal, .draft: return nil
+        case .project, .searchProject, .terminal, .draft, .workroomInbox, .workroomQuestion: return nil
         }
     }
 }
@@ -456,6 +460,9 @@ final class RemoteAppModel: ObservableObject {
     @Published private(set) var widgetUsageFocusReady = false
     var usageGlance: MobileUsageGlancePublisher?
     @Published private(set) var notificationOpenRequest: RemoteNotificationOpenRequest?
+    /// What each Linked Workroom membership last said is waiting for this person, by pairing
+    /// id. Their sum is the app icon's badge; see `noteWorkroomWaiting(_:for:)`.
+    @Published private(set) var workroomWaitingByHost: [String: Int] = [:]
     @Published var isPairing = false
     /// An invitation the operating system delivered, held until the pairing screen takes it.
     ///
@@ -1589,6 +1596,9 @@ final class RemoteAppModel: ObservableObject {
             return
         }
         discardDashboardSnapshot(for: host.id)
+        if workroomWaitingByHost.removeValue(forKey: host.id) != nil || host.isWorkroomParticipant {
+            MobileWorkroomBadge.apply(workroomWaitingByHost, hosts: hosts)
+        }
         if usageGlance?.pairingID == host.id {
             usageGlance?.choose(nil)
             widgetHostID = nil
@@ -2817,7 +2827,7 @@ final class RemoteAppModel: ObservableObject {
         switch route {
         case let .session(id), let .sessionWorkspace(id, _): return id
         case let .draft(draft): return startedDrafts[draft.id]?.sessionID
-        case .project, .searchProject, .terminal, .none: return nil
+        case .project, .searchProject, .terminal, .workroomInbox, .workroomQuestion, .none: return nil
         }
     }
 
@@ -6231,5 +6241,145 @@ enum DemoHexColour {
     private static func format(red: Double, green: Double, blue: Double) -> String {
         func byte(_ value: Double) -> Int { Int((min(max(value, 0), 1) * 255).rounded()) }
         return String(format: "#%02X%02X%02X", byte(red), byte(green), byte(blue))
+    }
+}
+
+// MARK: - Linked Workrooms
+
+/// Where each section of a workroom inbox resumes; `0` is its start. The owner's single
+/// `latest` section resumes under `recent`.
+struct MobileWorkroomInboxCursors: Equatable, Sendable {
+    var replies: Int64 = 0
+    var open: Int64 = 0
+    var recent: Int64 = 0
+}
+
+extension PairedRemoteHost {
+    /// A guest membership that answers one person's Linked Workroom questions. It reaches no
+    /// chat and no terminal, so it is never shown as a Mac with sessions.
+    var isWorkroomParticipant: Bool { scope == RemoteShareScope.workroom.rawValue }
+}
+
+/// The app icon's badge, while any Linked Workroom membership is paired: the questions and
+/// messages waiting for this person, summed over the Macs that asked. Nothing else in the app
+/// sets a badge, so the number is this alone, and it is cleared once the last membership goes.
+enum MobileWorkroomBadge {
+    private static let ownsBadgeKey = "workroomBadgeOwned"
+
+    static func total(_ waitingByHost: [String: Int], hosts: [PairedRemoteHost]) -> Int {
+        hosts.filter(\.isWorkroomParticipant).reduce(0) { $0 + max(0, waitingByHost[$1.id] ?? 0) }
+    }
+
+    @MainActor
+    static func apply(_ waitingByHost: [String: Int], hosts: [PairedRemoteHost],
+                      defaults: UserDefaults = .standard) {
+        let hasMembership = hosts.contains(where: \.isWorkroomParticipant)
+        guard hasMembership || defaults.bool(forKey: ownsBadgeKey) else { return }
+        defaults.set(hasMembership, forKey: ownsBadgeKey)
+        let count = hasMembership ? total(waitingByHost, hosts: hosts) : 0
+        UNUserNotificationCenter.current().setBadgeCount(count) { _ in }
+    }
+}
+
+extension RemoteAppModel {
+    /// The active pairing is a workroom membership: its root is the inbox, not a dashboard.
+    var showsWorkroomInbox: Bool { activeHost?.isWorkroomParticipant == true }
+
+    /// An owner device of a Mac with Linked Workrooms on may read questions and comment.
+    var canOpenOwnerWorkrooms: Bool {
+        activeHost?.isOwnerDevice == true
+            && me?.features?.contains(RemoteRESTFeature.workrooms.rawValue) == true
+    }
+
+    func fetchWorkroomInbox(cursors: MobileWorkroomInboxCursors = MobileWorkroomInboxCursors()) async throws
+        -> RemoteWorkroomInboxDTO {
+#if DEBUG
+        if MobileWorkroomFixture.isActive { return MobileWorkroomFixture.inbox }
+#endif
+        let (client, hostID) = try workroomClient()
+        let inbox = try await client.workroomInbox(cursors: cursors)
+        noteWorkroomWaiting(inbox.state, for: hostID)
+        return inbox
+    }
+
+    func fetchWorkroomState() async throws -> RemoteWorkroomStateDTO {
+#if DEBUG
+        if MobileWorkroomFixture.isActive { return MobileWorkroomFixture.inbox.state }
+#endif
+        let (client, hostID) = try workroomClient()
+        let state = try await client.workroomState()
+        noteWorkroomWaiting(state, for: hostID)
+        return state
+    }
+
+    func fetchWorkroomQuestion(id: String) async throws -> RemoteWorkroomQuestionDTO {
+#if DEBUG
+        if MobileWorkroomFixture.isActive { return MobileWorkroomFixture.question(id: id) }
+#endif
+        return try await workroomClient().client.workroomQuestion(id: id)
+    }
+
+    func answerWorkroomQuestion(id: String, _ answer: RemoteWorkroomAnswerRequestDTO) async throws
+        -> RemoteWorkroomQuestionDTO {
+        let hostID = try workroomClient().hostID
+        let question = try await performMutation(for: hostID) { client, requestID in
+            try await client.answerWorkroomQuestion(id: id, answer, requestID: requestID)
+        }
+        refreshWorkroomWaitingSoon()
+        return question
+    }
+
+    func messageWorkroomQuestion(id: String, text: String) async throws -> RemoteWorkroomQuestionDTO {
+        let hostID = try workroomClient().hostID
+        let question = try await performMutation(for: hostID) { client, requestID in
+            try await client.messageWorkroomQuestion(id: id, text: text, requestID: requestID)
+        }
+        refreshWorkroomWaitingSoon()
+        return question
+    }
+
+    func declineWorkroomQuestion(id: String, reason: String) async throws -> RemoteWorkroomQuestionDTO {
+        let hostID = try workroomClient().hostID
+        let question = try await performMutation(for: hostID) { client, requestID in
+            try await client.declineWorkroomQuestion(id: id, reason: reason, requestID: requestID)
+        }
+        refreshWorkroomWaitingSoon()
+        return question
+    }
+
+    /// A tapped workroom notification: the Mac that sent it, then that question. The question's
+    /// own page decides whether this person may still see it, so a stale alert lands on the
+    /// page's "not available" state rather than on nothing.
+    @discardableResult
+    func openWorkroomFromNotification(_ event: RemoteNotificationEventDTO) -> Bool {
+        guard UUID(uuidString: event.sessionID) != nil else { return false }
+        let candidate = hosts.first { ($0.hostID ?? $0.id) == event.hostID && $0.isWorkroomParticipant }
+            ?? hosts.first { ($0.hostID ?? $0.id) == event.hostID && $0.isOwnerDevice }
+        guard let candidate else { return false }
+        if activeHostID != candidate.id { selectHost(candidate.id) }
+        let question = MobileNavigationRoute.workroomQuestion(event.sessionID.lowercased())
+        navigationPath = candidate.isWorkroomParticipant ? [question] : [.workroomInbox, question]
+        return true
+    }
+
+    /// Records what a membership says is waiting and puts the sum on the app icon.
+    func noteWorkroomWaiting(_ state: RemoteWorkroomStateDTO, for hostID: String) {
+        guard hosts.first(where: { $0.id == hostID })?.isWorkroomParticipant == true else { return }
+        if workroomWaitingByHost[hostID] != state.waiting {
+            workroomWaitingByHost[hostID] = state.waiting
+        }
+        MobileWorkroomBadge.apply(workroomWaitingByHost, hosts: hosts)
+    }
+
+    /// After this person acts, the count on the icon follows without waiting for the next poll.
+    private func refreshWorkroomWaitingSoon() {
+        guard showsWorkroomInbox else { return }
+        Task { [weak self] in _ = try? await self?.fetchWorkroomState() }
+    }
+
+    /// The active Mac's client and pairing id, or the refusal a screen can show.
+    private func workroomClient() throws -> (client: RemoteClient, hostID: String) {
+        guard let hostID = activeHostID, let client else { throw RemoteClientError.unauthorized }
+        return (client, hostID)
     }
 }

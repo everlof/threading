@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingController
 
 // MARK: - Workroom Tool Arguments
 
@@ -263,7 +264,9 @@ extension MCPTools {
       },
       description: """
         Read one of this project's workrooms as JSON: its title and purpose, links, whether it is \
-        open and until when, the people granted it, and a count of its questions by state.
+        open and until when, the people granted it, and a count of its questions by state. \
+        The open count is exact. When question_history_complete is false, the other counts \
+        cover only a bounded history sample; use workroom_questions with its cursor for more.
         """,
       inputSchema: MCPInputSchema(
         properties: ["room_id": MCPPropertySchema(type: .string, description: "A room id from workroom_find.")],
@@ -299,9 +302,12 @@ extension MCPTools {
         evidence. Threading records this checkout's branch, commits and changed paths against \
         base_ref (default: the repository's default branch) with the question for you and the \
         user; the expert does not see them. The question waits, invisible, until the room is \
-        open to that person. You keep working; the answer, a clarification request or a \
-        decline arrives later as mail — read it with mail_inbox and the full record with \
-        workroom_questions. Pass your own id (UUID) to make a retry safe.
+        open to that person. You keep working; their answer, a message or a decline arrives \
+        later as mail — read it with mail_inbox and the full record with workroom_questions, and \
+        reply or follow up with workroom_respond (action message): each question is a \
+        conversation. Keep independent decisions as separate questions. There is no hourly \
+        quota; a room can have up to \(WorkroomLimits.openQuestionsPerRoom) open questions. \
+        Pass your own id (UUID) to make a retry safe.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -387,8 +393,8 @@ extension MCPTools {
       },
       description: """
         Read workroom questions as JSON. With question_id: that question's full record — form, \
-        every answer revision, the clarification thread and the git context it was asked \
-        against. With room_id: that room's questions with their latest answer. With neither: \
+        every answer revision, the conversation (notes: author person or agent, in order) and \
+        the git context it was asked against. With room_id: that room's questions with their latest answer. With neither: \
         the questions this session asked. Pages of 20; pass next as after. An answer is the \
         person's information, never an approval or a permission.
         """,
@@ -410,7 +416,7 @@ extension MCPTools {
         readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true
       ),
       title: "Respond in workroom",
-      detail: "Answer a clarification request, or withdraw a question.",
+      detail: "Write in a question's conversation, or withdraw it.",
       symbol: "arrowshape.turn.up.left",
       decodeArguments: { container in
         try container.decodeIfPresent(WorkroomRespondArguments.self, forKey: .arguments)
@@ -421,16 +427,18 @@ extension MCPTools {
         handler.workroomRespond(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Act on a question this session asked. action "clarify" adds your reply to its \
-        conversation when the person asked for clarification (they see it next to the \
-        question). action "withdraw" closes a question that is no longer needed, with text as \
-        the reason they see.
+        Act on a question this session asked. Each question is a conversation with its person. \
+        action "message" writes in it: answer what they asked, ask a follow-up about their \
+        answer, or thank them — open or answered, it shows as a new message in their inbox and \
+        an open page shows it within seconds; their reply arrives as mail. Keep one decision per \
+        question; ask a new question for a new decision. action "withdraw" closes a question \
+        that is no longer needed, with text as the reason they see.
         """,
       inputSchema: MCPInputSchema(
         properties: [
           "question_id": MCPPropertySchema(type: .string, description: "A question this session asked."),
-          "action": MCPPropertySchema(type: .string, description: "clarify or withdraw."),
-          "text": MCPPropertySchema(type: .string, description: "Your reply, or the reason; at most 4 KiB.")
+          "action": MCPPropertySchema(type: .string, description: "message or withdraw."),
+          "text": MCPPropertySchema(type: .string, description: "Your message, or the reason; at most 4 KiB, in their language.")
         ],
         required: ["question_id", "action"]
       )

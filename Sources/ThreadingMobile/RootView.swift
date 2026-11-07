@@ -73,6 +73,9 @@ enum MobileDemoScene: Equatable {
     /// One attachment preview. The kind is whatever followed `attachment-detail-`.
     case attachmentDetail(kind: RemoteAttachmentKind)
     case workspace
+    /// A Linked Workroom participant's inbox, and one question in it, from canned data.
+    case workroomInbox
+    case workroomQuestion
 }
 
 extension MobileDemoScene {
@@ -173,6 +176,8 @@ extension MobileDemoScene {
                 )
             )
         case "workspace": return .workspace
+        case "workroom-inbox": return .workroomInbox
+        case "workroom-question", "workroom-conversation": return .workroomQuestion
         default:
             // The chain tested this between `review` and `browser-private`. It reads the same
             // here: no opening-fixture id is `browser-private`, `attachments` or `workspace`,
@@ -325,6 +330,9 @@ enum MobileDemoFixture: String, CaseIterable {
 
     /// The session workspace and what it opens.
     case workspace = "workspace"
+    case workroomInbox = "workroom-inbox"
+    case workroomQuestion = "workroom-question"
+    case workroomConversation = "workroom-conversation"
     case browserPermission = "browser-permission"
     case browserPreview = "browser-preview"
     case browserPrivate = "browser-private"
@@ -737,6 +745,8 @@ struct RootView: View {
                     activityID: UUID().uuidString
                 ))
             }
+        case .workroomInbox, .workroomQuestion:
+            WorkroomDemoHost(opensQuestion: MobileDemoScene.current == .workroomQuestion)
         case .shippingRoot:
             standardRoot
         }
@@ -1086,6 +1096,10 @@ struct RootView: View {
                     }
                 } else if model.hosts.isEmpty {
                     WelcomeView(openSettings: { showsSettings = true })
+                } else if model.showsWorkroomInbox {
+                    // A workroom link reaches one person's questions and nothing else on the Mac,
+                    // so its inbox is the whole app for it rather than a dashboard of sessions.
+                    WorkroomInboxView(isRoot: true, openSettings: { showsSettings = true })
                 } else {
                     SessionDashboard(
                         openSettings: { showsSettings = true },
@@ -1143,6 +1157,11 @@ struct RootView: View {
                     }
                 case .draft(let draft):
                     SessionDraftView(draft: draft)
+                case .workroomInbox:
+                    WorkroomInboxView(isRoot: false, openSettings: { showsSettings = true })
+                case .workroomQuestion(let questionID):
+                    WorkroomQuestionView(questionID: questionID)
+                        .id(questionID)
                 }
             }
         }
@@ -1199,6 +1218,32 @@ private struct SessionDraftDemoHost: View {
                         SessionDraftView(draft: draft)
                     }
                 }
+        }
+    }
+}
+
+/// The participant's screens as they are met: the inbox at the root, a question pushed on it.
+private struct WorkroomDemoHost: View {
+    @EnvironmentObject private var model: RemoteAppModel
+    let opensQuestion: Bool
+
+    var body: some View {
+        NavigationStack(path: $model.navigationPath) {
+            WorkroomInboxView(isRoot: true, openSettings: {})
+                .navigationDestination(for: MobileNavigationRoute.self) { route in
+                    if case .workroomQuestion(let id) = route {
+                        WorkroomQuestionView(questionID: id).id(id)
+                    }
+                }
+        }
+        .task {
+            if opensQuestion, model.navigationPath.isEmpty {
+                let conversation = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                    == MobileDemoFixture.workroomConversation.rawValue
+                model.navigationPath = [.workroomQuestion(
+                    conversation ? MobileWorkroomFixture.answeredID : MobileWorkroomFixture.questionID
+                )]
+            }
         }
     }
 }
@@ -1335,7 +1380,7 @@ private struct WelcomeView: View {
                     }
 
                     VStack(spacing: MobileDesign.Spacing.small) {
-                        Text("Pair your own Mac, or open a chat someone shared with you.")
+                        Text("Pair your own Mac, or open a link someone sent you.")
                             .font(.body)
                             .foregroundStyle(theme.secondaryLabel)
                             .multilineTextAlignment(.center)

@@ -60,6 +60,7 @@ struct RemoteMeResponseKey: Hashable, Sendable {
         case .allSessions: scope = "all"
         case let .session(id): scope = "session:\(id.uuidString)"
         case let .projectTerminal(id): scope = "terminal:\(id.uuidString)"
+        case let .workroomPerson(id): scope = "workroom:\(id)"
         }
         isOwnerDevice = authorization.principal == .ownerDevice
         memberID = authorization.member?.id

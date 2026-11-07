@@ -7,7 +7,7 @@ export const BOUNDS = {
   // 3 knows `secretApproval`, the keyvault Face ID alert. A Mac asks before sending one.
   // 4 accepts a device-confirmed theme sound filename in push delivery metadata.
   // 5 knows `mirrorInvite`, retractable, two minutes, `time-sensitive`. A Mac asks before sending.
-  notificationProtocolVersion: 5,
+  notificationProtocolVersion: 6,
   maximumEnvelopeBytes: 384 * 1024,
   maximumIdentifierBytes: 256,
   maximumCredentialBytes: 4 * 1024,

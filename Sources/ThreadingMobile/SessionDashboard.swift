@@ -4178,6 +4178,23 @@ struct SessionDashboard: View {
                 )
             }
         }
+        // Its own quiet control rather than a seventh root row in the menu: Linked Workrooms is
+        // a place to go, and only a Mac that has them turned on offers it.
+        if projectName == nil, model.canOpenOwnerWorkrooms {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    model.navigationPath.append(.workroomInbox)
+                } label: {
+                    Image(systemName: "questionmark.bubble")
+                        .frame(
+                            width: MobileDesign.Size.compactControl,
+                            height: MobileDesign.Size.compactControl
+                        )
+                        .background(theme.controlResting, in: Circle())
+                }
+                .accessibilityLabel(MobileL10n.string("Linked Workrooms"))
+            }
+        }
         if projectName == nil {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {

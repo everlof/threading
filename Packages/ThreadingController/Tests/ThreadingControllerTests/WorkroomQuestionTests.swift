@@ -108,6 +108,78 @@ struct WorkroomQuestionTests {
         try WorkroomLimits.language("zh-Hant-TW")
     }
 
+    @Test func reviewQuestionsAndRepliesIgnoreExhaustedLegacyAndAgentMailQuotas() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        struct LegacyRate: Codable, Equatable, Sendable { let windowStart: Double; let count: Int }
+        let now = Date().timeIntervalSince1970
+        let agentRate = LegacyRate(windowStart: now, count: MailLimits.sendsPerMinute)
+        let personAddress = f.person.mailAddress(host: f.host)
+        try await f.store.insert("workroomAskRate", f.session.description,
+                                 value: LegacyRate(windowStart: now, count: 10))
+        try await f.store.insert("mailRate", f.session.description, value: agentRate)
+        try await f.store.insert("mailRate", personAddress.description, value: agentRate)
+        await #expect(throws: ControllerError.invalidInput("send_rate")) {
+            try await f.store.sendMail(from: f.session, to: f.session, id: UUID(), text: "Ordinary agent mail",
+                                       replyTo: nil, priority: .normal, ownerAdmitted: true)
+        }
+
+        // Reopening must not revive the old hourly block or require anyone to reset counters.
+        let reopened = try ControllerStore(path: f.directory.appendingPathComponent("controller.db").path)
+        let answers = [WorkroomFieldAnswer(field: "rule", values: ["review"]),
+                       WorkroomFieldAnswer(field: "agree", values: ["agree"])]
+        for index in 0..<25 {
+            let question = try await reopened.askWorkroom(
+                id: QuestionID(), roomID: f.room.id, scope: "project-a", asker: f.session,
+                personHandle: "expert", draft: draft(title: "Decision \(index)"), gitContext: nil
+            )
+            _ = try await reopened.participantAnswer(person: f.person.id, id: question.id,
+                                                       answers: answers, comment: "")
+        }
+        #expect(try await reopened.inbox(f.session, limit: 50).items.count == 25)
+        for address in [f.session, personAddress] {
+            let unchanged: LegacyRate? = try await reopened.optional("mailRate", address.description)
+            #expect(unchanged == agentRate)
+        }
+    }
+
+    @Test func aFullReviewRoomPreservesRetriesAndReleasesCapacityWithoutWaiting() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let first = try await ask(f)
+        for index in 1..<WorkroomLimits.openQuestionsPerRoom {
+            _ = try await ask(f, title: "Decision \(index)")
+        }
+        #expect(WorkroomLimits.openQuestionsPerRoom >= 211)
+        #expect(try await f.store.workroomSummary(f.room.id).openQuestions == WorkroomLimits.openQuestionsPerRoom)
+        #expect(try await f.store.openWorkroomQuestionCount(f.room.id, person: f.person.id) == WorkroomLimits.openQuestionsPerRoom)
+        #expect(try await f.store.openWorkroomQuestionCount(f.room.id, person: WorkroomPersonID()) == 0)
+        #expect(try await ask(f, id: first.id) == first)
+        let overflowID = QuestionID()
+        await #expect(throws: ControllerError.invalidInput("room_full")) {
+            try await ask(f, id: overflowID)
+        }
+        await #expect(throws: ControllerError.notFound) { try await f.store.mail(overflowID.rawValue) }
+        await #expect(throws: ControllerError.notFound) { try await f.store.workroomQuestionDetail(overflowID) }
+
+        _ = try await f.store.withdrawWorkroomQuestion(first.id, asker: f.session, reason: "Resolved")
+        #expect(try await f.store.openWorkroomQuestionCount(f.room.id, person: f.person.id) == WorkroomLimits.openQuestionsPerRoom - 1)
+        _ = try await ask(f, id: overflowID)
+        var openIDs: [QuestionID] = []
+        var cursor: Int64 = 0
+        for _ in 0...WorkroomLimits.openQuestionsPerRoom / 100 {
+            let page = try await f.store.participantInbox(person: f.person.id, filter: .open, cursor: cursor, limit: 100)
+            #expect(page.items.count <= 100)
+            openIDs += page.items.map(\.question.id)
+            if !page.more { break }
+            #expect(page.next > cursor)
+            cursor = page.next
+        }
+        #expect(openIDs.count == WorkroomLimits.openQuestionsPerRoom)
+        #expect(Set(openIDs).count == openIDs.count)
+        #expect(!openIDs.contains(first.id) && openIDs.contains(overflowID))
+    }
+
     @Test func answersAreRevisionsMailedBackAsRepliesThatWakeTheSession() async throws {
         let f = try await fixture()
         defer { try? FileManager.default.removeItem(at: f.directory) }
@@ -353,6 +425,211 @@ struct WorkroomQuestionTests {
             try await f.store.setWorkroomPersonLanguage(f.person.id, language: "en", source: .agent)
         }
         #expect(try await f.store.workroomPerson(handle: "expert")?.language == "sv")
+    }
+
+    @Test func anAgentReplyIsANewMessageUntilThePersonOpensOrActsOnIt() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let (participant, _) = try await participantToken(f)
+        let person = participant.person.id
+        let first = try await ask(f, title: "First")
+        let second = try await ask(f, title: "Second")
+        let before = try await f.store.participantInboxVersion(person: person)
+        _ = try await f.store.participantClarify(person: person, id: first.id, text: "Vilket labb?")
+        let mail = try #require(try await f.store.inbox(f.session).items.first)
+        #expect(mail.message.envelope.text.contains("Vilket labb?"))
+        #expect(mail.message.envelope.text.contains("workroom_respond, action message"))
+        #expect(mail.message.wake == true)
+
+        _ = try await f.store.respondToWorkroomQuestion(first.id, asker: f.session, text: "ALS, rapport ST2404411.")
+        let replied = try await f.store.participantInboxVersion(person: person)
+        #expect(replied != before)
+        // Each question is in one section: the reply takes it out of the open list.
+        let replies = try await f.store.participantInbox(person: person, filter: .replies)
+        #expect(replies.items.map(\.question.id) == [first.id])
+        #expect(replies.items.first?.reply == "ALS, rapport ST2404411.")
+        #expect(try await f.store.participantInbox(person: person, filter: .open).items.map(\.question.id) == [second.id])
+
+        // A second reply moves the question to the top again; the newest reply sorts first.
+        _ = try await f.store.respondToWorkroomQuestion(second.id, asker: f.session, text: "Och den här?")
+        _ = try await f.store.respondToWorkroomQuestion(first.id, asker: f.session, text: String(repeating: "å", count: 400))
+        let both = try await f.store.participantInbox(person: person, filter: .replies)
+        #expect(both.items.map(\.question.id) == [first.id, second.id])
+        #expect((both.items.first?.reply?.utf8.count ?? 0) <= WorkroomLimits.replyPreviewBytes)
+        let paged = try await f.store.participantInbox(person: person, filter: .replies, limit: 1)
+        #expect(paged.items.map(\.question.id) == [first.id])
+        let rest = try await f.store.participantInbox(person: person, filter: .replies, cursor: paged.next, limit: 1)
+        #expect(rest.items.map(\.question.id) == [second.id])
+
+        // Opening a question reads its replies; answering another clears that one.
+        _ = try await f.store.participantQuestion(person: person, id: first.id)
+        _ = try await f.store.participantAnswer(person: person, id: second.id,
+                                                answers: [WorkroomFieldAnswer(field: "rule", values: ["keep"]),
+                                                          WorkroomFieldAnswer(field: "agree", values: ["agree"])], comment: "")
+        #expect(try await f.store.participantInbox(person: person, filter: .replies).items.isEmpty)
+        #expect(try await f.store.participantInbox(person: person, filter: .open).items.map(\.question.id) == [first.id])
+        #expect(try await f.store.participantInbox(person: person, filter: .recent).items.map(\.question.id) == [second.id])
+
+        // A reply on an answered question brings it back; a withdrawal takes it away.
+        _ = try await f.store.respondToWorkroomQuestion(second.id, asker: f.session, text: "Tack!")
+        #expect(try await f.store.participantInbox(person: person, filter: .recent).items.isEmpty)
+        #expect(try await f.store.participantInbox(person: person, filter: .replies).items.map(\.question.id) == [second.id])
+        _ = try await f.store.withdrawWorkroomQuestion(second.id, asker: f.session, reason: "")
+        #expect(try await f.store.participantInbox(person: person, filter: .replies).items.isEmpty)
+    }
+
+    @Test func aConversationHoldsSixtyMessagesAndAClosingNoteBeyondThem() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let (participant, _) = try await participantToken(f)
+        let question = try await ask(f)
+        for index in 0..<(WorkroomLimits.notes / 2) {
+            _ = try await f.store.participantClarify(person: participant.person.id, id: question.id, text: "Fråga \(index)")
+            _ = try await f.store.respondToWorkroomQuestion(question.id, asker: f.session, text: "Svar \(index)")
+        }
+        await #expect(throws: ControllerError.invalidInput("notes")) {
+            try await f.store.participantClarify(person: participant.person.id, id: question.id, text: "En till")
+        }
+        _ = try await f.store.participantDecline(person: participant.person.id, id: question.id, reason: "Klart")
+        let detail = try await f.store.participantQuestion(person: participant.person.id, id: question.id)
+        #expect(detail.notes.count == WorkroomLimits.notes + 1)
+        #expect(detail.notes.last?.kind == .decline)
+    }
+
+    @Test func theNextQuestionWrapsSkipsClosedRoomsAndEndsAtTheLast() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let (participant, _) = try await participantToken(f)
+        let person = participant.person.id
+        let closed = try await f.store.createWorkroom(id: WorkroomID(), scope: "project-a", title: "Closed", purpose: "",
+                                                      createdBy: f.session)
+        let first = try await ask(f, title: "First")
+        let hidden = try await f.store.askWorkroom(id: QuestionID(), roomID: closed.id, scope: "project-a", asker: f.session,
+                                                   personHandle: "expert", draft: draft(title: "Hidden"), gitContext: nil)
+        let second = try await ask(f, title: "Second")
+        let third = try await ask(f, title: "Third")
+        #expect(try await f.store.participantNextQuestion(person: person, after: first.id) == second.id)
+        #expect(try await f.store.participantNextQuestion(person: person, after: hidden.id) == second.id)
+        #expect(try await f.store.participantNextQuestion(person: person, after: third.id) == first.id)
+        for question in [first, second] {
+            _ = try await f.store.participantDecline(person: person, id: question.id, reason: "Nej")
+        }
+        #expect(try await f.store.participantNextQuestion(person: person, after: third.id) == nil)
+        #expect(try await f.store.participantNextQuestion(person: person, after: first.id) == third.id)
+    }
+
+    @Test func pageFingerprintsChangeWithWhatThePageShows() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let (participant, _) = try await participantToken(f)
+        let person = participant.person.id
+        let question = try await ask(f)
+        let start = try await f.store.participantQuestionVersion(person: person, id: question.id)
+        #expect(start == question.pageVersion)
+        let inbox = try await f.store.participantInboxVersion(person: person)
+        #expect(try await f.store.participantInboxVersion(person: person) == inbox)
+        _ = try await f.store.respondToWorkroomQuestion(question.id, asker: f.session, text: "Hej")
+        let replied = try await f.store.participantQuestionVersion(person: person, id: question.id)
+        #expect(replied != start)
+        #expect(try await f.store.participantQuestion(person: person, id: question.id).question.pageVersion == replied)
+        _ = try await ask(f, title: "Another")
+        #expect(try await f.store.participantInboxVersion(person: person) != inbox)
+        let other = try await f.store.addWorkroomPerson(id: WorkroomPersonID(), handle: "other", name: "Other", language: "en")
+        await #expect(throws: ControllerError.notFound) {
+            try await f.store.participantQuestionVersion(person: other.id, id: question.id)
+        }
+    }
+
+    @Test func theOwnerCommentsWithoutAnsweringAndBothOthersHearIt() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let (participant, _) = try await participantToken(f)
+        let person = participant.person.id
+        let question = try await ask(f)
+        let note = try await f.store.ownerCommentOnWorkroomQuestion(question.id, ownerName: "David",
+                                                                    text: "Tänk på asfalt med tjära.")
+        #expect(note.author == .owner && note.kind == .comment && note.name == "David")
+        // The person sees it as a new message, with who wrote it.
+        let replies = try await f.store.participantInbox(person: person, filter: .replies)
+        #expect(replies.items.map(\.question.id) == [question.id])
+        #expect(replies.items.first?.reply == "David: Tänk på asfalt med tjära.")
+        // The asking session hears it as a reply on the question's mail, and knows who wrote it.
+        let mail = try #require(try await f.store.inbox(f.session).items.first)
+        #expect(mail.message.envelope.replyTo == question.mailID)
+        #expect(mail.message.envelope.text.contains("“David”, who owns this Mac, commented"))
+        // The question is unchanged: still open, no answer.
+        let detail = try await f.store.workroomQuestionDetail(question.id)
+        #expect(detail.question.state == .open && detail.answers.isEmpty)
+        #expect(detail.notes.map(\.author) == [.owner])
+        _ = try await f.store.withdrawWorkroomQuestion(question.id, asker: f.session, reason: "")
+        await #expect(throws: ControllerError.conflict) {
+            try await f.store.ownerCommentOnWorkroomQuestion(question.id, ownerName: "David", text: "Sent")
+        }
+    }
+
+    @Test func theOwnerPagesEveryQuestionNewestFirst() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let other = try await f.store.createWorkroom(id: WorkroomID(), scope: "project-b", title: "Other", purpose: "",
+                                                     createdBy: f.session)
+        var asked: [QuestionID] = []
+        for index in 0..<5 { asked.append(try await ask(f, title: "Q\(index)").id) }
+        asked.append(try await f.store.askWorkroom(id: QuestionID(), roomID: other.id, scope: "project-b", asker: f.session,
+                                                   personHandle: "expert", draft: draft(title: "Elsewhere"),
+                                                   gitContext: nil).id)
+        let first = try await f.store.ownerWorkroomQuestions(limit: 4)
+        #expect(first.items.map(\.question.id) == Array(asked.reversed().prefix(4)))
+        #expect(first.more && first.items.first?.roomTitle == "Other" && first.items.first?.personName == "Domain Expert")
+        let rest = try await f.store.ownerWorkroomQuestions(before: first.next, limit: 4)
+        #expect(rest.items.map(\.question.id) == Array(asked.reversed().dropFirst(4)))
+        #expect(!rest.more)
+    }
+
+    @Test func waitingCountsOpenAndUnreadOnceInVisibleRooms() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let (participant, _) = try await participantToken(f)
+        let person = participant.person.id
+        let closed = try await f.store.createWorkroom(id: WorkroomID(), scope: "project-a", title: "Closed", purpose: "",
+                                                      createdBy: f.session)
+        _ = try await f.store.askWorkroom(id: QuestionID(), roomID: closed.id, scope: "project-a", asker: f.session,
+                                          personHandle: "expert", draft: draft(title: "Hidden"), gitContext: nil)
+        let first = try await ask(f, title: "First")
+        let second = try await ask(f, title: "Second")
+        #expect(try await f.store.participantWaitingCount(person: person) == 2)
+        // A message on an open question does not count it twice.
+        _ = try await f.store.respondToWorkroomQuestion(first.id, asker: f.session, text: "Hej")
+        #expect(try await f.store.participantWaitingCount(person: person) == 2)
+        _ = try await f.store.participantAnswer(person: person, id: second.id,
+                                                answers: [WorkroomFieldAnswer(field: "rule", values: ["keep"]),
+                                                          WorkroomFieldAnswer(field: "agree", values: ["agree"])], comment: "")
+        #expect(try await f.store.participantWaitingCount(person: person) == 1)
+        // A message on an answered question brings it back until it is read.
+        _ = try await f.store.respondToWorkroomQuestion(second.id, asker: f.session, text: "Tack")
+        #expect(try await f.store.participantWaitingCount(person: person) == 2)
+        _ = try await f.store.participantQuestion(person: person, id: second.id)
+        #expect(try await f.store.participantWaitingCount(person: person) == 1)
+    }
+
+    @Test func aRoomMovesToItsRepositoryWithItsQuestionsAndOnlyOnce() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let question = try await ask(f)
+        let repository = "repository:/repo/sonda/.git"
+        #expect(try await f.store.rescopeWorkroom(f.room.id, from: "project-a", to: repository))
+        #expect(!(try await f.store.rescopeWorkroom(f.room.id, from: "project-a", to: repository)))
+        #expect(try await f.store.workrooms(scope: "project-a").items.isEmpty)
+        let moved = try #require(try await f.store.workrooms(scope: repository).items.first)
+        #expect(moved.id == f.room.id && moved.createdBy == f.room.createdBy && moved.title == f.room.title)
+        // Its questions, access and publication are keyed by the room, so they move with it.
+        _ = try await f.store.askWorkroom(id: QuestionID(), roomID: f.room.id, scope: repository, asker: f.session,
+                                          personHandle: "expert", draft: draft(title: "After"), gitContext: nil)
+        await #expect(throws: ControllerError.notFound) {
+            try await f.store.askWorkroom(id: QuestionID(), roomID: f.room.id, scope: "project-a", asker: f.session,
+                                          personHandle: "expert", draft: draft(title: "Old scope"), gitContext: nil)
+        }
+        #expect(try await f.store.workroomAsks(roomID: f.room.id).items.first?.id == question.id)
+        #expect(try await f.store.workroomPublication(f.room.id).isOpen())
     }
 
     @Test func inboxScanIsBoundedAcrossRooms() async throws {

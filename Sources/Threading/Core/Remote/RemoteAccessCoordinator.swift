@@ -1,6 +1,7 @@
 import Foundation
 import Security
 import SystemConfiguration
+import ThreadingController
 import ThreadingPeerTransport
 import ThreadingRemoteKit
 
@@ -165,6 +166,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private var pairingRedemptions: [String: PairingRedemption] = [:]
     private var sessionShares: [SessionID: [SessionShare]] = [:]
     private var terminalShares: [TerminalID: [SessionShare]] = [:]
+    /// Linked Workroom people invited to the iPhone app, each by their own membership.
+    private var workroomShares: [WorkroomPersonID: [SessionShare]] = [:]
     /// Invalidates a listener completion that was already enqueued on main when the user
     /// switched the feature off. Without it, a fast off-after-on could put the UI back into
     /// `listening` after `stop()` had already closed the listener and revoked its token.
@@ -1136,6 +1139,98 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         ))
     }
 
+    /// Invites one Linked Workroom person to answer in the iPhone app. Prefers Hosted Direct,
+    /// so a person far from this Mac's network can accept it, and falls back to the private
+    /// door. Accepting it gives that person's device a membership that reaches their questions
+    /// and nothing else, until the owner revokes it or removes the person.
+    func prepareWorkroomShare(
+        for person: WorkroomPersonID
+    ) async -> Result<RemoteCreatedShare, RemoteSharePreparationError> {
+        guard hostedService.state == .ready else {
+            let isListening: Bool
+            if case .listening = status { isListening = true } else { isListening = false }
+            if let refusal = Self.shareRefusal(isSessionShareable: true, isListening: isListening,
+                                               hasPrivateDoor: invitationDestination != nil) {
+                return .failure(refusal)
+            }
+            guard let created = createWorkroomShareNow(for: person) else { return .failure(.remoteAccessUnavailable) }
+            return .success(created)
+        }
+        guard case .listening = status, let token = Self.randomToken() else { return .failure(.remoteAccessUnavailable) }
+        let service = hostedService
+        let shareID = UUID().uuidString.lowercased()
+        let deviceID = "invite-" + shareID
+        do {
+            let issued = try await service.issueDeviceCredential(
+                deviceID: deviceID,
+                lifetimeSeconds: Int(RemoteAccessDefaults.defaultShareExpiry)
+            )
+            guard !Task.isCancelled, service === hostedService,
+                  case .listening = status,
+                  let origin = service.serviceURL,
+                  let fingerprint = identityStore.snapshot.fingerprint,
+                  let link = issued.credential.withValue({ credential in
+                      HostedPairingLink(serviceURL: origin, hostID: issued.hostID,
+                                        deviceID: issued.deviceID, rendezvousCredential: credential,
+                                        bootstrapToken: token, expiresAt: issued.expiresAt,
+                                        pinnedFingerprintCode: fingerprint.pairingCode)
+                  }),
+                  let url = RemoteInvitationWebLink.url(
+                      appPayload: link.scannablePayload,
+                      origin: origin == RemoteInvitationWebLink.developmentOrigin
+                          ? RemoteInvitationWebLink.developmentOrigin : RemoteInvitationWebLink.productionOrigin
+                  ),
+                  let created = createWorkroomShareNow(for: person, preparedToken: token, preparedID: shareID,
+                                                       hostedURL: url, hostedExpiry: issued.expiresAt) else {
+                service.revokeDevice(deviceID: deviceID)
+                return .failure(.remoteAccessUnavailable)
+            }
+            return .success(created)
+        } catch {
+            service.revokeDevice(deviceID: deviceID)
+            return .failure(.remoteAccessUnavailable)
+        }
+    }
+
+    private func createWorkroomShareNow(
+        for person: WorkroomPersonID,
+        preparedToken: String? = nil,
+        preparedID: String? = nil,
+        hostedURL: URL? = nil,
+        hostedExpiry: Date? = nil
+    ) -> RemoteCreatedShare? {
+        guard let invitationToken = preparedToken ?? Self.randomToken(),
+              let url = hostedURL ?? invitationURL(token: invitationToken) else { return nil }
+        let createdAt = Date()
+        let expiresAt = hostedExpiry ?? createdAt.addingTimeInterval(RemoteAccessDefaults.defaultShareExpiry)
+        let share = SessionShare(
+            id: preparedID ?? UUID().uuidString.lowercased(),
+            invitationToken: invitationToken,
+            hostedInvitationURL: hostedURL,
+            capability: .interact,
+            canApprovePermissions: false,
+            createdAt: createdAt,
+            expiresAt: expiresAt,
+            members: [:]
+        )
+        var candidate = workroomShares
+        candidate[person, default: []].append(share)
+        guard persistGuestShares(sessions: sessionShares, terminals: terminalShares, workrooms: candidate) else {
+            return nil
+        }
+        workroomShares = candidate
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + max(0, expiresAt.timeIntervalSince(createdAt))
+        ) { [weak self] in
+            self?.expireInvitation(token: invitationToken, person: person)
+        }
+        sharingChanged()
+        ThreadingLogger.remote.info(
+            "Remote workroom invitation created person=\(person.description, privacy: .public) hosted=\(hostedURL != nil, privacy: .public)"
+        )
+        return RemoteCreatedShare(url: url, expiresAt: expiresAt, canApprovePermissions: false)
+    }
+
     /// Why an invitation cannot be minted, or nil when one can.
     ///
     /// Separated from the minting so the order of the two refusals is a value rather than a run
@@ -1360,6 +1455,40 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             return cacheGuestRedemption(invitation: token, deviceID: normalizedDeviceID,
                 accessToken: accessToken, authorization: authorization, now: now)
         }
+        for person in Array(workroomShares.keys) {
+            guard var shares = workroomShares[person],
+                  let index = shares.firstIndex(where: {
+                      $0.invitationToken == token && $0.expiresAt > Date()
+                  }),
+                  let accessToken = Self.randomToken() else { continue }
+            var share = shares[index]
+            let memberID = UUID().uuidString.lowercased()
+            let authorization = RemoteAuthorization(
+                shareID: memberID,
+                capability: .interact,
+                scope: .workroomPerson(person),
+                principal: .guest,
+                member: RemoteMember(id: memberID, displayName: normalizedName, deviceID: normalizedDeviceID),
+                canApprovePermissions: false
+            )
+            share.invitationToken = nil
+            share.members[memberID] = MemberRecord(token: accessToken, authorization: authorization, joinedAt: Date())
+            shares[index] = share
+            var candidate = workroomShares
+            candidate[person] = shares
+            guard persistGuestShares(sessions: sessionShares, terminals: terminalShares, workrooms: candidate) else {
+                return nil
+            }
+            workroomShares = candidate
+            authority.set(authorization, forToken: accessToken)
+            retireHostedInvitation(share)
+            sharingChanged()
+            ThreadingLogger.remote.notice(
+                "Remote workroom invitation redeemed person=\(person.description, privacy: .public)"
+            )
+            return cacheGuestRedemption(invitation: token, deviceID: normalizedDeviceID,
+                accessToken: accessToken, authorization: authorization, now: now)
+        }
         return nil
     }
 
@@ -1460,6 +1589,53 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         !(terminalShares[terminalID]?.isEmpty ?? true)
     }
 
+    /// The devices a workroom person answers from, and the app invitations still unused.
+    func access(forWorkroomPerson person: WorkroomPersonID) -> SessionAccess {
+        var access = SessionAccess()
+        for share in workroomShares[person] ?? [] {
+            for record in share.members.values {
+                guard let member = record.authorization.member else { continue }
+                access.members.append(SessionAccess.Member(
+                    id: member.id, displayName: member.displayName, deviceID: member.deviceID,
+                    capability: record.authorization.capability, canApprovePermissions: false,
+                    joinedAt: record.joinedAt, lastSeenAt: record.lastSeenAt
+                ))
+            }
+            guard let invitationToken = share.invitationToken, share.expiresAt > Date() else { continue }
+            access.links.append(SessionAccess.Link(
+                id: share.id, capability: share.capability, canApprovePermissions: false,
+                createdAt: share.createdAt, expiresAt: share.expiresAt,
+                url: share.hostedInvitationURL ?? invitationURL(token: invitationToken)
+            ))
+        }
+        access.members.sort { $0.joinedAt < $1.joinedAt }
+        access.links.sort { $0.createdAt < $1.createdAt }
+        return access
+    }
+
+    /// The memberships that answer as this person, for delivering their notifications.
+    func workroomAuthorizations(for person: WorkroomPersonID) -> [RemoteAuthorization] {
+        (workroomShares[person] ?? []).flatMap { $0.members.values.map(\.authorization) }
+    }
+
+    /// Ends a workroom person's app access: every device and every unused invitation. Called by
+    /// the owner, and when the person is removed from Workrooms.
+    func revokeWorkroomShares(_ person: WorkroomPersonID) {
+        guard let removed = workroomShares[person], !removed.isEmpty else { return }
+        var candidate = workroomShares
+        candidate[person] = nil
+        guard persistGuestShares(sessions: sessionShares, terminals: terminalShares, workrooms: candidate) else { return }
+        workroomShares = candidate
+        for share in removed {
+            if share.hostedInvitationURL != nil { hostedService.revokeDevice(deviceID: "invite-" + share.id) }
+            for member in share.members.values { revoke(member) }
+        }
+        sharingChanged()
+        ThreadingLogger.remote.notice(
+            "Remote workroom access revoked person=\(person.description, privacy: .public) shares=\(removed.count, privacy: .public)"
+        )
+    }
+
     /// Who can reach this chat: the people who accepted an invitation, and the invitations still
     /// waiting to be used. The owner's own paired devices are deliberately absent — they hold the
     /// owner credential rather than a share, reach every chat, and are shown by the sharing pane
@@ -1524,6 +1700,16 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 return
             }
         }
+        for (person, shares) in workroomShares {
+            for (shareIndex, share) in shares.enumerated() where share.members[shareID] != nil {
+                var candidate = workroomShares
+                candidate[person]?[shareIndex].members[shareID]?.lastSeenAt = Date()
+                if persistGuestShares(sessions: sessionShares, terminals: terminalShares, workrooms: candidate) {
+                    workroomShares = candidate
+                }
+                return
+            }
+        }
     }
 
     @discardableResult
@@ -1550,6 +1736,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         try ownerDevices.deleteAllForAppReset()
         let removedShareCount = sessionShares.values.reduce(0) { $0 + $1.count }
             + terminalShares.values.reduce(0) { $0 + $1.count }
+            + workroomShares.values.reduce(0) { $0 + $1.count }
         do {
             try guestShareStore.deleteAll()
         } catch {
@@ -1560,6 +1747,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
         sessionShares.removeAll()
         terminalShares.removeAll()
+        workroomShares.removeAll()
         guestSharePersistenceError = nil
         try notifications.deleteAllForAppReset()
         ThreadingLogger.remote.notice(
@@ -1674,11 +1862,15 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             let now = Date()
             var restored: [SessionID: [SessionShare]] = [:]
             var restoredTerminals: [TerminalID: [SessionShare]] = [:]
+            var restoredWorkrooms: [WorkroomPersonID: [SessionShare]] = [:]
             for record in try guestShareStore.load() {
                 let scope: RemoteScope
                 if record.targetKind == .projectTerminal {
                     guard let terminalID = TerminalID(uuidString: record.sessionID) else { continue }
                     scope = .projectTerminal(terminalID)
+                } else if record.targetKind == .workroomPerson {
+                    guard let person = try? WorkroomPersonID(record.sessionID) else { continue }
+                    scope = .workroomPerson(person)
                 } else {
                     guard let sessionID = SessionID(uuidString: record.sessionID) else { continue }
                     scope = .session(sessionID)
@@ -1696,8 +1888,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                         scope: scope,
                         principal: .guest,
                         member: member,
-                        canApprovePermissions: record.targetKind == .projectTerminal
-                            ? false : record.canApprovePermissions
+                        canApprovePermissions: record.targetKind == nil && record.canApprovePermissions
                     )
                     result[stored.id] = MemberRecord(
                         token: stored.token,
@@ -1713,8 +1904,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                     invitationToken: invitation,
                     hostedInvitationURL: record.hostedInvitationURL,
                     capability: record.capability,
-                    canApprovePermissions: record.targetKind == .projectTerminal
-                        ? false : record.canApprovePermissions,
+                    canApprovePermissions: record.targetKind == nil && record.canApprovePermissions,
                     createdAt: record.createdAt,
                     expiresAt: record.expiresAt,
                     members: members
@@ -1738,12 +1928,22 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                             self?.expireInvitation(token: invitation, terminalID: terminalID)
                         }
                     }
+                case let .workroomPerson(person):
+                    restoredWorkrooms[person, default: []].append(share)
+                    if let invitation {
+                        DispatchQueue.main.asyncAfter(
+                            deadline: .now() + max(0, record.expiresAt.timeIntervalSince(now))
+                        ) { [weak self] in
+                            self?.expireInvitation(token: invitation, person: person)
+                        }
+                    }
                 case .allSessions:
                     break
                 }
             }
             sessionShares = restored
             terminalShares = restoredTerminals
+            workroomShares = restoredWorkrooms
             ThreadingLogger.remote.info(
                 "Remote guest shares restored sessions=\(restored.count, privacy: .public) terminals=\(restoredTerminals.count, privacy: .public)"
             )
@@ -1751,6 +1951,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             guestSharePersistenceError = error.localizedDescription
             sessionShares = [:]
             terminalShares = [:]
+            workroomShares = [:]
             ThreadingLogger.remote.error(
                 "Remote guest share persistence failed stage=load error=\(error.localizedDescription, privacy: .private(mask: .hash))"
             )
@@ -1760,18 +1961,19 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private func persistGuestShares(
         _ candidate: [SessionID: [SessionShare]]
     ) -> Bool {
-        persistGuestShares(sessions: candidate, terminals: terminalShares)
+        persistGuestShares(sessions: candidate, terminals: terminalShares, workrooms: workroomShares)
     }
 
     private func persistTerminalGuestShares(
         _ candidate: [TerminalID: [SessionShare]]
     ) -> Bool {
-        persistGuestShares(sessions: sessionShares, terminals: candidate)
+        persistGuestShares(sessions: sessionShares, terminals: candidate, workrooms: workroomShares)
     }
 
     private func persistGuestShares(
         sessions: [SessionID: [SessionShare]],
-        terminals: [TerminalID: [SessionShare]]
+        terminals: [TerminalID: [SessionShare]],
+        workrooms: [WorkroomPersonID: [SessionShare]]
     ) -> Bool {
         guard guestSharePersistenceError == nil else { return false }
         let sessionRecords = sessions.flatMap { sessionID, shares in
@@ -1823,7 +2025,32 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 )
             }
         }
-        let records = sessionRecords + terminalRecords
+        let workroomRecords = workrooms.flatMap { person, shares in
+            shares.map { share in
+                RemoteGuestShareRecord(
+                    id: share.id,
+                    targetKind: .workroomPerson,
+                    sessionID: person.description,
+                    invitationToken: share.invitationToken,
+                    hostedInvitationURL: share.hostedInvitationURL,
+                    capability: share.capability,
+                    canApprovePermissions: false,
+                    createdAt: share.createdAt,
+                    expiresAt: share.expiresAt,
+                    members: share.members.values.map { member in
+                        RemoteGuestShareRecord.Member(
+                            id: member.authorization.shareID,
+                            token: member.token,
+                            displayName: member.authorization.member?.displayName ?? "Guest",
+                            deviceID: member.authorization.member?.deviceID ?? "unknown",
+                            joinedAt: member.joinedAt,
+                            lastSeenAt: member.lastSeenAt
+                        )
+                    }
+                )
+            }
+        }
+        let records = sessionRecords + terminalRecords + workroomRecords
         do {
             try guestShareStore.save(records)
             return true
@@ -1902,6 +2129,18 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         for member in share.members.values {
             revoke(member)
         }
+        sharingChanged()
+    }
+
+    private func expireInvitation(token: String, person: WorkroomPersonID) {
+        guard var shares = workroomShares[person],
+              let index = shares.firstIndex(where: { $0.invitationToken == token }) else { return }
+        let share = shares.remove(at: index)
+        var candidate = workroomShares
+        candidate[person] = shares.isEmpty ? nil : shares
+        guard persistGuestShares(sessions: sessionShares, terminals: terminalShares, workrooms: candidate) else { return }
+        workroomShares = candidate
+        for member in share.members.values { revoke(member) }
         sharingChanged()
     }
 
@@ -2062,6 +2301,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         result.append(contentsOf: terminalShares.values.flatMap { shares in
             shares.flatMap { $0.members.values.map(\.authorization) }
         })
+        result.append(contentsOf: workroomShares.values.flatMap { shares in
+            shares.flatMap { $0.members.values.map(\.authorization) }
+        })
         return result
     }
 
@@ -2116,7 +2358,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 }
             }
         }
-        for shares in terminalShares.values {
+        for shares in Array(terminalShares.values) + Array(workroomShares.values) {
             for share in shares {
                 for member in share.members.values {
                     authority.set(member.authorization, forToken: member.token)
@@ -2301,6 +2543,13 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 )
             }
         )
+        notifications.configureHostedBadgePushSender { [weak service] event, registrationID, playsSound, badge in
+            guard let service else {
+                return RemoteAPNSDeliveryResult(statusCode: nil, reason: "Hosted push service is unavailable.", apnsID: nil)
+            }
+            return await service.sendHostedPush(event: event, registrationID: registrationID,
+                                                playsSound: playsSound, badge: badge)
+        }
         notifications.configureHostedRetractionSender {
             [weak service] retraction, registrationID in
                 guard let service else {

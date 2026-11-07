@@ -496,7 +496,9 @@ extension ControllerStore {
             // keeps such an exchange inside one chain's message fuse and budget.
             chainID = inherited.chainID; depth = inherited.depth + 1
         }
-        try spendSendRate(sender)
+        // Workroom questions and human replies have their own room, form and portal bounds.
+        // Charging them to agent mail would make a review batch stop at the mail rate fuse.
+        if !viaWorkroom { try spendSendRate(sender) }
         var envelope = MailEnvelope(id: id, sender: sender, senderName: senderName, recipient: recipient, text: text,
                                     priority: priority, replyTo: replyTo, questionID: questionID, chainID: chainID,
                                     depth: depth, sentAt: Self.now())

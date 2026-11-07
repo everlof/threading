@@ -117,6 +117,7 @@
 		A62300010000000000000001 /* MobileAgentIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A62300010000000000000002 /* MobileAgentIdentityTests.swift */; };
 		A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000002 /* RemoteHostTrustTests.swift */; };
 		A63100010000000000000101 /* MobileInvitationRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000102 /* MobileInvitationRouteTests.swift */; };
+		A6F0A0C10000000000000101 /* MobileWorkroomTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6F0A0C10000000000000102 /* MobileWorkroomTests.swift */; };
 		61A0CE010000000000000018 /* MobileUsageWidgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61A0CE010000000000000019 /* MobileUsageWidgetTests.swift */; };
 		4D1220A00000000000000001 /* MobileMirrorPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D1220A00000000000000002 /* MobileMirrorPolicyTests.swift */; };
 		A63100010000000000000201 /* ShareChatFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A63100010000000000000202 /* ShareChatFlowTests.swift */; };
@@ -468,6 +469,7 @@
 		A62300010000000000000002 /* MobileAgentIdentityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileAgentIdentityTests.swift; sourceTree = "<group>"; };
 		A63100010000000000000002 /* RemoteHostTrustTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteHostTrustTests.swift; sourceTree = "<group>"; };
 		A63100010000000000000102 /* MobileInvitationRouteTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileInvitationRouteTests.swift; sourceTree = "<group>"; };
+		A6F0A0C10000000000000102 /* MobileWorkroomTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileWorkroomTests.swift; sourceTree = "<group>"; };
 		61A0CE010000000000000019 /* MobileUsageWidgetTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileUsageWidgetTests.swift; sourceTree = "<group>"; };
 		4D1220A00000000000000002 /* MobileMirrorPolicyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileMirrorPolicyTests.swift; sourceTree = "<group>"; };
 		A63100010000000000000202 /* ShareChatFlowTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareChatFlowTests.swift; sourceTree = "<group>"; };
@@ -669,6 +671,10 @@
 				"ThreadingMobile/ThreadingMobile-InfoPlist.xcstrings",
 				ThreadingMobile/ThreadingMobile.entitlements,
 				ThreadingMobile/ThreadingMobileApp.swift,
+				ThreadingMobile/WorkroomAnswerDraft.swift,
+				ThreadingMobile/WorkroomFixtures.swift,
+				ThreadingMobile/WorkroomInboxView.swift,
+				ThreadingMobile/WorkroomQuestionView.swift,
 			);
 			target = F6000001000000000000001 /* Threading */;
 		};
@@ -945,6 +951,7 @@
 				B20000010000000000000004 /* NotificationDeepLinkTests.swift */,
 				A63100010000000000000002 /* RemoteHostTrustTests.swift */,
 				A63100010000000000000102 /* MobileInvitationRouteTests.swift */,
+				A6F0A0C10000000000000102 /* MobileWorkroomTests.swift */,
 				61A0CE010000000000000019 /* MobileUsageWidgetTests.swift */,
 				4D1220A00000000000000002 /* MobileMirrorPolicyTests.swift */,
 				A63100010000000000000202 /* ShareChatFlowTests.swift */,
@@ -1964,6 +1971,7 @@
 				B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */,
 				A63100010000000000000001 /* RemoteHostTrustTests.swift in Sources */,
 				A63100010000000000000101 /* MobileInvitationRouteTests.swift in Sources */,
+				A6F0A0C10000000000000101 /* MobileWorkroomTests.swift in Sources */,
 				61A0CE010000000000000018 /* MobileUsageWidgetTests.swift in Sources */,
 				4D1220A00000000000000001 /* MobileMirrorPolicyTests.swift in Sources */,
 				A63100010000000000000201 /* ShareChatFlowTests.swift in Sources */,

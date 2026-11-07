@@ -2221,6 +2221,17 @@
         }
       }
     },
+    "%d phones in the app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d telefoner i appen"
+          }
+        }
+      }
+    },
     "%d reads, %d edits" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30960,6 +30971,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bjud in någon i Threading-appen, från vilket nätverk som helst."
+          }
+        }
+      }
+    },
+    "Invite to App" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bjud in till appen"
           }
         }
       }
@@ -61381,6 +61403,17 @@
         }
       }
     },
+    "The app invitation could not be created" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appinbjudan kunde inte skapas"
+          }
+        }
+      }
+    },
     "The app will switch to the %@ theme." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -76754,6 +76787,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "app"
+          }
+        }
+      }
+    },
+    "app invitation unused until %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "appinbjudan oanvänd till %@"
           }
         }
       }

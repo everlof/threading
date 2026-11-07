@@ -51,18 +51,19 @@ final class WorkroomPortalServerTests: XCTestCase {
         let tunnel = WorkroomTunnel(recipe: .cloudflare(), childLedger: AgentChildLedger(url: directory.appendingPathComponent("ledger.json")),
                                     locateExecutable: { script })
         let connected = expectation(description: "connected")
+        // The shared temporary directory may hold another process's directories, including ones a
+        // killed run left behind; only the one this tunnel made is its to remove.
+        let before = try tunnelDirectories()
         tunnel.start(port: 1) { state in
             if case .connected(let url) = state, url.host == "fake-room-1.trycloudflare.com" { connected.fulfill() }
         }
         await fulfillment(of: [connected], timeout: 10)
-        let privateDirectories = try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
-            .filter { $0.hasPrefix("threading-workroom-tunnel-") }
+        let privateDirectories = try tunnelDirectories().subtracting(before)
+        XCTAssertFalse(privateDirectories.isEmpty, "the tunnel made a private directory")
         tunnel.stop()
         XCTAssertEqual(tunnel.state, .stopped)
         try await Task.sleep(for: .milliseconds(300))
-        let remaining = try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
-            .filter { $0.hasPrefix("threading-workroom-tunnel-") }
-        XCTAssertTrue(Set(remaining).isDisjoint(with: Set(privateDirectories)), "a stopped tunnel leaves no private directory")
+        XCTAssertTrue(try tunnelDirectories().isDisjoint(with: privateDirectories), "a stopped tunnel leaves no private directory")
     }
 
     func testATunnelThatNeverPublishesIsStoppedAndSaysSo() async throws {
@@ -83,6 +84,11 @@ final class WorkroomPortalServerTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private func tunnelDirectories() throws -> Set<String> {
+        Set(try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
+            .filter { $0.hasPrefix("threading-workroom-tunnel-") })
+    }
 
     private func start(_ server: WorkroomPortalServer) async throws -> UInt16 {
         let port: UInt16? = await withCheckedContinuation { continuation in

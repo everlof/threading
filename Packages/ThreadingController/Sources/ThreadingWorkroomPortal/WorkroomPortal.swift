@@ -26,10 +26,13 @@ public actor WorkroomPortal {
     /// Every method and path pattern this portal answers. A test pins it.
     public static let routes = [
         "GET /assets/portal.css",
+        "GET /assets/portal.js",
         "GET /join/<token>",
         "POST /join/<token>",
         "GET /",
+        "GET /state",
         "GET /q/<id>",
+        "GET /q/<id>/state",
         "POST /q/<id>/answer",
         "POST /q/<id>/clarify",
         "POST /q/<id>/decline",
@@ -76,9 +79,15 @@ public actor WorkroomPortal {
     private func route(_ request: PortalRequest, configuration: WorkroomPortalConfiguration, fallback: PortalText,
                        now: Date) async throws -> PortalResponse {
         let segments = request.path.split(separator: "/", omittingEmptySubsequences: false).dropFirst().map(String.init)
+        // Pages name the assets with `?v=` and their content's hash, so a cached copy never
+        // outlives an upgrade.
         if request.method == "GET", request.path == "/assets/portal.css" {
             return respond(200, contentType: "text/css; charset=utf-8", body: Data(PortalStyle.css.utf8),
-                           extra: [PortalHeader("Cache-Control", "max-age=3600")])
+                           extra: [PortalHeader("Cache-Control", "max-age=86400")])
+        }
+        if request.method == "GET", request.path == "/assets/portal.js" {
+            return respond(200, contentType: "text/javascript; charset=utf-8", body: Data(PortalScript.js.utf8),
+                           extra: [PortalHeader("Cache-Control", "max-age=86400")])
         }
         if segments.count == 2, segments[0] == "join" {
             let token = segments[1]
@@ -109,21 +118,30 @@ public actor WorkroomPortal {
         let person = participant.person
         switch (request.method, segments.count) {
         case ("GET", 1) where segments[0].isEmpty:
-            let openCursor = Int64(request.query["open"] ?? "") ?? 0
-            let recentCursor = Int64(request.query["recent"] ?? "") ?? 0
-            guard openCursor >= 0, recentCursor >= 0 else { return notFound(text) }
-            let open = try await backend.inbox(person: person.id, filter: .open, cursor: openCursor)
-            let recent = try await backend.inbox(person: person.id, filter: .recent, cursor: recentCursor)
-            return html(200, renderer.inbox(person: person, formToken: formToken, open: open, recent: recent,
-                                            openCursor: openCursor, recentCursor: recentCursor))
+            let cursors = PortalRenderer.InboxCursors(replies: Int64(request.query["new"] ?? "") ?? 0,
+                                                      open: Int64(request.query["open"] ?? "") ?? 0,
+                                                      recent: Int64(request.query["recent"] ?? "") ?? 0)
+            guard cursors.replies >= 0, cursors.open >= 0, cursors.recent >= 0 else { return notFound(text) }
+            let version = try await backend.inboxVersion(person: person.id)
+            let replies = try await backend.inbox(person: person.id, filter: .replies, cursor: cursors.replies)
+            let open = try await backend.inbox(person: person.id, filter: .open, cursor: cursors.open)
+            let recent = try await backend.inbox(person: person.id, filter: .recent, cursor: cursors.recent)
+            return html(200, renderer.inbox(person: person, formToken: formToken, version: version,
+                                            replies: replies, open: open, recent: recent, cursors: cursors))
+        case ("GET", 1) where segments[0] == "state":
+            return state(try await backend.inboxVersion(person: person.id))
         case ("POST", 1) where segments[0] == "language":
             guard let language = PortalLanguage(rawValue: form.first("language")) else { return notFound(text) }
             _ = try await backend.setLanguage(person: person.id, language: language.rawValue)
             return redirect(Self.returnPath(form.first("return")))
         case ("GET", 2) where segments[0] == "q":
             guard let id = try? QuestionID(segments[1]) else { return notFound(text) }
-            let notice: String? = request.query["saved"] != nil ? text[.saved] : request.query["asked"] != nil ? text[.clarifySent] : nil
-            return try await questionPage(person: person, id: id, renderer: renderer, formToken: formToken, status: 200, notice: notice)
+            return try await questionPage(person: person, id: id, renderer: renderer, formToken: formToken, status: 200,
+                                          saved: request.query["saved"] != nil)
+        case ("GET", 3) where segments[0] == "q" && segments[2] == "state":
+            guard let id = try? QuestionID(segments[1]) else { return notFound(text) }
+            do { return state(try await backend.questionVersion(person: person.id, id: id)) }
+            catch ControllerError.notFound { return notFound(text) }
         case ("POST", 3) where segments[0] == "q":
             guard let id = try? QuestionID(segments[1]) else { return notFound(text) }
             return try await questionAction(segments[2], person: person, id: id, form: form, renderer: renderer, formToken: formToken)
@@ -161,15 +179,17 @@ public actor WorkroomPortal {
                     _ = try await backend.answer(person: person.id, id: id, answers: answers, comment: comment)
                 } catch let error as ControllerError {
                     guard error != .notFound else { throw error }
+                    let next = try await backend.nextQuestion(person: person.id, after: id)
                     return html(error == .conflict ? 409 : 400,
-                                renderer.question(person: person, formToken: formToken, detail: detail, notice: nil,
-                                                  error: Self.message(for: error, text: renderer.text),
+                                renderer.question(person: person, formToken: formToken, detail: detail, next: next,
+                                                  saved: false, error: Self.message(for: error, text: renderer.text),
                                                   submitted: answers, submittedComment: comment))
                 }
                 return redirect("/q/\(id)?saved=1")
             case "clarify":
+                // A message in the question's conversation; the page opens at it.
                 _ = try await backend.clarify(person: person.id, id: id, text: form.first("text"))
-                return redirect("/q/\(id)?asked=1")
+                return redirect("/q/\(id)#\(PortalRenderer.latestAnchor)")
             case "decline":
                 _ = try await backend.decline(person: person.id, id: id, reason: form.first("text"))
                 return redirect("/q/\(id)")
@@ -180,17 +200,18 @@ public actor WorkroomPortal {
             return notFound(renderer.text)
         } catch let error as ControllerError {
             return try await questionPage(person: person, id: id, renderer: renderer, formToken: formToken,
-                                          status: error == .conflict ? 409 : 400, notice: nil,
+                                          status: error == .conflict ? 409 : 400, saved: false,
                                           error: Self.message(for: error, text: renderer.text))
         }
     }
 
     private func questionPage(person: WorkroomPerson, id: QuestionID, renderer: PortalRenderer, formToken: String,
-                              status: Int, notice: String?, error: String? = nil) async throws -> PortalResponse {
+                              status: Int, saved: Bool, error: String? = nil) async throws -> PortalResponse {
         do {
             let detail = try await backend.question(person: person.id, id: id)
-            return html(status, renderer.question(person: person, formToken: formToken, detail: detail, notice: notice,
-                                                  error: error, submitted: nil, submittedComment: nil))
+            let next = try await backend.nextQuestion(person: person.id, after: id)
+            return html(status, renderer.question(person: person, formToken: formToken, detail: detail, next: next,
+                                                  saved: saved, error: error, submitted: nil, submittedComment: nil))
         } catch ControllerError.notFound {
             return notFound(renderer.text)
         }
@@ -260,8 +281,10 @@ public actor WorkroomPortal {
 
     // MARK: - Responses
 
+    /// The only script is the portal's own static file, which polls the `state` routes and never
+    /// inserts markup; every page works without it.
     static let securityHeaders = [
-        PortalHeader("Content-Security-Policy", "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"),
+        PortalHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"),
         PortalHeader("X-Content-Type-Options", "nosniff"),
         PortalHeader("Referrer-Policy", "no-referrer"),
         PortalHeader("X-Robots-Tag", "noindex, nofollow"),
@@ -279,6 +302,12 @@ public actor WorkroomPortal {
 
     private func html(_ status: Int, _ page: String, extra: [PortalHeader] = []) -> PortalResponse {
         respond(status, contentType: "text/html; charset=utf-8", body: Data(page.utf8), extra: extra)
+    }
+
+    /// What a page polls: a fingerprint that changes when the page would. Never cached.
+    private func state(_ version: String) -> PortalResponse {
+        let body = (try? JSONEncoder().encode(["v": version])) ?? Data("{}".utf8)
+        return respond(200, contentType: "application/json; charset=utf-8", body: body)
     }
 
     private func redirect(_ location: String, extra: [PortalHeader] = []) -> PortalResponse {

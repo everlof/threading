@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ThreadingController
 import ThreadingRemoteKit
 
 /// Session-scoped notification fan-out.
@@ -114,6 +115,11 @@ final class RemoteNotificationService {
     typealias HostedThemePushSender = @MainActor (
         RemoteNotificationEventDTO, String, Bool, String?
     ) async -> RemoteAPNSDeliveryResult
+    /// Sends one alert that also sets the app icon's badge. Only a broker that knows badges is
+    /// given one; see `RemoteNotificationBrokerCompatibility`.
+    typealias HostedBadgePushSender = @MainActor (
+        RemoteNotificationEventDTO, String, Bool, Int
+    ) async -> RemoteAPNSDeliveryResult
     typealias HostedRetractionSender = @MainActor (
         RemoteNotificationRetractionDTO,
         String
@@ -123,6 +129,7 @@ final class RemoteNotificationService {
     private let localPushSender: RemoteAPNSPushSender?
     private let recordsPersistenceDiagnostics: Bool
     private var hostedPushSender: HostedThemePushSender?
+    private var hostedBadgePushSender: HostedBadgePushSender?
     private var hostedRetractionSender: HostedRetractionSender?
     private var hostedPushAvailability: (@MainActor () -> Bool)?
     private var hostedPushServiceURL: (@MainActor () -> URL?)?
@@ -322,6 +329,21 @@ final class RemoteNotificationService {
         hostedPushAvailability = isAvailable
         hostedPushSender = send
         responseDeliveryCoordinator.transportChanged()
+    }
+
+    func configureHostedBadgePushSender(_ send: @escaping HostedBadgePushSender) {
+        hostedBadgePushSender = send
+    }
+
+    /// A Linked Workroom question or message waits for one person who answers in the app. It
+    /// goes to that person's memberships alone — live to an open phone, and as a push carrying
+    /// their waiting count as the badge otherwise. Returns how many devices it reached.
+    @discardableResult
+    func deliverWorkroom(_ event: RemoteNotificationEventDTO, person: WorkroomPersonID, badge: Int) -> Int {
+        let summary = deliverIndependentEvent(event, badge: badge) {
+            $0.authorization.scope.workroomPerson == person
+        }
+        return summary.liveRecipients + summary.pushTargets
     }
 
     func configureHostedRetractionSender(_ send: @escaping HostedRetractionSender) {
@@ -1368,6 +1390,7 @@ final class RemoteNotificationService {
     @discardableResult
     private func deliverIndependentEvent(
         _ event: RemoteNotificationEventDTO,
+        badge: Int? = nil,
         matching predicate: @escaping (Subscription) -> Bool
     ) -> DeliverySummary {
         guard event.kind.lifecycle == .independentEvent else {
@@ -1449,6 +1472,14 @@ final class RemoteNotificationService {
                         environment: target.environment,
                         playsSound: target.soundEnabledKinds.contains(event.kind),
                         soundName: self.themeSoundName(for: event.kind, subscription: target)
+                    )
+                } else if let badge, let hostedBadgePushSender,
+                          let hostedRegistrationID = target.hostedRegistrationID {
+                    result = await hostedBadgePushSender(
+                        event,
+                        hostedRegistrationID,
+                        target.soundEnabledKinds.contains(event.kind),
+                        badge
                     )
                 } else if let hostedPushSender,
                           let hostedRegistrationID = target.hostedRegistrationID {

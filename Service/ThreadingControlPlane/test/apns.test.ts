@@ -250,6 +250,58 @@ describe("hosted APNs broker", () => {
     });
   });
 
+  it("delivers a workroom question with the person's waiting count as the badge", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, {
+      status: 200,
+    }));
+    const body = pushBody(hostID, crypto.randomUUID().toLowerCase(), registrationID);
+    const event = body.event as Record<string, unknown>;
+    event.kind = NotificationKind.workroom;
+    event.title = "Ny fråga från Ticket sweep";
+    event.body = "Ska asfalten granskas?";
+    body.badge = 3;
+
+    const response = await sendPush(hostCredential, body);
+
+    expect(response.status).toBe(200);
+    const [, options] = upstream.mock.calls[0] ?? [];
+    const headers = new Headers(options?.headers);
+    expect(Number(headers.get("apns-expiration"))).toBe(Math.floor(Number(event.createdAt) + 86_400));
+    const payload = JSON.parse(new TextDecoder().decode(options?.body as Uint8Array));
+    expect(payload).toMatchObject({
+      aps: { alert: { title: "Ny fråga från Ticket sweep" }, badge: 3 },
+      event: { kind: "workroom" },
+    });
+  });
+
+  it.each([-1, 1.5, 10_000, "3"])("refuses a malformed badge %s before APNs", async (badge) => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    const body = pushBody(hostID, crypto.randomUUID().toLowerCase(), registrationID);
+    body.badge = badge;
+
+    const response = await sendPush(hostCredential, body);
+
+    expect(response.status).toBe(400);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it("sends no badge key when the host sent none", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    const response = await sendPush(
+      hostCredential, pushBody(hostID, crypto.randomUUID().toLowerCase(), registrationID),
+    );
+    expect(response.status).toBe(200);
+    const [, options] = upstream.mock.calls[0] ?? [];
+    const payload = JSON.parse(new TextDecoder().decode(options?.body as Uint8Array));
+    expect(payload.aps.badge).toBeUndefined();
+  });
+
   it("leaves every other kind at the default interruption level", async () => {
     const hostID = `host-${crypto.randomUUID()}`;
     const { hostCredential, registrationID } = await enrollPushRecipient(hostID);

@@ -23,6 +23,10 @@
     must reach the child only through a 0600 file, never argv or the environment.
   - Keep the Mac awake while a room is open.
   - Notify the owner when an answer arrives.
+  - Reach the person when the agent writes or asks while their page is closed. Since 2026-11-07
+    each question is a conversation, an open page refreshes itself and the inbox marks new
+    messages, but nothing leaves the Mac to tell them. Web Push needs a home-screen web app on
+    iOS, whose separate cookie jar cannot use an already-spent single-use link.
   - Block the agent browser from the portal host.
   - An optional owner review before each question goes out.
   - Removing a person from Settings, and approvals on the iPhone.

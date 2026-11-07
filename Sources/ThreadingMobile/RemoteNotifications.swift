@@ -278,7 +278,8 @@ enum HostedPushRefreshFailurePolicy {
 enum RemoteNotificationPresentationPolicy {
     static func presentsInForeground(_ kind: RemoteNotificationKind) -> Bool {
         // A Face ID approval lives two minutes; it has to reach whoever is looking at the app.
-        kind == .agentMessage || kind == .secretApproval
+        // A workroom question is addressed to this person, who may be reading another one.
+        kind == .agentMessage || kind == .secretApproval || kind == .workroom
     }
 }
 
@@ -556,6 +557,7 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         let opened = switch event.kind {
         case .secretApproval: model.openSecretApprovalFromNotification(event)
         case .mirrorInvite: model.openMirrorFromNotification(event)
+        case .workroom: model.openWorkroomFromNotification(event)
         default: model.openSessionFromNotification(event, origin: origin)
         }
         guard opened else { return }
@@ -1497,6 +1499,14 @@ final class RemoteNotificationManager: ObservableObject {
     @Published var secretApprovalSoundsEnabled: Bool {
         didSet { defaults.set(secretApprovalSoundsEnabled, forKey: Keys.secretApprovalSounds) }
     }
+    /// Linked Workroom questions and messages for this person. Registered only with a workroom
+    /// membership, which reaches nothing else, so it is on by default and sounds by default.
+    @Published var workroomQuestionsEnabled: Bool {
+        didSet { defaults.set(workroomQuestionsEnabled, forKey: Keys.workroomQuestions) }
+    }
+    @Published var workroomSoundsEnabled: Bool {
+        didSet { defaults.set(workroomSoundsEnabled, forKey: Keys.workroomSounds) }
+    }
 
     private let center = UNUserNotificationCenter.current()
     private let defaults: UserDefaults
@@ -1529,6 +1539,8 @@ final class RemoteNotificationManager: ObservableObject {
         static let sharedChatSounds = "remoteNotificationSharedChatSounds"
         static let secretApprovals = "remoteNotificationsSecretApprovals"
         static let secretApprovalSounds = "remoteNotificationSecretApprovalSounds"
+        static let workroomQuestions = "remoteNotificationsWorkroomQuestions"
+        static let workroomSounds = "remoteNotificationWorkroomSounds"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -1552,6 +1564,8 @@ final class RemoteNotificationManager: ObservableObject {
             Keys.sharedChatSounds: false,
             Keys.secretApprovals: true,
             Keys.secretApprovalSounds: true,
+            Keys.workroomQuestions: true,
+            Keys.workroomSounds: true,
         ])
         sharedChatsEnabled = defaults.bool(forKey: Keys.sharedChats)
         permissionsEnabled = defaults.bool(forKey: Keys.permissions)
@@ -1571,6 +1585,8 @@ final class RemoteNotificationManager: ObservableObject {
         sharedChatSoundsEnabled = defaults.bool(forKey: Keys.sharedChatSounds)
         secretApprovalsEnabled = defaults.bool(forKey: Keys.secretApprovals)
         secretApprovalSoundsEnabled = defaults.bool(forKey: Keys.secretApprovalSounds)
+        workroomQuestionsEnabled = defaults.bool(forKey: Keys.workroomQuestions)
+        workroomSoundsEnabled = defaults.bool(forKey: Keys.workroomSounds)
 
         observers.append(NotificationCenter.default.addObserver(
             forName: RemoteNotificationBridge.deviceTokenNotification,
@@ -1707,18 +1723,26 @@ final class RemoteNotificationManager: ObservableObject {
             MobileThemeAssets.shared.retainSoundReceipts(forHostIDs: Set(hosts.map { $0.hostID ?? $0.id }))
         }
         for host in hosts {
-            // Invites only from a Mac this phone takes mirrors from, and only as its owner.
-            let kinds = host.isOwnerDevice
-                && MobileMirrorPreferences.shared.isEnabled(hostID: MobileMirrorController.macID(host))
-                ? sharedKinds + [.mirrorInvite]
-                : sharedKinds
+            // Invites only from a Mac this phone takes mirrors from, and only as its owner. A
+            // workroom membership reaches no chat, so it registers its own kind and nothing else.
+            let kinds: [RemoteNotificationKind] = if host.isWorkroomParticipant {
+                workroomQuestionsEnabled ? [.workroom] : []
+            } else if host.isOwnerDevice
+                && MobileMirrorPreferences.shared.isEnabled(hostID: MobileMirrorController.macID(host)) {
+                sharedKinds + [.mirrorInvite]
+            } else {
+                sharedKinds
+            }
+            let hostSoundKinds = host.isWorkroomParticipant
+                ? (notificationSoundsEnabled && workroomSoundsEnabled ? [.workroom] : [])
+                : soundKinds
             let themeSoundNames = MobileThemeAssets.shared.confirmedSounds(for: host.hostID ?? host.id)
             let signature = [
                 host.id,
                 deviceToken,
                 pushEnvironment.rawValue,
                 kinds.map(\.rawValue).sorted().joined(separator: ","),
-                soundKinds.map(\.rawValue).sorted().joined(separator: ","),
+                hostSoundKinds.map(\.rawValue).sorted().joined(separator: ","),
                 includesResponsePreviews.description,
                 themeSoundNames.sorted { $0.key < $1.key }.map { $0.key + "=" + $0.value }.joined(separator: ","),
                 host.link.token,
@@ -1763,6 +1787,7 @@ final class RemoteNotificationManager: ObservableObject {
             // preference atomically on hosts that know the optional features.
             let optionalKinds: Set<RemoteNotificationKind> = [
                 .attentionRequest, .agentQuestion, .turnCompleted, .secretApproval, .mirrorInvite,
+                .workroom,
             ]
             let baselineKinds = kinds.filter { !optionalKinds.contains($0) }
             let baselineRegistration = RemoteNotificationRegistrationDTO(
@@ -1771,7 +1796,7 @@ final class RemoteNotificationManager: ObservableObject {
                 preserveHostedRegistration: preservesHostedRegistration ? true : nil,
                 environment: pushEnvironment,
                 enabledKinds: baselineKinds,
-                soundEnabledKinds: soundKinds.filter { baselineKinds.contains($0) }
+                soundEnabledKinds: hostSoundKinds.filter { baselineKinds.contains($0) }
             )
             do {
                 var result = try await registerNotifications(
@@ -1785,7 +1810,7 @@ final class RemoteNotificationManager: ObservableObject {
                         preserveHostedRegistration: preservesHostedRegistration ? true : nil,
                         environment: pushEnvironment,
                         enabledKinds: kinds,
-                        soundEnabledKinds: soundKinds,
+                        soundEnabledKinds: hostSoundKinds,
                         capabilities: [.turnCompletionPreview, .notificationRetraction],
                         includesResponsePreviews: includesResponsePreviews,
                         themeSoundNames: themeSoundNames.isEmpty ? nil : themeSoundNames
@@ -1841,10 +1866,12 @@ final class RemoteNotificationManager: ObservableObject {
         environment: RemoteNotificationEnvironment,
         host: PairedRemoteHost
     ) async throws -> String {
+        // A guest membership's credential is issued to its own device identity, not the owner
+        // pairing's, so the check is against the identity this record's credential belongs to.
         guard let serviceURL = host.hostedServiceURL,
               let credential = host.hostedCredential,
               credential.hostID == host.hostID,
-              credential.deviceID == RemoteDeviceIdentity.current,
+              credential.deviceID == host.hostedDeviceID,
               credential.expiresAt > Date().addingTimeInterval(60) else {
             throw PeerControlPlaneError.invalidCredential
         }
@@ -2195,11 +2222,13 @@ final class RemoteNotificationManager: ObservableObject {
         case .secretApproval: return secretApprovalsEnabled
         // Governed per Mac by the Mirror switch, which decides whether the kind is registered.
         case .mirrorInvite: return true
+        case .workroom: return workroomQuestionsEnabled
         }
     }
 
     private func playsSound(for kind: RemoteNotificationKind) -> Bool {
-        notificationSoundsEnabled && soundEnabledKinds.contains(kind)
+        if kind == .workroom { return notificationSoundsEnabled && workroomSoundsEnabled }
+        return notificationSoundsEnabled && soundEnabledKinds.contains(kind)
     }
 
     func apnsSuppressionReason(for event: RemoteNotificationEventDTO) -> String? {
@@ -2303,18 +2332,7 @@ struct NotificationSettingsView: View {
                 statusRow
             }
 
-            ThemedSettingsSection {
-                Toggle("Chats shared with me", isOn: $notifications.sharedChatsEnabled)
-                Toggle("Permission requests", isOn: $notifications.permissionsEnabled)
-                Toggle("Agent needs my response", isOn: $notifications.agentQuestionsEnabled)
-                Toggle("Agent finishes a turn", isOn: $notifications.turnCompletionsEnabled)
-                Toggle("Requests for my input", isOn: $notifications.attentionRequestsEnabled)
-                Toggle("Agent updates I request", isOn: $notifications.agentUpdatesEnabled)
-                Toggle("Face ID approvals for keyvault", isOn: $notifications.secretApprovalsEnabled)
-            } header: {
-                Text("Notify me about")
-            }
-            .disabled(notifications.authorizationStatus == .denied)
+            kindsSection
 
             ThemedSettingsSection {
                 Toggle(
@@ -2338,30 +2356,7 @@ struct NotificationSettingsView: View {
             }
             .disabled(notifications.authorizationStatus == .denied)
 
-            ThemedSettingsSection {
-                Toggle("Play notification sounds", isOn: $notifications.notificationSoundsEnabled)
-                if notifications.notificationSoundsEnabled {
-                    Toggle("Permission requests", isOn: $notifications.permissionSoundsEnabled)
-                        .disabled(!notifications.permissionsEnabled)
-                    Toggle("Agent needs my response", isOn: $notifications.questionSoundsEnabled)
-                        .disabled(!notifications.agentQuestionsEnabled)
-                    Toggle("Completed turns", isOn: $notifications.turnCompletionSoundsEnabled)
-                        .disabled(!notifications.turnCompletionsEnabled)
-                    Toggle("Requests from people", isOn: $notifications.attentionSoundsEnabled)
-                        .disabled(!notifications.attentionRequestsEnabled)
-                    Toggle("Requested agent updates", isOn: $notifications.updateSoundsEnabled)
-                        .disabled(!notifications.agentUpdatesEnabled)
-                    Toggle("Newly shared chats", isOn: $notifications.sharedChatSoundsEnabled)
-                        .disabled(!notifications.sharedChatsEnabled)
-                    Toggle("Face ID approvals", isOn: $notifications.secretApprovalSoundsEnabled)
-                        .disabled(!notifications.secretApprovalsEnabled)
-                }
-            } header: {
-                Text("Sounds")
-            } footer: {
-                Text("Blocking questions and requests from people sound by default; routine updates stay quiet.")
-            }
-            .disabled(notifications.authorizationStatus == .denied)
+            soundsSection
 
             ThemedSettingsSection {
                 Toggle(
@@ -2450,6 +2445,66 @@ struct NotificationSettingsView: View {
         .onChange(of: notifications.sharedChatSoundsEnabled) { _, _ in sync() }
         .onChange(of: notifications.secretApprovalsEnabled) { _, _ in sync() }
         .onChange(of: notifications.secretApprovalSoundsEnabled) { _, _ in sync() }
+    }
+
+    /// Split out of `body` so the list type-checks in reasonable time.
+    private var hasWorkroomMembership: Bool {
+        model.hosts.contains(where: \.isWorkroomParticipant)
+    }
+
+    @ViewBuilder
+    private var kindsSection: some View {
+        ThemedSettingsSection {
+            Toggle("Chats shared with me", isOn: $notifications.sharedChatsEnabled)
+            Toggle("Permission requests", isOn: $notifications.permissionsEnabled)
+            Toggle("Agent needs my response", isOn: $notifications.agentQuestionsEnabled)
+            Toggle("Agent finishes a turn", isOn: $notifications.turnCompletionsEnabled)
+            Toggle("Requests for my input", isOn: $notifications.attentionRequestsEnabled)
+            Toggle("Agent updates I request", isOn: $notifications.agentUpdatesEnabled)
+            Toggle("Face ID approvals for keyvault", isOn: $notifications.secretApprovalsEnabled)
+            if hasWorkroomMembership {
+                Toggle("Questions for me", isOn: $notifications.workroomQuestionsEnabled)
+            }
+        } header: {
+            Text("Notify me about")
+        }
+        .disabled(notifications.authorizationStatus == .denied)
+        // Here rather than on `body`, whose chain of observers is already at the type
+        // checker's limit.
+        .onChange(of: notifications.workroomQuestionsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.workroomSoundsEnabled) { _, _ in sync() }
+    }
+
+    @ViewBuilder
+    private var soundsSection: some View {
+        ThemedSettingsSection {
+            Toggle("Play notification sounds", isOn: $notifications.notificationSoundsEnabled)
+            if notifications.notificationSoundsEnabled {
+                Toggle("Permission requests", isOn: $notifications.permissionSoundsEnabled)
+                    .disabled(!notifications.permissionsEnabled)
+                Toggle("Agent needs my response", isOn: $notifications.questionSoundsEnabled)
+                    .disabled(!notifications.agentQuestionsEnabled)
+                Toggle("Completed turns", isOn: $notifications.turnCompletionSoundsEnabled)
+                    .disabled(!notifications.turnCompletionsEnabled)
+                Toggle("Requests from people", isOn: $notifications.attentionSoundsEnabled)
+                    .disabled(!notifications.attentionRequestsEnabled)
+                Toggle("Requested agent updates", isOn: $notifications.updateSoundsEnabled)
+                    .disabled(!notifications.agentUpdatesEnabled)
+                Toggle("Newly shared chats", isOn: $notifications.sharedChatSoundsEnabled)
+                    .disabled(!notifications.sharedChatsEnabled)
+                Toggle("Face ID approvals", isOn: $notifications.secretApprovalSoundsEnabled)
+                    .disabled(!notifications.secretApprovalsEnabled)
+                if hasWorkroomMembership {
+                    Toggle("Questions for me", isOn: $notifications.workroomSoundsEnabled)
+                        .disabled(!notifications.workroomQuestionsEnabled)
+                }
+            }
+        } header: {
+            Text("Sounds")
+        } footer: {
+            Text("Blocking questions and requests from people sound by default; routine updates stay quiet.")
+        }
+        .disabled(notifications.authorizationStatus == .denied)
     }
 
     @ViewBuilder

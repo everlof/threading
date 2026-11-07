@@ -62,6 +62,24 @@ extension ControllerStore {
         try required("workroom", id.description)
     }
 
+    /// Moves a room from one scope to another — a checkout's room to its repository's, once the
+    /// host knows they are the same — so every checkout of the repository reaches it. Answers
+    /// false, changing nothing, for a room that is not in `old`; a retry is harmless.
+    public func rescopeWorkroom(_ id: WorkroomID, from old: String, to new: String) throws -> Bool {
+        try Limits.text(new, field: "scope", maximum: 256)
+        return try db.transaction {
+            let room: LinkedWorkroom = try required("workroom", id.description)
+            guard room.scope == old, old != new else { return false }
+            var moved = LinkedWorkroom(id: room.id, scope: new, title: room.title, purpose: room.purpose,
+                                       createdAt: room.createdAt)
+            moved.createdBy = room.createdBy
+            try db.run("UPDATE record SET scope=?,payload=? WHERE kind='workroom' AND id=?",
+                       [.text(new), .text(try encode(moved)), .text(id.description)])
+            try event("workroom.rescoped", id.description)
+            return true
+        }
+    }
+
     /// Owner projection. A future human adapter must filter by authenticated scope.
     public func workrooms(scope: String, after: Int64 = 0, limit: Int = 50) throws -> ControllerPage<LinkedWorkroom> {
         try Limits.text(scope, field: "scope", maximum: 256)

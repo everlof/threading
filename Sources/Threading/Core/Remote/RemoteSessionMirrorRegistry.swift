@@ -590,6 +590,7 @@ final class RemoteSessionMirrorRegistry {
         case .allSessions: scopeName = .all
         case .session: scopeName = .session
         case .projectTerminal: scopeName = .terminal
+        case .workroomPerson: scopeName = .workroom
         }
 
         return RemoteMeDTO(
@@ -663,6 +664,16 @@ final class RemoteSessionMirrorRegistry {
                     projectID: project?.id,
                     projectName: project?.name ?? ""
                 )],
+                archivedSessions: nil,
+                newSessionCatalog: nil,
+                authorization: authorization
+            )
+        case .workroomPerson:
+            // A workroom membership reaches no chat and no terminal; its questions are read
+            // through the `workroom/…` routes, which check the person on every request.
+            return makeMeCatalogue(
+                sessions: [],
+                terminals: [],
                 archivedSessions: nil,
                 newSessionCatalog: nil,
                 authorization: authorization
@@ -843,6 +854,10 @@ final class RemoteSessionMirrorRegistry {
         features.append(RemoteRESTFeature.attachmentThumbnails.rawValue)
         features.append(RemoteRESTFeature.attachmentVideoStreaming.rawValue)
         features.append(RemoteRESTFeature.sessionStartupHandshake.rawValue)
+        if authorization.scope.workroomPerson != nil
+            || (authorization.canManageHost && AppSettings.shared.workroomsEnabled) {
+            features.append(RemoteRESTFeature.workrooms.rawValue)
+        }
         if authorization.canManageHost {
             features.append(RemoteRESTFeature.projectVisibility.rawValue)
             features.append(RemoteRESTFeature.reportSessionOpening.rawValue)
@@ -3567,6 +3582,11 @@ final class RemoteSessionMirrorRegistry {
 
     func latestWorkspaceActivityID(for sessionID: SessionID) -> String? {
         latestWorkspaceActivity[sessionID]?.activityID
+    }
+
+    /// Linked Workrooms was switched on or off: an owner's catalogue advertises it.
+    func workroomsAvailabilityChanged() {
+        broadcastSessionsChanged(ProjectsDidChange())
     }
 
     func sessionSharingChanged() {

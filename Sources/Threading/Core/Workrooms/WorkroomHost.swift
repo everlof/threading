@@ -59,6 +59,10 @@ final class WorkroomHost {
             guard change.affects(AppSettingIdentity.workroomsEnabled.rawValue,
                                  AppSettingIdentity.workroomTunnelProvider.rawValue,
                                  AppSettingIdentity.workroomNgrokDomain.rawValue) else { return }
+            if change.affects(AppSettingIdentity.workroomsEnabled.rawValue) {
+                // An owner's phone shows Workrooms only while it is on.
+                RemoteSessionMirrorRegistry.shared.workroomsAvailabilityChanged()
+            }
             self?.refresh()
         }
         recheck = Task { [weak self] in
@@ -77,6 +81,7 @@ final class WorkroomHost {
         refreshing = Task { [weak self] in
             guard let self else { return }
             let enabled = AppSettings.shared.workroomsEnabled
+            if enabled { await WorkroomScopeMigration.run() }
             let openRooms = enabled ? ((try? await MacMailbox.shared.controllerStore().openWorkroomCount()) ?? 0) : 0
             self.apply(enabled: enabled, openRooms: openRooms)
             self.refreshing = nil
@@ -186,6 +191,15 @@ struct WorkroomPortalBackend: WorkroomParticipantBackend {
     }
     func setLanguage(person: WorkroomPersonID, language: String) async throws -> WorkroomPerson {
         try await backend().setLanguage(person: person, language: language)
+    }
+    func nextQuestion(person: WorkroomPersonID, after id: QuestionID) async throws -> QuestionID? {
+        try await backend().nextQuestion(person: person, after: id)
+    }
+    func inboxVersion(person: WorkroomPersonID) async throws -> String {
+        try await backend().inboxVersion(person: person)
+    }
+    func questionVersion(person: WorkroomPersonID, id: QuestionID) async throws -> String {
+        try await backend().questionVersion(person: person, id: id)
     }
 
     private func delivered(_ receipt: WorkroomParticipantReceipt) async -> WorkroomParticipantReceipt {

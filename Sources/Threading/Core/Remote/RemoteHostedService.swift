@@ -69,6 +69,9 @@ enum RemoteNotificationBrokerCompatibility {
     /// interruption level. An older one would answer 400, so a Mac paired with it says *Open
     /// Threading on iPhone* instead of sending an invite.
     static let mirrorInviteVersion = 5
+    /// The first that knows `workroom` and accepts `badge`. An older one would answer 400 to
+    /// either, so a workroom person's phone hears only while Threading is open on it.
+    static let workroomVersion = 6
 
     static func themeSoundName(_ name: String?, forBrokerVersion version: Int) -> String? {
         guard version >= themeSoundVersion, let name, RemoteThemeSound.acceptsName(name) else { return nil }
@@ -79,6 +82,7 @@ enum RemoteNotificationBrokerCompatibility {
         switch kind {
         case .secretApproval: version >= secretApprovalVersion
         case .mirrorInvite: version >= mirrorInviteVersion
+        case .workroom: version >= workroomVersion
         default: true
         }
     }
@@ -833,7 +837,8 @@ final class RemoteHostedServiceController {
         event: RemoteNotificationEventDTO,
         registrationID: String,
         playsSound: Bool,
-        soundName: String? = nil
+        soundName: String? = nil,
+        badge: Int? = nil
     ) async -> RemoteAPNSDeliveryResult {
         guard let endpoint, !endpoint.isLoopback else {
             return RemoteAPNSDeliveryResult(
@@ -860,6 +865,7 @@ final class RemoteHostedServiceController {
                     soundName: RemoteNotificationBrokerCompatibility.themeSoundName(
                         soundName, forBrokerVersion: brokerVersion
                     ),
+                    badge: brokerVersion >= RemoteNotificationBrokerCompatibility.workroomVersion ? badge : nil,
                     event: RemoteNotificationBrokerCompatibility.payload(event, forBrokerVersion: brokerVersion)
                 )
             )
@@ -1521,6 +1527,8 @@ private struct RemoteHostedPushEnvelope: Encodable, Sendable {
     let registrationID: String
     let playsSound: Bool
     let soundName: String?
+    /// The app icon's number after this alert. Nil leaves the key out, as an older broker needs.
+    let badge: Int?
     let event: RemoteNotificationEventDTO
 }
 

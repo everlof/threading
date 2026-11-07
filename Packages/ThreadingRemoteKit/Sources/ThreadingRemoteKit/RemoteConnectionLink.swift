@@ -321,6 +321,30 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     public var projectDefaultAccountsURL: URL { routeURL(.projectDefaultAccounts) }
     public var mirrorEndURL: URL { routeURL(.mirrorEnd) }
 
+    /// A workroom inbox page; each cursor resumes its own section, and zero leaves it out.
+    public func workroomInboxURL(replies: Int64 = 0, open: Int64 = 0, recent: Int64 = 0) -> URL {
+        let endpoint = routeURL(.workroom).appendingPathComponent(RemoteWorkroomPath.inbox)
+        let cursors: [(RemoteWorkroomPath.Cursor, Int64)] = [(.replies, replies), (.open, open), (.recent, recent)]
+        let items = cursors.filter { $0.1 > 0 }.map { URLQueryItem(name: $0.0.rawValue, value: String($0.1)) }
+        guard !items.isEmpty, var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
+            return endpoint
+        }
+        components.queryItems = items
+        return components.url ?? endpoint
+    }
+
+    public var workroomStateURL: URL {
+        routeURL(.workroom).appendingPathComponent(RemoteWorkroomPath.state)
+    }
+
+    public func workroomQuestionURL(questionID: String) -> URL {
+        routeURL(.workroom).appendingPathComponent(RemoteWorkroomPath.question).appendingPathComponent(questionID)
+    }
+
+    public func workroomActionURL(questionID: String, action: RemoteWorkroomPath.Action) -> URL {
+        workroomQuestionURL(questionID: questionID).appendingPathComponent(action.rawValue)
+    }
+
     public func renameSessionURL(sessionID: String) -> URL {
         sessionActionURL(sessionID: sessionID, action: .rename)
     }
