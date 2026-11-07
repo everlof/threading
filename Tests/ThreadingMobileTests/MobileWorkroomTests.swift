@@ -11,8 +11,14 @@ final class MobileWorkroomTests: XCTestCase {
         let membership = try host(scope: RemoteShareScope.workroom.rawValue)
         XCTAssertTrue(membership.isWorkroomParticipant)
         XCTAssertFalse(membership.isOwnerDevice)
-        XCTAssertEqual(membership.menuTitle, MobileL10n.string("Questions from %@", "Studio Mac"))
+        XCTAssertEqual(membership.menuTitle, MobileL10n.string("%@ · Linked Workroom", "Studio Mac"))
         XCTAssertNotEqual(membership.menuTitle, MobileL10n.string("%@ · Shared chat", "Studio Mac"))
+        // In Settings ▸ Macs: the Mac's name over what this phone holds there, and no second
+        // copy of the Mac's identity code under a record that only answers questions.
+        let row = try XCTUnwrap(PairedMacPresentation.rows(hosts: [membership], activeHostID: nil).first)
+        XCTAssertEqual(row.title, "Studio Mac")
+        XCTAssertEqual(row.role, MobileL10n.string("Linked Workroom"))
+        XCTAssertNil(row.identityCode)
 
         XCTAssertFalse(try host(scope: RemoteShareScope.all.rawValue).isWorkroomParticipant)
         XCTAssertFalse(try host(scope: RemoteShareScope.session.rawValue).isWorkroomParticipant)

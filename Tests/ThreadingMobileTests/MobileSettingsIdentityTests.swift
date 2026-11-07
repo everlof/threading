@@ -88,8 +88,8 @@ final class MobileSettingsIdentityTests: XCTestCase {
         )
     }
 
-    /// A one-chat capability is not a Mac of yours, and the section says so in the same words
-    /// the Mac chooser uses rather than inventing a second spelling.
+    /// A one-chat capability is not a Mac of yours, and the row says so under the Mac's name in
+    /// the same words the Mac chooser uses.
     func testASharedChatIsLabelledAsOneRatherThanAsYourMac() throws {
         var host = try pairedHost(pinned: Self.certificate)
         host = PairedRemoteHost(
@@ -104,8 +104,9 @@ final class MobileSettingsIdentityTests: XCTestCase {
         let mac = try XCTUnwrap(
             PairedMacPresentation.rows(hosts: [host], activeHostID: nil).first
         )
-        XCTAssertEqual(mac.title, host.menuTitle)
-        XCTAssertNotEqual(mac.title, host.name, "a shared chat read as a Mac you own")
+        XCTAssertEqual(mac.title, host.name)
+        XCTAssertEqual(mac.role, MobileL10n.string("Shared chat"), "a shared chat read as a Mac you own")
+        XCTAssertNil(mac.identityCode)
     }
 
     /// Nothing paired is no section at all, which the settings screen decides from this list.

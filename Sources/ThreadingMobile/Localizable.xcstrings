@@ -392,6 +392,17 @@
         }
       }
     },
+    "%@ · Linked Workroom" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · Linked Workroom"
+          }
+        }
+      }
+    },
     "%@ · Shared chat" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7589,6 +7600,17 @@
         }
       }
     },
+    "Linked Workroom" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Linked Workroom"
+          }
+        }
+      }
+    },
     "Linked Workrooms" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10722,17 +10744,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Frågor till dig"
-          }
-        }
-      }
-    },
-    "Questions from %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Frågor från %@"
           }
         }
       }

@@ -318,11 +318,15 @@ struct MobileSettingsView: View {
 struct PairedMacPresentation: Equatable, Identifiable {
 
     let id: String
-    /// The Mac's own spelling of its name, shared with the Mac chooser so a shared chat reads
-    /// the same in both places.
+    /// The Mac's own spelling of its name.
     let title: String
+    /// What this phone holds on that Mac when it is not the Mac's owner — one shared chat, or a
+    /// Linked Workroom's questions — in the words the Mac chooser uses. Nil for an owner pairing.
+    let role: String?
     /// The 26 characters a person compares against the Mac's settings page, or nil for a record
-    /// that has never been given a certificate to pin.
+    /// that has never been given a certificate to pin. Shown for an owner pairing only: the code
+    /// is the same Mac's under every record, and someone who only answers questions has no
+    /// settings page to compare it with.
     let identityCode: String?
     /// Whether this is the Mac the phone is talking to. Marked rather than sorted to the top:
     /// the list is short and a row that moves when you connect is a row you have to find again.
@@ -332,12 +336,15 @@ struct PairedMacPresentation: Equatable, Identifiable {
         hosts: [PairedRemoteHost],
         activeHostID: String?
     ) -> [PairedMacPresentation] {
-        hosts.map {
-            PairedMacPresentation(
-                id: $0.id,
-                title: $0.menuTitle,
-                identityCode: $0.pinnedFingerprintCode,
-                isActive: $0.id == activeHostID
+        hosts.map { host in
+            let role: String? = host.isOwnerDevice ? nil
+                : host.isWorkroomParticipant ? MobileL10n.string("Linked Workroom") : MobileL10n.string("Shared chat")
+            return PairedMacPresentation(
+                id: host.id,
+                title: host.name,
+                role: role,
+                identityCode: role == nil ? host.pinnedFingerprintCode : nil,
+                isActive: host.id == activeHostID
             )
         }
     }
@@ -368,7 +375,11 @@ private struct PairedMacRow: View {
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
                 Text(mac.title)
                     .foregroundStyle(theme.label)
-                if let code = mac.identityCode {
+                if let role = mac.role {
+                    Text(role)
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryLabel)
+                } else if let code = mac.identityCode {
                     Text(code)
                         .font(.caption.monospaced())
                         .foregroundStyle(theme.tertiaryLabel)
