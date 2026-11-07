@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 import ThreadingRemoteKit
 @testable import ThreadingMobile
@@ -5,6 +6,43 @@ import ThreadingRemoteKit
 /// The phone's half of Linked Workrooms that needs no Mac: what a membership is shown as, what
 /// the form lets through before a round trip, how paged sections grow, and what a refusal says.
 final class MobileWorkroomTests: XCTestCase {
+    // MARK: Markdown
+
+    /// A table cell that wraps makes its row as tall as its text: the grid measured cells at one
+    /// line once, and a two-line cell's second line lay under the next row. Drawn whole, the
+    /// table with long cells has to be taller than the same table with short ones by more than a
+    /// line, and the drawing is written out for review.
+    @MainActor
+    func testATableRowGrowsWithItsWrappedCell() throws {
+        let short = """
+            | Prov | Beslut |
+            |---|---|
+            | A1 | Godkänt |
+            | A2 | Granskas |
+            """
+        let long = """
+            | Prov | Beslut |
+            |---|---|
+            | A1 | Godkänt |
+            | A2 (`A-rg-as-over-mrr`), arsenik <10, koppar <80 och en förklaring som inte får plats på en rad | **Granskas** eftersom hela gränsen lyfter provet över MRR |
+            """
+        func render(_ text: String) throws -> UIImage {
+            let renderer = ImageRenderer(content: MobileMarkdownView(text, scrollsTables: false)
+                .frame(width: 600).padding().background(Color.black))
+            renderer.scale = 2
+            return try XCTUnwrap(renderer.uiImage)
+        }
+        let shortImage = try render(short)
+        let longImage = try render(long)
+        let line = UIFont.preferredFont(forTextStyle: .subheadline).lineHeight
+        XCTAssertGreaterThan(longImage.size.height, shortImage.size.height + line * 1.5,
+                             "a wrapped cell did not make its row taller")
+        if let out = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"], !out.isEmpty,
+           let data = longImage.pngData() {
+            try data.write(to: URL(fileURLWithPath: out).appendingPathComponent("mobile-markdown-table.png"))
+        }
+    }
+
     // MARK: Membership
 
     func testAWorkroomMembershipIsNeitherAnOwnerNorAChat() throws {

@@ -15,10 +15,13 @@ struct MobileMarkdownView: View {
     @Environment(\.remoteTheme) private var theme
     let text: String
     var font: Font = .body
+    /// Off only where the whole table has to be drawn at once — a rendering test.
+    var scrollsTables = true
 
-    init(_ text: String, font: Font = .body) {
+    init(_ text: String, font: Font = .body, scrollsTables: Bool = true) {
         self.text = text
         self.font = font
+        self.scrollsTables = scrollsTables
     }
 
     var body: some View {
@@ -62,6 +65,7 @@ struct MobileMarkdownView: View {
                     .textSelection(.enabled)
                     .padding(MobileDesign.Spacing.medium)
             }
+            .modifier(MobileHardScrollEdges())
             .background(theme.controlResting, in: RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous))
         case .table(let table):
             tableView(table)
@@ -86,26 +90,34 @@ struct MobileMarkdownView: View {
     /// A header band, banded rows and a rule between columns, as a terminal table reads, scrolling
     /// sideways inside the page. A long cell wraps at a readable width instead of making the table
     /// a screen wide per word, and each column keeps the alignment its separator row asked for.
+    @ViewBuilder
     private func tableView(_ table: MarkdownTableNode) -> some View {
+        if scrollsTables {
+            ScrollView(.horizontal, showsIndicators: true) { tableGrid(table) }
+                .modifier(MobileHardScrollEdges())
+        } else {
+            tableGrid(table)
+        }
+    }
+
+    private func tableGrid(_ table: MarkdownTableNode) -> some View {
         let shape = RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
-        return ScrollView(.horizontal, showsIndicators: true) {
-            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-                GridRow {
-                    ForEach(Array(table.headers.enumerated()), id: \.offset) { column, header in
-                        cell(header, table: table, column: column, row: nil)
-                    }
+        return Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+            GridRow {
+                ForEach(Array(table.headers.enumerated()), id: \.offset) { column, header in
+                    cell(header, table: table, column: column, row: nil)
                 }
-                ForEach(Array(table.rows.enumerated()), id: \.offset) { index, row in
-                    GridRow {
-                        ForEach(Array(row.enumerated()), id: \.offset) { column, value in
-                            cell(value, table: table, column: column, row: index)
-                        }
+            }
+            ForEach(Array(table.rows.enumerated()), id: \.offset) { index, row in
+                GridRow {
+                    ForEach(Array(row.enumerated()), id: \.offset) { column, value in
+                        cell(value, table: table, column: column, row: index)
                     }
                 }
             }
-            .clipShape(shape)
-            .overlay(shape.stroke(theme.border, lineWidth: 1))
         }
+        .clipShape(shape)
+        .overlay(shape.stroke(theme.border, lineWidth: 1))
     }
 
     /// `row` is nil for the header.
@@ -113,23 +125,23 @@ struct MobileMarkdownView: View {
         let alignment = alignment(table, column)
         let frame = Alignment(horizontal: alignment, vertical: .top)
         let band: Color = row.map { $0.isMultiple(of: 2) ? Color.clear : theme.controlResting } ?? theme.controlHover
-        return Text(attributed(runs))
-            .font(row == nil ? .subheadline.weight(.semibold) : .subheadline.monospacedDigit())
-            .multilineTextAlignment(alignment == .trailing ? .trailing : alignment == .center ? .center : .leading)
-            .textSelection(.enabled)
-            .frame(maxWidth: MobileMarkdownDefaults.cellReadableWidth, alignment: frame)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, MobileDesign.Spacing.medium)
-            .padding(.vertical, MobileDesign.Spacing.small)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: frame)
-            .background(band)
-            .overlay(alignment: .leading) {
-                if column > 0 { Rectangle().fill(theme.border).frame(width: 1) }
-            }
-            .overlay(alignment: .bottom) {
-                if row == nil { Rectangle().fill(theme.border).frame(height: 1) }
-            }
-            .gridColumnAlignment(alignment)
+        return MobileReadableWidth(maximum: MobileMarkdownDefaults.cellReadableWidth) {
+            Text(attributed(runs))
+                .font(row == nil ? .subheadline.weight(.semibold) : .subheadline.monospacedDigit())
+                .multilineTextAlignment(alignment == .trailing ? .trailing : alignment == .center ? .center : .leading)
+                .textSelection(.enabled)
+        }
+        .padding(.horizontal, MobileDesign.Spacing.medium)
+        .padding(.vertical, MobileDesign.Spacing.small)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: frame)
+        .background(band)
+        .overlay(alignment: .leading) {
+            if column > 0 { Rectangle().fill(theme.border).frame(width: 1) }
+        }
+        .overlay(alignment: .bottom) {
+            if row == nil { Rectangle().fill(theme.border).frame(height: 1) }
+        }
+        .gridColumnAlignment(alignment)
     }
 
     private func alignment(_ table: MarkdownTableNode, _ column: Int) -> HorizontalAlignment {
@@ -184,6 +196,49 @@ struct MobileMarkdownView: View {
             span.underlineStyle = .single
         }
         return span
+    }
+}
+
+// MARK: - Scroll Edges
+
+/// A table's bands and a code block's chip run to their edges. iOS 26 softens what scrolls
+/// sideways under an edge, which rounded every band where it met the scroll view's side.
+private struct MobileHardScrollEdges: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.scrollEdgeEffectHidden(true, for: .horizontal)
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: - Readable Width
+
+/// Lays its content out no wider than `maximum`, and measures it at that width.
+///
+/// A table scrolls sideways, so its cells are asked for their size with no width to keep to. A
+/// `frame(maxWidth:)` would narrow the cell but report the height of the text on one line, and
+/// the grid would then place the next row over the wrapped second line. This measures the text
+/// at the width it will be drawn at, so a wrapped cell makes its row as tall as it needs.
+struct MobileReadableWidth: Layout {
+    let maximum: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let content = subviews.first else { return .zero }
+        return content.sizeThatFits(ProposedViewSize(width: width(for: proposal, content), height: nil))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let content = subviews.first else { return }
+        content.place(at: bounds.origin, anchor: .topLeading,
+                      proposal: ProposedViewSize(width: min(bounds.width, maximum), height: nil))
+    }
+
+    /// The width it would take on one line, the width offered, or `maximum`, whichever is least.
+    private func width(for proposal: ProposedViewSize, _ content: LayoutSubview) -> CGFloat {
+        let ideal = content.sizeThatFits(.unspecified).width
+        return min(ideal, proposal.width ?? ideal, maximum)
     }
 }
 
