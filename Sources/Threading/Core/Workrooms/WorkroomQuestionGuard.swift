@@ -19,6 +19,12 @@ import ThreadingController
 /// for every session with lifecycle hooks and decide at request time, because a chat becomes tied
 /// in the middle of its life. A failure of any kind answers empty: a missed nudge costs a wait,
 /// a wrong block costs a turn.
+///
+/// **A turn a person started is theirs.** The guard exists for the agent nobody is watching —
+/// a turn started by mail, a wake or a continuation. When the turn began with a person's own
+/// prompt (`MailHumanTurn` tells it from the prompts this app writes), that person is at the
+/// terminal and a question for them is answered there, so both hooks stay silent. Without this,
+/// a chat that once created a room could not ask the person typing to it anything.
 @MainActor
 enum WorkroomQuestionGuard {
 
@@ -33,6 +39,15 @@ enum WorkroomQuestionGuard {
 
     /// The last turn this guard blocked, per session, so it blocks a turn at most once.
     private static var lastBlocked: [SessionID: String] = [:]
+
+    /// Sessions whose current turn a person started.
+    private static var attendedTurns: Set<SessionID> = []
+
+    /// A terminal reported a new turn. `byPerson` is false for a prompt this app wrote and for a
+    /// turn that reported no prompt, which keeps the guard in force — the side it was built for.
+    static func turnStarted(_ sessionID: SessionID, byPerson: Bool) {
+        if byPerson { attendedTurns.insert(sessionID) } else { attendedTurns.remove(sessionID) }
+    }
 
     // MARK: - Hook commands
 
@@ -68,7 +83,8 @@ enum WorkroomQuestionGuard {
 
     /// The hook's reply for this session and event, or nil for silence.
     static func decide(_ sessionID: SessionID, event: Event, payload: [String: Any]) async -> [String: Any]? {
-        guard AppSettings.shared.workroomsEnabled, !ProjectStore.shared.sessionRunsOnRemoteHost(sessionID) else { return nil }
+        guard AppSettings.shared.workroomsEnabled, !ProjectStore.shared.sessionRunsOnRemoteHost(sessionID),
+              !attendedTurns.contains(sessionID) else { return nil }
         switch event {
         case .preToolUse:
             guard payload["tool_name"] as? String == askToolName,

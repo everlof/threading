@@ -131,6 +131,13 @@ A session is **tied** while it created, or asked in, a workroom that is not clos
   `MailStopContinuationLedger` like a mail notice's, so the chat is not shown idle while it
   continues.
 
+**A turn a person started is theirs.** The guard is for the agent nobody is watching. When a
+terminal reports a turn that began with a person's own prompt — `MailHumanTurn` tells it from the
+mail notice and cross-session headers this app writes — both hooks stay silent for that turn, so
+the person typing is asked directly. A turn that reported no prompt, or one this app wrote,
+keeps the guard. Before this, a chat that had once created a room could not ask the person in
+front of it anything: the guard blocked its question and told it to ask the room instead.
+
 Questions for the owner go to the person chosen in **Settings ▸ Workrooms ▸ Questions for you go
 to**, who is granted beside anyone a room is opened to. Without one, the reason tells the agent to
 state its assumption instead. Every untied session gets an empty answer. The entries are written
@@ -202,12 +209,17 @@ from their own phone.
 
 - **A workroom membership is a guest share whose scope is one person.** `RemoteScope.workroomPerson`
   sits beside `.session` and `.projectTerminal` and covers no chat and no terminal; its `/api/me`
-  catalogue is empty and advertises `workrooms`. Settings ▸ Workrooms ▸ **Invite to App** mints it
+  catalogue is empty and advertises `workrooms`. Settings ▸ Workrooms ▸ **Invite to App…** mints it
   through `RemoteAccessCoordinator.prepareWorkroomShare`, the chat-share machinery: Hosted Direct
   when the service is ready, so a person far from this network can accept it, a private door
   otherwise; single use for 24 hours, then a device-bound membership in the guest-share Keychain
   record (`targetKind: workroomPerson`) until **Sign Out**, which ends app devices and browsers
   together. Remote Access must be on; the portal's tunnel is not involved.
+- **The invitation is a code to scan.** The first pilot invitation was opened from Safari and
+  landed on the web page, whose browser button serves shared chats, not workrooms. **Invite to
+  App…** therefore shows a QR code that carries the app's own `threading://` invitation, which the
+  camera hands straight to the app (`WorkroomAppInvitationAlert`), with Copy Link beside it for
+  someone who is not in the room; the copied web link opens the app when tapped in Messages.
 - **`/api/workroom/…` routes** (`RemoteWorkroomPath`, DTOs in `RemoteWorkroomDTO.swift`): `inbox`,
   `state`, `question/<id>` and its `answer`, `message` and `decline`. The route is parsed and the
   body bounded (64 KiB) before anything is read; the viewer is decided on the main actor against

@@ -30953,6 +30953,17 @@
         }
       }
     },
+    "Invitation code" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inbjudningskod"
+          }
+        }
+      }
+    },
     "Invitation link" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30960,6 +30971,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inbjudningslänk"
+          }
+        }
+      }
+    },
+    "Invite %@ to the Threading app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bjud in %@ till Threading-appen"
           }
         }
       }
@@ -30975,13 +30997,13 @@
         }
       }
     },
-    "Invite to App" : {
+    "Invite to App…" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bjud in till appen"
+            "value" : "Bjud in till appen…"
           }
         }
       }
@@ -33054,6 +33076,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Länka ett 1Password-objekt"
+          }
+        }
+      }
+    },
+    "Link copied. Send it to them; it opens the app when tapped." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Länken är kopierad. Skicka den till hen, så öppnar den appen när hen trycker på den."
           }
         }
       }
@@ -40291,6 +40324,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En annan session stängs; dess konversation sparas och kan återupptas."
+          }
+        }
+      }
+    },
+    "One person · Single use · Accept before %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En person · Används en gång · Gäller till %@"
           }
         }
       }
@@ -51437,6 +51481,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skanna den valda artefakten eller mappen igen."
+          }
+        }
+      }
+    },
+    "Scan the code with the camera on %@’s phone. Threading opens with only their questions, never anything else on this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skanna koden med kameran i %@s telefon. Threading öppnas med bara hens frågor, aldrig något annat på den här Macen."
           }
         }
       }

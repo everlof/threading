@@ -3966,8 +3966,10 @@ switch it on in **Settings ▸ Workrooms**.
   of typing, it shows a banner instead of reloading.
 - **In the Threading app.** Instead of the web page, a person can answer in the Threading iPhone app,
   with notifications and a badge for what waits for them. In **Settings ▸ Workrooms**, choose
-  **Invite to App** beside the person and send them the copied link; it works once, within 24
-  hours, and opens the app. They need no account and never see your chats. Remote Access must be
+  **Invite to App…** beside the person: they scan the code with their phone's camera and Threading
+  opens with their questions. Not in the same room? **Copy Link** and send it; tapped in Messages it
+  opens the app (if it opens a web page instead, choose **Open in Threading** there). An
+  invitation works once, within 24 hours. They need no account and never see your chats. Remote Access must be
   on. **Sign Out** ends their app access and their browsers. On your own paired iPhone, Workrooms
   lists every question; you can read the conversation and **comment** — the person and the agent
   both see it — but you never answer for the person.
@@ -3975,7 +3977,8 @@ switch it on in **Settings ▸ Workrooms**.
   the same way mail between sessions does, and wakes it if it is idle. The answer is information,
   never an approval or a permission.
 - **No waiting in the terminal.** A chat that created or asked in an open workroom routes its
-  questions through the workroom instead of stopping on them: Claude's question prompt is refused
+  questions through the workroom instead of stopping on them, unless you started that turn
+  yourself — then it asks you directly: Claude's question prompt is refused
   with that instruction, and a turn that ends on a question is sent back once to ask it through
   the workroom and carry on. Choose yourself under **Questions for you go to** so questions only
   you can answer reach you the same way; you are added to every room you open. If a chat ends on a

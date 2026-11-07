@@ -58,6 +58,32 @@ final class WorkroomQuestionGuardTests: XCTestCase {
         XCTAssertNil(statement)
     }
 
+    /// A person typing to a tied chat is at the terminal: their turn may end on a question and use
+    /// the question tool. A turn this app started for the agent — mail, a wake — is guarded again.
+    func testATurnAPersonStartedIsLeftAlone() async throws {
+        let settings = AppSettings.shared
+        let prior = settings.workroomsEnabled
+        settings.workroomsEnabled = true
+        defer { settings.workroomsEnabled = prior }
+        let session = SessionID(UUID())
+        let store = try await MacMailbox.shared.controllerStore()
+        let address = try await MacMailbox.shared.register(session, name: "Attended chat")
+        _ = try await store.createWorkroom(id: WorkroomID(), scope: "project:test", title: "Pilot", purpose: "", createdBy: address)
+        let ask: [String: Any] = ["tool_name": "AskUserQuestion"]
+
+        WorkroomQuestionGuard.turnStarted(session, byPerson: true)
+        let attendedStop = await WorkroomQuestionGuard.decide(
+            session, event: .stop, payload: ["last_assistant_message": "Ska jag sätta igång?", "turn_id": "p1"])
+        XCTAssertNil(attendedStop)
+        let attendedAsk = await WorkroomQuestionGuard.decide(session, event: .preToolUse, payload: ask)
+        XCTAssertNil(attendedAsk)
+
+        WorkroomQuestionGuard.turnStarted(session, byPerson: false)
+        let unattendedStop = await WorkroomQuestionGuard.decide(
+            session, event: .stop, payload: ["last_assistant_message": "Ska jag sätta igång?", "turn_id": "m1"])
+        XCTAssertEqual(unattendedStop?["decision"] as? String, "block")
+    }
+
     func testClaudeSettingsCarryTheAnsweringEntriesBesideTheLifecycleOnes() throws {
         let session = SessionID(UUID())
         let settings = try XCTUnwrap(MCPSessionRegistry.hookSettings(for: session, brokersPermissions: false, reportsLifecycle: true))

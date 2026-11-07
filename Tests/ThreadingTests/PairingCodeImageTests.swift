@@ -312,6 +312,47 @@ final class PairingCodeImageTests: XCTestCase {
         }
     }
 
+    // MARK: - Scannable code view
+
+    /// A workroom app invitation carries a hosted rendezvous credential — the service, the host,
+    /// the device, two secrets and the pin — several times the bytes of a LAN pairing code. At
+    /// the side the invitation sheet gives it, it still has to decode to the exact payload, and
+    /// go on decoding after a theme switch redraws it.
+    func testAnInvitationSizedCodeDecodesAtTheSheetsSide() throws {
+        let host = "11111111-2222-3333-4444-555555555555"
+        let link = try XCTUnwrap(HostedPairingLink(
+            serviceURL: RemoteInvitationWebLink.productionOrigin,
+            hostID: host,
+            deviceID: "invite-" + host,
+            rendezvousCredential: "th_device_" + String(repeating: "r", count: 43),
+            bootstrapToken: String(repeating: "b", count: 43),
+            expiresAt: Date().addingTimeInterval(600),
+            pinnedFingerprintCode: "CEJBGFAVCYLRQGI2DMOB2HQ7EA"
+        ))
+        let invitation = try XCTUnwrap(RemoteInvitationWebLink.url(appPayload: link.scannablePayload))
+        let payload = WorkroomAppInvitationAlert.scannedPayload(for: invitation)
+        XCTAssertEqual(payload, link.scannablePayload, "the code would carry the web page, not the app")
+        let view = ScannableCodeView(
+            payload: payload,
+            caption: "One person",
+            side: WorkroomAppInvitationDefaults.codeSide,
+            accessibilityLabel: "Invitation code"
+        )
+        let code = try XCTUnwrap(view.subviews.first?.subviews.compactMap { $0 as? NSImageView }.first)
+        XCTAssertEqual(code.accessibilityLabel(), "Invitation code")
+        XCTAssertEqual(code.image.flatMap { decode($0) }, payload)
+
+        // A theme change draws the code again in the new colours, and it still reads.
+        let before = code.image
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeStyles.cyberpunk.id))
+        XCTAssertFalse(code.image === before, "the code kept the colours it was opened with")
+        XCTAssertEqual(code.image.flatMap { decode($0) }, payload)
+
+        view.caption = "Link copied"
+        XCTAssertEqual(view.caption, "Link copied")
+    }
+
     // MARK: - Helpers
 
     private func decode(_ image: NSImage) -> String? {

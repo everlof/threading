@@ -447,6 +447,10 @@ enum HookLifecycleRelay {
         if report.event == .turnStarted {
             MailStopContinuationLedger.recordTurnStarted(report.sessionID)
             MailHumanTurn.turnStarted(report.sessionID, prompt: report.prompt)
+            WorkroomQuestionGuard.turnStarted(
+                report.sessionID,
+                byPerson: report.prompt.map { !$0.isEmpty && !MailHumanTurn.isAgentOriginated($0) } ?? false
+            )
             SubagentReportBack.shared.turnStarted(sessionID: report.sessionID, prompt: report.prompt)
         }
 

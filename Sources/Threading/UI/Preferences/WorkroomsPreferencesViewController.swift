@@ -45,7 +45,6 @@ final class WorkroomsPreferencesViewController: NSViewController {
     private var invitationButtons: [ObjectIdentifier: WorkroomLinkExtension.Target] = [:]
     private var roomButtons: [ObjectIdentifier: WorkroomID] = [:]
     private var copiedPerson: WorkroomPersonID?
-    private var copiedAppPerson: WorkroomPersonID?
     private var addMessage: String?
 
     private lazy var enabledToggle = SettingsUI.toggle(isOn: AppSettings.shared.workroomsEnabled,
@@ -276,8 +275,7 @@ final class WorkroomsPreferencesViewController: NSViewController {
                                          action: #selector(copyLink(_:)))
             copy.isEnabled = WorkroomHost.shared.publishedOrigin != nil
             personButtons[ObjectIdentifier(copy)] = person.id
-            let invite = SettingsUI.button(copiedAppPerson == person.id ? "Copied" : "Invite to App",
-                                           target: self, action: #selector(inviteToApp(_:)))
+            let invite = SettingsUI.button("Invite to App…", target: self, action: #selector(inviteToApp(_:)))
             personButtons[ObjectIdentifier(invite)] = person.id
             let signOut = SettingsUI.button("Sign Out", target: self, action: #selector(signOut(_:)))
             signOut.isEnabled = !entry.devices.isEmpty || !entry.app.members.isEmpty || !entry.app.links.isEmpty
@@ -432,16 +430,18 @@ final class WorkroomsPreferencesViewController: NSViewController {
         }
     }
 
-    /// An app invitation on the clipboard: one person, single use, accepted in the Threading
-    /// app. It reaches their questions and nothing else on this Mac, until Sign Out.
+    /// An app invitation for one person, single use, shown as a code to scan with their phone's
+    /// camera and a link to copy. It reaches their questions and nothing else, until Sign Out.
     @objc private func inviteToApp(_ sender: ThemedButton) {
         guard let person = personButtons[ObjectIdentifier(sender)] else { return }
         sender.isEnabled = false
         Task { [weak self] in
             switch await RemoteAccessCoordinator.shared.prepareWorkroomShare(for: person) {
             case let .success(created):
-                ShareInvitationText.copy(created.url)
-                self?.copiedAppPerson = person
+                sender.isEnabled = true
+                let name = self?.snapshot.people.first { $0.person.id == person }?.person.name ?? ""
+                WorkroomAppInvitationAlert.show(created.url, personName: name, expiresAt: created.expiresAt,
+                                                in: self?.view.window)
                 self?.load()
             case let .failure(error):
                 sender.isEnabled = true

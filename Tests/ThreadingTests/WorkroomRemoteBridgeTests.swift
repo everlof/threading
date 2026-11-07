@@ -131,6 +131,30 @@ final class WorkroomRemoteBridgeTests: XCTestCase {
         XCTAssertNotEqual(WorkroomAgentCommandService.scope(for: folder), WorkroomAgentCommandService.scope(for: main))
     }
 
+    // MARK: - Invitation code
+
+    /// The code carries the app's own invitation, so the camera opens Threading directly; the
+    /// copied link stays the web link. Copy Link keeps the sheet up and says it copied.
+    func testTheInvitationCodeOpensTheAppAndCopyingKeepsItOpen() throws {
+        let payload = "threading://pair#" + String(repeating: "a", count: 64)
+        let web = try XCTUnwrap(RemoteInvitationWebLink.url(appPayload: payload, origin: RemoteInvitationWebLink.productionOrigin))
+        XCTAssertEqual(WorkroomAppInvitationAlert.scannedPayload(for: web), payload)
+        let other = try XCTUnwrap(URL(string: "https://192.168.1.4:8760#token.code"))
+        XCTAssertEqual(WorkroomAppInvitationAlert.scannedPayload(for: other), other.absoluteString)
+
+        let alert = WorkroomAppInvitationAlert.makeAlert(web, personName: "Viktor", expiresAt: Date())
+        XCTAssertTrue(alert.messageText.contains("Viktor") && alert.informativeText.contains("Viktor"))
+        XCTAssertEqual(alert.buttons.count, 2)
+        let code = try XCTUnwrap(alert.accessoryView as? ScannableCodeView)
+        XCTAssertTrue(code.hasCode)
+        let pasteboard = NSPasteboard.general
+        let before = code.caption
+        XCTAssertEqual(alert.shouldChooseButton?(WorkroomAppInvitationDefaults.copyButtonIndex), false)
+        XCTAssertNotEqual(code.caption, before)
+        XCTAssertEqual(pasteboard.string(forType: .string)?.hasPrefix(RemoteInvitationWebLink.productionOrigin.absoluteString), true)
+        XCTAssertEqual(alert.shouldChooseButton?(0), true)
+    }
+
     // MARK: - One vocabulary
 
     func testTheWireAndTheFormSpellAnswersTheSameWay() {
