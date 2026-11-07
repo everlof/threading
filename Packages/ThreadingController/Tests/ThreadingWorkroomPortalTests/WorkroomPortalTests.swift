@@ -241,7 +241,7 @@ struct WorkroomPortalTests {
         #expect(mine.lowerBound < theirs.lowerBound)
         #expect(conversation.contains("class=\"msg agent\" id=\"latest\""))
         #expect(conversation.contains("Ticket sweep <span class=\"tag\">AI-agent</span>"))
-        #expect(conversation.contains("Skriv till Ticket sweep") && !conversation.contains("Behöver du fråga något"))
+        #expect(conversation.contains("Skriv till agenten som frågade") && !conversation.contains("Behöver du fråga något"))
         // Opening it read the reply.
         #expect(!body(await f.portal.handle(request("GET", "/", cookie: session))).contains("Nya meddelanden"))
     }

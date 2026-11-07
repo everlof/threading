@@ -41,7 +41,7 @@ enum WorkroomAppInvitationAlert {
         alert.alertStyle = .informational
         alert.messageText = L10n.format("Invite %@ to the Threading app", personName)
         alert.informativeText = L10n.format(
-            "Scan the code with the camera on %@’s phone. Threading opens with only their questions, never anything else on this Mac.",
+            "Scan the code with the camera on %@’s iPhone, which needs the Threading app. It opens with only their questions, never anything else on this Mac.",
             personName
         )
         let code = ScannableCodeView(

@@ -51782,13 +51782,13 @@
         }
       }
     },
-    "Scan the code with the camera on %@’s phone. Threading opens with only their questions, never anything else on this Mac." : {
+    "Scan the code with the camera on %@’s iPhone, which needs the Threading app. It opens with only their questions, never anything else on this Mac." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Skanna koden med kameran i %@s telefon. Threading öppnas med bara hens frågor, aldrig något annat på den här Macen."
+            "value" : "Skanna koden med kameran på %@s iPhone, som behöver Threading-appen. Appen öppnas med bara deras frågor, aldrig något annat på den här Mac-datorn."
           }
         }
       }

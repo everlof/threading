@@ -90,17 +90,24 @@ struct WorkroomInboxView: View {
         .navigationBarTitleDisplayMode(isRoot ? .large : .inline)
         .toolbarBackground(theme.surface, for: .navigationBar)
         .toolbar { toolbar }
-        .task(id: model.activeHostID) { await poll() }
+        .task(id: model.activeHostID) {
+            // As the root, this screen is what a Mac switch lands on. Switching discards the
+            // previous Mac's connection, and the sessions dashboard rebuilds it when it appears;
+            // without the same call here every request went to a torn-down connection and the
+            // page said it could not reach the server until the person switched again.
+            if isRoot { await model.activateDashboard() }
+            await poll()
+        }
     }
 
     @ViewBuilder
     private var content: some View {
         if inbox == nil {
-            if let failure {
+            if let failure = model.phase.failure?.message ?? failure {
                 WorkroomFailureCard(
                     title: MobileL10n.string("Couldn’t load the questions"),
                     message: failure,
-                    retry: { Task { await reload() } }
+                    retry: { Task { await retry() } }
                 )
             } else {
                 ProgressView()
@@ -223,8 +230,19 @@ struct WorkroomInboxView: View {
             failure = nil
         } catch is CancellationError {
         } catch {
+            // While the Mac is still being reached, a refused request is the connection not being
+            // up yet, not a failure to report: the poll asks again, and a connection that does
+            // fail says so through `model.phase`.
+            if model.phase == .connecting { return }
             failure = error.localizedDescription
         }
+    }
+
+    /// Try Again reaches the Mac again first when the connection is what failed.
+    private func retry() async {
+        failure = nil
+        if isRoot, model.phase != .online { await model.refresh(reason: .userCheck) }
+        await reload()
     }
 
     private func loadMore(_ kind: RemoteWorkroomSectionKind) async {

@@ -226,6 +226,20 @@ from their own phone.
   a workroom share only for the native client (`persistsOwnerDevice`, which the server sets from
   the iOS client header), and a browser is refused without spending it, so **Open in Threading**
   still works afterwards.
+- **The invitation says what it is for.** A workroom invitation's hosted link carries
+  `HostedPairingLink.purpose = .workroom` (payload key `k`, ignored by older builds and absent from
+  every other link). The invitation page reads it from the fragment and says "You have questions to
+  answer", in Swedish or English after the phone's language, with Open in Threading as the only
+  action; any other link keeps the chat page. The purpose is wording, never authority.
+- **On an open question the form is the one place to type.** The box for writing to the agent stays
+  folded behind "Need to ask something before you answer?" — as the portal folds it — until the
+  person asks for it or a conversation has started; it is labelled for who reads it, "Write to the
+  agent that asked", not with the asking chat's name. A Done button above the keyboard serves every
+  field, since a number field's keypad has no return key.
+- **The inbox root reconnects on a Mac switch.** Switching Macs discards the previous connection;
+  the participant's inbox, like the sessions dashboard, reconnects the newly chosen Mac when it
+  appears, and a request refused while that connection is still being made is not reported as a
+  failure.
 - **`/api/workroom/…` routes** (`RemoteWorkroomPath`, DTOs in `RemoteWorkroomDTO.swift`): `inbox`,
   `state`, `question/<id>` and its `answer`, `message` and `decline`. The route is parsed and the
   body bounded (64 KiB) before anything is read; the viewer is decided on the main actor against

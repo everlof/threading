@@ -26,6 +26,20 @@ describe("public invitations", () => {
     expect(html).not.toContain("fetch(");
     expect(html).not.toContain("http-equiv=\"refresh\"");
   });
+  it("tells a workroom invitation's person what waits for them and offers only the app", async () => {
+    const html = await (await worker.fetch(new Request("https://remote.threading.codes/join"))).text();
+    // The page reads the invitation's purpose from the app payload in the fragment; the strings
+    // it then shows are in the page, in both languages a workroom question can be asked in.
+    expect(html).toContain(".k||''");
+    expect(html).toContain("purpose==='workroom'");
+    for (const words of ["You have questions to answer", "Du har frågor att svara på", "Öppna i Threading"]) {
+      expect(html).toContain(words);
+    }
+    // No browser path is offered for it: the Mac refuses a workroom invitation from a browser.
+    const workroomBranch = html.slice(html.indexOf("if(purpose==='workroom')"), html.indexOf("} else if(link.hostname"));
+    expect(workroomBranch).not.toContain("browser.hidden=false");
+  });
+
   it("does not proxy or accept any API operation", async () => {
     for (const path of ["/api/me", "/v1/push", "/ready", "/join/extra"]) {
       expect((await worker.fetch(new Request("https://remote.threading.codes" + path))).status).toBe(404);

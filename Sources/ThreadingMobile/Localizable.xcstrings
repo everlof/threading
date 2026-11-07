@@ -3857,13 +3857,13 @@
         }
       }
     },
-    "Comment (optional)" : {
+    "Comment with your answer (optional)" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Kommentar (valfri)"
+            "value" : "Kommentar till svaret (valfri)"
           }
         }
       }
@@ -8416,6 +8416,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Navigeringsfält"
+          }
+        }
+      }
+    },
+    "Need to ask something before you answer?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Behöver du fråga något innan du svarar?"
           }
         }
       }
@@ -17558,13 +17569,13 @@
         }
       }
     },
-    "Write to %@" : {
+    "Write to the agent that asked" : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Skriv till %@"
+            "value" : "Skriv till agenten som frågade"
           }
         }
       }
@@ -17786,13 +17797,13 @@
         }
       }
     },
-    "Your answer is saved. %@ has received it." : {
+    "Your answer is saved. The agent that asked has received it." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ditt svar är sparat. %@ har fått det."
+            "value" : "Ditt svar är sparat. Agenten som frågade har fått det."
           }
         }
       }

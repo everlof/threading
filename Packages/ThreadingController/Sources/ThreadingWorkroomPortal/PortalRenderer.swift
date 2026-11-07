@@ -289,7 +289,7 @@ struct PortalRenderer {
     private func composer(_ question: WorkroomQuestion, formToken: String, anchored: Bool) -> String {
         let anchor = anchored ? " id=\"\(Self.latestAnchor)\"" : ""
         return "<form method=\"post\" action=\"/q/\(question.id)/clarify\" class=\"composer\"\(anchor)>\(hidden(formToken))" +
-            "<label class=\"field\"><span class=\"label\">\(e(text.format(.composeTo, question.askerName)))</span>" +
+            "<label class=\"field\"><span class=\"label\">\(e(text[.composeTo]))</span>" +
             "<textarea name=\"text\" rows=\"3\" maxlength=\"\(WorkroomLimits.noteBytes)\" required></textarea></label>" +
             "<p class=\"help\">\(e(text[.composeHelp]))</p>" +
             "<button type=\"submit\">\(e(text[.composeSubmit]))</button></form>"

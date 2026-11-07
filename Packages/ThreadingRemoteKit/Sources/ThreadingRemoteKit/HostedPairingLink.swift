@@ -16,6 +16,15 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
     public let bootstrapToken: String
     public let expiresAt: Date
     public let pinnedFingerprintCode: String?
+    /// What the invitation is for, when that changes what the person should be told before the
+    /// app opens. Only the invitation page reads it: a workroom invitation is answered in the app
+    /// alone, so the page offers no browser. Not authority — the Mac decides what a redeemed
+    /// invitation reaches — and absent from every older link, which reads as a chat.
+    public let purpose: Purpose?
+
+    public enum Purpose: String, Sendable {
+        case workroom
+    }
 
     private struct Payload: Codable {
         let v: Int
@@ -26,6 +35,8 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
         let b: String
         let e: Double
         let p: String?
+        /// `Purpose`. Optional and ignored when unknown, so neither side breaks the other.
+        let k: String?
     }
 
     public init?(
@@ -36,6 +47,7 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
         bootstrapToken: String,
         expiresAt: Date,
         pinnedFingerprintCode: String? = nil,
+        purpose: Purpose? = nil,
         now: Date = Date()
     ) {
         if let pinnedFingerprintCode, RemoteHostPin(pairingCode: pinnedFingerprintCode) == nil { return nil }
@@ -55,6 +67,7 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
         self.bootstrapToken = bootstrapToken
         self.expiresAt = expiresAt
         self.pinnedFingerprintCode = pinnedFingerprintCode
+        self.purpose = purpose
     }
 
     public init?(string: String, now: Date = Date()) {
@@ -86,6 +99,7 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
                 bootstrapToken: payload.b,
                 expiresAt: Date(timeIntervalSince1970: payload.e),
                 pinnedFingerprintCode: payload.p,
+                purpose: payload.k.flatMap(Purpose.init(rawValue:)),
                 now: now
               ) else {
             return nil
@@ -102,7 +116,8 @@ public struct HostedPairingLink: Equatable, Hashable, Sendable {
             c: rendezvousCredential,
             b: bootstrapToken,
             e: expiresAt.timeIntervalSince1970,
-            p: pinnedFingerprintCode
+            p: pinnedFingerprintCode,
+            k: purpose?.rawValue
         )
         guard let data = try? JSONEncoder().encode(payload) else { return "" }
         return "THREADING://PAIR#\(data.base64URLEncodedString())"

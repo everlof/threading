@@ -134,6 +134,50 @@ final class RemoteInvitationLinkTests: XCTestCase {
     }
 
     #if canImport(Darwin)
+    /// The invitation page offers a workroom invitation only to the app, so the link says what
+    /// it is for. Every link minted before that carries no purpose and still reads as a chat, and
+    /// a purpose this build does not know is ignored rather than refused.
+    func testAWorkroomInvitationSaysWhatItIsForAndOtherLinksStillRead() throws {
+        let expiry = Date(timeIntervalSince1970: Date().addingTimeInterval(600).timeIntervalSince1970.rounded(.down))
+        let workroom = try XCTUnwrap(HostedPairingLink(
+            serviceURL: RemoteInvitationWebLink.productionOrigin, hostID: "host", deviceID: "invite-1",
+            rendezvousCredential: "transport-secret", bootstrapToken: "workroom-secret",
+            expiresAt: expiry, pinnedFingerprintCode: fingerprint, purpose: .workroom))
+        let decoded = try XCTUnwrap(HostedPairingLink(string: workroom.scannablePayload))
+        XCTAssertEqual(decoded, workroom)
+        XCTAssertEqual(decoded.purpose, .workroom)
+
+        let chat = try XCTUnwrap(HostedPairingLink(
+            serviceURL: RemoteInvitationWebLink.productionOrigin, hostID: "host", deviceID: "invite-2",
+            rendezvousCredential: "transport-secret", bootstrapToken: "chat-secret",
+            expiresAt: expiry, pinnedFingerprintCode: fingerprint))
+        XCTAssertFalse(chat.scannablePayload.contains(Self.purposeKey), "a chat link grew a purpose")
+        XCTAssertNil(try XCTUnwrap(HostedPairingLink(string: chat.scannablePayload)).purpose)
+
+        let future = try Self.payload(of: workroom, settingPurpose: "something-later")
+        let read = try XCTUnwrap(HostedPairingLink(string: future), "an unknown purpose refused the link")
+        XCTAssertNil(read.purpose)
+        XCTAssertEqual(read.bootstrapToken, "workroom-secret")
+    }
+
+    private static let purposeKey = "\"k\""
+
+    /// The link's own payload with its purpose replaced, as a later build might write it.
+    private static func payload(of link: HostedPairingLink, settingPurpose purpose: String) throws -> String {
+        let prefix = "THREADING://PAIR#"
+        let encoded = String(link.scannablePayload.dropFirst(prefix.count))
+        var padded = encoded.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while padded.count % 4 != 0 { padded += "=" }
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: XCTUnwrap(Data(base64Encoded: padded))) as? [String: Any])
+        object["k"] = purpose
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let base64URL = data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        return prefix + base64URL
+    }
+
     func testHostedInvitationRemainsOneDetectedURLInsideAMessage() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let introduction = "Your invitation:\n"

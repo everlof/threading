@@ -19,6 +19,9 @@ struct WorkroomQuestionView: View {
     @State private var draftIsDirty = false
     @State private var showsAnswerForm = false
     @State private var message = ""
+    /// The person asked to write before answering. Until then an open question keeps its box
+    /// folded away, so the form is the one place to type, as the portal does.
+    @State private var wantsToWrite = false
     @FocusState private var composerIsFocused: Bool
     // Loaders (status-integrity review): the first load, and one send at a time — answer,
     // message or decline — each an awaited `RemoteClient` request bounded by its timeout. Success
@@ -61,7 +64,7 @@ struct WorkroomQuestionView: View {
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await load() }
             .safeAreaInset(edge: .bottom) {
-                if question?.canMessage == true { composer(proxy) }
+                if let question, showsComposer(question) { composer(proxy) }
             }
             .onChange(of: justSaved) { _, saved in
                 if saved { withAnimation { proxy.scrollTo(Self.topID, anchor: .top) } }
@@ -83,6 +86,15 @@ struct WorkroomQuestionView: View {
             }
         }
         .background(theme.ground.ignoresSafeArea())
+        .toolbar {
+            // A number field's keypad has no return key, and a long answer's Return breaks the
+            // line: Done is the one way out of the keyboard that every field shares.
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button(MobileL10n.string("Done")) { Self.dismissKeyboard() }
+                    .tint(theme.accent)
+            }
+        }
         .navigationTitle(MobileL10n.string("Question"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(theme.surface, for: .navigationBar)
@@ -112,6 +124,19 @@ struct WorkroomQuestionView: View {
         if justSaved { savedNotice(question) }
         header(question)
         if question.canAnswer { answerSection(question) }
+        if question.canMessage, !showsComposer(question) {
+            Button {
+                wantsToWrite = true
+                DispatchQueue.main.async { composerIsFocused = true }
+            } label: {
+                Label(MobileL10n.string("Need to ask something before you answer?"),
+                      systemImage: "bubble.left")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity, minHeight: MobileDesign.Size.minimumTapTarget)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.accent)
+        }
         if !question.entries.isEmpty {
             Text(MobileL10n.string("Conversation"))
                 .font(.subheadline.weight(.semibold))
@@ -210,7 +235,7 @@ struct WorkroomQuestionView: View {
 
     private func savedNotice(_ question: RemoteWorkroomQuestionDTO) -> some View {
         VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
-            Label(MobileL10n.string("Your answer is saved. %@ has received it.", question.askerName),
+            Label(MobileL10n.string("Your answer is saved. The agent that asked has received it."),
                   systemImage: "checkmark.circle.fill")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(theme.positive)
@@ -265,7 +290,7 @@ struct WorkroomQuestionView: View {
             WorkroomTextEntry(
                 label: question.fields.isEmpty
                     ? MobileL10n.string("Your answer")
-                    : MobileL10n.string("Comment (optional)"),
+                    : MobileL10n.string("Comment with your answer (optional)"),
                 text: Binding(get: { draft.comment }, set: { draft.comment = $0; draftIsDirty = true }),
                 isLong: true
             )
@@ -359,11 +384,24 @@ struct WorkroomQuestionView: View {
         .overlay(alignment: .top) { Divider().overlay(theme.divider) }
     }
 
+    /// Who reads what is written here, in words: the agent's chat name means nothing to a person
+    /// outside the Mac, and "Write to" a chat's name read as an instruction to someone else.
     private var composerPlaceholder: String {
         guard let question else { return "" }
         return question.viewer == .owner
             ? MobileL10n.string("Write a comment")
-            : MobileL10n.string("Write to %@", question.askerName)
+            : MobileL10n.string("Write to the agent that asked")
+    }
+
+    /// The owner comments from the bottom box; a person gets it once a conversation has started,
+    /// once the question is answered or closed, or when they ask for it.
+    private func showsComposer(_ question: RemoteWorkroomQuestionDTO) -> Bool {
+        guard question.canMessage else { return false }
+        return question.viewer == .owner || question.state != .open || !question.entries.isEmpty || wantsToWrite
+    }
+
+    private static func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     // MARK: Actions

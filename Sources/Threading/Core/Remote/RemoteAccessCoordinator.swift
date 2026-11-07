@@ -1173,7 +1173,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                       HostedPairingLink(serviceURL: origin, hostID: issued.hostID,
                                         deviceID: issued.deviceID, rendezvousCredential: credential,
                                         bootstrapToken: token, expiresAt: issued.expiresAt,
-                                        pinnedFingerprintCode: fingerprint.pairingCode)
+                                        pinnedFingerprintCode: fingerprint.pairingCode, purpose: .workroom)
                   }),
                   let url = RemoteInvitationWebLink.url(
                       appPayload: link.scannablePayload,

@@ -21,7 +21,7 @@ body{margin:0;min-height:100svh;display:grid;place-items:center}main{max-width:2
 .brand{font-size:.85rem;letter-spacing:.12em;text-transform:uppercase;color:light-dark(#666,#aaa)}
 h1{font-size:2rem;letter-spacing:-.04em;margin:1rem 0}p{line-height:1.6;color:light-dark(#555,#bbb)}
 a{display:inline-block;padding:.85rem 1.25rem;border-radius:.6rem;background:light-dark(#202020,#eee);color:light-dark(#fff,#171717);text-decoration:none;font-weight:600;margin:1rem 0}a:focus-visible{outline:3px solid #687dff;outline-offset:4px}
-.actions{display:flex;flex-wrap:wrap;gap:.6rem;margin:1.5rem 0}.actions a{margin:0}#open{background:transparent;color:inherit;box-shadow:inset 0 0 0 1px light-dark(#bbb,#555)}@media(max-width:420px){.actions{flex-direction:column}.actions a{text-align:center}}
+.actions{display:flex;flex-wrap:wrap;gap:.6rem;margin:1.5rem 0}.actions a{margin:0}#open:not(.primary){background:transparent;color:inherit;box-shadow:inset 0 0 0 1px light-dark(#bbb,#555)}@media(max-width:420px){.actions{flex-direction:column}.actions a{text-align:center}}
 small{display:block;line-height:1.5;color:light-dark(#666,#aaa)}[hidden]{display:none}
 </style><main><div class="brand">Threading</div><h1>You’re invited to a chat</h1>
 <p id="message">Join the shared chat in your browser or open it in the Threading app.</p>
@@ -38,7 +38,31 @@ try {
  if(link.protocol!=='threading:' || !['pair','join'].includes(link.hostname.toLowerCase()) || !link.hash || link.username || link.password || link.port || link.pathname || link.search) throw Error();
  button.href=payload; button.hidden=false;
  const browser=document.getElementById('browser');
- if(link.hostname.toLowerCase()==='pair') { browser.href='/join/chat#'+encoded; browser.hidden=false; }
+ // A workroom invitation is answered in the app alone: the Mac refuses it from a browser, so
+ // the page offers no browser and says what is waiting, in Swedish or English.
+ let purpose='';
+ if(link.hostname.toLowerCase()==='pair') {
+  try { purpose=String(JSON.parse(atob(link.hash.slice(1).replaceAll('-','+').replaceAll('_','/'))).k||''); } catch {}
+ }
+ if(purpose==='workroom') {
+  const sv=(navigator.languages||[navigator.language||'']).some(l=>String(l).toLowerCase().startsWith('sv'));
+  const words=sv ? {
+   lang:'sv', title:'Dina frågor · Threading', heading:'Du har frågor att svara på',
+   message:'Någon som använder Threading har frågor till dig. Öppna dem i Threading-appen på den här iPhonen. Appen säger till när en ny fråga kommer.',
+   help:'Du ser bara frågorna till dig, aldrig något annat på avsändarens Mac. Inbjudan fungerar en gång, och avsändarens Mac behöver vara igång med Threading öppet.',
+   open:'Öppna i Threading'
+  } : {
+   lang:'en', title:'Your questions · Threading', heading:'You have questions to answer',
+   message:'Someone using Threading has questions for you. Open them in the Threading app on this iPhone. The app tells you when a new one arrives.',
+   help:'You see only the questions for you, never anything else on the sender’s Mac. The invitation works once, and the sender’s Mac must be online with Threading open.',
+   open:'Open in Threading'
+  };
+  document.documentElement.lang=words.lang; document.title=words.title;
+  document.querySelector('h1').textContent=words.heading;
+  document.getElementById('message').textContent=words.message;
+  document.getElementById('help').textContent=words.help;
+  button.textContent=words.open; button.classList.add('primary');
+ } else if(link.hostname.toLowerCase()==='pair') { browser.href='/join/chat#'+encoded; browser.hidden=false; }
  if(link.hostname.toLowerCase()==='join') {
   const note=document.getElementById('network');note.hidden=false;
   const privateURL=new URL(atob(link.hash.slice(1).replaceAll('-','+').replaceAll('_','/')));
