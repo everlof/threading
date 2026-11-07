@@ -71,7 +71,10 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
         XCTAssertFalse(RemoteNotificationBrokerCompatibility.delivers(.secretApproval, brokerVersion: 2))
         XCTAssertFalse(RemoteNotificationBrokerCompatibility.delivers(.secretApproval, brokerVersion: 0))
         XCTAssertTrue(RemoteNotificationBrokerCompatibility.delivers(.secretApproval, brokerVersion: 3))
-        for kind in RemoteNotificationKind.allCases where kind != .secretApproval && kind != .mirrorInvite {
+        // Kinds a later protocol introduced are pinned by their own tests; Linked Workrooms' in
+        // `WorkroomRemoteBridgeTests`.
+        let newer: Set<RemoteNotificationKind> = [.secretApproval, .mirrorInvite, .workroom]
+        for kind in RemoteNotificationKind.allCases where !newer.contains(kind) {
             XCTAssertTrue(RemoteNotificationBrokerCompatibility.delivers(kind, brokerVersion: 1), "\(kind)")
         }
     }

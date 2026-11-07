@@ -188,6 +188,7 @@ final class ComponentGalleryViewController: NSViewController {
         "RunPlanDisclosureView",
         "SearchMatchLabel",
         "SearchResultRowView",
+        "ScannableCodeView",
         "ScreenshotReportDropTargetView",
         "SemanticHierarchySceneView",
         "SemanticSceneView",
@@ -295,6 +296,7 @@ final class ComponentGalleryViewController: NSViewController {
         "WindowCommandBandView",
         "WindowChromeFrameView",
         "WindowTitleBandView",
+        "WorkroomPaneViewController",
         "WorkspaceNavigatorPipelinePlaceholderView",
         "WorkspaceNavigatorPipelineResultsView",
         "WorkspaceNavigatorPipelineSearchBandView",
@@ -2757,6 +2759,19 @@ final class ComponentGalleryViewController: NSViewController {
         static let height: CGFloat = 130
     }
 
+    /// The pane over a fixed reading. Its controller is the gallery's child, so its buttons keep
+    /// a target; what they ask for is shown as a receipt rather than performed.
+    private func makeWorkroomPaneSample() -> NSView {
+        let pane = WorkroomPaneViewController()
+        addChild(pane)
+        let host = pane.fixedSizeHost(GalleryWorkroomSample.size)
+        pane.onAction = { [weak self] action in
+            self?.showReceipt(L10n.format("Workroom pane asked for %@", String(describing: action)))
+        }
+        pane.apply(GalleryWorkroomSample.presentation)
+        return host
+    }
+
     /// The reading at three widths: whole, one complete segment, nothing.
     private func galleryCompoundValues() -> NSView {
         let column = NSStackView()
@@ -3857,6 +3872,28 @@ final class ComponentGalleryViewController: NSViewController {
                         + "on one ink column, the geometry the Info and Sharing panes share "
                         + "instead of each stating their own insets.",
                     makePanelListSample()
+                ),
+                story(
+                    "WorkroomPaneViewController",
+                    "One chat's Linked Workrooms in the display panel: its rooms and their people, "
+                        + "each with where they will see a question and the app invitation beside "
+                        + "them, and the questions the chat asked. Click a question for its "
+                        + "conversation and a comment box.",
+                    makeWorkroomPaneSample()
+                ),
+                story(
+                    "ScannableCodeView",
+                    "A code a phone's camera reads, with one line under it the owner can change — "
+                        + "Invite to App's invitation. Drawn at the side it is shown at, and again "
+                        + "when the theme changes.",
+                    ScannableCodeView(
+                        payload: GalleryWorkroomSample.invitationPayload,
+                        caption: L10n.format("One person · Single use · Accept before %@",
+                                             Date().addingTimeInterval(GalleryWorkroomSample.invitationLifetime)
+                                                .formatted(date: .omitted, time: .shortened)),
+                        side: GalleryWorkroomSample.codeSide,
+                        accessibilityLabel: L10n.string("Invitation code")
+                    )
                 ),
                 story(
                     "ImageCompareView & CompareInspectorView",
@@ -7977,5 +8014,40 @@ private final class GalleryHoverPolicyDemo {
         scheduler.cancelPendingWork()
         popover?.close()
         popover = nil
+    }
+}
+
+/// The Workroom stories' fixed reading: one open room with a person outside the app and the owner,
+/// a closed one, and a question answered.
+private enum GalleryWorkroomSample {
+    static let size = NSSize(width: 340, height: 360)
+    static let codeSide: CGFloat = 160
+    static let invitationLifetime: TimeInterval = 24 * 60 * 60
+    /// Not an invitation anything can redeem: the app's scheme around a word.
+    static let invitationPayload = "THREADING://PAIR#GALLERY" // localization-ignore: a sample payload, not copy
+
+    @MainActor static var presentation: WorkroomPanePresentation {
+        WorkroomPanePresentation(
+            chatTitle: "MOMS", // localization-ignore: a sample chat's name
+            rooms: [
+                .init(id: "open", title: "Sonda", // localization-ignore: a sample room's name
+                      status: [L10n.format("Open until %@", Date().addingTimeInterval(7 * 24 * 60 * 60)
+                                .formatted(date: .abbreviated, time: .omitted)),
+                               L10n.format("Open questions: %d", 1)].joined(separator: WorkroomPaneFeedDefaults.separator),
+                      canClose: true,
+                      people: [
+                        .init(id: "viktor", name: "Viktor", // localization-ignore: a sample person's name
+                              status: L10n.string("Not in the app yet"), canInvite: true),
+                        .init(id: "owner", name: L10n.string("Owner"),
+                              status: L10n.string("You · your paired iPhone shows every question"), canInvite: false)
+                      ]),
+                .init(id: "closed", title: "Avstämning", // localization-ignore: a sample room's name
+                      status: L10n.string("Closed"), canClose: false, people: [])
+            ],
+            questions: [
+                .init(id: "q", title: "Hur avrundas momsen?", // localization-ignore: a sample question
+                      status: ["Viktor", L10n.string("Answered")].joined(separator: WorkroomPaneFeedDefaults.separator))
+            ]
+        )
     }
 }

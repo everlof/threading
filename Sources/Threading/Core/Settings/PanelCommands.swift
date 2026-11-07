@@ -5,7 +5,7 @@ import Foundation
 enum PanelCommandTarget: Equatable {
     case simulator, androidDevice, realDevice, audit, browser, privateBrowser, overview, compare
     case supervision
-    case notificationTest, webExtensions
+    case notificationTest, workroom, webExtensions
     case nativePlugin(URL)
     case nativePluginSection(identifier: String, section: String)
     case extensionPanel(identifier: String, panelID: String)
@@ -43,6 +43,8 @@ enum PanelCommands {
         Entry(id: "panel.notificationTest", title: "Push Test", icon: "bell.badge",
               target: .notificationTest,
               detail: "Send a test notification from this chat to the Mac or iPhone"),
+        Entry(id: "panel.workroom", title: "Workroom", icon: WorkroomPaneSymbols.tab, target: .workroom,
+              detail: "This chat’s rooms, the people in them, and its questions and answers"),
         Entry(id: "panel.audit", title: "Execution audit", icon: "checklist.checked", target: .audit),
         Entry(id: "panel.browser", title: "New Browser", icon: "globe", target: .browser),
         Entry(id: "panel.webExtensions", title: "Web Extensions", icon: "puzzlepiece.extension", target: .webExtensions,

@@ -3,9 +3,17 @@ import ThreadingController
 
 // MARK: - Workrooms Preferences
 
-/// Settings ▸ Workrooms: whether agents may ask people outside this Mac at all, how an opened
-/// room is reached, who those people are, and which rooms are open to them. Everything an
-/// outsider can do starts here or in the opening sheet — the web portal has no owner side.
+/// Settings ▸ Workrooms: whether agents may ask people outside this Mac at all, who those people
+/// are and whether they have the app, which rooms are open, and — folded away — how a person
+/// without the app answers in a browser.
+///
+/// The page was one long list of everything the feature has: the tunnel and its domain first,
+/// then every person with four buttons, then every room with its questions. The pilot owner
+/// called it hard to grasp, and it was answering the wrong question for most visits — "who can
+/// answer, and how do I get them in" — after the infrastructure. So the order is the decision
+/// order: the switch, people with the app invitation, rooms; the web path, which needs a tunnel
+/// and its provider, is one disclosure at the end. Each chat's own questions are in its Workroom
+/// panel, not here.
 ///
 /// The people and rooms are externally sized, so the page reads bounded slices of them
 /// (`WorkroomsPageDefaults`) off the main actor and rebuilds only its own small stack.
@@ -21,8 +29,6 @@ final class WorkroomsPreferencesViewController: NSViewController {
 
     private struct RoomEntry {
         let summary: WorkroomSummary
-        let questions: [WorkroomQuestion]
-        let people: [WorkroomPersonID: String]
     }
 
     private struct Snapshot {
@@ -40,7 +46,10 @@ final class WorkroomsPreferencesViewController: NSViewController {
     private var loading: Task<Void, Never>?
     private let peopleCards = NSStackView()
     private let roomCards = NSStackView()
+    private let browserCards = NSStackView()
     private var statusField: NSTextField?
+    /// The browser section's fold: a view state, not a preference.
+    private var showsBrowserAnswering = false
     private var personButtons: [ObjectIdentifier: WorkroomPersonID] = [:]
     private var invitationButtons: [ObjectIdentifier: WorkroomLinkExtension.Target] = [:]
     private var roomButtons: [ObjectIdentifier: WorkroomID] = [:]
@@ -70,7 +79,10 @@ final class WorkroomsPreferencesViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView()
+        let root = SettingsPageRootView()
+        // A search naming the tunnel, its domain or a web link finds it behind the browser fold.
+        root.onPrepareToReveal = { [weak self] _ in self?.unfoldBrowserAnswering() ?? false }
+        view = root
         nameField.placeholderString = L10n.string("Name")
         handleField.placeholderString = L10n.string("handle")
         languageField.placeholderString = "sv" // localization-ignore: a BCP-47 example, not copy
@@ -128,11 +140,8 @@ final class WorkroomsPreferencesViewController: NSViewController {
                 after = page.next
             }
             snapshot.moreRooms = rooms.count > WorkroomsPageDefaults.rooms
-            let names = Dictionary(snapshot.people.map { ($0.person.id, $0.person.name) }, uniquingKeysWith: { first, _ in first })
             for room in rooms.suffix(WorkroomsPageDefaults.rooms).reversed() {
-                let questions = try await store.workroomAsks(roomID: room.id, limit: WorkroomsPageDefaults.questionsPerRoom)
-                snapshot.rooms.append(RoomEntry(summary: try await store.workroomSummary(room.id),
-                                                questions: questions.items, people: names))
+                snapshot.rooms.append(RoomEntry(summary: try await store.workroomSummary(room.id)))
             }
         } catch {
             snapshot.failure = MacMailbox.describe(error)
@@ -143,37 +152,41 @@ final class WorkroomsPreferencesViewController: NSViewController {
     // MARK: - Building
 
     private func buildPage() {
-        for cards in [peopleCards, roomCards] {
+        for cards in [peopleCards, roomCards, browserCards] {
             cards.orientation = .vertical
             cards.alignment = .leading
             cards.spacing = 0
         }
-        var tunnelStatus: NSTextField?
-        let tunnel = SettingsUI.row(title: "Tunnel", subtitle: statusLine(), control: providerPopUp,
-                                    subtitleField: &tunnelStatus)
-        statusField = tunnelStatus
         let sections: [NSView] = [
-            SettingsUI.section(nil, SettingsCard(rows: [SettingsUI.row(
-                title: "Ask people outside this Mac",
-                subtitle: "Structured questions to domain experts; answers return as mail.",
-                help: SettingsUI.help(
-                    "Linked Workrooms",
-                    "An agent can create a private room in its project when you ask, and put questions in it to people you add here. Nothing is reachable from outside this Mac until you approve opening a room to a person.",
-                    "The person answers through a link you send them. Their answers are information for the agent, never approvals or permissions."
+            SettingsUI.section(nil, SettingsCard(rows: [
+                SettingsUI.row(
+                    title: "Ask people outside this Mac",
+                    subtitle: "Structured questions to domain experts; answers return as mail.",
+                    help: SettingsUI.help(
+                        "Linked Workrooms",
+                        "An agent can create a private room in its project when you ask, and put questions in it to people you add here. Nothing is reachable from outside this Mac until you approve opening a room to a person.",
+                        "The person answers in the Threading app or, through a link you send them, in a browser. Their answers are information for the agent, never approvals or permissions."
+                    ),
+                    control: enabledToggle
                 ),
-                control: enabledToggle
-            )])),
-            SettingsUI.section("Public Address", SettingsCard(rows: [
-                tunnel,
-                SettingsUI.row(title: "Reserved domain", subtitle: "Optional. Keeps links working after a restart.",
-                               control: domainField)
-            ]), help: SettingsUI.help(
-                "Public Address",
-                "An open room is published through a tunnel to a port on this Mac that serves only the people's pages. The tunnel provider terminates the connection and can read what passes through it.",
-                "ngrok uses your own ngrok configuration and account. A Cloudflare Quick Tunnel needs no account, but its address changes whenever Threading restarts, so links you sent stop working."
+                SettingsUI.row(
+                    title: "Questions for you go to",
+                    subtitle: "A chat tied to a workroom asks you here instead of waiting in its terminal.",
+                    help: SettingsUI.help(
+                        "Questions for you",
+                        "A chat that created or asked in an open workroom must not stop on a question in its terminal. Questions for you go to this person through the workroom, like any other person's, and the answer comes back to the chat as mail.",
+                        "Add yourself as a person first. You are added to every room you approve opening, so you can answer from your own phone."
+                    ),
+                    control: ownerPopUp
+                )
+            ])),
+            SettingsUI.section("People", peopleCards, help: SettingsUI.help(
+                "People",
+                "Invite to App… shows a code the person scans with their phone's camera. The Threading app then shows them only their own questions, with notifications, and never anything else on this Mac.",
+                "Sign Out ends a person's app access and their browsers. A chat's own Workroom panel lists the people of its rooms with the same invitation."
             )),
-            SettingsUI.section("People", peopleCards),
-            SettingsUI.section("Rooms", roomCards)
+            SettingsUI.section("Rooms", roomCards),
+            SettingsUI.section(nil, browserCards)
         ]
         let closeAll = SettingsUI.button("Close All Workrooms", target: self, action: #selector(closeAll))
         let page = SettingsUI.page(title: "Workrooms",
@@ -212,6 +225,7 @@ final class WorkroomsPreferencesViewController: NSViewController {
         roomButtons.removeAll()
         replaceCard(in: peopleCards, rows: peopleRows())
         replaceCard(in: roomCards, rows: roomRows())
+        replaceBrowserCard()
         updateKeyViewLoop()
         if let focusedControl, focusedControl.window === view.window {
             view.window?.makeFirstResponder(focusedControl)
@@ -219,10 +233,68 @@ final class WorkroomsPreferencesViewController: NSViewController {
     }
 
     private func replaceCard(in stack: NSStackView, rows: [NSView]) {
+        install(SettingsCard(rows: rows), in: stack)
+    }
+
+    private func install(_ card: NSView, in stack: NSStackView) {
         for old in stack.arrangedSubviews { stack.removeArrangedSubview(old); old.removeFromSuperview() }
-        let card = SettingsCard(rows: rows)
         stack.addArrangedSubview(card)
         card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    }
+
+    /// The web path, folded: the tunnel, its domain, and each person's single-use web link. Only
+    /// someone without the app needs any of it.
+    private func replaceBrowserCard() {
+        statusField = nil
+        var rows: [NSView] = []
+        if showsBrowserAnswering {
+            var tunnelStatus: NSTextField?
+            rows.append(SettingsUI.row(title: "Tunnel", subtitle: statusLine(), help: SettingsUI.help(
+                "Public Address",
+                "An open room is published through a tunnel to a port on this Mac that serves only the people's pages. The tunnel provider terminates the connection and can read what passes through it.",
+                "ngrok uses your own ngrok configuration and account. A Cloudflare Quick Tunnel needs no account, but its address changes whenever Threading restarts, so links you sent stop working."
+            ), control: providerPopUp, subtitleField: &tunnelStatus))
+            statusField = tunnelStatus
+            rows.append(SettingsUI.row(title: "Reserved domain", subtitle: "Optional. Keeps links working after a restart.",
+                                       control: domainField))
+            rows += snapshot.people.map(browserRow)
+        }
+        install(SettingsUI.disclosureCard(
+            title: "Answer in a browser",
+            subtitle: "For someone without the app: a single-use link to their questions, published through a tunnel while a room is open.",
+            isExpanded: showsBrowserAnswering,
+            accessibilityIdentifier: WorkroomsPageIdentifiers.browserAnswering,
+            onToggle: { [weak self] expanded in
+                self?.showsBrowserAnswering = expanded
+                self?.refreshData()
+            },
+            detailRows: rows
+        ), in: browserCards)
+    }
+
+    /// Opens the browser fold for a settings search; false when it was open already.
+    private func unfoldBrowserAnswering() -> Bool {
+        guard !showsBrowserAnswering else { return false }
+        showsBrowserAnswering = true
+        refreshData()
+        return true
+    }
+
+    private func browserRow(_ entry: PersonEntry) -> NSView {
+        let person = entry.person
+        let copy = SettingsUI.button(copiedPerson == person.id ? "Copied" : "Copy Link", target: self,
+                                     action: #selector(copyLink(_:)))
+        copy.isEnabled = WorkroomHost.shared.publishedOrigin != nil
+        personButtons[ObjectIdentifier(copy)] = person.id
+        var controls = [copy]
+        if let invitation = entry.invitation, invitation.state == .pending {
+            let extend = SettingsUI.button("Extend Link…", target: self, action: #selector(extendLink(_:)))
+            invitationButtons[ObjectIdentifier(extend)] = .init(person: person, invitation: invitation)
+            controls.append(extend)
+        }
+        return SettingsUI.row(title: person.name, subtitle: browserLine(entry),
+                              control: SettingsUI.controlGroup(controls, spacing: Design.Spacing.small),
+                              localizes: false)
     }
 
     private func updateKeyViewLoop() {
@@ -259,33 +331,17 @@ final class WorkroomsPreferencesViewController: NSViewController {
         }
         let owner = AppSettings.shared.workroomOwnerHandle
         ownerPopUp.selectItem(at: snapshot.people.firstIndex { $0.person.handle == owner }.map { $0 + 1 } ?? 0)
-        var rows: [NSView] = [SettingsUI.row(
-            title: "Questions for you go to",
-            subtitle: "A chat tied to a workroom asks you here instead of waiting in its terminal.",
-            help: SettingsUI.help(
-                "Questions for you",
-                "A chat that created or asked in an open workroom must not stop on a question in its terminal. Questions for you go to this person through the workroom, like any other person's, and the answer comes back to the chat as mail.",
-                "Add yourself as a person first. You are added to every room you approve opening, so you can answer from the same link on your phone."
-            ),
-            control: ownerPopUp
-        )]
-        rows += snapshot.people.map { entry in
+        var rows: [NSView] = snapshot.people.map { entry in
             let person = entry.person
-            let copy = SettingsUI.button(copiedPerson == person.id ? "Copied" : "Copy Link", target: self,
-                                         action: #selector(copyLink(_:)))
-            copy.isEnabled = WorkroomHost.shared.publishedOrigin != nil
-            personButtons[ObjectIdentifier(copy)] = person.id
-            let invite = SettingsUI.button("Invite to App…", target: self, action: #selector(inviteToApp(_:)))
-            personButtons[ObjectIdentifier(invite)] = person.id
+            var controls: [NSView] = []
+            if person.handle != owner {
+                let invite = SettingsUI.button("Invite to App…", target: self, action: #selector(inviteToApp(_:)))
+                personButtons[ObjectIdentifier(invite)] = person.id
+                controls.append(invite)
+            }
             let signOut = SettingsUI.button("Sign Out", target: self, action: #selector(signOut(_:)))
             signOut.isEnabled = !entry.devices.isEmpty || !entry.app.members.isEmpty || !entry.app.links.isEmpty
             personButtons[ObjectIdentifier(signOut)] = person.id
-            var controls = [copy, invite]
-            if let invitation = entry.invitation, invitation.state == .pending {
-                let extend = SettingsUI.button("Extend Link…", target: self, action: #selector(extendLink(_:)))
-                invitationButtons[ObjectIdentifier(extend)] = .init(person: person, invitation: invitation)
-                controls.append(extend)
-            }
             controls.append(signOut)
             return SettingsUI.row(title: person.name, subtitle: personLine(entry),
                                   control: SettingsUI.controlGroup(controls, spacing: Design.Spacing.small),
@@ -304,8 +360,18 @@ final class WorkroomsPreferencesViewController: NSViewController {
         return rows
     }
 
+    /// Who they are to agents, and where they will see a question — the app first, because that
+    /// is where they are told about it.
     private func personLine(_ entry: PersonEntry) -> String {
-        var parts = [entry.person.handle, entry.person.language]
+        [entry.person.handle, entry.person.language,
+         WorkroomPaneFeed.personStatus(app: entry.app, browsers: entry.devices,
+                                       isOwner: entry.person.handle == AppSettings.shared.workroomOwnerHandle)]
+            .joined(separator: WorkroomPaneFeedDefaults.separator)
+    }
+
+    /// The person's browsers and their web link, for the folded browser section.
+    private func browserLine(_ entry: PersonEntry) -> String {
+        var parts: [String] = []
         if let device = entry.devices.first {
             parts.append(L10n.format("%d browsers, last %@", entry.devices.count, Self.short(device.lastSeenAt)))
             parts.append(device.label)
@@ -315,15 +381,10 @@ final class WorkroomsPreferencesViewController: NSViewController {
             parts.append(expired
                 ? L10n.format("unused link expired %@", Self.short(invitation.expiresAt))
                 : L10n.format("link sent, unused until %@", Self.short(invitation.expiresAt)))
-        } else if entry.devices.isEmpty, entry.invitation == nil, entry.app.members.isEmpty {
+        } else if entry.devices.isEmpty {
             parts.append(L10n.string("no link yet"))
         }
-        if !entry.app.members.isEmpty {
-            parts.append(L10n.format("%d phones in the app", entry.app.members.count))
-        } else if let link = entry.app.links.last {
-            parts.append(L10n.format("app invitation unused until %@", link.expiresAt.formatted(date: .abbreviated, time: .shortened)))
-        }
-        return parts.joined(separator: " · ")
+        return parts.joined(separator: WorkroomPaneFeedDefaults.separator)
     }
 
     private func roomRows() -> [NSView] {
@@ -333,38 +394,25 @@ final class WorkroomsPreferencesViewController: NSViewController {
         guard !snapshot.rooms.isEmpty else {
             return [SettingsUI.row(title: "No rooms yet", subtitle: "An agent creates one when you ask it to.")]
         }
-        var rows: [NSView] = []
-        for entry in snapshot.rooms {
+        var rows: [NSView] = snapshot.rooms.map { entry in
             let summary = entry.summary
-            var parts = [WorkroomAgentCommandService.state(summary.publication)]
-            if summary.publication.isOpen(), let until = summary.publication.expiresAt {
-                parts.append(L10n.format("until %@", Self.short(until)))
-            }
+            var parts = [WorkroomPaneFeed.roomStatus(summary)]
             if !summary.people.isEmpty { parts.append(summary.people.map(\.name).joined(separator: ", ")) }
-            parts.append(L10n.format("%d open questions", summary.openQuestions))
             var control: NSView?
             if summary.publication.state == .open {
                 let close = SettingsUI.button("Close", target: self, action: #selector(closeRoom(_:)))
                 roomButtons[ObjectIdentifier(close)] = summary.room.id
                 control = close
             }
-            rows.append(SettingsUI.row(title: summary.room.title, subtitle: parts.joined(separator: " · "),
-                                       control: control, localizes: false))
-            for question in entry.questions {
-                rows.append(SettingsUI.detailRow(
-                    symbol: Self.symbol(question.state),
-                    title: question.draft.title,
-                    detail: [entry.people[question.person] ?? "", question.state.rawValue,
-                             question.answerRevision > 0 ? L10n.format("revision %d", question.answerRevision) : ""]
-                        .filter { !$0.isEmpty }.joined(separator: " · "),
-                    localizes: false
-                ))
-            }
+            return SettingsUI.row(title: summary.room.title, subtitle: parts.joined(separator: WorkroomPaneFeedDefaults.separator),
+                                  control: control, localizes: false)
         }
         if snapshot.moreRooms {
             rows.append(SettingsUI.row(title: L10n.format("Showing the newest %d rooms", WorkroomsPageDefaults.rooms),
                                        localizes: false))
         }
+        rows.append(SettingsUI.row(title: "Questions and answers",
+                                   subtitle: "Each chat shows its own beside it: choose Workroom from the + menu of its side panel."))
         return rows
     }
 
@@ -435,24 +483,11 @@ final class WorkroomsPreferencesViewController: NSViewController {
     @objc private func inviteToApp(_ sender: ThemedButton) {
         guard let person = personButtons[ObjectIdentifier(sender)] else { return }
         sender.isEnabled = false
+        let name = snapshot.people.first { $0.person.id == person }?.person.name ?? ""
         Task { [weak self] in
-            switch await RemoteAccessCoordinator.shared.prepareWorkroomShare(for: person) {
-            case let .success(created):
-                sender.isEnabled = true
-                let name = self?.snapshot.people.first { $0.person.id == person }?.person.name ?? ""
-                WorkroomAppInvitationAlert.show(created.url, personName: name, expiresAt: created.expiresAt,
-                                                in: self?.view.window)
-                self?.load()
-            case let .failure(error):
-                sender.isEnabled = true
-                // States an outcome and asks nothing, so a plain themed alert.
-                let alert = ThemedAlert()
-                alert.alertStyle = .warning
-                alert.messageText = L10n.string("The app invitation could not be created")
-                alert.informativeText = error.localizedDescription
-                alert.addButton(withTitle: L10n.string("OK"))
-                if let window = self?.view.window { alert.beginSheetModal(for: window) }
-            }
+            await WorkroomAppInvitationAlert.invite(person, name: name, in: self?.view.window)
+            sender.isEnabled = true
+            self?.load()
         }
     }
 
@@ -495,20 +530,14 @@ final class WorkroomsPreferencesViewController: NSViewController {
         guard let date = ISO8601DateFormatter().date(from: iso) else { return iso }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
-
-    private static func symbol(_ state: WorkroomQuestionState) -> String {
-        switch state {
-        case .open: return "questionmark.bubble"
-        case .answered: return "checkmark.bubble"
-        case .declined: return "xmark.bubble"
-        case .withdrawn: return "arrow.uturn.backward"
-        }
-    }
 }
 
 enum WorkroomsPageDefaults {
     static let people = 50
     static let rooms = 20
     static let roomPages = 4
-    static let questionsPerRoom = 5
+}
+
+enum WorkroomsPageIdentifiers {
+    static let browserAnswering = "settings.workrooms.browser"
 }

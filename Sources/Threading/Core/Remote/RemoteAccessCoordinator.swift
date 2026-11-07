@@ -1456,7 +1456,11 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 accessToken: accessToken, authorization: authorization, now: now)
         }
         for person in Array(workroomShares.keys) {
-            guard var shares = workroomShares[person],
+            // A workroom membership is the app's: a browser has no workroom screens, and accepting
+            // there would spend the single-use invitation the person then cannot use in the app.
+            // The server sets `persistsOwnerDevice` exactly for the native app's client header.
+            guard persistsOwnerDevice,
+                  var shares = workroomShares[person],
                   let index = shares.firstIndex(where: {
                       $0.invitationToken == token && $0.expiresAt > Date()
                   }),

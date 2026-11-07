@@ -3944,10 +3944,19 @@ switch it on in **Settings ▸ Workrooms**.
   waiting does not. The participant's inbox stays paginated.
 - **Opening a room.** Nothing is reachable from outside this Mac until you approve it. When an agent
   asks, a sheet names the room, the person, how many questions are waiting, the tunnel, how long it
-  stays open and the agent's reason. Approve, then copy the person's link from **Settings ▸
-  Workrooms** (Copy Link) and send it yourself. Each link works once and signs in that browser;
-  copying a new one cancels an unused earlier one. **Sign Out** ends a person's browsers.
-- **Extending a link.** In **Settings ▸ Workrooms**, choose **Extend Link…** beside a person,
+  stays open and the agent's reason. Approve, and the chat's **Workroom** panel opens with the
+  person in it: choose **Invite to App…** there, or open **Answer in a browser** in **Settings ▸
+  Workrooms**, choose **Copy Link** and send it yourself. Each web link works once and signs in
+  that browser; copying a new one cancels an unused earlier one. **Sign Out** ends a person's app
+  access and browsers.
+- **Beside the chat.** Choose **Workroom** from the **+** menu of a chat's side panel (or View ▸
+  Panels, or the command palette) to see that chat's workrooms: each room, whether it is open and
+  until when, and how many questions wait; its people and where they will see a question — in the
+  app, an unused invitation, a browser, or nowhere yet — with **Invite to App…** beside them; and
+  the questions this chat asked. Click a question to read its conversation and write a comment;
+  the person sees it and the chat gets it as mail. **Close** closes a room at once, as in
+  Settings; its questions and answers stay.
+- **Extending a link.** In **Settings ▸ Workrooms ▸ Answer in a browser**, choose **Extend Link…** beside a person,
   or use **Extend Workroom Link…** in the command palette. This adds seven days to the existing
   unused invitation, keeping the same URL. An expired unused link gets seven days from now.
   Used or replaced invitations cannot be extended. Room closing dates and signed-in browser
@@ -3965,11 +3974,11 @@ switch it on in **Settings ▸ Workrooms**.
   open page picks up a new message or question by itself within seconds; if they are in the middle
   of typing, it shows a banner instead of reloading.
 - **In the Threading app.** Instead of the web page, a person can answer in the Threading iPhone app,
-  with notifications and a badge for what waits for them. In **Settings ▸ Workrooms**, choose
-  **Invite to App…** beside the person: they scan the code with their phone's camera and Threading
+  with notifications and a badge for what waits for them. In the chat's **Workroom** panel or in
+  **Settings ▸ Workrooms**, choose **Invite to App…** beside the person: they scan the code with their phone's camera and Threading
   opens with their questions. Not in the same room? **Copy Link** and send it; tapped in Messages it
-  opens the app (if it opens a web page instead, choose **Open in Threading** there). An
-  invitation works once, within 24 hours. They need no account and never see your chats. Remote Access must be
+  opens the app (if it opens a web page instead, choose **Open in Threading** there; the browser
+  cannot use up an app invitation). An invitation works once, within 24 hours. They need no account and never see your chats. Remote Access must be
   on. **Sign Out** ends their app access and their browsers. On your own paired iPhone, Workrooms
   lists every question; you can read the conversation and **comment** — the person and the agent
   both see it — but you never answer for the person.
@@ -3983,7 +3992,8 @@ switch it on in **Settings ▸ Workrooms**.
   the workroom and carry on. Choose yourself under **Questions for you go to** so questions only
   you can answer reach you the same way; you are added to every room you open. If a chat ends on a
   question twice in a row, the second one is left for you in the terminal.
-- **Public address.** An open room is published through a tunnel: your own **ngrok** (set a
+- **Public address.** Only someone answering in a browser needs it; it is under **Answer in a
+  browser** in **Settings ▸ Workrooms**. An open room is published through a tunnel: your own **ngrok** (set a
   reserved domain so links keep working after a restart), or a **Cloudflare Quick Tunnel**, which
   needs no account but gets a new address whenever Threading restarts. The tunnel provider
   terminates the connection and can read what passes through it. The tunnel runs only while a

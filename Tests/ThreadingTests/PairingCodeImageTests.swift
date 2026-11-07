@@ -326,12 +326,15 @@ final class PairingCodeImageTests: XCTestCase {
             deviceID: "invite-" + host,
             rendezvousCredential: "th_device_" + String(repeating: "r", count: 43),
             bootstrapToken: String(repeating: "b", count: 43),
-            expiresAt: Date().addingTimeInterval(600),
+            // Whole seconds: the payload carries the expiry as a JSON number, which keeps no more.
+            expiresAt: Date(timeIntervalSince1970: Date().addingTimeInterval(600).timeIntervalSince1970.rounded(.down)),
             pinnedFingerprintCode: "CEJBGFAVCYLRQGI2DMOB2HQ7EA"
         ))
         let invitation = try XCTUnwrap(RemoteInvitationWebLink.url(appPayload: link.scannablePayload))
         let payload = WorkroomAppInvitationAlert.scannedPayload(for: invitation)
-        XCTAssertEqual(payload, link.scannablePayload, "the code would carry the web page, not the app")
+        // The app's own payload, not the web page: the same invitation, and the app's scheme.
+        XCTAssertEqual(RemoteInvitation(payload: payload), .hostedPairing(link))
+        XCTAssertTrue(RemoteInvitation.isAppScheme(payload), "the code would carry the web page, not the app")
         let view = ScannableCodeView(
             payload: payload,
             caption: "One person",

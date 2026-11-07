@@ -81,6 +81,7 @@ final class PaneTab {
     case simulator(SimulatorWorkspaceViewController)
     case realDevice(RealDevicePaneViewController)
     case notificationTest(NotificationTestViewController)
+    case workroom(WorkroomPaneViewController)
     case webExtensions(WebExtensionWorkbenchViewController)
     case nativePlugin(NativePluginPaneViewController)
     case extensionPanel(ExtensionPanelViewController)
@@ -156,7 +157,7 @@ final class PaneTab {
       return true
     case .terminal:
       return false
-    case .subagents, .sharing, .supervision, .notificationTest, .webExtensions,
+    case .subagents, .sharing, .supervision, .notificationTest, .workroom, .webExtensions,
       .browserComparison:
       return false
     }
@@ -228,6 +229,11 @@ final class PaneTab {
     return nil
   }
 
+  var workroom: WorkroomPaneViewController? {
+    if case .workroom(let controller) = body { return controller }
+    return nil
+  }
+
   var webExtensions: WebExtensionWorkbenchViewController? {
     if case .webExtensions(let controller) = body { return controller }
     return nil
@@ -267,6 +273,7 @@ final class PaneTab {
     case .simulator(let simulator): return simulator
     case .realDevice(let realDevice): return realDevice
     case .notificationTest(let controller): return controller
+    case .workroom(let controller): return controller
     case .webExtensions(let controller): return controller
     case .extensionPanel(let panel): return panel
     case .compare(let compare): return compare
@@ -308,6 +315,8 @@ final class PaneTab {
       return "iphone.gen2"
     case .notificationTest:
       return "bell.badge"
+    case .workroom:
+      return WorkroomPaneSymbols.tab
     case .webExtensions:
       return "puzzlepiece.extension"
     case .extensionPanel:
@@ -365,6 +374,8 @@ final class PaneTab {
       return L10n.string("iPhone Device")
     case .notificationTest:
       return L10n.string("Push Test")
+    case .workroom:
+      return L10n.string("Workroom")
     case .webExtensions:
       return L10n.string("Web Extensions")
     case .extensionPanel(let panel):

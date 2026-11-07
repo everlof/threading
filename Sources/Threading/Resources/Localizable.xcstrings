@@ -529,6 +529,17 @@
         }
       }
     },
+    "%@ answered" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ svarade"
+          }
+        }
+      }
+    },
     "%@ archived “%@”" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -591,6 +602,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ kan inte köra automatiseringar i sin terminal. Välj Chatt."
+          }
+        }
+      }
+    },
+    "%@ changed the answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ ändrade svaret"
           }
         }
       }
@@ -723,6 +745,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ anpassningsbar yta"
+          }
+        }
+      }
+    },
+    "%@ declined" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ avböjde"
           }
         }
       }
@@ -1384,6 +1417,17 @@
         }
       }
     },
+    "%@ sees your comment, and this chat gets it as mail." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ ser din kommentar, och den här chatten får den som mejl."
+          }
+        }
+      }
+    },
     "%@ sessions can’t run on a remote host yet." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1523,6 +1567,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ kommer att köras på den här Macen igen. Sessioner som redan körs på maskinen fortsätter där, och Threading når dem inte längre."
+          }
+        }
+      }
+    },
+    "%@ withdrew the question" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ drog tillbaka frågan"
           }
         }
       }
@@ -2206,28 +2261,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%d av %d filer · %d läsningar · %d redigeringar"
-          }
-        }
-      }
-    },
-    "%d open questions" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%d öppna frågor"
-          }
-        }
-      }
-    },
-    "%d phones in the app" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%d telefoner i appen"
           }
         }
       }
@@ -4616,6 +4649,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En chatt, en utcheckning eller en terminal som fått ett eget ljud från sin Ljud-meny listas här."
+          }
+        }
+      }
+    },
+    "A code a phone's camera reads, with one line under it the owner can change — Invite to App's invitation. Drawn at the side it is shown at, and again when the theme changes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En kod som telefonens kamera läser, med en rad under som ägaren kan byta — inbjudan från Bjud in till appen. Ritas i den storlek den visas i, och på nytt när temat byts."
           }
         }
       }
@@ -7038,13 +7082,13 @@
         }
       }
     },
-    "Add yourself as a person first. You are added to every room you approve opening, so you can answer from the same link on your phone." : {
+    "Add yourself as a person first. You are added to every room you approve opening, so you can answer from your own phone." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Lägg till dig själv som person först. Du läggs till i varje rum som du godkänner att öppna, så att du kan svara från samma länk i telefonen."
+            "value" : "Lägg till dig själv som person först. Du läggs till i varje rum som du godkänner att öppna, så att du kan svara från din egen telefon."
           }
         }
       }
@@ -7860,6 +7904,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Alla automatiseringar"
+          }
+        }
+      }
+    },
+    "All Questions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alla frågor"
           }
         }
       }
@@ -9189,6 +9244,17 @@
         }
       }
     },
+    "Answer in a browser" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Svara i en webbläsare"
+          }
+        }
+      }
+    },
     "Answer the chooser and continue at reset" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9207,6 +9273,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Svara på den öppna frågan först."
+          }
+        }
+      }
+    },
+    "Answered" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Besvarad"
+          }
+        }
+      }
+    },
+    "Answered · revision %d" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Besvarad · version %d"
           }
         }
       }
@@ -15989,6 +16077,17 @@
         }
       }
     },
+    "Close “%@” to everyone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng ”%@” för alla"
+          }
+        }
+      }
+    },
     "Close “%@”?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15996,6 +16095,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stäng “%@”?"
+          }
+        }
+      }
+    },
+    "Closed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stängt"
           }
         }
       }
@@ -16751,6 +16861,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kommandon"
+          }
+        }
+      }
+    },
+    "Comment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kommentar"
           }
         }
       }
@@ -21122,6 +21243,17 @@
         }
       }
     },
+    "Declined" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avböjd"
+          }
+        }
+      }
+    },
     "Decorations" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23116,6 +23248,17 @@
         }
       }
     },
+    "Each chat shows its own beside it: choose Workroom from the + menu of its side panel." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Varje chatt visar sina egna bredvid sig: välj Workroom i plusmenyn i dess sidopanel."
+          }
+        }
+      }
+    },
     "Earlier messages are not shown." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24961,6 +25104,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Expert fallback för att inspektera en redan känd markör."
+          }
+        }
+      }
+    },
+    "Expired" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Har gått ut"
           }
         }
       }
@@ -27032,6 +27186,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "För skalsessioner. Agenter startas via ditt inloggningsskal."
+          }
+        }
+      }
+    },
+    "For someone without the app: a single-use link to their questions, published through a tunnel while a room is open." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "För den som inte har appen: en engångslänk till deras frågor, publicerad genom en tunnel medan ett rum är öppet."
           }
         }
       }
@@ -29811,6 +29976,17 @@
         }
       }
     },
+    "In the app · last seen %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I appen · senast sedd %@"
+          }
+        }
+      }
+    },
     "In use — waiting" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31004,6 +31180,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bjud in till appen…"
+          }
+        }
+      }
+    },
+    "Invite to App… shows a code the person scans with their phone's camera. The Threading app then shows them only their own questions, with notifications, and never anything else on this Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bjud in till appen… visar en kod som personen skannar med telefonens kamera. Threading-appen visar sedan bara deras egna frågor, med notiser, och aldrig något annat på den här Mac-datorn."
           }
         }
       }
@@ -37395,6 +37582,17 @@
         }
       }
     },
+    "No answer yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inget svar ännu."
+          }
+        }
+      }
+    },
     "No apps found" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38999,6 +39197,17 @@
         }
       }
     },
+    "Not in the app yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte i appen ännu"
+          }
+        }
+      }
+    },
     "Not installed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39050,6 +39259,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Idag är inte en schemalagd dag."
+          }
+        }
+      }
+    },
+    "Not opened to anyone yet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inte öppnat för någon ännu"
           }
         }
       }
@@ -40185,6 +40405,17 @@
         }
       }
     },
+    "One chat's Linked Workrooms in the display panel: its rooms and their people, each with where they will see a question and the app invitation beside them, and the questions the chat asked. Click a question for its conversation and a comment box." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En chatts Linked Workrooms i visningspanelen: dess rum och personerna i dem, var och en med var de ser en fråga och appinbjudan bredvid, och frågorna chatten har ställt. Klicka på en fråga för dess konversation och en kommentarsruta."
+          }
+        }
+      }
+    },
     "One continuous themed card whose repeating rows are recycled at the viewport boundary. Scroll it to exercise real cell reuse rather than a retained stack disguised as a list." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41306,13 +41537,13 @@
         }
       }
     },
-    "Open for %d days. You can close it any time in Settings ▸ Workrooms." : {
+    "Open for %d days. You can close it any time in this chat’s Workroom panel or in Settings ▸ Workrooms." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Öppet i %d dagar. Du kan stänga det när som helst i Inställningar ▸ Workrooms."
+            "value" : "Öppet i %d dagar. Du kan stänga det när som helst i chattens Workroom-panel eller i Inställningar ▸ Workrooms."
           }
         }
       }
@@ -41543,6 +41774,17 @@
         }
       }
     },
+    "Open questions: %d" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna frågor: %d"
+          }
+        }
+      }
+    },
     "Open shared Device Logs or discover Bluetooth packet tools for a paired iPhone." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41725,6 +41967,17 @@
         }
       }
     },
+    "Open until %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppet till %@"
+          }
+        }
+      }
+    },
     "Open usage, limits, and banked resets" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41732,6 +41985,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna användning, gränser och sparade återställningar"
+          }
+        }
+      }
+    },
+    "Open with no end date" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppet utan slutdatum"
           }
         }
       }
@@ -42940,6 +43204,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Personer"
+          }
+        }
+      }
+    },
+    "People, links and the public address, in Settings ▸ Workrooms" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personer, länkar och den publika adressen, i Inställningar ▸ Workrooms"
           }
         }
       }
@@ -45486,6 +45761,17 @@
         }
       }
     },
+    "Questions and answers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågor och svar"
+          }
+        }
+      }
+    },
     "Questions for people outside this Mac." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45515,6 +45801,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Frågor till dig skickas till"
+          }
+        }
+      }
+    },
+    "Questions from this chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frågor från den här chatten"
           }
         }
       }
@@ -51507,6 +51804,17 @@
         }
       }
     },
+    "ScannableCodeView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScannableCodeView"
+          }
+        }
+      }
+    },
     "Scanning…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54378,6 +54686,17 @@
         }
       }
     },
+    "Settings…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inställningar…"
+          }
+        }
+      }
+    },
     "Settled" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -56036,6 +56355,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Logga ut"
+          }
+        }
+      }
+    },
+    "Sign Out ends a person's app access and their browsers. A chat's own Workroom panel lists the people of its rooms with the same invitation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logga ut avslutar personens åtkomst i appen och i deras webbläsare. En chatts egen Workroom-panel visar personerna i dess rum med samma inbjudan."
           }
         }
       }
@@ -62108,6 +62438,17 @@
         }
       }
     },
+    "The comment was not saved: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kommentaren sparades inte: %@"
+          }
+        }
+      }
+    },
     "The compact terminal-palette preview used in menus and theme lists." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63861,6 +64202,17 @@
         }
       }
     },
+    "The newest %d questions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "De %d senaste frågorna"
+          }
+        }
+      }
+    },
     "The next reset date for an affected window may move." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -64037,13 +64389,13 @@
         }
       }
     },
-    "The person answers through a link you send them. Their answers are information for the agent, never approvals or permissions." : {
+    "The person answers in the Threading app or, through a link you send them, in a browser. Their answers are information for the agent, never approvals or permissions." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Personen svarar via en länk du skickar. Svaren är information till agenten, aldrig godkännanden eller behörigheter."
+            "value" : "Personen svarar i Threading-appen eller, via en länk du skickar, i en webbläsare. Svaren är information till agenten, aldrig godkännanden eller behörigheter."
           }
         }
       }
@@ -67221,13 +67573,13 @@
         }
       }
     },
-    "They will see only the questions addressed to them in this room, and answer through a link you send them." : {
+    "They will see only the questions addressed to them in this room, and answer in the Threading app or through a link you send them." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Personen ser bara de frågor i rummet som riktas till hen, och svarar via en länk du skickar."
+            "value" : "De ser bara frågorna till dem i det här rummet och svarar i Threading-appen eller via en länk du skickar."
           }
         }
       }
@@ -67696,6 +68048,28 @@
         }
       }
     },
+    "This chat has no workroom yet. Ask the agent to create one, for example “Make a workroom and ask our accountant how VAT is rounded.” Nobody outside this Mac sees anything until you approve opening it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här chatten har inget workroom ännu. Be agenten skapa ett, till exempel ”Skapa ett workroom och fråga vår redovisningskonsult hur momsen avrundas.” Ingen utanför den här Mac-datorn ser något förrän du godkänner att det öppnas."
+          }
+        }
+      }
+    },
+    "This chat has not asked anything yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här chatten har inte frågat något ännu."
+          }
+        }
+      }
+    },
     "This chat is moving to another checkout. The annotations are saved here; send them after the move completes." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -67746,6 +68120,17 @@
         }
       }
     },
+    "This chat runs on another Mac. Its workrooms are on that Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den här chatten körs på en annan Mac-dator. Dess workrooms finns där."
+          }
+        }
+      }
+    },
     "This chat was not opened to repair a conversation, so there is nothing to propose." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -67764,6 +68149,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenten i den här chatten får använda alla webbplatser i Threadings inloggade webbläsare."
+          }
+        }
+      }
+    },
+    "This chat’s rooms, the people in them, and its questions and answers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chattens rum, personerna i dem och dess frågor och svar"
           }
         }
       }
@@ -75462,6 +75858,17 @@
         }
       }
     },
+    "Withdrawn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillbakadragen"
+          }
+        }
+      }
+    },
     "Without a poke" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -75737,6 +76144,39 @@
         }
       }
     },
+    "Workroom" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Workroom"
+          }
+        }
+      }
+    },
+    "Workroom pane asked for %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Workroom-panelen bad om %@"
+          }
+        }
+      }
+    },
+    "WorkroomPaneViewController" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WorkroomPaneViewController"
+          }
+        }
+      }
+    },
     "Workrooms" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -75755,6 +76195,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Workrooms kan inte läsas"
+          }
+        }
+      }
+    },
+    "Workrooms is off, so this chat cannot ask people outside this Mac. Turn it on in Settings ▸ Workrooms." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Workrooms är avstängt, så den här chatten kan inte fråga personer utanför den här Mac-datorn. Slå på det i Inställningar ▸ Workrooms."
           }
         }
       }
@@ -75887,6 +76338,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skriv en CLAUDE.md som dokumenterar den här kodbasen"
+          }
+        }
+      }
+    },
+    "Write a comment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv en kommentar"
           }
         }
       }
@@ -76219,6 +76681,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Du · 10:45"
+          }
+        }
+      }
+    },
+    "You · your paired iPhone shows every question" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du · din parkopplade iPhone visar alla frågor"
           }
         }
       }
@@ -80721,17 +81194,6 @@
         }
       }
     },
-    "revision %d" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "version %d"
-          }
-        }
-      }
-    },
     "revoke" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -81773,17 +82235,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "osatt"
-          }
-        }
-      }
-    },
-    "until %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "till %@"
           }
         }
       }

@@ -25,14 +25,15 @@ final class WorkroomAgentCommandService {
     private let projects: ProjectStore
     private let mailbox: MacMailbox
     private let approveOpening: OpeningApprover
-    private let revealSettings: @MainActor () -> Void
+    /// Shows the asking chat's Workroom pane, where the person's invitation is one click away.
+    private let revealWorkroom: @MainActor (SessionID) -> Void
 
     init(projects: ProjectStore, mailbox: MacMailbox, approveOpening: @escaping OpeningApprover,
-         revealSettings: @escaping @MainActor () -> Void) {
+         revealWorkroom: @escaping @MainActor (SessionID) -> Void) {
         self.projects = projects
         self.mailbox = mailbox
         self.approveOpening = approveOpening
-        self.revealSettings = revealSettings
+        self.revealWorkroom = revealWorkroom
     }
 
     // MARK: - Tools
@@ -313,10 +314,10 @@ final class WorkroomAgentCommandService {
             await WorkroomAppNotifier.roomOpened(room.id, to: person.id)
             WorkroomHost.shared.refresh()
             NotificationCenter.default.post(WorkroomStatusDidChange())
-            self.revealSettings()
+            self.revealWorkroom(sessionID)
             return .success("""
-                The user opened “\(room.title)” to \(person.name) for \(days) days. The user sends them their link \
-                from Settings ▸ Workrooms; you never see it. Their answers arrive as mail.
+                The user opened “\(room.title)” to \(person.name) for \(days) days. The user invites them from this \
+                chat's Workroom panel or Settings ▸ Workrooms; you never see the invitation. Their answers arrive as mail.
                 """)
         }
     }

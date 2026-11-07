@@ -1,6 +1,7 @@
 import AppKit
 import CryptoKit
 import XCTest
+import ThreadingController
 import ThreadingPeerTransport
 import ThreadingRemoteKit
 @testable import Threading
@@ -6476,6 +6477,28 @@ final class RemoteGuestSharePersistenceTests: HostedStoreTestCase {
         coordinator.revokeSessionShares(sessionID)
         XCTAssertNil(coordinator.redeemInvitation(token: invitationToken,
             deviceID: "guest-phone", displayName: "Guest", persistsOwnerDevice: false))
+    }
+
+    /// A workroom invitation is the app's. A browser cannot show workrooms, so it is turned away
+    /// without spending the single-use invitation, which the app can still accept afterwards.
+    func testAWorkroomInvitationIsAcceptedOnlyByTheAppAndABrowserDoesNotSpendIt() throws {
+        let person = WorkroomPersonID()
+        let store = InMemoryRemoteGuestShareStore(shares: [RemoteGuestShareRecord(
+            id: "workroom-share", targetKind: .workroomPerson, sessionID: person.description,
+            invitationToken: invitationToken, capability: .interact, canApprovePermissions: false,
+            createdAt: Date(), expiresAt: Date(timeIntervalSinceNow: 3600), members: [])])
+        let coordinator = makeCoordinator(guestShareStore: store)
+        XCTAssertEqual(coordinator.access(forWorkroomPerson: person).links.count, 1)
+
+        XCTAssertNil(coordinator.redeemInvitation(token: invitationToken,
+            deviceID: "viktor-browser", displayName: "Viktor", persistsOwnerDevice: false))
+        XCTAssertEqual(coordinator.access(forWorkroomPerson: person).links.count, 1, "the browser spent the invitation")
+
+        let accepted = try XCTUnwrap(coordinator.redeemInvitation(token: invitationToken,
+            deviceID: "viktor-phone", displayName: "Viktor", persistsOwnerDevice: true))
+        XCTAssertEqual(accepted.authorization.scope, .workroomPerson(person))
+        XCTAssertTrue(coordinator.access(forWorkroomPerson: person).links.isEmpty)
+        XCTAssertEqual(coordinator.access(forWorkroomPerson: person).members.map(\.displayName), ["Viktor"])
     }
 
     func testUnreadableGuestPersistenceFailsClosedWithoutConsumingAnInvitation() {

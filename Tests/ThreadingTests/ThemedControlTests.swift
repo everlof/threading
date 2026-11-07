@@ -8108,6 +8108,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "RunPlanDisclosureView",
                 "SearchMatchLabel",
                 "SearchResultRowView",
+                "ScannableCodeView",
                 "SemanticHierarchySceneView",
                 "SemanticSceneView",
                 "SeparatorView",
@@ -8209,6 +8210,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "WindowChromeFrameView",
                 "WindowCommandBandView",
                 "WindowTitleBandView",
+                "WorkroomPaneViewController",
                 "WorkspaceNavigatorPipelinePlaceholderView",
                 "WorkspaceNavigatorPipelineResultsView",
                 "WorkspaceNavigatorPipelineSearchBandView",
@@ -8261,7 +8263,9 @@ final class ThemedControlTests: HostedStoreTestCase {
             "ThemeTransitionPresenter",
             "ThemeMomentPresenter",
             "ThemeGradientAnimator",
-            "ThemeBackdropMotionView"
+            "ThemeBackdropMotionView",
+            // A settings page's root, which draws nothing; it only answers a search's reveal.
+            "SettingsPageRootView"
         ]
         // This shared source file also declares a Linux-only view behind #if os(Linux).
         // The Mac gallery cannot instantiate it; the Linux opening-composer runtime journey

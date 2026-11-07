@@ -7,7 +7,14 @@ extension AgentToolCoordinator {
         return WorkroomAgentCommandService(
             projects: dependencies.projects, mailbox: dependencies.mail,
             approveOpening: { facts in if let window { await WorkroomOpeningSheet.ask(in: window, facts: facts) } else { nil } },
-            revealSettings: { WorkroomOpeningSheet.revealSettings() })
+            revealWorkroom: { [weak self] sessionID in self?.showWorkroom(for: sessionID) })
+    }
+
+    /// After an approval: the chat's Workroom pane, where the person is listed with their
+    /// invitation beside them. A chat that is not on screen gets the tab for when it is.
+    private func showWorkroom(for sessionID: SessionID) {
+        displayPaneController.activateWorkroom(for: sessionID)
+        _ = revealDisplayPane(for: sessionID)
     }
 
     func workroomFind(_ a: WorkroomFindArguments, for s: SessionID, completion c: @escaping WorkroomCompletion) { workroomCommands.find(a, for: s, completion: c) }

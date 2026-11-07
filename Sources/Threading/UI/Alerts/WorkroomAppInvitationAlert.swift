@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingController
 import ThreadingRemoteKit
 
 // MARK: - Workroom App Invitation
@@ -12,6 +13,23 @@ import ThreadingRemoteKit
 /// copied link stays the web link, which works from anywhere the app is installed.
 @MainActor
 enum WorkroomAppInvitationAlert {
+
+    /// Mints the person's invitation and shows it; a refusal is said in a sheet instead. Settings
+    /// ▸ Workrooms and the chat's Workroom pane both come here, so both offer the same invitation.
+    static func invite(_ person: WorkroomPersonID, name: String, in window: NSWindow?) async {
+        switch await RemoteAccessCoordinator.shared.prepareWorkroomShare(for: person) {
+        case let .success(created):
+            show(created.url, personName: name, expiresAt: created.expiresAt, in: window)
+        case let .failure(error):
+            // States an outcome and asks nothing, so a plain themed alert.
+            let alert = ThemedAlert()
+            alert.alertStyle = .warning
+            alert.messageText = L10n.string("The app invitation could not be created")
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: L10n.string("OK"))
+            alert.begin(in: window) { _ in }
+        }
+    }
 
     static func show(_ url: URL, personName: String, expiresAt: Date, in window: NSWindow?) {
         makeAlert(url, personName: personName, expiresAt: expiresAt).begin(in: window) { _ in }

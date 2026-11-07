@@ -99,6 +99,12 @@ protocol SettingsRowRevealing: NSView {
     func prepareToReveal(title: String) -> Bool
 }
 
+extension SettingsPageRootView: SettingsRowRevealing {
+    func prepareToReveal(title: String) -> Bool {
+        onPrepareToReveal?(title) ?? false
+    }
+}
+
 // MARK: - Reveal
 
 /// What happens after a search result that names a setting is clicked and its page is on

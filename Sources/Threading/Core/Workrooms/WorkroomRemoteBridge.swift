@@ -161,22 +161,29 @@ enum WorkroomRemoteBridge {
             _ = try await participant.decline(person: person, id: id, reason: reason)
         case let (.message(question, text), .owner(canComment: true)):
             id = question
-            let name = try await ownerName(store)
-            _ = try await store.ownerCommentOnWorkroomQuestion(id, ownerName: name, text: text)
-            let commented = try await store.workroomQuestionDetail(id).question
-            await MainActor.run {
-                if commented.asker.kind == .session {
-                    MacMailDelivery.shared.arrived(for: SessionID(commented.asker.id), priority: .normal)
-                }
-                NotificationCenter.default.post(WorkroomStatusDidChange())
-            }
-            await WorkroomAppNotifier.notify(.ownerComment(name: name, text: text), about: commented)
+            try await ownerComment(on: id, text: text, store: store)
         default:
             // The owner never answers or declines for a person, and a view-only owner device
             // does not comment.
             return RemoteRouter.error(403, "Forbidden")
         }
         return RemoteRouter.json(try await question(store, id: id, viewer: viewer))
+    }
+
+    /// The owner's comment on a question, from a paired phone or from the chat's Workroom pane:
+    /// stored under the owner's name, delivered to the asking chat as mail, and announced on the
+    /// person's phone. One path, so a comment reaches the same three places wherever it was typed.
+    static func ownerComment(on id: QuestionID, text: String, store: ControllerStore) async throws {
+        let name = try await ownerName(store)
+        _ = try await store.ownerCommentOnWorkroomQuestion(id, ownerName: name, text: text)
+        let commented = try await store.workroomQuestionDetail(id).question
+        await MainActor.run {
+            if commented.asker.kind == .session {
+                MacMailDelivery.shared.arrived(for: SessionID(commented.asker.id), priority: .normal)
+            }
+            NotificationCenter.default.post(WorkroomStatusDidChange())
+        }
+        await WorkroomAppNotifier.notify(.ownerComment(name: name, text: text), about: commented)
     }
 
     /// The owner's name on a comment: the person chosen for the owner's own questions, else the

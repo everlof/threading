@@ -42,16 +42,16 @@ enum WorkroomOpeningSheet {
             : L10n.string("a Cloudflare Quick Tunnel, whose address changes whenever Threading restarts")
         lines.append(L10n.format("Reached through %@. The tunnel provider terminates the connection and can read what passes through it.",
                                  address))
-        lines.append(L10n.format("Open for %d days. You can close it any time in Settings ▸ Workrooms.", facts.days))
+        lines.append(L10n.format("Open for %d days. You can close it any time in this chat’s Workroom panel or in Settings ▸ Workrooms.", facts.days))
         lines.append(L10n.format("The agent’s reason: “%@”", facts.reason))
         if let owner = facts.ownerName {
             lines.append(L10n.format("You (%@) can answer in this room too.", owner))
         }
-        lines.append(L10n.string("They will see only the questions addressed to them in this room, and answer through a link you send them."))
+        lines.append(L10n.string("They will see only the questions addressed to them in this room, and answer in the Threading app or through a link you send them."))
         return lines.joined(separator: "\n\n")
     }
 
-    /// After an approval: where the user copies the person's link once the tunnel is up.
+    /// Settings ▸ Workrooms in the main window: people, web links and the public address.
     static func revealSettings() {
         let controller = NSApp.windows.lazy.compactMap { $0.windowController as? MainWindowController }.first
         controller?.showSettingsPage(id: SettingsPages.workroomsID)

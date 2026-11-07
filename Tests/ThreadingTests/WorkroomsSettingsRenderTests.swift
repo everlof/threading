@@ -4,8 +4,8 @@ import XCTest
 @testable import Threading
 
 /// Settings ▸ Workrooms, drawn light and dark at the pane's two widths, plus the rows its search
-/// entries promise. The page is the only owner surface for people outside this Mac, so what it
-/// must never lose is the switch, the public address and the way to close everything.
+/// entries promise. What it must never lose is the switch, the people with their app invitation,
+/// the way to close everything, and — one fold away — the public address a browser needs.
 final class WorkroomsSettingsRenderTests: HostedStoreTestCase {
 
     private static let widths: [CGFloat] = [420, SettingsUIDefaults.pageWidth]
@@ -19,14 +19,25 @@ final class WorkroomsSettingsRenderTests: HostedStoreTestCase {
     }
 
     @MainActor
-    func testThePageCarriesTheSwitchTheAddressAndCloseAll() {
+    func testThePageLeadsWithPeopleAndFoldsTheBrowserPathAway() throws {
         let controller = WorkroomsPreferencesViewController()
         let host = laidOut(controller.view, width: SettingsUIDefaults.pageWidth)
         let labels = Self.labels(in: host)
-        for title in ["Ask people outside this Mac", "Tunnel", "Reserved domain", "Add a person"] {
+        for title in ["Ask people outside this Mac", "Questions for you go to", "Add a person", "Answer in a browser"] {
             XCTAssertTrue(labels.contains(L10n.string(title)), title)
         }
         XCTAssertTrue(Self.buttons(in: host).contains(L10n.string("Close All Workrooms")))
+        for title in ["Tunnel", "Reserved domain"] {
+            XCTAssertFalse(labels.contains(L10n.string(title)), "\(title) is the browser path's, folded away")
+        }
+
+        let fold = try XCTUnwrap(Self.browserFold(in: host))
+        XCTAssertTrue(fold.performPrimaryAction())
+        host.layoutSubtreeIfNeeded()
+        let opened = Self.labels(in: host)
+        for title in ["Tunnel", "Reserved domain"] {
+            XCTAssertTrue(opened.contains(L10n.string(title)), title)
+        }
     }
 
     @MainActor
@@ -43,11 +54,13 @@ final class WorkroomsSettingsRenderTests: HostedStoreTestCase {
         let language = try XCTUnwrap(fields.first { Self.placeholder(in: $0) == "sv" })
         let add = try XCTUnwrap(Self.button(in: host, titled: "Add"))
         let closeAll = try XCTUnwrap(Self.button(in: host, titled: "Close All Workrooms"))
+        let fold = try XCTUnwrap(Self.browserFold(in: host))
 
         XCTAssertTrue(name.nextKeyView === handle)
         XCTAssertTrue(handle.nextKeyView === language)
         XCTAssertTrue(language.nextKeyView === add)
-        XCTAssertTrue(add.nextKeyView === closeAll)
+        XCTAssertTrue(add.nextKeyView === fold, "the browser fold is the page's last stop")
+        XCTAssertTrue(fold.nextKeyView === closeAll)
     }
 
     @MainActor
@@ -109,6 +122,12 @@ final class WorkroomsSettingsRenderTests: HostedStoreTestCase {
         window.setContentSize(NSSize(width: 1400, height: 1000))
         shell.showSettingsPage(id: SettingsPages.workroomsID)
         let content = try XCTUnwrap(window.contentView)
+        for _ in 0..<200 {
+            if Self.labels(in: content).contains(person.name) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        // A web link is the browser path's, one fold away.
+        XCTAssertTrue(try XCTUnwrap(Self.browserFold(in: content)).performPrimaryAction())
         for _ in 0..<200 {
             if Self.button(in: content, titled: "Extend Link…") != nil { break }
             try await Task.sleep(for: .milliseconds(10))
@@ -198,6 +217,16 @@ final class WorkroomsSettingsRenderTests: HostedStoreTestCase {
         if let button = view as? ThemedButton, button.title == L10n.string(title) { return button }
         for subview in view.subviews {
             if let found = button(in: subview, titled: title) { return found }
+        }
+        return nil
+    }
+
+    @MainActor
+    private static func browserFold(in view: NSView) -> ThemedDisclosureRow? {
+        if let row = view as? ThemedDisclosureRow,
+           row.accessibilityIdentifier() == WorkroomsPageIdentifiers.browserAnswering { return row }
+        for subview in view.subviews {
+            if let found = browserFold(in: subview) { return found }
         }
         return nil
     }

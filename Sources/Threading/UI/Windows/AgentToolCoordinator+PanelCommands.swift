@@ -42,6 +42,8 @@ extension AgentToolCoordinator {
                 kind = "extension panel"
             } else if tab.compare != nil {
                 kind = "compare"
+            } else if tab.workroom != nil {
+                kind = "workroom"
             } else if case .image? = tab.content?.body {
                 kind = "image"
             }

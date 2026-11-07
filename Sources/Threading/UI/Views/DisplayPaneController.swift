@@ -622,7 +622,7 @@ final class DisplayPaneController: NSViewController {
   /// `PaneTab.canLiveInDetachedWindow` states, asked before the tab exists.
   private static func makesDetachableTab(id: String, target: PanelCommandTarget?) -> Bool {
     switch target {
-    case .privateBrowser, .notificationTest, .webExtensions, .supervision:
+    case .privateBrowser, .notificationTest, .workroom, .webExtensions, .supervision:
       return false
     case .simulator, .androidDevice, .realDevice, .audit, .browser, .overview, .compare,
       .nativePlugin, .nativePluginSection, .extensionPanel:
@@ -712,6 +712,7 @@ final class DisplayPaneController: NSViewController {
       guard let bundle else { return false }
       return activateNativePlugin(bundleURL: bundle, section: section, for: sessionID) != nil
     case .notificationTest: return activateNotificationTest(for: sessionID) != nil
+    case .workroom: return activateWorkroom(for: sessionID) != nil
     case .webExtensions: return activateWebExtensions(for: sessionID) != nil
     case .audit: return addAuditTab(for: sessionID) != nil
     case .browser, .privateBrowser:
@@ -2034,6 +2035,33 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
+  /// One chat's Linked Workrooms: its rooms and people, its questions, and a question's
+  /// conversation. One per chat, created on demand.
+  ///
+  /// Ephemeral like Push Test: `persisted(_:)` has no case for it, because everything it shows
+  /// is read again from the workroom store whenever it comes on screen.
+  @discardableResult
+  func activateWorkroom(for sessionID: SessionID) -> WorkroomPaneViewController? {
+    if let existing = revealPeerTab?(sessionID, { $0.workroom != nil }), let pane = existing.workroom {
+      pane.refresh()
+      return pane
+    }
+    restoreIfNeeded(sessionID)
+    if let existing = tabsBySession[sessionID]?.first(where: { $0.workroom != nil }), let pane = existing.workroom {
+      activeTabIDBySession[sessionID] = existing.id
+      if sessionID == currentSessionID { render() }
+      return pane
+    }
+
+    let pane = WorkroomPaneFeed.makePane(for: sessionID)
+    addChild(pane)
+    let tab = DisplayTab(body: .workroom(pane), owningSessionID: sessionID)
+    tabsBySession[sessionID, default: []].append(tab)
+    activeTabIDBySession[sessionID] = tab.id
+    if sessionID == currentSessionID { render() }
+    return pane
+  }
+
   @discardableResult
   func activateWebExtensions(
     for sessionID: SessionID,
@@ -2923,6 +2951,15 @@ final class DisplayPaneController: NSViewController {
       contentMenuButton.isHidden = true
       installHosted(controller)
 
+    case .workroom(let pane):
+      imageView.image = nil
+      imageView.isHidden = true
+      hideHTML()
+      captionLabel.isHidden = true
+      contentMenuButton.isHidden = true
+      installHosted(pane)
+      pane.refresh()
+
     case .webExtensions(let controller):
       imageView.image = nil
       imageView.isHidden = true
@@ -3086,6 +3123,7 @@ final class DisplayPaneController: NSViewController {
     case .simulator: return "simulator"
     case .realDevice: return "real-device"
     case .notificationTest: return "notification-test"
+    case .workroom: return "workroom"
     case .webExtensions: return "web-extensions"
     case .extensionPanel: return "extension-panel"
     case .compare: return "compare"

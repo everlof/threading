@@ -220,6 +220,12 @@ from their own phone.
   App…** therefore shows a QR code that carries the app's own `threading://` invitation, which the
   camera hands straight to the app (`WorkroomAppInvitationAlert`), with Copy Link beside it for
   someone who is not in the room; the copied web link opens the app when tapped in Messages.
+- **Only the app accepts it.** The web page behind the link also offers the browser client, which
+  serves shared chats and has no workroom screens; accepting there spent the single-use invitation
+  on a client that could show nothing. `RemoteAccessCoordinator.redeemInvitation` therefore admits
+  a workroom share only for the native client (`persistsOwnerDevice`, which the server sets from
+  the iOS client header), and a browser is refused without spending it, so **Open in Threading**
+  still works afterwards.
 - **`/api/workroom/…` routes** (`RemoteWorkroomPath`, DTOs in `RemoteWorkroomDTO.swift`): `inbox`,
   `state`, `question/<id>` and its `answer`, `message` and `decline`. The route is parsed and the
   body bounded (64 KiB) before anything is read; the viewer is decided on the main actor against
@@ -244,6 +250,48 @@ from their own phone.
   broker, so the phone then hears only while the app is open.
 - **One vocabulary.** The wire spells field kinds, states and fixed answers exactly as the form
   stores them (`RemoteWorkroomYesNo` beside `WorkroomYesNo`, and so on); a test pins each pair.
+
+## Settings ▸ Workrooms is in decision order
+
+The page had been the tunnel and its domain first, then every person with four buttons, then every
+room with its questions; the pilot owner found it hard to grasp. Most visits are about getting a
+person in, and the app needs no tunnel. So the page is the switch and where the owner's own
+questions go; people with **Invite to App…** and **Sign Out**; rooms with **Close**; and one fold,
+**Answer in a browser**, holding the tunnel, its reserved domain and each person's single-use web
+link (Copy Link, Extend Link…). A person's line says where they will see a question — the app, an
+unused app invitation, a browser, or nowhere yet — in the words the chat's Workroom pane uses
+(`WorkroomPaneFeed.personStatus`). Questions are no longer listed under their room here; each
+chat's are in its pane.
+
+## Beside the chat
+
+Settings ▸ Workrooms says what this Mac publishes and to whom; it did not say what a chat is
+waiting for, from whom, or whether that person can even see the question. The **Workroom** tab in
+the chat's display panel does (`+` ▸ Workroom, View ▸ Panels, the command palette): a
+`WorkroomPaneViewController` in `UI/Design` that renders a bounded presentation, and a
+`WorkroomPaneFeed` that reads the store and performs what the owner asks.
+
+- **Rooms.** The chat's ties first, then its repository's newest rooms it has not tied; a closed
+  room is listed only if this chat worked in it. Each says whether it is reachable and until when,
+  and how many questions wait. **Close** closes it at once, exactly as Settings does — the
+  questions and answers stay, and an agent can ask to open it again.
+- **People** stand under their room with where they will see a question: in the app (last seen),
+  an app invitation still unused, a browser, or nothing yet. **Invite to App…** is
+  `WorkroomAppInvitationAlert.invite`, the path Settings uses. The owner is marked as such and is
+  offered no invitation, because their paired iPhone already shows every question.
+- **Questions from this chat**, newest first, open into their conversation in place, projected by
+  `WorkroomRemoteBridge.project` — the owner's phone's projection, so the two cannot disagree
+  about who said what. The owner comments under it through `WorkroomRemoteBridge.ownerComment`,
+  the phone's path: stored under the owner's name, mailed to the asking chat, and announced on
+  the person's phone, wherever it was typed. A draft survives a refresh and is cleared only once
+  the store has the comment.
+- **Opened after an approval.** Approving `workroom_request_opening` opens the asking chat's
+  Workroom tab, where the person and their invitation are one click away, instead of Settings.
+- **Not saved.** Like Push Test, the tab is not in the persisted layout and cannot move to a
+  detached window. It reads again when it comes on screen, on `WorkroomStatusDidChange` (every
+  participant write, the agent's asks, responses and withdrawals, opening and closing), and on
+  `SessionSharingDidChange` (an invitation accepted, a person signed out). An equal reading is
+  not drawn again, so a refresh that found nothing new keeps the scroll position and the hover.
 
 ## Records (schema v12)
 
@@ -343,6 +391,7 @@ form sizes and the portal's device/join/global rate limits still apply.
 | Owner's question list | tens to hundreds | 20 a page through `record_page`; the poll fingerprints the first page only |
 | Page polls | one per visible tab every 4 s | each a bounded count; the device limit is 120 a minute |
 | Inbox page | 20 shown per section | at most 500 index rows examined per section per request; `more` says it stopped there |
+| A chat's Workroom pane | a room or two, tens of questions | rooms: the chat's ties (100) and 2 pages of 50 of its repository's, 6 shown; questions: 4 pages of 50 examined, the newest 20 shown; one conversation within the per-question bounds above |
 
 No layout, scroll or stream callback reaches the store. The portal decodes a payload only for a
 row it shows. Tool JSON is encoded on a worker. A batch remains a sequence of bounded atomic
