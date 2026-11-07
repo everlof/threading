@@ -404,7 +404,7 @@ struct WorkroomNotificationCard: View {
     @State private var isRequesting = false
 
     var body: some View {
-        switch notifications.authorizationStatus {
+        switch notifications.hasReadAuthorization ? notifications.authorizationStatus : .authorized {
         case .notDetermined:
             card(
                 title: MobileL10n.string("Get a notification when you’re asked something"),

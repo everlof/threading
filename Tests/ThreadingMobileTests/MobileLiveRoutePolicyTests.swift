@@ -421,6 +421,38 @@ final class MobileRouteWalkPlanTests: XCTestCase {
         XCTAssertEqual(plan.steps, [.direct(0), .direct(1), .direct(2), .direct(3)])
     }
 
+    /// A notification registration walks what a mutation walks, tunnel included. It used to leave
+    /// the tunnel out, so a workroom membership accepted through the hosted service — no address
+    /// of the Mac's that a phone away from it can reach — never registered, and its Mac never had
+    /// a phone to tell about a question.
+    @MainActor
+    func testARegistrationTakesTheHostedTunnelWhereAMutationWould() async throws {
+        let suite = "MobileRouteWalkPlanTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = RemoteAppModel(continuity: MobileSessionContinuityStore(defaults: defaults))
+        func membership(hosted: Bool) throws -> PairedRemoteHost {
+            PairedRemoteHost(
+                id: "workroom", hostID: "mac", shareID: "share", scope: RemoteShareScope.workroom.rawValue,
+                name: "Mac", link: try XCTUnwrap(RemoteConnectionLink(baseURL: Fixture.lanOne, token: "fixture-bearer")),
+                lastConnectedAt: Fixture.now,
+                hostedServiceURL: hosted ? URL(string: "https://service.example") : nil,
+                hostedCredential: hosted ? PeerDeviceServiceCredential(
+                    hostID: "mac", deviceID: RemoteDeviceIdentity.current,
+                    credential: try PeerControlPlaneBearer("fixture-service-credential"),
+                    expiresAt: Fixture.now.addingTimeInterval(3600)
+                ) : nil
+            )
+        }
+
+        // Nothing has answered yet, so the tunnel leads, as it would for a mutation.
+        let throughService = await model.registrationRoutes(for: try membership(hosted: true))
+        XCTAssertFalse(throughService.direct.isEmpty)
+        XCTAssertEqual(throughService.steps, [.hosted] + throughService.direct.indices.map(MobileRouteWalkPlan.Step.direct))
+        let addressOnly = await model.registrationRoutes(for: try membership(hosted: false))
+        XCTAssertEqual(addressOnly.steps, addressOnly.direct.indices.map(MobileRouteWalkPlan.Step.direct))
+    }
+
     /// Inside a walk the next address is the replay; only the last attempt has no next address.
     func testOnlyTheLastAttemptReplaysALostResponse() {
         XCTAssertEqual(

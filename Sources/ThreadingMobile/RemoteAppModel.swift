@@ -1730,11 +1730,11 @@ final class RemoteAppModel: ObservableObject {
         hostRefreshSingleFlight.hasFlight(for: hostID) || themeEventsRecoveryHostID == hostID
     }
 
-    /// The routes a notification registration walks for `host`, in the order a mutation would
-    /// take them. Joined to any catalogue refresh in flight for that Mac first: a registration
-    /// started beside a launch used to walk the persisted order while the race beside it was
-    /// finding the Mac, and reached the route the race had found at attempt 4 of 14.
-    func registrationRoutes(for host: PairedRemoteHost) async -> [RemoteHostConnectionCandidate] {
+    /// The walk a notification registration takes to `host`, the one a mutation would take,
+    /// hosted tunnel included. Joined to any catalogue refresh in flight for that Mac first: a
+    /// registration started beside a launch used to walk the persisted order while the race
+    /// beside it was finding the Mac, and reached the route the race had found at attempt 4 of 14.
+    func registrationRoutes(for host: PairedRemoteHost) async -> MobileRouteWalkPlan.Plan<RemoteHostConnectionCandidate> {
         await hostRefreshSingleFlight.join(hostID: host.id)
         let admitted = routeHealth.admitting(
             host.candidates(preferring: discoveredAddresses[host.id]),
@@ -1742,11 +1742,24 @@ final class RemoteAppModel: ObservableObject {
         )
         return MobileRouteWalkPlan.plan(
             direct: admitted,
-            hasHostedRoute: false,
+            hasHostedRoute: host.hostedServiceURL != nil && host.hostedCredential != nil,
             hostID: host.id,
             lastConnection: lastConnection,
             origin: { $0.link.baseURL }
-        ).direct
+        )
+    }
+
+    /// The hosted tunnel to `host`, for a registration walk that has reached it. Nil when the host
+    /// has no hosted service or the tunnel could not be made.
+    func hostedRegistrationRoute(for host: PairedRemoteHost) async -> HostedRemoteRoute? {
+        guard host.hostedServiceURL != nil, host.hostedCredential != nil else { return nil }
+        var lastError: Error = RemoteClientError.invalidResponse
+        return await prepareHostedRouteForWalk(
+            for: host,
+            trace: UUID().uuidString.lowercased(),
+            peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
+            lastError: &lastError
+        )
     }
 
     /// The last route that actually answered for this host. A detail socket watches this commit

@@ -8,10 +8,11 @@ import ThreadingRemoteKit
 final class MobileWorkroomTests: XCTestCase {
     // MARK: Markdown
 
-    /// A table cell that wraps makes its row as tall as its text: the grid measured cells at one
-    /// line once, and a two-line cell's second line lay under the next row. Drawn whole, the
-    /// table with long cells has to be taller than the same table with short ones by more than a
-    /// line, and the drawing is written out for review.
+    /// A table cell that wraps makes its row as tall as its text. Measured at its ideal size —
+    /// the size a sideways-scrolling table is given — the grid reported every row on one line,
+    /// and drew a two-line cell's second line over the next row. The table with long cells has
+    /// to measure taller than the same table with short ones by more than a line, and the
+    /// drawing is written out for review.
     @MainActor
     func testATableRowGrowsWithItsWrappedCell() throws {
         let short = """
@@ -28,7 +29,7 @@ final class MobileWorkroomTests: XCTestCase {
             """
         func render(_ text: String) throws -> UIImage {
             let renderer = ImageRenderer(content: MobileMarkdownView(text, scrollsTables: false)
-                .frame(width: 600).padding().background(Color.black))
+                .fixedSize().padding().background(Color.black).environment(\.colorScheme, .dark))
             renderer.scale = 2
             return try XCTUnwrap(renderer.uiImage)
         }
@@ -40,6 +41,87 @@ final class MobileWorkroomTests: XCTestCase {
         if let out = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"], !out.isEmpty,
            let data = longImage.pngData() {
             try data.write(to: URL(fileURLWithPath: out).appendingPathComponent("mobile-markdown-table.png"))
+        }
+    }
+
+    /// The sideways-scrolling box is exactly as tall as the table, and the table draws at the
+    /// height it measured: `Grid` measured 210 points and drew its rows taller, so the last row
+    /// was cut off at the box's edge with no way to scroll down to it.
+    @MainActor
+    func testATableScrollsSidewaysWithoutLosingItsLastRow() throws {
+        let text = """
+            | Syntetiskt prov | Utveckling | Familj 1 | Varför |
+            |---|---|---|---|
+            | Prov B (`A-rg-bly-200`) | IFA, granskas | preliminär MKM, ej 17 05 04 | 1,3 b |
+            | Arsenik <15 (`A-rg-as-over-mrr`), arsenik <10, koppar <80 | MKM, MRR, KM | preliminär MRR | hela gränsen lyfter provet över MRR (**C b**) |
+            | Tio fall av ”gräns på nivå” (bly, kadmium, Cr(VI), PFOS…) | granskas | slutlig med anmärkning | bara 0, den mildare räkningen, ger en lägre klass (*B b*) |
+            | Prov D (`A-rg-zn-12`) | ~~avförd~~ klar | slutlig | `KM` håller med marginal |
+            """
+        let whole = try XCTUnwrap(ImageRenderer(content: MobileMarkdownView(text, scrollsTables: false).fixedSize())
+            .uiImage).size.height
+
+        // In a window, as the app shows it.
+        let width: CGFloat = 358
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 900))
+        window.overrideUserInterfaceStyle = .dark
+        let host = UIHostingController(rootView: ScrollView {
+            MobileMarkdownView(text).frame(width: width)
+        }.background(Color.black).environment(\.colorScheme, .dark))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.3))
+        host.view.layoutIfNeeded()
+
+        var scrollViews: [UIScrollView] = []
+        func collect(_ view: UIView) {
+            if let scrollView = view as? UIScrollView { scrollViews.append(scrollView) }
+            view.subviews.forEach(collect)
+        }
+        collect(host.view)
+        let sideways = try XCTUnwrap(scrollViews.first { $0.contentSize.width > $0.bounds.width + 1 },
+                                     "the wide table does not scroll sideways")
+        XCTAssertEqual(sideways.bounds.height, whole, accuracy: 1,
+                       "the sideways box is not as tall as its table drawn whole")
+        XCTAssertEqual(sideways.contentSize.height, whole, accuracy: 1,
+                       "the table inside the box is not drawn at its own height")
+
+        let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
+            host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+        }
+        // The last row is drawn whole: its band, read up a column of pixels inside the first
+        // cell's padding where no text is drawn, is at least a line and its padding tall.
+        let box = sideways.convert(sideways.bounds, to: host.view)
+        let column = try luminances(of: image, atX: box.minX + MobileDesign.Spacing.medium - 2)
+        let scale = image.scale
+        let bottom = Int((box.maxY - 4) * scale)
+        let band = column[bottom]
+        XCTAssertGreaterThan(band, column[Int((box.maxY + 8) * scale)] + 0.03, "the last row's band is not drawn")
+        var top = bottom
+        while top > 0, abs(column[top - 1] - band) < 0.02 { top -= 1 }
+        let line = UIFont.preferredFont(forTextStyle: .subheadline).lineHeight
+        XCTAssertGreaterThan(CGFloat(bottom - top) / scale + 4, line + 2 * MobileDesign.Spacing.small - 2,
+                             "the last row is cut off at the box's edge")
+        if let out = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"], !out.isEmpty,
+           let data = image.pngData() {
+            try data.write(to: URL(fileURLWithPath: out).appendingPathComponent("mobile-markdown-scrolling-table.png"))
+        }
+    }
+
+    /// The brightness of each pixel row of `image` at `x` points, top to bottom.
+    private func luminances(of image: UIImage, atX x: CGFloat) throws -> [CGFloat] {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let width = cgImage.width, height = cgImage.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let pixel = min(width - 1, Int(x * image.scale))
+        return (0..<height).map { row in
+            let offset = (row * width + pixel) * 4
+            return (0.299 * CGFloat(pixels[offset]) + 0.587 * CGFloat(pixels[offset + 1])
+                + 0.114 * CGFloat(pixels[offset + 2])) / 255
         }
     }
 

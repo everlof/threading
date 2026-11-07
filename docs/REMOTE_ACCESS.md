@@ -302,8 +302,10 @@ first when it is among the candidates, hosted next (first only when hosted answe
 prepared when the walk gets there), then the Mac's other addresses in wave order; the client
 replays on the last attempt only. A registration walk joins any catalogue refresh in flight for
 the Mac before it starts (`registrationRoutes(for:)`), so one started beside a launch walks the
-route the race found rather than the order it was persisted in. Mutation semantics are unchanged:
-one request id, sequential, no ceiling.
+route the race found rather than the order it was persisted in, and it takes the same steps,
+hosted tunnel included: the planner was asked for the walk without the tunnel, so a workroom
+membership accepted through the hosted service never registered and its Mac had no phone to push a
+question to. Mutation semantics are unchanged: one request id, sequential, no ceiling.
 
 Owner responses carry the addresses each way in is currently answering on, tailnet included, plus an
 explicit policy that is now always `privateOnly`; `relayOnly` and `preferPrivate` are still

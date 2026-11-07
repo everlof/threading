@@ -318,7 +318,10 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
             model.installUsageGlancePublisher(MobileUsageGlancePublisher())
         }
         notifications.routePlanner = { [weak model] host in
-            await model?.registrationRoutes(for: host) ?? host.candidates
+            await model?.registrationRoutes(for: host)
+        }
+        notifications.hostedRoutePreparer = { [weak model] host in
+            await model?.hostedRegistrationRoute(for: host)
         }
         // Mirror's Live Activity **End** may launch the app in the background just to run.
         _ = model.mirror
@@ -1433,12 +1436,18 @@ final class RemoteNotificationSyncGate<Value> {
 @MainActor
 final class RemoteNotificationManager: ObservableObject {
 
-    /// The routes a registration walks for a Mac, in the model's order: the route that answered
-    /// last first, joined to any refresh in flight. Set by the app; without it a registration
-    /// walks the record's own order.
-    var routePlanner: (@MainActor (PairedRemoteHost) async -> [RemoteHostConnectionCandidate])?
+    /// The walk a registration takes to a Mac, in the model's order: the route that answered last
+    /// first and the hosted tunnel where a mutation would take it, joined to any refresh in
+    /// flight. Set by the app; without it a registration walks the record's own direct order.
+    var routePlanner: (@MainActor (PairedRemoteHost) async -> MobileRouteWalkPlan.Plan<RemoteHostConnectionCandidate>?)?
+    /// Prepares the hosted tunnel to a Mac when a registration's walk reaches it.
+    var hostedRoutePreparer: (@MainActor (PairedRemoteHost) async -> HostedRemoteRoute?)?
 
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
+    /// Whether `authorizationStatus` is iOS's answer yet rather than the launch's placeholder. A
+    /// card that offers to turn notifications on waits for it, or it flashes at every launch for
+    /// someone who said yes long ago.
+    @Published private(set) var hasReadAuthorization = false
     @Published private(set) var deviceToken: String?
     @Published private(set) var deliveryByConnection: [String: RemoteNotificationDelivery] = [:]
     @Published var scenePhase: ScenePhase = .active
@@ -1629,7 +1638,7 @@ final class RemoteNotificationManager: ObservableObject {
     }
 
     var shouldOfferOnboarding: Bool {
-        authorizationStatus == .notDetermined
+        hasReadAuthorization && authorizationStatus == .notDetermined
             && !defaults.bool(forKey: Keys.onboardingDeferred)
     }
 
@@ -1671,6 +1680,7 @@ final class RemoteNotificationManager: ObservableObject {
 
     func refreshAuthorization() async {
         authorizationStatus = await center.notificationSettings().authorizationStatus
+        hasReadAuthorization = true
         MobileDiagnostics.record(.notificationAuthorization, fields: [
             .status: String(authorizationStatus.rawValue)
         ])
@@ -1885,6 +1895,11 @@ final class RemoteNotificationManager: ObservableObject {
         return registration.registrationID
     }
 
+    /// The mutation walk, hosted tunnel included and prepared only when the walk reaches it. The
+    /// walk used to leave the tunnel out: a membership accepted through the hosted service has no
+    /// direct route at all, and a phone away from the Mac's network has none that answers, so
+    /// their registration never reached the Mac and it had no phone to tell — no push for a
+    /// workroom question, ever.
     private func registerNotifications(
         _ registration: RemoteNotificationRegistrationDTO,
         with host: PairedRemoteHost
@@ -1892,22 +1907,27 @@ final class RemoteNotificationManager: ObservableObject {
         let requestID = UUID().uuidString.lowercased()
         let peer = MobileDiagnostics.pseudonym(host.id, prefix: "peer")
         var lastError: Error = RemoteClientError.invalidResponse
-        let candidates = await routePlanner?(host) ?? host.candidates
-        for (index, candidate) in candidates.enumerated() {
-            let link = candidate.link
-            let timeout = candidates.count > 1 && index < candidates.count - 1
-                ? 8
-                : RemoteClient.defaultRequestTimeout
+        let plan = await routePlanner?(host) ?? MobileRouteWalkPlan.Plan(
+            direct: host.candidates,
+            steps: host.candidates.indices.map(MobileRouteWalkPlan.Step.direct)
+        )
+        let total = plan.steps.count
+
+        /// One attempt: the response, or nil to try the next route. Throws what no other route
+        /// could change.
+        func attempt(_ link: RemoteConnectionLink, kind: RemoteHostEndpointKind, index: Int)
+            async throws -> RemoteNotificationRegistrationResponseDTO? {
+            let timeout = total > 1 && index < total - 1 ? 8 : RemoteClient.defaultRequestTimeout
             let startedAt = MobileDiagnostics.monotonicNow()
             let fields: [RemoteDiagnosticField: String] = [
                 .trace: requestID,
                 .peer: peer,
-                .transport: candidate.kind.rawValue,
+                .transport: kind.rawValue,
                 .origin: MobileDiagnostics.originDigest(link.baseURL),
                 .phase: "notificationRegistration.request",
                 .timeoutMS: MobileDiagnostics.milliseconds(timeout),
                 .attempt: String(index + 1),
-                .total: String(candidates.count),
+                .total: String(total),
             ]
             MobileDiagnostics.recordConnectivity(
                 .hostRouteStarted,
@@ -1917,11 +1937,8 @@ final class RemoteNotificationManager: ObservableObject {
                 let response = try await RemoteClient(
                     link: link,
                     requestTimeout: timeout,
-                    endpointKind: candidate.kind,
-                    replaysLostResponse: MobileRouteWalkPlan.replaysLostResponse(
-                        at: index,
-                        of: candidates.count
-                    )
+                    endpointKind: kind,
+                    replaysLostResponse: MobileRouteWalkPlan.replaysLostResponse(at: index, of: total)
                 ).registerNotifications(registration, requestID: requestID)
                 MobileDiagnostics.recordConnectivity(
                     .hostRouteEnded,
@@ -1950,16 +1967,10 @@ final class RemoteNotificationManager: ObservableObject {
                 if case .server(let status, _, _) = error {
                     failedFields[.status] = String(status)
                 }
-                MobileDiagnostics.recordConnectivity(
-                    .hostRouteEnded,
-                    level: .warning,
-                    fields: failedFields
-                )
-                if error.allowsMutationRouteFailover {
-                    lastError = error
-                    continue
-                }
-                throw error
+                MobileDiagnostics.recordConnectivity(.hostRouteEnded, level: .warning, fields: failedFields)
+                guard error.allowsMutationRouteFailover else { throw error }
+                lastError = error
+                return nil
             } catch {
                 MobileDiagnostics.recordConnectivity(
                     .hostRouteEnded,
@@ -1971,6 +1982,23 @@ final class RemoteNotificationManager: ObservableObject {
                     ]) { _, new in new }
                 )
                 lastError = error
+                return nil
+            }
+        }
+
+        for (index, step) in plan.steps.enumerated() {
+            switch step {
+            case .direct(let position):
+                let candidate = plan.direct[position]
+                if let response = try await attempt(candidate.link, kind: candidate.kind, index: index) {
+                    return response
+                }
+            case .hosted:
+                guard let route = await hostedRoutePreparer?(host) else { continue }
+                let response = try await attempt(route.link, kind: .hosted, index: index)
+                // Held to the end of the request: the route owns the tunnel its link goes through.
+                withExtendedLifetime(route) {}
+                if let response { return response }
             }
         }
         throw lastError

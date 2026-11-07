@@ -261,7 +261,11 @@ from their own phone.
   id, and the request carries `badge`: the person's open questions plus unread messages in rooms open
   to them (`participantWaitingCount`, each counted once, 500 rows of each examined). The hosted
   broker learned the kind and the badge in notification protocol 6; a Mac sends neither to an older
-  broker, so the phone then hears only while the app is open.
+  broker, so the phone then hears only while the app is open. The phone registers for them over the
+  same walk a mutation takes, hosted tunnel included (`registrationRoutes(for:)`): a membership
+  accepted through the hosted service usually has no Mac address the phone can reach, and while
+  the registration walk left the tunnel out the Mac never learned the phone's token — the journal
+  showed workroom questions asked and not one `notificationRegistrationReceived`.
 - **One vocabulary.** The wire spells field kinds, states and fixed answers exactly as the form
   stores them (`RemoteWorkroomYesNo` beside `WorkroomYesNo`, and so on); a test pins each pair.
 
@@ -271,7 +275,9 @@ A question's prompt, background and evidence, and the agent's and the owner's me
 Markdown — what the agent's terminal would show: **bold**, *italic*, `code`, ~~struck~~, headings,
 lists, quotes, https links and pipe tables. One reading of it, `ThreadingMarkdownModel`, serves
 every surface the person sees: the iPhone draws it in SwiftUI (`MobileMarkdownView`; tables and code
-scroll sideways), the portal as HTML (`MarkdownHTML`, which escapes everything and writes no style
+scroll sideways, a table through `MobileMarkdownTableLayout`, which measures each cell at its
+column's width — `Grid` boxed a table at a height it then drew past, and the last row could not be
+reached), the portal as HTML (`MarkdownHTML`, which escapes everything and writes no style
 attribute, so the page's CSP is unchanged), and the Mac's Workroom pane through the chat's own
 `MarkdownView`. What the person writes is never read as Markdown: it is shown as typed. Field
 labels and options stay plain text. `workroom_ask` and `workroom_respond` say so to agents.

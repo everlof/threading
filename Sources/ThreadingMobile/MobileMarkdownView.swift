@@ -58,17 +58,20 @@ struct MobileMarkdownView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
         case .code(_, let code):
-            ScrollView(.horizontal, showsIndicators: false) {
+            sideways(indicators: false) {
                 Text(verbatim: code)
                     .font(.system(.footnote, design: .monospaced))
                     .foregroundStyle(theme.label)
                     .textSelection(.enabled)
                     .padding(MobileDesign.Spacing.medium)
             }
-            .modifier(MobileHardScrollEdges())
             .background(theme.controlResting, in: RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous))
         case .table(let table):
-            tableView(table)
+            if scrollsTables {
+                sideways(indicators: true) { tableView(table) }
+            } else {
+                tableView(table)
+            }
         case .rule:
             Divider().overlay(theme.divider)
         }
@@ -87,32 +90,24 @@ struct MobileMarkdownView: View {
         }
     }
 
+    /// Scrolls `content` sideways inside the page, in a box as tall as the content's ideal size.
+    private func sideways<Content: View>(indicators: Bool, @ViewBuilder content: () -> Content) -> some View {
+        ScrollView(.horizontal, showsIndicators: indicators) { content() }
+            .modifier(MobileHardScrollEdges())
+    }
+
     /// A header band, banded rows and a rule between columns, as a terminal table reads, scrolling
     /// sideways inside the page. A long cell wraps at a readable width instead of making the table
     /// a screen wide per word, and each column keeps the alignment its separator row asked for.
-    @ViewBuilder
     private func tableView(_ table: MarkdownTableNode) -> some View {
-        if scrollsTables {
-            ScrollView(.horizontal, showsIndicators: true) { tableGrid(table) }
-                .modifier(MobileHardScrollEdges())
-        } else {
-            tableGrid(table)
-        }
-    }
-
-    private func tableGrid(_ table: MarkdownTableNode) -> some View {
         let shape = RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
-        return Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-            GridRow {
-                ForEach(Array(table.headers.enumerated()), id: \.offset) { column, header in
-                    cell(header, table: table, column: column, row: nil)
-                }
+        return MobileMarkdownTableLayout(columns: table.headers.count) {
+            ForEach(Array(table.headers.enumerated()), id: \.offset) { column, header in
+                cell(header, table: table, column: column, row: nil)
             }
             ForEach(Array(table.rows.enumerated()), id: \.offset) { index, row in
-                GridRow {
-                    ForEach(Array(row.enumerated()), id: \.offset) { column, value in
-                        cell(value, table: table, column: column, row: index)
-                    }
+                ForEach(Array(row.enumerated()), id: \.offset) { column, value in
+                    cell(value, table: table, column: column, row: index)
                 }
             }
         }
@@ -141,7 +136,6 @@ struct MobileMarkdownView: View {
         .overlay(alignment: .bottom) {
             if row == nil { Rectangle().fill(theme.border).frame(height: 1) }
         }
-        .gridColumnAlignment(alignment)
     }
 
     private func alignment(_ table: MarkdownTableNode, _ column: Int) -> HorizontalAlignment {
@@ -213,14 +207,65 @@ private struct MobileHardScrollEdges: ViewModifier {
     }
 }
 
+// MARK: - Table Layout
+
+/// Columns as wide as their widest cell and rows as tall as their tallest, with every cell
+/// measured at the width it is drawn at, and the same size whatever the table is offered.
+///
+/// A table that scrolls sideways is boxed at its ideal size. `Grid` reported that size with every
+/// row on one line, then drew the wrapped rows taller: the table spilled out of its box and its
+/// last row could not be scrolled to. Each cell is placed at its column's width and its row's
+/// height, so a band fills its row. Cells arrive row by row, `columns` to a row — the model pads
+/// every row to the header's width.
+struct MobileMarkdownTableLayout: Layout {
+    let columns: Int
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let tracks = measure(subviews)
+        return CGSize(width: tracks.widths.reduce(0, +), height: tracks.heights.reduce(0, +))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let tracks = measure(subviews)
+        var y = bounds.minY
+        for (row, height) in tracks.heights.enumerated() {
+            var x = bounds.minX
+            for (column, width) in tracks.widths.enumerated() {
+                let index = row * columns + column
+                guard index < subviews.count else { return }
+                subviews[index].place(at: CGPoint(x: x, y: y), anchor: .topLeading,
+                                      proposal: ProposedViewSize(width: width, height: height))
+                x += width
+            }
+            y += height
+        }
+    }
+
+    /// Each column's width from its cells' ideal widths, then each row's height from its cells
+    /// measured at those widths. Bounded by the text a workroom field carries.
+    private func measure(_ subviews: Subviews) -> (widths: [CGFloat], heights: [CGFloat]) {
+        guard columns > 0 else { return ([], []) }
+        var widths = Array(repeating: CGFloat.zero, count: columns)
+        for (index, subview) in subviews.enumerated() {
+            widths[index % columns] = max(widths[index % columns], subview.sizeThatFits(.unspecified).width.rounded(.up))
+        }
+        var heights = Array(repeating: CGFloat.zero, count: (subviews.count + columns - 1) / columns)
+        for (index, subview) in subviews.enumerated() {
+            let height = subview.sizeThatFits(ProposedViewSize(width: widths[index % columns], height: nil)).height
+            heights[index / columns] = max(heights[index / columns], height.rounded(.up))
+        }
+        return (widths, heights)
+    }
+}
+
 // MARK: - Readable Width
 
 /// Lays its content out no wider than `maximum`, and measures it at that width.
 ///
-/// A table scrolls sideways, so its cells are asked for their size with no width to keep to. A
+/// A table scrolls sideways, so a cell is first asked for its size with no width to keep to. A
 /// `frame(maxWidth:)` would narrow the cell but report the height of the text on one line, and
-/// the grid would then place the next row over the wrapped second line. This measures the text
-/// at the width it will be drawn at, so a wrapped cell makes its row as tall as it needs.
+/// the next row would be placed over the wrapped second line. This measures the text at the
+/// width it will be drawn at, so a wrapped cell makes its row as tall as it needs.
 struct MobileReadableWidth: Layout {
     let maximum: CGFloat
 
