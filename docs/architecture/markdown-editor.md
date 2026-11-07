@@ -126,7 +126,14 @@ window, preview-provider selection and enabling/disabling the extension. No lega
 Finder injection is installed.
 
 `Packages/ThreadingMarkdownKit` owns the existing native block and inline parser, including its
-32-level recursion limit and HTTP/HTTPS-only link policy. The app supplies resolved fonts and
+32-level recursion limit and HTTP/HTTPS-only link policy. Beside it, the Foundation-only
+`ThreadingMarkdownModel` target reads the same block and inline rules into plain values
+(`MarkdownDocument`) with an HTML renderer (`MarkdownHTML`), for surfaces that have no AppKit: the
+iPhone app draws them in SwiftUI (`MobileMarkdownView`) and the workroom portal as HTML. It adds
+strikethrough, rules and an ordered list's starting number, and keeps a line break inside a
+paragraph, since the text it reads is written for a person rather than reflowed. The Mac's
+conversation still renders through the AppKit parser; moving it onto the model is the remaining
+step to one parser. The app supplies resolved fonts and
 inks through `MarkdownStyle`; conversation heading fonts still resolve in the conversation
 surface. Quick Look presents those exact parsed blocks and runs as semantic HTML. Headings,
 quotes, lists, tables and fenced code become readable document structure. Raw HTML is escaped,

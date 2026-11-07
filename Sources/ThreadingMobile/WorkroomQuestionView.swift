@@ -23,6 +23,9 @@ struct WorkroomQuestionView: View {
     /// folded away, so the form is the one place to type, as the portal does.
     @State private var wantsToWrite = false
     @FocusState private var composerIsFocused: Bool
+    /// The software keyboard is up. While a form field has it, the box for writing to the agent
+    /// steps aside: two text boxes at the keyboard's edge read as one broken one.
+    @State private var keyboardIsUp = false
     // Loaders (status-integrity review): the first load, and one send at a time — answer,
     // message or decline — each an awaited `RemoteClient` request bounded by its timeout. Success
     // replaces the page with the Mac's updated question; failure leaves `problem` or `actionError`
@@ -64,7 +67,7 @@ struct WorkroomQuestionView: View {
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await load() }
             .safeAreaInset(edge: .bottom) {
-                if let question, showsComposer(question) { composer(proxy) }
+                if let question, showsComposer(question), composerIsFocused || !keyboardIsUp { composer(proxy) }
             }
             .onChange(of: justSaved) { _, saved in
                 if saved { withAnimation { proxy.scrollTo(Self.topID, anchor: .top) } }
@@ -88,13 +91,24 @@ struct WorkroomQuestionView: View {
         .background(theme.ground.ignoresSafeArea())
         .toolbar {
             // A number field's keypad has no return key, and a long answer's Return breaks the
-            // line: Done is the one way out of the keyboard that every field shares.
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button(MobileL10n.string("Done")) { Self.dismissKeyboard() }
-                    .tint(theme.accent)
+            // line: Done is the way out of the keyboard the form's fields share. The box for
+            // writing to the agent has its own send and sits at the keyboard's edge, where a
+            // floating Done would cover it.
+            if !composerIsFocused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(MobileL10n.string("Done")) { Self.dismissKeyboard() }
+                        .tint(theme.accent)
+                }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            keyboardIsUp = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardIsUp = false
+        }
+        .opensWebLinksInApp()
         .navigationTitle(MobileL10n.string("Question"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(theme.surface, for: .navigationBar)
@@ -191,18 +205,15 @@ struct WorkroomQuestionView: View {
                 Spacer(minLength: MobileDesign.Spacing.small)
                 WorkroomStateBadge(state: question.state)
             }
-            Text(question.prompt)
-                .font(.body)
+            // What the agent wrote is Markdown, drawn as its terminal would draw it.
+            MobileMarkdownView(question.prompt)
                 .foregroundStyle(theme.label)
-                .textSelection(.enabled)
             if !question.background.isEmpty {
                 Divider().overlay(theme.divider)
                 Text(MobileL10n.string("Background"))
                     .font(.subheadline.weight(.semibold))
-                Text(question.background)
-                    .font(.subheadline)
+                MobileMarkdownView(question.background, font: .subheadline)
                     .foregroundStyle(theme.label)
-                    .textSelection(.enabled)
             }
             if !question.evidence.isEmpty {
                 Divider().overlay(theme.divider)
@@ -211,7 +222,7 @@ struct WorkroomQuestionView: View {
                         ForEach(Array(question.evidence.enumerated()), id: \.offset) { _, item in
                             VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline) {
                                 Text(item.label).font(.subheadline.weight(.semibold))
-                                Text(item.text).font(.subheadline).textSelection(.enabled)
+                                MobileMarkdownView(item.text, font: .subheadline)
                                 if let source = item.source {
                                     Text(MobileL10n.string("Source: %@", source))
                                         .font(.caption)
@@ -730,9 +741,15 @@ struct WorkroomEntryBubble: View {
                     }
                 }
                 if !entry.text.isEmpty {
-                    Text(entry.text)
-                        .font(.body)
-                        .textSelection(.enabled)
+                    // The person's words are shown as typed; the agent's and the owner's are
+                    // Markdown, as they write it in a terminal.
+                    if entry.author == .person {
+                        Text(entry.text)
+                            .font(.body)
+                            .textSelection(.enabled)
+                    } else {
+                        MobileMarkdownView(entry.text)
+                    }
                 }
             }
             .foregroundStyle(theme.label)

@@ -196,6 +196,7 @@
 		C11B04010000000000000001 /* MobileClipboardWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C11B04010000000000000002 /* MobileClipboardWriterTests.swift */; };
 		4D4400010000000000000003 /* ThreadingMarkdownKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4400010000000000000002; };
 		4D4400010000000000000004 /* ThreadingMarkdownKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4400010000000000000002; };
+		4D44000100000000000000A1 /* ThreadingMarkdownModel in Frameworks */ = {isa = PBXBuildFile; productRef = 4D44000100000000000000A2 /* ThreadingMarkdownModel */; };
 		4D4400010000000000000006 /* ThreadingMarkdownPreview.appex in Embed Markdown Preview */ = {isa = PBXBuildFile; fileRef = 4D4400010000000000000005; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -675,6 +676,7 @@
 				ThreadingMobile/WorkroomFixtures.swift,
 				ThreadingMobile/WorkroomInboxView.swift,
 				ThreadingMobile/WorkroomQuestionView.swift,
+				ThreadingMobile/MobileMarkdownView.swift,
 			);
 			target = F6000001000000000000001 /* Threading */;
 		};
@@ -773,6 +775,7 @@
 				E50000010000000000000012 /* Sentry-Dynamic in Frameworks */,
 				A20000010000000000000012 /* SwiftTerm in Frameworks */,
 				A20000010000000000000013 /* ThreadingRemoteKit in Frameworks */,
+				4D44000100000000000000A1 /* ThreadingMarkdownModel in Frameworks */,
 				61A0CE010000000000000001 /* ThreadingGlanceKit in Frameworks */,
 				D3EE00010000000000000002 /* ThreadingPeerTransport in Frameworks */,
 				A20000010000000000000017 /* ThreadingExtensionKit in Frameworks */,
@@ -1362,6 +1365,7 @@
 				61A0CE010000000000000002 /* ThreadingGlanceKit */,
 				A20000010000000000000010 /* SwiftTerm */,
 				A20000010000000000000011 /* ThreadingRemoteKit */,
+				4D44000100000000000000A2 /* ThreadingMarkdownModel */,
 				D3EE00010000000000000005 /* ThreadingPeerTransport */,
 				F4000001000000000000007 /* ThreadingExtensionKit */,
 				F4000001000000000000003 /* ThinkingOrbs */,
@@ -3702,6 +3706,7 @@
 		};
 		61A0CE010000000000000002 /* ThreadingGlanceKit */ = {isa = XCSwiftPackageProductDependency; productName = ThreadingGlanceKit; };
 		4D4400010000000000000002 /* ThreadingMarkdownKit */ = {isa = XCSwiftPackageProductDependency; productName = ThreadingMarkdownKit; };
+		4D44000100000000000000A2 /* ThreadingMarkdownModel */ = {isa = XCSwiftPackageProductDependency; productName = ThreadingMarkdownModel; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = F8000001000000000000001 /* Project object */;

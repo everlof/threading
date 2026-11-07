@@ -59,6 +59,8 @@ struct WorkroomPanePresentation: Equatable {
         let heading: String
         let lines: [String]
         let text: String
+        /// The agent's and the owner's words are Markdown; the person's are shown as typed.
+        var isMarkdown = false
     }
 
     var chatTitle = ""
@@ -101,6 +103,11 @@ final class WorkroomPaneViewController: NSViewController {
 
     /// Asked to read again: the pane came on screen, so what it shows may be old.
     var onRefresh: (() -> Void)?
+
+    /// Draws agent-written Markdown — the question and the agent's messages — the way the chat
+    /// draws a reply. Supplied by the owner, so this component does not depend on the chat's
+    /// renderer; without it the text is shown as written.
+    var makeMarkdownView: ((String) -> NSView)?
 
     private(set) var presentation = WorkroomPanePresentation(notice: .loading)
     private var hasRendered = false
@@ -291,9 +298,7 @@ final class WorkroomPaneViewController: NSViewController {
         list.addRow(title)
         list.addRow(wrapping(detail.status, role: .caption, color: Design.Text.tertiary))
         if !detail.prompt.isEmpty {
-            let prompt = wrapping(detail.prompt, role: .subheading, color: Design.Text.secondary)
-            prompt.isSelectable = true
-            list.addRow(prompt)
+            list.addRow(markdown(detail.prompt) ?? selectableWrapping(detail.prompt, color: Design.Text.secondary))
         }
 
         list.addSection(L10n.string("Conversation"))
@@ -306,9 +311,8 @@ final class WorkroomPaneViewController: NSViewController {
                 list.addRow(shown)
             }
             if !entry.text.isEmpty {
-                let text = wrapping(entry.text, role: .subheading, color: Design.Text.label)
-                text.isSelectable = true
-                list.addRow(text)
+                let drawn = entry.isMarkdown ? markdown(entry.text) : nil
+                list.addRow(drawn ?? selectableWrapping(entry.text, color: Design.Text.label))
             }
         }
 
@@ -378,6 +382,18 @@ final class WorkroomPaneViewController: NSViewController {
         row.setAccessibilityRole(.group)
         row.setAccessibilityLabel([title, detail].filter { !$0.isEmpty }.joined(separator: ", "))
         return row
+    }
+
+    private func markdown(_ text: String) -> NSView? {
+        guard let view = makeMarkdownView?(text) else { return nil }
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }
+
+    private func selectableWrapping(_ text: String, color: NSColor) -> NSTextField {
+        let label = wrapping(text, role: .subheading, color: color)
+        label.isSelectable = true
+        return label
     }
 
     /// A control kept to its own width at the leading edge of a full-width list row.

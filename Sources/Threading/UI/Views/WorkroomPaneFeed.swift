@@ -38,6 +38,8 @@ final class WorkroomPaneFeed {
         let feed = WorkroomPaneFeed(sessionID: sessionID, pane: pane, projects: projects)
         pane.onAction = { feed.perform($0) }
         pane.onRefresh = { [weak feed] in feed?.refresh() }
+        // The chat's own renderer, so a question reads here as a reply reads in the chat.
+        pane.makeMarkdownView = { MarkdownView(markdown: $0) }
         return pane
     }
 
@@ -236,7 +238,8 @@ final class WorkroomPaneFeed {
             return WorkroomPanePresentation.Entry(
                 id: entry.id, heading: [heading, when].joined(separator: WorkroomPaneFeedDefaults.separator),
                 lines: entry.shown.map { shownLine(label: $0.label, value: $0.value) },
-                text: entry.text
+                text: entry.text,
+                isMarkdown: entry.author != .person
             )
         }
         return WorkroomPanePresentation.Detail(

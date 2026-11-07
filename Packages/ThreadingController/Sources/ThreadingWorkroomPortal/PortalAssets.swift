@@ -33,7 +33,17 @@ enum PortalStyle {
         .language{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
         h1{font-size:1.45rem;line-height:1.25;margin:.3em 0}h2{font-size:1.1rem;margin:1.2em 0 .5em}
         a{color:var(--accent)}p{margin:.5em 0}.quiet,.help,.meta{color:var(--quiet)}.help{font-size:.92rem}
-        .pre,.prompt{white-space:pre-wrap;overflow-wrap:anywhere}.prompt{font-size:1.05rem}
+        .pre{white-space:pre-wrap;overflow-wrap:anywhere}.prompt{font-size:1.05rem}
+        .md{overflow-wrap:anywhere}.md>:first-child{margin-top:0}.md>:last-child{margin-bottom:0}
+        .md ul,.md ol{padding-left:22px;margin:.5em 0}.md li{margin:.15em 0}.md hr{border:0;border-top:1px solid var(--line);margin:1em 0}
+        .md-heading{font-size:1.02rem;margin:1em 0 .35em}.md blockquote{margin:.6em 0;padding:2px 0 2px 12px;border-left:3px solid var(--line);color:var(--quiet)}
+        .md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;background:var(--line);padding:.05em .3em;border-radius:5px}
+        .md pre{overflow-x:auto;padding:10px 12px;border-radius:10px;background:var(--line);margin:.6em 0}.md pre code{background:none;padding:0;font-size:.88em}
+        .md-table{overflow-x:auto;margin:.6em 0;-webkit-overflow-scrolling:touch}.md table{border-collapse:collapse;font-size:.95rem}
+        .md th,.md td{border:1px solid var(--line);padding:5px 10px;text-align:left;vertical-align:top;min-width:4em;max-width:18em}
+        .md th{font-weight:650;background:var(--line)}.md tbody tr:nth-child(even) td{background:rgba(127,127,127,.08)}
+        .md td code{color:var(--accent)}.md p code,.md li code{color:var(--accent)}
+        .md .md-center{text-align:center}.md .md-trailing{text-align:right;font-variant-numeric:tabular-nums}
         .eyebrow{color:var(--quiet);font-size:.85rem;margin:0}
         .card,.list li{background:var(--card);border:1px solid var(--line);border-radius:14px}
         .card{padding:16px 18px;margin-top:14px}.answer h2{margin-top:0}

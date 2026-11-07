@@ -293,6 +293,32 @@ struct WorkroomPortalTests {
         #expect(last.contains("Det var den sista öppna frågan") && last.contains("<dd>Ja</dd>"))
     }
 
+    /// The agent writes as it would in a terminal — emphasis, code, a table — and the page draws
+    /// it; what the person writes is shown exactly as they typed it, markup characters and all.
+    @Test func theAgentsMarkdownIsDrawnAndThePersonsWordsStayAsTyped() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let session = try await signIn(f)
+        let question = try await f.store.askWorkroom(
+            id: QuestionID(), roomID: f.room.id, scope: "p", asker: f.session, personHandle: "expert",
+            draft: WorkroomQuestionDraft(
+                title: "Gränsvärden", prompt: "Gäller **0,5 mg/kg** för `PAH-16`?\n\n| Ämne | Gräns |\n|---|---:|\n| PAH | 0,5 |",
+                background: "Se [rapporten](https://example.com/r) och <script>x</script>.", language: "sv",
+                form: WorkroomForm(fields: [WorkroomField(id: "ok", kind: .yesNo, label: "Stämmer det?")])),
+            gitContext: nil)
+        _ = await f.portal.handle(request("POST", "/q/\(question.id)/clarify", cookie: session,
+                                          form: [("_form", WorkroomToken.formToken(for: session)), ("text", "Menar ni **alla** prover?")]))
+        _ = try await f.store.respondToWorkroomQuestion(question.id, asker: f.session, text: "Ja, *alla*.")
+        let page = body(await f.portal.handle(request("GET", "/q/\(question.id)", cookie: session)))
+
+        #expect(page.contains("<strong>0,5 mg/kg</strong>") && page.contains("<code>PAH-16</code>"))
+        #expect(page.contains("<div class=\"md-table\"><table>") && page.contains("<td class=\"md-trailing\">0,5</td>"))
+        #expect(page.contains("<a href=\"https://example.com/r\" rel=\"noopener noreferrer nofollow\" target=\"_blank\">rapporten</a>"))
+        #expect(page.contains("&lt;script&gt;x&lt;/script&gt;") && !page.contains("<script>x"))
+        #expect(page.contains("<em>alla</em>"), "the agent's message is drawn")
+        #expect(page.contains("Menar ni **alla** prover?"), "the person's own words were reformatted")
+    }
+
     /// Writes a signed-in inbox and conversation, with the stylesheet and script beside them, to
     /// `THREADING_RENDER_OUT` for review at phone width. Without it the pages are only checked.
     @Test func rendersTheInboxAndAConversationForReview() async throws {
@@ -303,7 +329,7 @@ struct WorkroomPortalTests {
         let other = try await f.store.askWorkroom(
             id: QuestionID(), roomID: f.room.id, scope: "p", asker: f.session, personHandle: "expert",
             draft: WorkroomQuestionDraft(title: "Stämmer sammanfattningen av SONDA-753?",
-                                         prompt: "Prover med bara PAH-summa går nu alltid till granskning.", language: "sv",
+                                         prompt: "Prover med **bara PAH-summa** går nu alltid till granskning:\n\n| Prov | PAH-16 | Beslut |\n|---|---:|---|\n| A1 | 0,4 mg/kg | Godkänt |\n| A2 | `saknas` | **Granskas** |", language: "sv",
                                          form: WorkroomForm(fields: [WorkroomField(id: "ok", kind: .confirm, label: "Sammanfattningen")])),
             gitContext: nil)
         _ = await f.portal.handle(request("POST", "/q/\(f.question.id)/clarify", cookie: session,

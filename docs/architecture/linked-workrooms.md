@@ -265,6 +265,20 @@ from their own phone.
 - **One vocabulary.** The wire spells field kinds, states and fixed answers exactly as the form
   stores them (`RemoteWorkroomYesNo` beside `WorkroomYesNo`, and so on); a test pins each pair.
 
+## Agents write Markdown
+
+A question's prompt, background and evidence, and the agent's and the owner's messages, are
+Markdown — what the agent's terminal would show: **bold**, *italic*, `code`, ~~struck~~, headings,
+lists, quotes, https links and pipe tables. One reading of it, `ThreadingMarkdownModel`, serves
+every surface the person sees: the iPhone draws it in SwiftUI (`MobileMarkdownView`; tables and code
+scroll sideways), the portal as HTML (`MarkdownHTML`, which escapes everything and writes no style
+attribute, so the page's CSP is unchanged), and the Mac's Workroom pane through the chat's own
+`MarkdownView`. What the person writes is never read as Markdown: it is shown as typed. Field
+labels and options stay plain text. `workroom_ask` and `workroom_respond` say so to agents.
+
+Still to come: images, PDFs and Mermaid diagrams attached to a question, drawn on the Mac when it
+is asked so the phone and the page only show files.
+
 ## Settings ▸ Workrooms is in decision order
 
 The page had been the tunnel and its domain first, then every person with four buttons, then every

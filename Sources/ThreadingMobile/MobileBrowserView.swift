@@ -111,7 +111,7 @@ struct MobileBrowserView: View {
 }
 
 /// Safari owns public-site navigation, authentication and browser chrome.
-private struct MobileSystemBrowser: UIViewControllerRepresentable {
+struct MobileSystemBrowser: UIViewControllerRepresentable {
     let url: URL
     @Environment(\.dismiss) private var dismiss
 

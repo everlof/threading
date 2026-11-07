@@ -7,7 +7,8 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [.library(name: "ThreadingController", targets: ["ThreadingController"]),
                .library(name: "ThreadingWorkroomPortal", targets: ["ThreadingWorkroomPortal"])],
-    dependencies: [.package(path: "../ThreadingDomain"), .package(path: "../ThreadingUsage")],
+    dependencies: [.package(path: "../ThreadingDomain"), .package(path: "../ThreadingUsage"),
+                   .package(path: "../ThreadingMarkdownKit")],
     targets: [
         .systemLibrary(name: "CControllerSQLite", pkgConfig: "sqlite3",
                        providers: [.apt(["libsqlite3-dev"])]),
@@ -16,7 +17,9 @@ let package = Package(
         .testTarget(name: "ThreadingControllerTests", dependencies: ["ThreadingController"]),
         // The Linked Workrooms participant portal: a pure request→response handler over a
         // participant-only backend. Foundation only, no sockets, so any host can serve it.
-        .target(name: "ThreadingWorkroomPortal", dependencies: ["ThreadingController"]),
+        .target(name: "ThreadingWorkroomPortal", dependencies: [
+            "ThreadingController", .product(name: "ThreadingMarkdownModel", package: "ThreadingMarkdownKit")
+        ]),
         .testTarget(name: "ThreadingWorkroomPortalTests", dependencies: ["ThreadingWorkroomPortal", "ThreadingController"])
     ]
 )

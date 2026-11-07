@@ -1,9 +1,12 @@
 import Foundation
 import ThreadingController
+import ThreadingMarkdownModel
 
 /// Server-rendered pages: one same-origin stylesheet and one same-origin script that only
-/// polls and never inserts markup, so every page works without it. Every agent- or
-/// person-written string is escaped and shown as text. Links are only the portal's own routes.
+/// polls and never inserts markup, so every page works without it. What the agent wrote — the
+/// question, its background and evidence, its messages — is Markdown, drawn by `MarkdownHTML`,
+/// which escapes every character it is given and links only web URLs; what the person wrote is
+/// escaped and shown as text, as they typed it. The page's own links are only its own routes.
 ///
 /// A question page is a conversation: the question, then every answer revision and message in
 /// the order they happened, the person's on the right, then a box to write in.
@@ -69,14 +72,14 @@ struct PortalRenderer {
         body += "<article class=\"question card\" lang=\"\(e(draft.language))\">"
         body += "<p class=\"eyebrow\">\(e(text.format(.from, question.askerName, detail.room.title)))</p>"
         body += "<h1>\(e(draft.title))</h1>\(stateBadge(question.state))"
-        body += "<p class=\"prompt\">\(e(draft.prompt))</p>"
+        body += "<div class=\"prompt md\">\(MarkdownHTML.render(markdown: draft.prompt))</div>"
         if !draft.background.isEmpty {
-            body += "<section class=\"brief\"><h2>\(e(text[.background]))</h2><p class=\"pre\">\(e(draft.background))</p></section>"
+            body += "<section class=\"brief\"><h2>\(e(text[.background]))</h2><div class=\"md\">\(MarkdownHTML.render(markdown: draft.background))</div></section>"
         }
         if !draft.evidence.isEmpty {
             body += "<section class=\"brief\"><h2>\(e(text[.evidence]))</h2><ul>"
             for item in draft.evidence {
-                body += "<li><strong>\(e(item.label))</strong><p class=\"pre\">\(e(item.text))</p>"
+                body += "<li><strong>\(e(item.label))</strong><div class=\"md\">\(MarkdownHTML.render(markdown: item.text))</div>"
                 if let source = item.source { body += "<p class=\"quiet\">\(e(text.format(.sourceToVerify, source)))</p>" }
                 body += "</li>"
             }
@@ -278,7 +281,12 @@ struct PortalRenderer {
             case .withdrawal: html += "<p class=\"kind\">\(e(text[.stateWithdrawn]))</p>"
             case .clarification, .response, .comment: break
             }
-            return html + "<p class=\"pre\">\(e(note.text))</p></li>"
+            // The person's own words stay as they typed them; the agent's and the owner's are
+            // Markdown, as they write it in a terminal.
+            let body = note.author == .person
+                ? "<p class=\"pre\">\(e(note.text))</p>"
+                : "<div class=\"md\">\(MarkdownHTML.render(markdown: note.text))</div>"
+            return html + body + "</li>"
         }
     }
 

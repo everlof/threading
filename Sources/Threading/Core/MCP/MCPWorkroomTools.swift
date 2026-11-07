@@ -299,7 +299,10 @@ extension MCPTools {
         answer quickly: single_choice or multi_choice with 2–8 options (each may say its \
         consequence), yes_no, number (unit, minimum, maximum), short_text, long_text, or confirm \
         (agree / disagree / unsure with a statement). Put the facts they need in background and \
-        evidence. Threading records this checkout's branch, commits and changed paths against \
+        evidence. The prompt, background, evidence and your messages are Markdown, drawn on their \
+        phone and web page as a terminal draws it: **bold**, *italic*, `code`, ~~struck~~, \
+        headings, lists, quotes, https links and pipe tables — a table is the clearest way to \
+        compare values. Labels and options are plain text. Threading records this checkout's branch, commits and changed paths against \
         base_ref (default: the repository's default branch) with the question for you and the \
         user; the expert does not see them. The question waits, invisible, until the room is \
         open to that person. You keep working; their answer, a message or a decline arrives \
@@ -314,8 +317,8 @@ extension MCPTools {
           "room_id": MCPPropertySchema(type: .string, description: "The room to ask in."),
           "person": MCPPropertySchema(type: .string, description: "The person's handle from workroom_find."),
           "title": MCPPropertySchema(type: .string, description: "One line, at most 200 bytes."),
-          "prompt": MCPPropertySchema(type: .string, description: "The question, at most 4 KiB."),
-          "background": MCPPropertySchema(type: .string, description: "What they need to know, at most 8 KiB."),
+          "prompt": MCPPropertySchema(type: .string, description: "The question, Markdown, at most 4 KiB."),
+          "background": MCPPropertySchema(type: .string, description: "What they need to know, Markdown, at most 8 KiB."),
           "language": MCPPropertySchema(
             type: .string,
             description: "BCP-47 tag the question is written in; defaults to the person's language."
@@ -438,7 +441,7 @@ extension MCPTools {
         properties: [
           "question_id": MCPPropertySchema(type: .string, description: "A question this session asked."),
           "action": MCPPropertySchema(type: .string, description: "message or withdraw."),
-          "text": MCPPropertySchema(type: .string, description: "Your message, or the reason; at most 4 KiB, in their language.")
+          "text": MCPPropertySchema(type: .string, description: "Your message (Markdown), or the reason; at most 4 KiB, in their language.")
         ],
         required: ["question_id", "action"]
       )
