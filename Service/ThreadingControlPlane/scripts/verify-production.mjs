@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 const maximumResponseBytes = 4 * 1024;
 const expectedProtocolVersion = 1;
-const expectedNotificationProtocolVersion = 5;
+const expectedNotificationProtocolVersion = 6;
 
 export async function verifyProduction({
   attempts = 10,
