@@ -1606,6 +1606,10 @@ adding about 108 ms before paint. Keyboard frame notifications update the safe-a
 constraint instead; the keyboard demo verifies the same layout behavior when input is actually
 requested.
 
+Keyboard evidence seeds are Debug-only, like `MobileDemoScene` itself. Keep every consumer of
+that fixture type inside `#if DEBUG`; an always-false Release focus guard does not prevent Swift
+from type-checking the guarded body.
+
 ## Queue, Steer, Stop
 
 ### Phone chat reading and follow-ups

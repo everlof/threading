@@ -62,8 +62,9 @@ plugin assets and Sentry symbols. Public SDK verification follows publication.
 
 Local credentials are the existing Keychain, ignored `.release-local/`, `.sentryclirc`, and
 `fastlane/.env` setup described in `docs/architecture/releasing.md`. Never print or commit them.
-Fastlane's `beta receipt:<path>` records the validated IPA hash, source commit, version and build
-number before upload. Retries retain that archive; they never select Apple's changing latest
+Fastlane's `beta receipt:<path>` builds and validates the Release archive before its long test
+gate, then records the IPA hash, source commit, version and build number. Retries retain that
+archive even when CI failed; every publication check still runs. They never select Apple's changing latest
 build. A confirmed upload is never repeated while Apple's build list catches up. An existing
 build without a confirmed upload receipt stops for reconciliation rather
 than claiming an unrelated upload. `submit_review receipt:<path>` requires the recorded upload

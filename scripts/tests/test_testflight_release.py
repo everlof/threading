@@ -209,7 +209,7 @@ class TestFlightReleaseTests(unittest.TestCase):
         self.assertIsNone(result["failure"])
         calls = result["calls"]
         self.assertEqual([call["name"] for call in calls], [
-            "sentry:check", "ci", "production", "build", "validate",
+            "build", "validate", "sentry:check", "ci", "production",
             "sentry:prepare", "upload", "sentry:deploy",
         ])
         self.assertEqual(calls[5]["arguments"], [
@@ -221,6 +221,13 @@ class TestFlightReleaseTests(unittest.TestCase):
         self.assertEqual(calls[7]["arguments"], [
             "--release-file", "/tested-receipt", "--environment", "production",
         ])
+
+    def test_release_archive_failures_stop_before_the_expensive_quality_gate(self):
+        for stage in ["build", "validate"]:
+            with self.subTest(stage=stage):
+                result = self.run_lane(FAIL_AT=stage)
+                self.assertIsNotNone(result["failure"])
+                self.assertNotIn("ci", [call["name"] for call in result["calls"]])
 
     def test_failed_gate_prevents_upload(self):
         for gate in ["sentry:check", "ci", "production", "build", "validate", "sentry:prepare"]:
@@ -258,8 +265,15 @@ class TestFlightReleaseTests(unittest.TestCase):
                 )
                 return json.loads(result.stdout)
 
+            failed_quality = run(FAIL_AT="ci")
+            self.assertIsNotNone(failed_quality["failure"])
+            self.assertEqual(json.loads(receipt.read_text())["state"], "validated")
+            self.assertNotIn("upload", [call["name"] for call in failed_quality["calls"]])
+
             interrupted = run(FAIL_AT="processing")
             self.assertIsNotNone(interrupted["failure"])
+            self.assertNotIn("build", [call["name"] for call in interrupted["calls"]])
+            self.assertIn("ci", [call["name"] for call in interrupted["calls"]])
             upload = next(call["arguments"] for call in interrupted["calls"] if call["name"] == "upload")
             self.assertTrue(upload["skip_waiting_for_build_processing"])
             self.assertEqual(json.loads(receipt.read_text())["state"], "uploaded")

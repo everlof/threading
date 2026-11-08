@@ -369,6 +369,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 #endif
         guard initiallyFocusesComposer, !initiallyFocused else { return }
         initiallyFocused = true
+#if DEBUG
         if textView.text.isEmpty,
            ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "conversation-keyboard" {
             textView.text = MobileL10n.string(
@@ -376,6 +377,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             )
             textDidChange()
         }
+#endif
         textView.becomeFirstResponder()
     }
 

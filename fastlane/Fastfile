@@ -42,8 +42,6 @@ platform :ios do
     revision = testflight_checkout
     receipt_path = options[:receipt] && File.expand_path(options[:receipt], REPOSITORY)
     receipt = read_release_receipt(receipt_path, revision) if receipt_path && File.exist?(receipt_path)
-    testflight_quality_gate
-    verify_testflight_checkout(revision)
     build = receipt ? receipt.fetch("build").transform_keys(&:to_sym) : build_for_app_store
     validate_app_store_build(build)
     verify_testflight_checkout(revision)
@@ -54,6 +52,8 @@ platform :ios do
       }
       write_release_receipt(receipt_path, receipt)
     end
+    testflight_quality_gate
+    verify_testflight_checkout(revision)
     sentry_ios("prepare", "--app", File.join(build[:archive], "Products/Applications/ThreadingMobile.app"),
                "--debug-files", File.join(build[:archive], "dSYMs"), "--output", build[:sentry_receipt])
     verify_testflight_checkout(revision)

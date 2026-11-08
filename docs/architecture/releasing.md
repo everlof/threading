@@ -1409,15 +1409,16 @@ review/listing metadata. It does not submit a build for review or enable externa
 ### TestFlight checks cannot be bypassed
 
 The 2026-10-11 review found that `beta` could upload without running tests or checking the live
-service, and without preparing Sentry's matching symbols. It now checks Sentry project access,
-runs `scripts/ci.sh` (including iOS), and verifies the production service and report intake before
-building. The exact exported IPA must pass Apple's validation. `sentry-release.sh prepare` then
+service, and without preparing Sentry's matching symbols. `beta` first archives Release and
+validates the exact exported IPA with Apple, so Release-only compile or signing failures stop
+before the long test gate. It then checks Sentry project access, runs `scripts/ci.sh` (including
+iOS), and verifies the production service and report intake. `sentry-release.sh prepare` then
 uses that archive's app and dSYMs with `SENTRY_PROJECT=threading-ios`; only a successful TestFlight
 upload records a deploy, in `production` to match the Release SDK configuration.
 
 `allow_dirty:true` no longer bypasses validation. The checkout, including untracked files, must
-be clean before checks and remain at the same commit before the archive, Sentry preparation and
-upload. The lane cannot substitute a tested checkout with later local edits. Unit tests execute
+be clean before the archive and remain at the same commit after archive validation, the quality
+gate and Sentry preparation. The lane cannot substitute a tested checkout with later local edits. Unit tests execute
 the real lane with external actions stubbed and prove that a failed gate, changed checkout or
 failed upload stops the dependent publication steps.
 
@@ -1427,7 +1428,8 @@ credential revocation and a consented, symbolicated Sentry crash. The October re
 perform that device matrix or publish a new iOS archive.
 
 For resumable full releases, `beta receipt:<path>` writes the source revision, archive paths,
-version/build and SHA-256 of the validated IPA before uploading. A retry reuses that archive;
+version/build and SHA-256 of the validated IPA before the quality gate. A retry reuses that archive
+even if CI was interrupted, while still rerunning every publication check;
 it never allocates another build number or adopts the latest build. A confirmed uploaded receipt
 can resume Sentry deployment or submission. If Apple has the number but local upload success was
 not recorded, the lane refuses ambiguous recovery. `submit_review` rejects changed source or IPA,
