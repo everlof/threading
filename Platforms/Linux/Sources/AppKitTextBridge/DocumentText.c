@@ -59,13 +59,16 @@ static int paint_at(TATDocumentLayout *document, int y) {
 
 TATDocumentLayout *tat_document_create(const uint8_t *utf8, int length,
     int monospace, int weight, int italic, double size, int width,
-    int char_wrapping, int alignment, int antialias, TATMetrics *metrics, int *line_count) {
+    int char_wrapping, int alignment, double line_spacing, int antialias,
+    TATMetrics *metrics, int *line_count) {
     if (!utf8 || length <= 0 || !metrics || !line_count ||
         !g_utf8_validate((const char *)utf8, length, NULL) ||
         !boolean(monospace) || weight < 0 || weight > 3 || !boolean(italic) ||
         !isfinite(size) || size < 1 || size > 128 || width <= 0 ||
         width > INT_MAX / PANGO_SCALE || !boolean(char_wrapping) ||
-        alignment < 0 || alignment > 3 || !boolean(antialias)) return NULL;
+        alignment < 0 || alignment > 3 || !isfinite(line_spacing) ||
+        line_spacing < 0 || line_spacing > 128 || !boolean(antialias)) return NULL;
+    const int spacing = (int)lround(line_spacing * PANGO_SCALE);
 
     // A private map prevents a worker-owned layout from sharing the UI thread's font cache.
     // https://docs.gtk.org/PangoCairo/type_func.FontMap.get_default.html
@@ -112,6 +115,7 @@ TATDocumentLayout *tat_document_create(const uint8_t *utf8, int length,
         pango_layout_set_text(layout, text, delimiter);
         pango_layout_set_width(layout, width * PANGO_SCALE);
         pango_layout_set_wrap(layout, char_wrapping ? PANGO_WRAP_CHAR : PANGO_WRAP_WORD_CHAR);
+        pango_layout_set_spacing(layout, spacing);
         PangoAlignment resolved_alignment = alignment == 1 ? PANGO_ALIGN_CENTER :
             alignment == 2 ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT;
         if (previous == PANGO_DIRECTION_RTL && alignment != 1)
@@ -131,9 +135,16 @@ TATDocumentLayout *tat_document_create(const uint8_t *utf8, int length,
             pango_layout_iter_get_line_extents(iterator, &ink, &position);
             pango_layout_line_get_extents(line.line, NULL, &local);
             pango_layout_iter_get_line_yrange(iterator, &start, &end);
-            double bottom = ceil(y + (double)end / PANGO_SCALE);
+            int64_t band_start = start, band_end = end;
+            // Paragraph plans share the same inter-line bands as one complete Pango layout.
+            // Pango's per-paragraph iterator has no preceding/following paragraph to include.
+            if (offset > 0 && line.line->start_index == 0) band_start -= spacing / 2;
+            if (offset + delimiter < length && pango_layout_iter_at_last_line(iterator)) {
+                band_end += spacing - spacing / 2;
+            }
+            double bottom = ceil(y + (double)band_end / PANGO_SCALE);
             if (bottom > INT_MAX) { valid = FALSE; break; }
-            line.top = (int)floor(y + (double)start / PANGO_SCALE);
+            line.top = (int)floor(y + (double)band_start / PANGO_SCALE);
             line.bottom = (int)bottom;
             line.origin_x = ((double)position.x - local.x) / PANGO_SCALE;
             line.baseline = y + (double)pango_layout_iter_get_baseline(iterator) / PANGO_SCALE;
@@ -161,6 +172,7 @@ TATDocumentLayout *tat_document_create(const uint8_t *utf8, int length,
         pango_layout_get_extents(layout, NULL, &paragraph);
         y += (double)paragraph.height / PANGO_SCALE;
         if (offset + delimiter == length) break;
+        y += (double)spacing / PANGO_SCALE;
         offset += next;
     }
     pango_font_description_free(font);
@@ -313,7 +325,7 @@ int tat_document_render_rgba(TATDocumentLayout *document, uint8_t *rgba, int cap
 #else
 struct TATDocumentLayout { int unused; };
 TATDocumentLayout *tat_document_create(const uint8_t *t, int n, int m, int w, int i, double s,
-    int x, int c, int a, int aa, TATMetrics *r, int *l) { return NULL; }
+    int x, int c, int a, double spacing, int aa, TATMetrics *r, int *l) { return NULL; }
 void tat_document_destroy(TATDocumentLayout *d) {}
 int tat_document_hit(TATDocumentLayout *d, double x, double y) { return -1; }
 int tat_document_render(TATDocumentLayout *d, uint8_t *p, int c, int w, int h, int x, int y,

@@ -88,6 +88,8 @@ class Peer:
         self.listener.settimeout(.2)
         self.stop = threading.Event()
         self.release = threading.Event()
+        self.hold_next_connection = threading.Event()
+        self.surveyed = threading.Event()
         self.hello = threading.Event()
         self.hello_at = None
         self.errors = queue.Queue()
@@ -105,24 +107,26 @@ class Peer:
                 continue
             except OSError:
                 return
-            first = not self.connections
+            creation = self.hold_next_connection.is_set()
+            if creation:
+                self.hold_next_connection.clear()
             self.connections.append(connection)
-            thread = threading.Thread(target=self.serve, args=(connection, first), daemon=True)
+            thread = threading.Thread(target=self.serve, args=(connection, creation), daemon=True)
             self.workers.append(thread)
             thread.start()
 
-    def serve(self, connection, first):
+    def serve(self, connection, creation):
         try:
             connection.settimeout(6)
             hello = receive(connection)
             assert hello['type'] == 'hello', hello
-            if first:
+            if creation:
                 self.hello_at = time.monotonic()
                 self.hello.set()
                 assert self.release.wait(4), 'fixture did not release creation within hello deadline'
             control(connection, hello)
             request = receive(connection)
-            if first:
+            if creation:
                 assert request['type'] == 'spawn', request
                 body = request['body']
                 assert body['id']['kind'] == 'agentSession', body
@@ -135,6 +139,7 @@ class Peer:
             else:
                 assert request == {'type': 'list'}, request
                 control(connection, {'type': 'sessions', 'body': []})
+                self.surveyed.set()
         except Exception as error:
             if not self.stop.is_set():
                 self.errors.put(error)
@@ -239,6 +244,9 @@ class Scenario:
         # The catalog bound below deliberately exercises seven visible rows.
         self.xdo('windowsize', '--sync', self.window, '1120', '480')
         self.app = self.eventually(self.application, 'AT-SPI fixture application')
+        # Startup now surveys the daemon before the explicit creation command. Let that
+        # real protocol exchange finish; connection order does not identify a spawn.
+        self.eventually(self.peer.surveyed.is_set, 'startup daemon survey completed')
 
     def folder_pid(self):
         children = set()
@@ -285,6 +293,7 @@ class Scenario:
         self.title('Threading experiment - ' + str(project))
 
     def begin_creation(self):
+        self.peer.hold_next_connection.set()
         self.key('ctrl+shift+l')
         self.eventually(self.peer.hello.is_set, 'creation paused before persistence', timeout=3)
         assert self.records() == self.before, 'creation committed before controlled hello release'

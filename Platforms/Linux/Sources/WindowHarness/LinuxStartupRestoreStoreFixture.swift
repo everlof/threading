@@ -1,5 +1,6 @@
 #if os(Linux)
 import Foundation
+import Glibc
 @testable import CoreSlice
 
 enum LinuxStartupRestoreStoreFixture {
@@ -29,6 +30,7 @@ enum LinuxStartupRestoreStoreFixture {
             try database.addSession(background, to: project.id, position: 1)
             try database.saveRunningSessionIDs([selected.id, background.id])
         }
+        try verifyWriterCoordination(store: store, otherStore: folder)
 
         let defaults = PreferenceStore.shared
         let keys = [SessionRestoreDefaults.policyKey,
@@ -142,6 +144,54 @@ enum LinuxStartupRestoreStoreFixture {
         precondition(afterAcceptance == [background.id],
                      "a successful consume lost the queued relaunch on quick quit")
         print("PASS Linux startup restore store: exact consume, selected exclusion and quick-quit preservation")
+    }
+
+    private static func verifyWriterCoordination(store: URL, otherStore: URL) throws {
+        let owner = try LinuxStoreMutation.acquire(at: store)
+        defer { owner.close() }
+        let other = try LinuxStoreMutation.acquire(at: otherStore)
+        other.close()
+        do {
+            let unexpected = try LinuxStoreMutation.acquire(at: store, waitForLocalWriter: false)
+            unexpected.close()
+            preconditionFailure("latency-sensitive metadata waited through a local writer")
+        } catch {}
+
+        let entered = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            entered.signal()
+            do {
+                let count = try NativeWorkspaceSession.withDatabase(store: store.path) {
+                    try $0.runningSessionIDs().count
+                }
+                precondition(count == 2, "native startup lost its record after local contention")
+            } catch {
+                preconditionFailure("native startup refused a local writer: \(error)")
+            }
+            finished.signal()
+        }
+        precondition(entered.wait(timeout: .now() + 2) == .success,
+                     "native store worker did not enter")
+        precondition(finished.wait(timeout: .now() + 0.1) == .timedOut,
+                     "native startup refused an in-process writer instead of waiting")
+        owner.close()
+        precondition(finished.wait(timeout: .now() + 2) == .success,
+                     "native startup did not resume after the writer closed")
+
+        // An OS owner outside the registry represents a separate host. It must still be
+        // refused immediately, and the failed acquisition must release the local reservation.
+        let external = Glibc.open(store.appendingPathComponent("host.lock").path, O_RDWR | O_CLOEXEC)
+        precondition(external >= 0 && flock(external, LOCK_EX | LOCK_NB) == 0)
+        do {
+            let unexpected = try LinuxStoreMutation.acquire(at: store)
+            unexpected.close()
+            preconditionFailure("another host's store lock was ignored")
+        } catch {}
+        Glibc.close(external)
+        let recovered = try LinuxStoreMutation.acquire(at: store)
+        recovered.close()
+        print("PASS Linux store writers: local serialization, independent stores and external exclusion")
     }
 }
 #endif

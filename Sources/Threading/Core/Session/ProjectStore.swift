@@ -58,7 +58,7 @@ enum ProjectStorePersistenceBlock: Equatable, Sendable {
 /// are managed by `AgentRuntime`; standalone terminal surfaces are managed by
 /// `ProjectTerminalRuntime`, each keyed by the durable identifiers stored here.
 @MainActor
-final class ProjectStore {
+final class ProjectStore: Sendable {
 
     private enum StateWritePolicy {
         case allowed
@@ -626,11 +626,17 @@ final class ProjectStore {
             uniqueIDs.allSatisfy { sessionLocationsByID[$0]?.projectIndex == index }
         } ?? false
         if alreadyThere, let destinationIndex {
+            var recoveredMissingFolder = false
             for id in uniqueIDs {
                 guard let location = locate(sessionID: id) else { continue }
-                projects[location.projectIndex].sessions[location.sessionIndex].branch = branch
-                projects[location.projectIndex].sessions[location.sessionIndex]
-                    .pendingCheckoutMove = nil
+                var session = projects[location.projectIndex].sessions[location.sessionIndex]
+                session.branch = branch
+                session.pendingCheckoutMove = nil
+                if session.lastLaunchFailure?.knownCause == SessionLaunchFailure.missingProjectFolderCause {
+                    session.lastLaunchFailure = nil
+                    recoveredMissingFolder = true
+                }
+                projects[location.projectIndex].sessions[location.sessionIndex] = session
             }
             guard stateManager.moveSessions(affectedProjects: [
                 (projects[destinationIndex], destinationIndex)
@@ -647,7 +653,9 @@ final class ProjectStore {
                 createdProject: false
             )
             notifyChanged(sidebarImpact: .structure)
-            return .unchanged(destination)
+            // Choosing the original folder after restoring it is recovery too: the successful
+            // transaction must publish a change so the stopped chat actually resumes.
+            return recoveredMissingFolder ? .moved(destination) : .unchanged(destination)
         }
 
         let previousProjects = projects
@@ -683,6 +691,11 @@ final class ProjectStore {
         for index in moving.indices {
             moving[index].branch = branch
             moving[index].pendingCheckoutMove = nil
+            // The old execution folder no longer gates the replacement. Clear only that
+            // diagnosis, atomically with ownership, so a failed write retains both facts.
+            if moving[index].lastLaunchFailure?.knownCause == SessionLaunchFailure.missingProjectFolderCause {
+                moving[index].lastLaunchFailure = nil
+            }
         }
         projects[targetIndex].sessions.append(contentsOf: moving)
         rebuildLookupIndexes()

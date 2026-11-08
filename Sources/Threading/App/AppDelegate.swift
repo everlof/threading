@@ -3655,6 +3655,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             case AppCommands.ID.renameSession:
                 controller.renameSession(sessionID)
                 return .invoked(commandID: id)
+            case AppCommands.ID.chooseSessionCheckout:
+                controller.chooseSessionCheckout(sessionID)
+                return .invoked(commandID: id)
             case AppCommands.ID.toggleCheckoutNotices:
                 controller.sessionCoordinator.toggleCheckoutNotices(for: sessionID)
                 return .invoked(commandID: id)
@@ -3738,6 +3741,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.newProject: mainWindowController?.newProject()
         case AppCommands.ID.addProject: mainWindowController?.addProject()
         case AppCommands.ID.renameSession: mainWindowController?.renameCurrentSession()
+        case AppCommands.ID.chooseSessionCheckout:
+            if let controller = mainWindowController, let sessionID = controller.currentSessionID {
+                controller.chooseSessionCheckout(sessionID)
+            }
         case AppCommands.ID.toggleCheckoutNotices:
             if let controller = mainWindowController, let sessionID = controller.currentSessionID {
                 controller.sessionCoordinator.toggleCheckoutNotices(for: sessionID)
@@ -4609,6 +4616,18 @@ private enum UIScenarioBootstrap {
         ) else {
             return .refused("one or more fixture artifacts are missing or outside scenario home")
         }
+        let automationTape: URL?
+        if environment["THREADING_UI_SCENARIO_AUTOMATION_WORKSPACE"] == "1" {
+            guard let tape = artifact(
+                "THREADING_UI_SCENARIO_AUTOMATION_TAPE", environment: environment, root: root,
+                expectsDirectory: false, executable: false, fileManager: fileManager
+            ) else {
+                return .refused("the automation tape is missing or outside scenario home")
+            }
+            automationTape = tape
+        } else {
+            automationTape = nil
+        }
         let targetProject: URL?
         if environment[Key.targetProject] != nil {
             guard let target = artifact(
@@ -4697,7 +4716,7 @@ private enum UIScenarioBootstrap {
         ) else {
             return .refused("could not install the fixture process")
         }
-        if environment["THREADING_UI_SCENARIO_AUTOMATION_WORKSPACE"] == "1" {
+        if let automationTape {
             // One validated sandbox automation, installed on its ordinary creation event before
             // runtime launch. The fixture still replaces only the exact new session process.
             automationFixtureEvents.observe(ProjectsDidChange.self) { _ in
@@ -4706,7 +4725,7 @@ private enum UIScenarioBootstrap {
                         let id = candidate.id
                         _ = AgentRuntime.shared.installFixtureLaunchPlan(for: id, provider: { _, _, _ in
                             let current = ProjectStore.shared.session(withID: id) ?? candidate
-                            let tape = current.resumeState.isResumable ? resumeTape : freshTape
+                            let tape = current.resumeState.isResumable ? resumeTape : automationTape
                             return AgentLaunchPlan(executable: executable.path,
                                 arguments: ["replay", tape.path, "--scenario-root", rootPath], resumeState: current.resumeState)
                         })

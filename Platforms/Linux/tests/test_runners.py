@@ -189,7 +189,7 @@ fi''')
         self.write(artifact_bin / "WindowHarness", '''case "$1" in
     --project-row-layout-fixture|--session-row-layout-fixture|--terminal-row-layout-fixture)
         printf '%s\\n' "$1" >> "$RUNNER_FIXTURE_ROOT/layout-fixtures" ;;
-    --settings-row-contract|--app-event-contract) exit 0 ;;
+    --settings-row-contract|--app-event-contract|--startup-restore-contract) exit 0 ;;
     *) exit 92 ;;
 esac''')
 

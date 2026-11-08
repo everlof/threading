@@ -43,11 +43,7 @@ enum ScheduleMomentPickerRows {
         let title = NSTextField(labelWithString: time.title)
         // Tabular figures: a column of clock faces whose digits shift width is a column that
         // reads as ragged even though every string is the same length.
-        #if os(Linux)
-        title.font = Design.Typography.numericBody()
-        #else
         title.applyFont(.numericBody)
-        #endif
         title.textColor = Design.Text.label
 
         let row = NSStackView(views: [title])

@@ -14,7 +14,7 @@ enum ConversationDefaults {
     /// pass updates the column's measured width; at 400, that stale constant pulled the pane
     /// back. Below 250, the reply box instead shrank to its content's fitting width.
     /// Transcript rows keep their separate 999 because they live in the scroll document.
-    static let statedColumnPriority = ConversationPaneLayout.statedColumnPriority
+    @MainActor static let statedColumnPriority = ConversationPaneLayout.statedColumnPriority
 
     /// The reply box's column: the transcript's column plus the box's own padding.
     ///

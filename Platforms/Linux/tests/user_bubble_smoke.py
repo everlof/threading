@@ -51,11 +51,9 @@ def button(value, title):
 
 
 def clipboard_matches(text):
-    try:
-        return subprocess.check_output(['xclip', '-selection', 'clipboard', '-o'], text=True,
-                                       stderr=subprocess.DEVNULL, timeout=2) == text
-    except subprocess.CalledProcessError:
-        return False
+    result = subprocess.run(['xclip', '-selection', 'clipboard', '-target', 'UTF8_STRING', '-o'],
+                            capture_output=True, timeout=3)
+    return result.returncode == 0 and result.stdout == text.encode('utf-8')
 
 
 def capture(name):

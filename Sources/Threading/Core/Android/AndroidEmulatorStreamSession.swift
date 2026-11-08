@@ -419,7 +419,7 @@ final class AndroidInputSequencer: @unchecked Sendable {
             return !moveScheduled
         }
         guard schedule else { return }
-        Task {
+        Task { [self] in
             try? await perform { [weak self] in
                 guard let self else { return }
                 let next: (@Sendable () async throws -> Void)? = self.lock.withLock {

@@ -67,12 +67,15 @@ def quit_window(number):
                                           '--pid', str(process.pid), '--name', '^Threading'],
                                          capture_output=True, text=True, timeout=5)
                 return matches.stdout.splitlines()[0] if matches.stdout else None
-            wid = eventually(window, f'window {number} never opened')
+            eventually(window, f'window {number} never opened')
             try:
                 eventually(lambda: 'TERMINAL_FRAME ' in log_path.read_text(),
                            f'window {number} did not attach the live agent')
             except AssertionError as error:
                 raise AssertionError(f'{error}: {log_path.read_text()[-4000:]}') from error
+            # SDL may replace the initial X11 window while creating its software renderer.
+            # Resolve the handle after the app has drawn, before sending the real quit gesture.
+            wid = eventually(window, f'window {number} disappeared before quit')
             subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'key', 'alt+F4'],
                            check=True, timeout=5)
             assert process.wait(timeout=8) == 0, log_path.read_text()[-5000:]
@@ -80,6 +83,9 @@ def quit_window(number):
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
+            # The bundle runner removes its temporary profile, including on failure. Keep the
+            # native lifecycle evidence beside the other runtime logs for a failed relaunch.
+            Path(f'out/startup-restore-quit-{number}.log').write_text(log_path.read_text())
     assert 'recordWritten=true' in log_path.read_text(), \
         'quit did not await its worker record'
     with sqlite3.connect(store / 'threading.db') as database:

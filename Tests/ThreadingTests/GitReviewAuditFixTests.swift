@@ -83,8 +83,8 @@ final class GitReviewAuditFixTests: XCTestCase {
         }
         XCTAssertEqual(rows.count, 10, "ten code rows, no omission row")
         XCTAssertEqual(rows.count, preview.rows.count)
-        XCTAssertEqual(rows.filter(\.1).map(\.0), Array(3...9), "every selected line is shown")
-        XCTAssertEqual(rows.map(\.0), Array(1...10), "two neighbours above, one below")
+        XCTAssertEqual(rows.filter(\.1).map(\.0), (3...9).map(Optional.some), "every selected line is shown")
+        XCTAssertEqual(rows.map(\.0), (1...10).map(Optional.some), "two neighbours above, one below")
 
         let exact = try XCTUnwrap(CodeContextPreview.make(totalLineCount: 20, target: 5...14) {
             CodeContextPreview.SourceLine(number: $0, change: .context, text: "line \($0)")

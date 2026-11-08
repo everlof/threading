@@ -56,7 +56,7 @@ final class RevealHighlightView: NSView, ThemedComponent {
             context.duration = Design.Motion.appear
             context.allowsImplicitAnimation = true
             self.animator().alphaValue = 1
-        }, completionHandler: {
+        }, completionHandler: { [weak self] in
             DispatchQueue.main.asyncAfter(deadline: .now() + Design.Motion.revealHold) { [weak self] in
                 guard let self else {
                     completion()

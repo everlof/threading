@@ -36,6 +36,7 @@ out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --session-row-la
 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --terminal-row-layout-fixture
 timeout 60 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --settings-row-contract
 timeout 120 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --app-event-contract
+timeout 120 out/threading-linux-preview-ubuntu24.04-arm64/bin/WindowHarness --startup-restore-contract
 # Exercise the same Release emulator/client modules before leaving the build container.
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product NativeAgentProcessHarness
 swift build -c release --static-swift-stdlib -Xswiftc -enable-testing --product NativeConversationHarness

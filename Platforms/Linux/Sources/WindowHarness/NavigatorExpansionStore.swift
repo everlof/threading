@@ -13,13 +13,8 @@ enum NavigatorExpansionStore {
         guard FileManager.default.fileExists(atPath: file.path) else {
             throw WindowFailure("store does not exist")
         }
-        let lock = Glibc.open(root.appendingPathComponent("host.lock").path,
-                             O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard lock >= 0 else { throw WindowFailure("cannot open store lock") }
-        defer { Glibc.close(lock) }
-        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else {
-            throw WindowFailure("store is already owned")
-        }
+        let lease = try LinuxStoreMutation.acquire(at: root)
+        defer { lease.close() }
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
         guard try database.updateProjectExpansion(id: id, expanded: expanded) else {

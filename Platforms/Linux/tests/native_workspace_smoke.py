@@ -331,6 +331,30 @@ def brightness(path, x, y, width, height, statistic):
         '+repage', '-colorspace', 'Gray', '-format', f'%[fx:{statistic}]', 'info:'], text=True, timeout=5))
 
 
+def reply_drag_points(path):
+    # At 2x the user's bubble wraps and pushes the reply down. Locate the first two
+    # rendered assistant lines in the column's left strip rather than scaling old Y values.
+    frame = composer_frame()
+    left = int(frame['x']) + 12 * scale
+    top = 41 * scale + 1
+    width = 50 * scale
+    height = int(frame['y']) - 36 * scale - top
+    pixels = subprocess.check_output(['convert', str(path), '-crop', f'{width}x{height}+{left}+{top}',
+                                     '+repage', '-depth', '8', 'rgb:-'], timeout=5)
+    bands = []
+    for y in range(height):
+        if not any(max(pixels[(y * width + x) * 3:(y * width + x) * 3 + 3]) < 128
+                   for x in range(width)):
+            continue
+        if not bands or y > bands[-1][1] + 2 * scale:
+            bands.append([y, y])
+        else:
+            bands[-1][1] = y
+    assert len(bands) >= 2, ('reply heading and prose ink bands', bands)
+    heading_y, prose_y = (top + (first + last) // 2 for first, last in bands[:2])
+    return (left + 2 * scale, heading_y), (left + 140 * scale, prose_y)
+
+
 def resize_native(turn=0):
     # Selecting a pane applies its initial viewport. Resize after selection so these captures
     # exercise the conversation at the requested height rather than the picker's initial size.
@@ -398,9 +422,10 @@ try:
     assert turns()[0]['text'] == first, turns()
     pid = turns()[0]['pid']
     capture('native-first-reply.png')
-    xdo('mousemove', '--window', window, str(320 * scale), str(128 * scale))
+    start, end = reply_drag_points(output / 'native-first-reply.png')
+    xdo('mousemove', '--window', window, *map(str, start))
     xdo('mousedown', '1')
-    xdo('mousemove', '--window', window, str(430 * scale), str(160 * scale))
+    xdo('mousemove', '--window', window, *map(str, end))
     xdo('mouseup', '1')
     key('ctrl+c')
     def copied_reply():

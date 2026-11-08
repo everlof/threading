@@ -959,16 +959,6 @@ private struct SessionDraftComposerScreen: View {
         promptIsFocused = false
     }
 
-    /// What the folded composer says instead of nothing: the run it is set up for, in one
-    /// quiet line. Tapping it is tapping the composer.
-    private var foldedSummary: String {
-        var parts = [runSummary]
-        if selectedModel?.supportsFastMode == true { parts.append(selectedSpeedName) }
-        if !(selectedAgent?.permissionModes ?? []).isEmpty { parts.append(selectedPermissionName) }
-        if selectedAgent?.supportsConversation == true { parts.append(selectedSurfaceTitle) }
-        return parts.joined(separator: " · ")
-    }
-
     private var composer: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let attachmentNotice {
@@ -987,31 +977,25 @@ private struct SessionDraftComposerScreen: View {
                 )
                 .padding(.bottom, MobileDesign.Spacing.small)
             }
-            VStack(alignment: .leading, spacing: 0) {
-                if promptIsOverflowing {
-                    HStack(spacing: MobileDesign.Spacing.small) {
-                        if attachmentTray != nil { attachmentButtonOnMargin(hangsBelow: true) }
-                        Spacer(minLength: 0)
-                        sendButtonOnMargin(hangsBelow: true)
-                    }
-                    .frame(height: SessionDraftPromptMetrics.controlRow)
-                    // The send disc sits over full-width text here; the editor's own top inset
-                    // alone left the disc reading as resting on the first line.
-                    .padding(.bottom, MobileDesign.Spacing.tight)
-                }
-                promptEditor
-            }
-            // The actions belong to the first line, not to two permanent columns beside the
-            // whole draft. TextKit excludes their footprints from that line; every later line
-            // reclaims the composer's full width beneath them.
-            .overlay(alignment: .topLeading) {
-                if !promptIsOverflowing, attachmentTray != nil {
-                    attachmentButtonOnMargin(hangsBelow: !promptWraps)
-                }
-            }
-            .overlay(alignment: .topTrailing) {
-                if !promptIsOverflowing { sendButtonOnMargin(hangsBelow: !promptWraps) }
-            }
+            SessionDraftPromptRow(
+                prompt: $prompt,
+                promptIsFocused: $promptIsFocused,
+                promptIsOverflowing: $promptIsOverflowing,
+                promptWraps: $promptWraps,
+                isChoosingAttachmentSource: $isChoosingAttachmentSource,
+                theme: theme,
+                isSubmitting: isSubmitting,
+                canSubmit: canSubmit,
+                offersAttachments: attachmentTray != nil,
+                canAcceptAttachments: attachmentTray?.canAcceptMore == true,
+                promptPlaceholder: promptPlaceholder,
+                attachmentSourceActions: attachmentSourceActions,
+                beginChoosingAttachmentSource: beginChoosingAttachmentSource,
+                offersFiles: { attachmentTray?.canAcceptMore == true
+                    && ComposerClipboard.general.hasFiles },
+                stageClipboardFiles: stageClipboardFiles,
+                submit: submit
+            )
             // Folded to nothing rather than removed: the chips are menus, and a menu that is
             // unmounted under a finger cannot finish what it was asked. Clipping keeps the
             // folded row from painting over the prompt's last line. The air above the strip
@@ -1028,7 +1012,7 @@ private struct SessionDraftComposerScreen: View {
             // The folded composer says what it is set up for rather than nothing. Not while
             // starting: the strip folds for the handoff too, and a line appearing for that
             // third of a second would read as a glitch.
-            Text(foldedSummary)
+            Text(choiceStrip.foldedSummary)
                 .font(.caption)
                 .foregroundStyle(theme.tertiaryLabel)
                 .lineLimit(1)
@@ -1063,135 +1047,6 @@ private struct SessionDraftComposerScreen: View {
         )
     }
 
-    /// The prompt shares its first line with Start, so the composer folded to that one line is
-    /// still the whole composer. Top-aligned: a longer prompt grows down from a stable first
-    /// row instead of carrying the button away with every line.
-    private var promptEditor: some View {
-        ZStack(alignment: .topLeading) {
-            SessionDraftPromptEditor(
-                text: $prompt,
-                isFocused: $promptIsFocused,
-                isOverflowing: $promptIsOverflowing,
-                isEnabled: !isSubmitting,
-                theme: theme,
-                offersFiles: { attachmentTray?.canAcceptMore == true
-                    && ComposerClipboard.general.hasFiles },
-                pasteFiles: stageClipboardFiles,
-                firstLineLeadingAccessoryWidth: promptFirstLineLeadingAccessoryWidth,
-                firstLineTrailingAccessoryWidth: promptFirstLineTrailingAccessoryWidth,
-                firstLineAccessoryHeight: SessionDraftPromptMetrics.controlRow,
-                firstLineAccessoriesInline: !promptIsOverflowing
-            )
-            .mobileUIEvidenceKeyboardFocus($promptIsFocused)
-            // Drawn here rather than by the editor: the field's own placeholder takes the
-            // system's colour, not the theme's, and disappears behind a prompt that is only
-            // whitespace — a stray newline left the phone's composer saying nothing at all.
-            if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(promptPlaceholder)
-                    .font(.body)
-                    .foregroundStyle(theme.inputPlaceholder)
-                    .lineLimit(1)
-                    .padding(
-                        .top,
-                        SessionDraftPromptMetrics.textInsets(
-                            for: UIFont.preferredFont(forTextStyle: .body)
-                        ).top
-                    )
-                    .padding(.leading, promptFirstLineLeadingAccessoryWidth)
-                    .padding(.trailing, promptFirstLineTrailingAccessoryWidth)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-        }
-        .frame(minHeight: SessionDraftPromptMetrics.controlRow)
-        // Whether the prompt has a second line, read from the height the editor took. The
-        // first-line targets stop hanging below their marks once it has.
-        .onGeometryChange(for: Bool.self) { proxy in
-            proxy.size.height > SessionDraftPromptMetrics.wrapThreshold(
-                for: UIFont.preferredFont(forTextStyle: .body)
-            )
-        } action: { wraps in
-            promptWraps = wraps
-        }
-    }
-
-    /// The inline actions' footprints, stated whether or not the actions are currently inline.
-    /// The editor decides their placement by measuring the document against these footprints,
-    /// so they must not follow the placement they decide: zeroing them on overflow handed the
-    /// decision its own consequence, and a prompt within a line of the cap flickered between
-    /// its two layouts forever. `firstLineAccessoriesInline` is what actually releases the
-    /// first line's width once the controls move to their fixed row.
-    private var promptFirstLineLeadingAccessoryWidth: CGFloat {
-        attachmentTray != nil ? SessionDraftPromptMetrics.accessoryExclusionWidth : 0
-    }
-
-    private var promptFirstLineTrailingAccessoryWidth: CGFloat {
-        SessionDraftPromptMetrics.trailingAccessoryExclusionWidth
-    }
-
-    /// The two controls stood on the composer's margins by their marks, not their frames. Each
-    /// is the full iPhone target centred on what it shows — the paperclip's glyph, the send
-    /// disc — and the target's overhang past that mark is pulled out over the margin, where
-    /// nothing else stands. The first line's exclusions begin where the targets end, so a tap
-    /// on its words never lands on a control. The row subtracts what the control's own
-    /// geometry states rather than a number of its own, the way the Mac composer places its
-    /// import button by `ThemedIconButton.opticalHorizontalInset`: aligned by frame, the
-    /// paperclip's ink stood nine points inboard of the chip the strip starts with beneath it.
-    private func attachmentButtonOnMargin(hangsBelow: Bool) -> some View {
-        attachmentButton(hangsBelow: hangsBelow)
-            .padding(.leading, -SessionDraftPromptMetrics.attachmentOpticalInset)
-            .padding(.top, -SessionDraftPromptMetrics.targetOverhang)
-    }
-
-    private func sendButtonOnMargin(hangsBelow: Bool) -> some View {
-        sendButton(hangsBelow: hangsBelow)
-            .padding(.trailing, -SessionDraftPromptMetrics.sendOpticalInset)
-            .padding(.top, -SessionDraftPromptMetrics.targetOverhang)
-    }
-
-    /// The full iPhone target around a first-line mark the row lays out at its compact height.
-    /// Above the mark it hangs into the composer's own padding; below it, only while the prompt
-    /// is one line, because under a wrapped prompt that air is the second line, and a target
-    /// over words sends what a caret tap meant to edit. The disc alone was the target before,
-    /// and a tap a few points low fell into the icon menu the choice strip keeps beneath it.
-    private func firstLineTarget(around mark: some View, hangsBelow: Bool) -> some View {
-        let overhang = SessionDraftPromptMetrics.targetOverhang
-        return mark
-            .padding(.top, overhang)
-            .frame(
-                width: SessionDraftPromptMetrics.controlTarget,
-                height: SessionDraftPromptMetrics.controlRow + overhang
-                    + (hangsBelow ? overhang : 0),
-                alignment: .top
-            )
-            .contentShape(Rectangle())
-    }
-
-    /// The paperclip in its compact slot. The subheadline face is what
-    /// `MobileDesign.Size.compactControlGlyph` measures the mark by.
-    private func attachmentButton(hangsBelow: Bool) -> some View {
-        Button(action: beginChoosingAttachmentSource) {
-            firstLineTarget(
-                around: Image(systemName: "paperclip")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(theme.secondaryLabel)
-                    .frame(
-                        width: MobileDesign.Size.compactControl,
-                        height: MobileDesign.Size.compactControl
-                    ),
-                hangsBelow: hangsBelow
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(isSubmitting || attachmentTray?.canAcceptMore != true)
-        .accessibilityLabel(MobileL10n.string("Attachments"))
-        .themedConfirmationDialog(
-            "Attachments",
-            isPresented: $isChoosingAttachmentSource,
-            actions: attachmentSourceActions
-        )
-    }
-
     private var attachmentSourceActions: [ThemedDialogAction] {
         var actions: [ThemedDialogAction] = []
         if clipboardOffersFiles {
@@ -1212,57 +1067,25 @@ private struct SessionDraftComposerScreen: View {
         return actions
     }
 
-    /// The run settings — how the chat will run — as one compact, non-scrolling row. Where and
-    /// who are not here: the project stands in the ground and the account in the bar.
-    private var choiceStrip: some View {
-        HStack(spacing: MobileDesign.Spacing.small) {
-            runMenu
-                .layoutPriority(1)
-            if selectedModel?.supportsFastMode == true {
-                speedMenu
-            }
-            Spacer(minLength: MobileDesign.Spacing.small)
-            if !(selectedAgent?.permissionModes ?? []).isEmpty {
-                permissionMenu
-            }
-            if selectedAgent?.supportsConversation == true {
-                surfaceMenu
-            }
-        }
-    }
-
-    /// The toolbar circles' disc, in the first-line target.
-    private func sendButton(hangsBelow: Bool) -> some View {
-        Button {
-            submit()
-        } label: {
-            firstLineTarget(
-                around: ZStack {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 15, weight: .bold))
-                        .opacity(isSubmitting ? 0 : 1)
-                    ProgressView()
-                        // The ink chosen against the accent itself, like the arrow it
-                        // replaces. `ground` was near-invisible on the accent disc: a dark
-                        // theme's ground over an orange accent is orange-on-orange.
-                        .tint(theme.accentForeground)
-                        .opacity(isSubmitting ? 1 : 0)
-                }
-                .frame(
-                    width: MobileDesign.Size.compactControl,
-                    height: MobileDesign.Size.compactControl
-                )
-                .background(
-                    canSubmit || isSubmitting ? theme.accent : theme.controlResting,
-                    in: Circle()
-                ),
-                hangsBelow: hangsBelow
-            )
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(canSubmit || isSubmitting ? theme.accentForeground : theme.tertiaryLabel)
-        .disabled(!canSubmit)
-        .accessibilityLabel(MobileL10n.string("Start session"))
+    /// A concrete child keeps the four menu trees out of the screen's navigation value.
+    private var choiceStrip: SessionDraftChoiceStrip {
+        SessionDraftChoiceStrip(
+            theme: theme,
+            selectedAgent: selectedAgent,
+            selectedModel: selectedModel,
+            models: models,
+            defaultModelID: defaultModelID,
+            isSubmitting: isSubmitting,
+            modelID: $modelID,
+            reasoningID: $reasoningID,
+            speedID: $speedID,
+            permissionID: $permissionID,
+            surface: $surface,
+            runPickerIsPresented: $runPickerIsPresented,
+            speedChooserIsPresented: $speedChooserIsPresented,
+            permissionChooserIsPresented: $permissionChooserIsPresented,
+            makeRoomForChooser: makeRoomForChooser
+        )
     }
 
     /// A chat gets the Mac theme's invitation when it states one, else one of the task
@@ -1381,230 +1204,6 @@ private struct SessionDraftComposerScreen: View {
                 }
             )
         }
-    }
-
-    private var surfaceMenu: some View {
-        Menu {
-            Button {
-                surface = .conversation
-            } label: {
-                Label(
-                    "Native (Experimental)",
-                    systemImage: surface == .conversation
-                        ? "checkmark"
-                        : "bubble.left.and.bubble.right"
-                )
-            }
-            Button {
-                surface = .terminal
-            } label: {
-                Label(
-                    originalUISurfaceTitle,
-                    systemImage: surface == .terminal ? "checkmark" : "terminal"
-                )
-            }
-        } label: {
-            // The icon is the value: a terminal for the agent's own UI, a bubble for Native.
-            DraftIconMenuLabel(
-                symbol: surface == .conversation ? "bubble.left.and.bubble.right" : "terminal",
-                isSet: surface == .conversation
-            )
-        }
-        .disabled(isSubmitting)
-        .accessibilityLabel(MobileL10n.string("Interface"))
-        .accessibilityValue(selectedSurfaceTitle)
-    }
-
-    private var originalUISurfaceTitle: String {
-        MobileL10n.string(
-            "%@ UI",
-            selectedAgent?.name ?? MobileL10n.string("Agent")
-        )
-    }
-
-    private var selectedSurfaceTitle: String {
-        surface == .conversation
-            ? MobileL10n.string("Native · Experimental")
-            : originalUISurfaceTitle
-    }
-
-    /// Model and effort keep one unchanged one-line trigger. The popover shows the two as the
-    /// relationship they actually are, while speed remains the simpler independent three-way
-    /// choice beside it. All three draft choosers share the theme-owned popover chrome below.
-    private var runMenu: some View {
-        Button {
-            runPickerIsPresented = true
-        } label: {
-            DraftMenuLabel(symbol: "cpu", title: runSummary)
-        }
-        .buttonStyle(.plain)
-        .id(runSummary)
-        .disabled(models.isEmpty && selectedModel == nil)
-        .accessibilityLabel(MobileL10n.string("Model and effort"))
-        .accessibilityValue(runSummary)
-        .mobileThemedPopover(
-            isPresented: $runPickerIsPresented,
-            theme: theme,
-            arrowEdge: .bottom,
-            makeRoom: makeRoomForChooser
-        ) {
-            MobileModelEffortPicker(
-                models: models,
-                defaultModelID: defaultModelID,
-                selectedModelID: modelID,
-                selectedEffortID: reasoningID,
-                onChoose: { model, effort in
-                    modelID = model ?? ""
-                    reasoningID = effort ?? ""
-                    runPickerIsPresented = false
-                }
-            )
-        }
-    }
-
-    private var runSummary: String {
-        SessionDraftRunSummary.text(
-            model: selectedModel?.name,
-            effort: selectedModel?.reasoning.first(where: { $0.id == reasoningID })?.name
-        )
-    }
-
-    private var speedMenu: some View {
-        Button {
-            speedChooserIsPresented = true
-        } label: {
-            DraftMenuLabel(
-                symbol: selectedSpeedSymbol,
-                title: selectedSpeedName,
-                isSet: !speedID.isEmpty
-            )
-        }
-        .buttonStyle(.plain)
-        .id("speed-\(speedID)")
-        .disabled(isSubmitting)
-        .accessibilityLabel(MobileL10n.string("Speed"))
-        .accessibilityValue(selectedSpeedName)
-        .mobileThemedPopover(
-            isPresented: $speedChooserIsPresented,
-            theme: theme,
-            arrowEdge: .bottom,
-            makeRoom: makeRoomForChooser
-        ) {
-            MobileDraftChooser(
-                title: MobileL10n.string("Speed"),
-                choices: speedChoices,
-                selectedID: speedID,
-                onChoose: { choice in
-                    speedID = choice
-                    speedChooserIsPresented = false
-                }
-            )
-        }
-    }
-
-    private var speedChoices: [MobileDraftChoice] {
-        [
-            MobileDraftChoice(
-                id: "",
-                name: MobileL10n.string("Inherit"),
-                detail: MobileL10n.string("Follows the Conversation Speed setting on the Mac"),
-                symbol: MobilePermissionModeGlyph.inheritSymbol,
-                rank: nil
-            ),
-            MobileDraftChoice(
-                id: "standard",
-                name: MobileL10n.string("Standard"),
-                detail: MobileL10n.string("Normal speed and usage"),
-                symbol: "gauge.with.dots.needle.50percent",
-                rank: 0
-            ),
-            MobileDraftChoice(
-                id: "fast",
-                name: MobileL10n.string("Fast"),
-                detail: MobileL10n.string("1.5× speed, increased usage"),
-                symbol: "bolt.fill",
-                rank: 1
-            ),
-        ]
-    }
-
-    private var selectedSpeedName: String {
-        switch speedID {
-        case "fast": return MobileL10n.string("Fast")
-        case "standard": return MobileL10n.string("Standard")
-        default: return MobileL10n.string("Inherit")
-        }
-    }
-
-    /// The bolt is the meaning of Fast, not of the speed control itself. Keep the trigger's
-    /// glyph aligned with the value so an inherited or standard run never looks accelerated.
-    private var selectedSpeedSymbol: String {
-        switch speedID {
-        case "fast": return "bolt.fill"
-        case "standard": return "gauge.with.dots.needle.50percent"
-        default: return "arrow.triangle.branch"
-        }
-    }
-
-    private var permissionMenu: some View {
-        Button {
-            permissionChooserIsPresented = true
-        } label: {
-            DraftIconMenuLabel(symbol: selectedPermissionSymbol, isSet: !permissionID.isEmpty)
-        }
-        .buttonStyle(.plain)
-        .disabled(isSubmitting)
-        .accessibilityLabel(MobileL10n.string("Permissions"))
-        .accessibilityValue(selectedPermissionName)
-        .mobileThemedPopover(
-            isPresented: $permissionChooserIsPresented,
-            theme: theme,
-            arrowEdge: .bottom,
-            makeRoom: makeRoomForChooser
-        ) {
-            MobileDraftChooser(
-                title: MobileL10n.string("Permissions"),
-                choices: permissionChoices,
-                selectedID: permissionID,
-                onChoose: { choice in
-                    permissionID = choice
-                    permissionChooserIsPresented = false
-                }
-            )
-        }
-    }
-
-    /// Inherit first, then the agent's modes in the order the Mac sends them, which is the
-    /// shared vocabulary's own: from asking before anything to checking nothing.
-    private var permissionChoices: [MobileDraftChoice] {
-        [MobileDraftChoice(
-            id: "",
-            name: MobileL10n.string("Inherit"),
-            detail: MobileL10n.string("Uses the agent's setting on the Mac"),
-            symbol: MobilePermissionModeGlyph.inheritSymbol,
-            rank: nil
-        )] + (selectedAgent?.permissionModes ?? []).map { mode in
-            MobileDraftChoice(
-                id: mode.id,
-                name: mode.name,
-                detail: mode.detail,
-                symbol: MobilePermissionModeGlyph.symbol(for: mode.id),
-                rank: MobilePermissionModeGlyph.rank(for: mode.id)
-            )
-        }
-    }
-
-    /// The chip's glyph follows the value: an open lock says Bypass where a raised hand said
-    /// only "permissions".
-    private var selectedPermissionSymbol: String {
-        permissionID.isEmpty
-            ? MobilePermissionModeGlyph.unsetSymbol
-            : MobilePermissionModeGlyph.symbol(for: permissionID)
-    }
-
-    private var selectedPermissionName: String {
-        selectedAgent?.permissionModes?.first(where: { $0.id == permissionID })?.name
-            ?? MobileL10n.string("Inherit")
     }
 
     private var selectedIdentityLabel: String {
@@ -1968,6 +1567,493 @@ private struct SessionDraftComposerScreen: View {
             }
         }
     }
+}
+
+/// The bounded run-settings row owns its menu bodies. Keeping them inline in the draft's
+/// composer still exhausted the physical phone's stack after the editor was extracted: a
+/// navigation push evaluated the composer, row, and model popover on the same call stack.
+private struct SessionDraftChoiceStrip: View {
+    let theme: RemoteThemePalette
+    let selectedAgent: RemoteAgentChoiceDTO?
+    let selectedModel: RemoteModelChoiceDTO?
+    let models: [RemoteModelChoiceDTO]
+    let defaultModelID: String?
+    let isSubmitting: Bool
+    @Binding var modelID: String
+    @Binding var reasoningID: String
+    @Binding var speedID: String
+    @Binding var permissionID: String
+    @Binding var surface: RemoteSessionSurface
+    @Binding var runPickerIsPresented: Bool
+    @Binding var speedChooserIsPresented: Bool
+    @Binding var permissionChooserIsPresented: Bool
+    let makeRoomForChooser: () -> Void
+
+    var body: some View {
+        HStack(spacing: MobileDesign.Spacing.small) {
+            runMenu
+                .layoutPriority(1)
+            if selectedModel?.supportsFastMode == true {
+                speedMenu
+            }
+            Spacer(minLength: MobileDesign.Spacing.small)
+            if !(selectedAgent?.permissionModes ?? []).isEmpty {
+                permissionMenu
+            }
+            if selectedAgent?.supportsConversation == true {
+                surfaceMenu
+            }
+        }
+    }
+
+    /// What the folded composer says instead of nothing: the run it is set up for, in one
+    /// quiet line. Tapping it is tapping the composer.
+    var foldedSummary: String {
+        var parts = [runSummary]
+        if selectedModel?.supportsFastMode == true { parts.append(selectedSpeedName) }
+        if !(selectedAgent?.permissionModes ?? []).isEmpty { parts.append(selectedPermissionName) }
+        if selectedAgent?.supportsConversation == true { parts.append(selectedSurfaceTitle) }
+        return parts.joined(separator: " · ")
+    }
+
+    private var surfaceMenu: some View {
+        Menu {
+            Button {
+                surface = .conversation
+            } label: {
+                Label(
+                    "Native (Experimental)",
+                    systemImage: surface == .conversation
+                        ? "checkmark"
+                        : "bubble.left.and.bubble.right"
+                )
+            }
+            Button {
+                surface = .terminal
+            } label: {
+                Label(
+                    originalUISurfaceTitle,
+                    systemImage: surface == .terminal ? "checkmark" : "terminal"
+                )
+            }
+        } label: {
+            // The icon is the value: a terminal for the agent's own UI, a bubble for Native.
+            DraftIconMenuLabel(
+                symbol: surface == .conversation ? "bubble.left.and.bubble.right" : "terminal",
+                isSet: surface == .conversation
+            )
+        }
+        .disabled(isSubmitting)
+        .accessibilityLabel(MobileL10n.string("Interface"))
+        .accessibilityValue(selectedSurfaceTitle)
+    }
+
+    private var originalUISurfaceTitle: String {
+        MobileL10n.string(
+            "%@ UI",
+            selectedAgent?.name ?? MobileL10n.string("Agent")
+        )
+    }
+
+    private var selectedSurfaceTitle: String {
+        surface == .conversation
+            ? MobileL10n.string("Native · Experimental")
+            : originalUISurfaceTitle
+    }
+
+    /// Model and effort keep one unchanged one-line trigger. The popover shows the two as the
+    /// relationship they actually are, while speed remains the simpler independent three-way
+    /// choice beside it. All three draft choosers share the theme-owned popover chrome below.
+    private var runMenu: some View {
+        Button {
+            runPickerIsPresented = true
+        } label: {
+            DraftMenuLabel(symbol: "cpu", title: runSummary)
+        }
+        .buttonStyle(.plain)
+        .id(runSummary)
+        .disabled(models.isEmpty && selectedModel == nil)
+        .accessibilityLabel(MobileL10n.string("Model and effort"))
+        .accessibilityValue(runSummary)
+        .mobileThemedPopover(
+            isPresented: $runPickerIsPresented,
+            theme: theme,
+            arrowEdge: .bottom,
+            makeRoom: makeRoomForChooser
+        ) {
+            MobileModelEffortPicker(
+                models: models,
+                defaultModelID: defaultModelID,
+                selectedModelID: modelID,
+                selectedEffortID: reasoningID,
+                onChoose: { model, effort in
+                    modelID = model ?? ""
+                    reasoningID = effort ?? ""
+                    runPickerIsPresented = false
+                }
+            )
+        }
+    }
+
+    private var runSummary: String {
+        SessionDraftRunSummary.text(
+            model: selectedModel?.name,
+            effort: selectedModel?.reasoning.first(where: { $0.id == reasoningID })?.name
+        )
+    }
+
+    private var speedMenu: some View {
+        Button {
+            speedChooserIsPresented = true
+        } label: {
+            DraftMenuLabel(
+                symbol: selectedSpeedSymbol,
+                title: selectedSpeedName,
+                isSet: !speedID.isEmpty
+            )
+        }
+        .buttonStyle(.plain)
+        .id("speed-\(speedID)")
+        .disabled(isSubmitting)
+        .accessibilityLabel(MobileL10n.string("Speed"))
+        .accessibilityValue(selectedSpeedName)
+        .mobileThemedPopover(
+            isPresented: $speedChooserIsPresented,
+            theme: theme,
+            arrowEdge: .bottom,
+            makeRoom: makeRoomForChooser
+        ) {
+            MobileDraftChooser(
+                title: MobileL10n.string("Speed"),
+                choices: speedChoices,
+                selectedID: speedID,
+                onChoose: { choice in
+                    speedID = choice
+                    speedChooserIsPresented = false
+                }
+            )
+        }
+    }
+
+    private var speedChoices: [MobileDraftChoice] {
+        [
+            MobileDraftChoice(
+                id: "",
+                name: MobileL10n.string("Inherit"),
+                detail: MobileL10n.string("Follows the Conversation Speed setting on the Mac"),
+                symbol: MobilePermissionModeGlyph.inheritSymbol,
+                rank: nil
+            ),
+            MobileDraftChoice(
+                id: "standard",
+                name: MobileL10n.string("Standard"),
+                detail: MobileL10n.string("Normal speed and usage"),
+                symbol: "gauge.with.dots.needle.50percent",
+                rank: 0
+            ),
+            MobileDraftChoice(
+                id: "fast",
+                name: MobileL10n.string("Fast"),
+                detail: MobileL10n.string("1.5× speed, increased usage"),
+                symbol: "bolt.fill",
+                rank: 1
+            ),
+        ]
+    }
+
+    private var selectedSpeedName: String {
+        switch speedID {
+        case "fast": return MobileL10n.string("Fast")
+        case "standard": return MobileL10n.string("Standard")
+        default: return MobileL10n.string("Inherit")
+        }
+    }
+
+    /// The bolt is the meaning of Fast, not of the speed control itself. Keep the trigger's
+    /// glyph aligned with the value so an inherited or standard run never looks accelerated.
+    private var selectedSpeedSymbol: String {
+        switch speedID {
+        case "fast": return "bolt.fill"
+        case "standard": return "gauge.with.dots.needle.50percent"
+        default: return "arrow.triangle.branch"
+        }
+    }
+
+    private var permissionMenu: some View {
+        Button {
+            permissionChooserIsPresented = true
+        } label: {
+            DraftIconMenuLabel(symbol: selectedPermissionSymbol, isSet: !permissionID.isEmpty)
+        }
+        .buttonStyle(.plain)
+        .disabled(isSubmitting)
+        .accessibilityLabel(MobileL10n.string("Permissions"))
+        .accessibilityValue(selectedPermissionName)
+        .mobileThemedPopover(
+            isPresented: $permissionChooserIsPresented,
+            theme: theme,
+            arrowEdge: .bottom,
+            makeRoom: makeRoomForChooser
+        ) {
+            MobileDraftChooser(
+                title: MobileL10n.string("Permissions"),
+                choices: permissionChoices,
+                selectedID: permissionID,
+                onChoose: { choice in
+                    permissionID = choice
+                    permissionChooserIsPresented = false
+                }
+            )
+        }
+    }
+
+    /// Inherit first, then the agent's modes in the order the Mac sends them, which is the
+    /// shared vocabulary's own: from asking before anything to checking nothing.
+    private var permissionChoices: [MobileDraftChoice] {
+        [MobileDraftChoice(
+            id: "",
+            name: MobileL10n.string("Inherit"),
+            detail: MobileL10n.string("Uses the agent's setting on the Mac"),
+            symbol: MobilePermissionModeGlyph.inheritSymbol,
+            rank: nil
+        )] + (selectedAgent?.permissionModes ?? []).map { mode in
+            MobileDraftChoice(
+                id: mode.id,
+                name: mode.name,
+                detail: mode.detail,
+                symbol: MobilePermissionModeGlyph.symbol(for: mode.id),
+                rank: MobilePermissionModeGlyph.rank(for: mode.id)
+            )
+        }
+    }
+
+    /// The chip's glyph follows the value: an open lock says Bypass where a raised hand said
+    /// only "permissions".
+    private var selectedPermissionSymbol: String {
+        permissionID.isEmpty
+            ? MobilePermissionModeGlyph.unsetSymbol
+            : MobilePermissionModeGlyph.symbol(for: permissionID)
+    }
+
+    private var selectedPermissionName: String {
+        selectedAgent?.permissionModes?.first(where: { $0.id == permissionID })?.name
+            ?? MobileL10n.string("Inherit")
+    }
+
+}
+
+/// A concrete view boundary for the editor and its first-line controls. Keeping this tree
+/// inline in the screen's composer made SwiftUI materialize the full nested value while pushing
+/// the draft, overflowing the physical iPhone's main-thread stack in Debug builds. A computed
+/// `some View` property alone preserves that same nested type and does not create this boundary.
+private struct SessionDraftPromptRow: View {
+    @Binding var prompt: String
+    @Binding var promptIsFocused: Bool
+    @Binding var promptIsOverflowing: Bool
+    @Binding var promptWraps: Bool
+    @Binding var isChoosingAttachmentSource: Bool
+    let theme: RemoteThemePalette
+    let isSubmitting: Bool
+    let canSubmit: Bool
+    let offersAttachments: Bool
+    let canAcceptAttachments: Bool
+    let promptPlaceholder: String
+    let attachmentSourceActions: [ThemedDialogAction]
+    let beginChoosingAttachmentSource: () -> Void
+    let offersFiles: () -> Bool
+    let stageClipboardFiles: () -> Bool
+    let submit: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if promptIsOverflowing {
+                HStack(spacing: MobileDesign.Spacing.small) {
+                    if offersAttachments { attachmentButtonOnMargin(hangsBelow: true) }
+                    Spacer(minLength: 0)
+                    sendButtonOnMargin(hangsBelow: true)
+                }
+                .frame(height: SessionDraftPromptMetrics.controlRow)
+                // The send disc sits over full-width text here; the editor's own top inset
+                // alone left the disc reading as resting on the first line.
+                .padding(.bottom, MobileDesign.Spacing.tight)
+            }
+            promptEditor
+        }
+        // The actions belong to the first line, not to two permanent columns beside the
+        // whole draft. TextKit excludes their footprints from that line; every later line
+        // reclaims the composer's full width beneath them.
+        .overlay(alignment: .topLeading) {
+            if !promptIsOverflowing, offersAttachments {
+                attachmentButtonOnMargin(hangsBelow: !promptWraps)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if !promptIsOverflowing { sendButtonOnMargin(hangsBelow: !promptWraps) }
+        }
+    }
+
+    /// The prompt shares its first line with Start, so the composer folded to that one line is
+    /// still the whole composer. Top-aligned: a longer prompt grows down from a stable first
+    /// row instead of carrying the button away with every line.
+    private var promptEditor: some View {
+        ZStack(alignment: .topLeading) {
+            SessionDraftPromptEditor(
+                text: $prompt,
+                isFocused: $promptIsFocused,
+                isOverflowing: $promptIsOverflowing,
+                isEnabled: !isSubmitting,
+                theme: theme,
+                offersFiles: offersFiles,
+                pasteFiles: stageClipboardFiles,
+                firstLineLeadingAccessoryWidth: promptFirstLineLeadingAccessoryWidth,
+                firstLineTrailingAccessoryWidth: promptFirstLineTrailingAccessoryWidth,
+                firstLineAccessoryHeight: SessionDraftPromptMetrics.controlRow,
+                firstLineAccessoriesInline: !promptIsOverflowing
+            )
+            .mobileUIEvidenceKeyboardFocus($promptIsFocused)
+            // Drawn here rather than by the editor: the field's own placeholder takes the
+            // system's colour, not the theme's, and disappears behind a prompt that is only
+            // whitespace — a stray newline left the phone's composer saying nothing at all.
+            if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(promptPlaceholder)
+                    .font(.body)
+                    .foregroundStyle(theme.inputPlaceholder)
+                    .lineLimit(1)
+                    .padding(
+                        .top,
+                        SessionDraftPromptMetrics.textInsets(
+                            for: UIFont.preferredFont(forTextStyle: .body)
+                        ).top
+                    )
+                    .padding(.leading, promptFirstLineLeadingAccessoryWidth)
+                    .padding(.trailing, promptFirstLineTrailingAccessoryWidth)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(minHeight: SessionDraftPromptMetrics.controlRow)
+        // Whether the prompt has a second line, read from the height the editor took. The
+        // first-line targets stop hanging below their marks once it has.
+        .onGeometryChange(for: Bool.self) { proxy in
+            proxy.size.height > SessionDraftPromptMetrics.wrapThreshold(
+                for: UIFont.preferredFont(forTextStyle: .body)
+            )
+        } action: { wraps in
+            promptWraps = wraps
+        }
+    }
+
+    /// The inline actions' footprints, stated whether or not the actions are currently inline.
+    /// The editor decides their placement by measuring the document against these footprints,
+    /// so they must not follow the placement they decide: zeroing them on overflow handed the
+    /// decision its own consequence, and a prompt within a line of the cap flickered between
+    /// its two layouts forever. `firstLineAccessoriesInline` is what actually releases the
+    /// first line's width once the controls move to their fixed row.
+    private var promptFirstLineLeadingAccessoryWidth: CGFloat {
+        offersAttachments ? SessionDraftPromptMetrics.accessoryExclusionWidth : 0
+    }
+
+    private var promptFirstLineTrailingAccessoryWidth: CGFloat {
+        SessionDraftPromptMetrics.trailingAccessoryExclusionWidth
+    }
+
+    /// The two controls stood on the composer's margins by their marks, not their frames. Each
+    /// is the full iPhone target centred on what it shows — the paperclip's glyph, the send
+    /// disc — and the target's overhang past that mark is pulled out over the margin, where
+    /// nothing else stands. The first line's exclusions begin where the targets end, so a tap
+    /// on its words never lands on a control. The row subtracts what the control's own
+    /// geometry states rather than a number of its own, the way the Mac composer places its
+    /// import button by `ThemedIconButton.opticalHorizontalInset`: aligned by frame, the
+    /// paperclip's ink stood nine points inboard of the chip the strip starts with beneath it.
+    private func attachmentButtonOnMargin(hangsBelow: Bool) -> some View {
+        attachmentButton(hangsBelow: hangsBelow)
+            .padding(.leading, -SessionDraftPromptMetrics.attachmentOpticalInset)
+            .padding(.top, -SessionDraftPromptMetrics.targetOverhang)
+    }
+
+    private func sendButtonOnMargin(hangsBelow: Bool) -> some View {
+        sendButton(hangsBelow: hangsBelow)
+            .padding(.trailing, -SessionDraftPromptMetrics.sendOpticalInset)
+            .padding(.top, -SessionDraftPromptMetrics.targetOverhang)
+    }
+
+    /// The full iPhone target around a first-line mark the row lays out at its compact height.
+    /// Above the mark it hangs into the composer's own padding; below it, only while the prompt
+    /// is one line, because under a wrapped prompt that air is the second line, and a target
+    /// over words sends what a caret tap meant to edit. The disc alone was the target before,
+    /// and a tap a few points low fell into the icon menu the choice strip keeps beneath it.
+    private func firstLineTarget(around mark: some View, hangsBelow: Bool) -> some View {
+        let overhang = SessionDraftPromptMetrics.targetOverhang
+        return mark
+            .padding(.top, overhang)
+            .frame(
+                width: SessionDraftPromptMetrics.controlTarget,
+                height: SessionDraftPromptMetrics.controlRow + overhang
+                    + (hangsBelow ? overhang : 0),
+                alignment: .top
+            )
+            .contentShape(Rectangle())
+    }
+
+    /// The paperclip in its compact slot. The subheadline face is what
+    /// `MobileDesign.Size.compactControlGlyph` measures the mark by.
+    private func attachmentButton(hangsBelow: Bool) -> some View {
+        Button(action: beginChoosingAttachmentSource) {
+            firstLineTarget(
+                around: Image(systemName: "paperclip")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(theme.secondaryLabel)
+                    .frame(
+                        width: MobileDesign.Size.compactControl,
+                        height: MobileDesign.Size.compactControl
+                    ),
+                hangsBelow: hangsBelow
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isSubmitting || !canAcceptAttachments)
+        .accessibilityLabel(MobileL10n.string("Attachments"))
+        .themedConfirmationDialog(
+            "Attachments",
+            isPresented: $isChoosingAttachmentSource,
+            actions: attachmentSourceActions
+        )
+    }
+
+    /// The toolbar circles' disc, in the first-line target.
+    private func sendButton(hangsBelow: Bool) -> some View {
+        Button {
+            submit()
+        } label: {
+            firstLineTarget(
+                around: ZStack {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 15, weight: .bold))
+                        .opacity(isSubmitting ? 0 : 1)
+                    ProgressView()
+                        // The ink chosen against the accent itself, like the arrow it
+                        // replaces. `ground` was near-invisible on the accent disc: a dark
+                        // theme's ground over an orange accent is orange-on-orange.
+                        .tint(theme.accentForeground)
+                        .opacity(isSubmitting ? 1 : 0)
+                }
+                .frame(
+                    width: MobileDesign.Size.compactControl,
+                    height: MobileDesign.Size.compactControl
+                )
+                .background(
+                    canSubmit || isSubmitting ? theme.accent : theme.controlResting,
+                    in: Circle()
+                ),
+                hangsBelow: hangsBelow
+            )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(canSubmit || isSubmitting ? theme.accentForeground : theme.tertiaryLabel)
+        .disabled(!canSubmit)
+        .accessibilityLabel(MobileL10n.string("Start session"))
+    }
+
 }
 
 /// The new-session prompt's native editor.

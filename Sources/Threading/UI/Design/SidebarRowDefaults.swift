@@ -11,11 +11,7 @@ public enum SidebarRowDefaults {
 
     @MainActor
     static func configureAttentionLabel(_ label: NSTextField) {
-        #if os(Linux)
-        label.font = Design.Typography.caption()
-        #else
         label.applyFont(.caption)
-        #endif
         label.setAccessibilityIdentifier("sidebar.session.attention-overlay")
         label.setContentHuggingPriority(.required, for: .horizontal)
         label.setContentCompressionResistancePriority(.required, for: .horizontal)

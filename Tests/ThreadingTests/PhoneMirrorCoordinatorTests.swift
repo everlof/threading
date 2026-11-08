@@ -362,16 +362,19 @@ private final class FakeChannel: PhoneMirrorChannel, @unchecked Sendable {
     }
 
     /// Frames are encoded on the coordinator's worker; wait for it before reading.
+    @MainActor
     private func settled() -> [Data] {
         PhoneMirrorCoordinator.frameQueue.sync {}
         return lock.withLock { frames.map { Data($0.utf8) } }
     }
 
+    @MainActor
     func states() -> [RemoteMirrorStateDTO] {
         settled().compactMap { try? JSONDecoder().decode(RemoteMirrorStateDTO.self, from: $0) }
             .filter { $0.type == RemoteMirrorFrame.state.rawValue }
     }
 
+    @MainActor
     func ended() -> [RemoteMirrorEndedDTO] {
         settled().compactMap { try? JSONDecoder().decode(RemoteMirrorEndedDTO.self, from: $0) }
             .filter { $0.type == RemoteMirrorFrame.ended.rawValue }

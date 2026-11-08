@@ -189,6 +189,7 @@ enum AppCommands {
         static let addProject = "project.add"
         static let closeSession = "session.close"
         static let renameSession = "session.rename"
+        static let chooseSessionCheckout = "session.chooseCheckout"
         static let toggleCheckoutNotices = "session.toggleCheckoutNotices"
         static let toggleAllCheckoutNotices = "app.toggleCheckoutNotices"
         static let closeTab = "tab.close"
@@ -340,6 +341,9 @@ enum AppCommands {
         AppCommand(id: ID.renameSession, group: .session, title: "Rename Session…",
                    defaultShortcut: KeyboardShortcut(key: "r", modifiers: .command),
                    isEditable: true, scope: .session),
+        AppCommand(id: ID.chooseSessionCheckout, group: .session, title: "Choose Existing Checkout…",
+                   defaultShortcut: nil, isEditable: true, scope: .session,
+                   iconName: "arrow.right.folder"),
         AppCommand(id: ID.toggleCheckoutNotices, group: .session, title: "Toggle Checkout Notices",
                    detail: "Mutes or unmutes checkout-move notices for this chat.",
                    defaultShortcut: nil, isEditable: true, scope: .session),

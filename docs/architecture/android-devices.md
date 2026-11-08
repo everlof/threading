@@ -145,6 +145,10 @@ speaks it without a third-party runtime:
 
 The protocol is the SDK's `emulator/lib/emulator_controller.proto`.
 
+The channel queue also owns the pending connection continuation. Readiness, failure, explicit
+close and the deadline consume that one continuation; callback-local mutable flags must not
+cross Network's sendable callbacks. Once closed, a channel refuses a new connection immediately.
+
 **Frames.** `streamScreenshot` asks for RGBA8888 with the long side capped at 1,280. It uses
 the MMAP transport: the emulator writes pixels into a private file Threading creates (mode 0600,
 unlinked on deinit), and the app copies them into a CGImage once, off main. The emulator delivers

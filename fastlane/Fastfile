@@ -6,6 +6,8 @@
 require "json"
 require "open3"
 require "shellwords"
+require "digest"
+require "tmpdir"
 
 default_platform(:ios)
 
@@ -37,24 +39,90 @@ platform :ios do
   desc "wait:false returns before App Store Connect finishes processing."
   lane :beta do |options|
     revision = testflight_checkout
+    receipt_path = options[:receipt] && File.expand_path(options[:receipt], REPOSITORY)
+    receipt = read_release_receipt(receipt_path, revision) if receipt_path && File.exist?(receipt_path)
     testflight_quality_gate
     verify_testflight_checkout(revision)
-    build = build_for_app_store
+    build = receipt ? receipt.fetch("build").transform_keys(&:to_sym) : build_for_app_store
     validate_app_store_build(build)
     verify_testflight_checkout(revision)
+    if receipt_path && !receipt
+      receipt = {
+        "revision" => revision, "build" => build, "state" => "validated",
+        "ipa_sha256" => Digest::SHA256.file(build[:ipa]).hexdigest
+      }
+      write_release_receipt(receipt_path, receipt)
+    end
     sentry_ios("prepare", "--app", File.join(build[:archive], "Products/Applications/ThreadingMobile.app"),
                "--debug-files", File.join(build[:archive], "dSYMs"), "--output", build[:sentry_receipt])
     verify_testflight_checkout(revision)
-    upload_to_testflight(
-      api_key: asc_api_key,
-      app_identifier: APP_IDENTIFIER,
-      ipa: build[:ipa],
-      changelog: options[:changelog] || default_changelog,
-      distribute_external: false,
-      uses_non_exempt_encryption: false,
-      skip_waiting_for_build_processing: options[:wait] == false
-    )
+    existing = receipt_path && uploaded_release_build(build)
+    confirmed_upload = receipt && %w[uploaded submitted].include?(receipt.fetch("state"))
+    if existing && !confirmed_upload
+      UI.user_error!("This build number exists without a confirmed upload receipt; reconcile it in App Store Connect before retrying")
+    end
+    if confirmed_upload
+      # Apple's build list may lag a successful upload. The durable receipt owns retry
+      # behavior; wait for that exact build instead of uploading it a second time.
+      UI.message("Resuming the recorded build #{build[:version]} (#{build[:number]})")
+    else
+      upload_to_testflight(
+        api_key: asc_api_key,
+        app_identifier: APP_IDENTIFIER,
+        ipa: build[:ipa],
+        changelog: options[:changelog] || default_changelog,
+        distribute_external: false,
+        uses_non_exempt_encryption: false,
+        # Persist upload success before Apple's separately bounded processing wait. A timeout
+        # there must resume this build, not leave a receipt that cannot prove its upload.
+        skip_waiting_for_build_processing: !receipt_path.nil? || options[:wait] == false
+      )
+      if receipt_path
+        receipt = receipt.merge("state" => "uploaded")
+        write_release_receipt(receipt_path, receipt)
+      end
+    end
+    wait_for_release_build(build) if receipt_path
     sentry_ios("deploy", "--release-file", build[:sentry_receipt], "--environment", "production")
+    if receipt_path
+      write_release_receipt(receipt_path, receipt.merge("state" => "uploaded"))
+    end
+  end
+
+  desc "Submit the exact beta receipt's build to App Review; leave release after approval manual."
+  desc "receipt:<path> is required. Re-running an already submitted build only verifies its state."
+  lane :submit_review do |options|
+    revision = testflight_checkout
+    path = options[:receipt] && File.expand_path(options[:receipt], REPOSITORY)
+    UI.user_error!("receipt:<path> from the beta lane is required") unless path
+    receipt = read_release_receipt(path, revision)
+    unless %w[uploaded submitted].include?(receipt.fetch("state"))
+      UI.user_error!("Finish the beta lane before submitting this receipt")
+    end
+    build = receipt.fetch("build").transform_keys(&:to_sym)
+    remote_build = wait_for_release_build(build)
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    version = app.get_app_store_versions.find { |entry| entry.version_string == build[:version] && entry.platform == "IOS" }
+    UI.user_error!("No App Store version #{build[:version]}; run the metadata lane first") unless version
+    accepted_states = %w[WAITING_FOR_REVIEW IN_REVIEW PENDING_DEVELOPER_RELEASE PENDING_APPLE_RELEASE READY_FOR_SALE READY_FOR_DISTRIBUTION PROCESSING_FOR_APP_STORE]
+    if accepted_states.include?(version.app_store_state)
+      UI.user_error!("A different build is already submitted") unless version.get_build.id == remote_build.id
+    else
+      verify_testflight_checkout(revision)
+      deliver(
+        api_key: asc_api_key, app_identifier: APP_IDENTIFIER, platform: "ios",
+        app_version: build[:version], build_number: build[:number].to_s,
+        skip_binary_upload: true, skip_metadata: true, skip_screenshots: true,
+        submit_for_review: true, automatic_release: false, force: true,
+        precheck_include_in_app_purchases: false
+      )
+      version = Spaceship::ConnectAPI::AppStoreVersion.get(app_store_version_id: version.id)
+      unless accepted_states.include?(version.app_store_state) && version.get_build.id == remote_build.id
+        UI.user_error!("Apple has not confirmed submission of the recorded build: #{version.app_store_state}")
+      end
+    end
+    write_release_receipt(path, receipt.merge("state" => "submitted", "app_store_state" => version.app_store_state))
+    UI.success("App Review: #{build[:version]} (#{build[:number]}) — #{version.app_store_state}")
   end
 
   desc "Build the IPA beta would upload and have App Store Connect validate it, uploading nothing."
@@ -210,10 +278,17 @@ platform :ios do
   end
 
   desc "Print the screenshot upload plan for App Store Connect; apply:true performs it."
+  desc "release_copy:true keeps Marketeer's upload bookkeeping out of the tested checkout."
   lane :upload_screenshots do |options|
-    arguments = ["sync", MARKETEER_DOCUMENT]
-    arguments << "--yes" if options[:apply]
-    marketeer_with_credentials(*arguments)
+    if options[:release_copy]
+      Dir.mktmpdir("threading-release-screenshots-") do |directory|
+        document = File.join(directory, "Threading.marketeer")
+        FileUtils.cp_r(MARKETEER_DOCUMENT, document)
+        sync_marketing_screenshots(document, options[:apply])
+      end
+    else
+      sync_marketing_screenshots(MARKETEER_DOCUMENT, options[:apply])
+    end
   end
 end
 
@@ -332,7 +407,49 @@ def build_for_app_store
     xcargs: "CURRENT_PROJECT_VERSION=#{build_number} #{authentication}",
     skip_profile_detection: true
   )
-  { ipa: ipa, archive: archive, sentry_receipt: File.join(output, "sentry-release.txt") }
+  plist = File.join(archive, "Products/Applications/ThreadingMobile.app/Info.plist")
+  version = get_info_plist_value(path: plist, key: "CFBundleShortVersionString")
+  { ipa: ipa, archive: archive, sentry_receipt: File.join(output, "sentry-release.txt"),
+    number: build_number, version: version }
+end
+
+# A receipt binds retries and review to the validated archive, never to Apple's changing "latest".
+def write_release_receipt(path, receipt)
+  FileUtils.mkdir_p(File.dirname(path))
+  temporary = "#{path}.tmp"
+  File.write(temporary, JSON.pretty_generate(receipt) + "\n", mode: "w", perm: 0600)
+  File.rename(temporary, path)
+end
+
+def read_release_receipt(path, revision)
+  receipt = JSON.parse(File.read(path))
+  UI.user_error!("Release receipt belongs to another commit") unless receipt.fetch("revision") == revision
+  ipa = receipt.fetch("build").fetch("ipa")
+  unless File.file?(ipa) && Digest::SHA256.file(ipa).hexdigest == receipt.fetch("ipa_sha256")
+    UI.user_error!("The recorded IPA is missing or changed")
+  end
+  receipt
+end
+
+def uploaded_release_build(build)
+  asc_api_key
+  app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+  UI.user_error!("App Store Connect has no app for #{APP_IDENTIFIER}") unless app
+  Spaceship::ConnectAPI::Build.all(app_id: app.id, version: build.fetch(:version),
+                                  build_number: build.fetch(:number).to_s, platform: "IOS").first
+end
+
+def wait_for_release_build(build)
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1800
+  loop do
+    remote = uploaded_release_build(build)
+    return remote if remote && remote.processing_state == "VALID"
+    if remote && %w[FAILED INVALID].include?(remote.processing_state)
+      UI.user_error!("Apple rejected processing this build: #{remote.processing_state}")
+    end
+    UI.user_error!("Apple is still processing the recorded build; rerun to resume") if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+    sleep(30)
+  end
 end
 
 def default_changelog
@@ -361,4 +478,10 @@ end
 def marketeer_with_credentials(*arguments)
   ENV["ASC_KEY_PATH"] = asc_credentials[:key_path]
   sh(marketeer_cli, *arguments)
+end
+
+def sync_marketing_screenshots(document, apply)
+  arguments = ["sync", document]
+  arguments << "--yes" if apply
+  marketeer_with_credentials(*arguments)
 end

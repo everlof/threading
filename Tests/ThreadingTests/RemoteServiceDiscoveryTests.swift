@@ -21,16 +21,16 @@ final class RemoteServiceDiscoveryTests: HostedStoreTestCase {
     /// A LAN address the test can bind. `::1` is assignable on every Mac, and the door rules
     /// classify by interface name, so an address reported on `en9` is the LAN door's whatever the
     /// address is. That keeps the test off the developer's real Wi-Fi.
-    private static let lanAddress = RemoteNetworkAddress(
+    nonisolated private static let lanAddress = RemoteNetworkAddress(
         interfaceName: "en9",
         address: "::1",
         isIPv6: true
     )
-    private static let tailscaleAddress = RemoteNetworkAddress(
+    nonisolated private static let tailscaleAddress = RemoteNetworkAddress(
         interfaceName: "utun9",
         address: "100.100.1.1"
     )
-    private static let hostID = "11111111-2222-3333-4444-555555555555"
+    nonisolated private static let hostID = "11111111-2222-3333-4444-555555555555"
 
     /// Every registration and withdrawal, in order.
     private final class RecordingAdvertiser: RemoteServiceAdvertising, @unchecked Sendable {
@@ -62,8 +62,8 @@ final class RemoteServiceDiscoveryTests: HostedStoreTestCase {
     private let journalFields =
         OSAllocatedUnfairLock<[[RemoteDiagnosticField: String]]>(initialState: [])
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         appSettingsSuiteName = "RemoteServiceDiscoveryTests.\(UUID().uuidString)"
         appSettingsDefaults = UserDefaults(suiteName: appSettingsSuiteName)!
         appSettings = AppSettings(defaults: appSettingsDefaults)
@@ -90,7 +90,7 @@ final class RemoteServiceDiscoveryTests: HostedStoreTestCase {
         }
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         // `stop()` withdraws before it cancels the listeners, so nothing is left announced.
         server?.stop()
         server = nil
@@ -103,7 +103,7 @@ final class RemoteServiceDiscoveryTests: HostedStoreTestCase {
         }
         appSettingsDefaults = nil
         appSettings = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Which doors are advertised

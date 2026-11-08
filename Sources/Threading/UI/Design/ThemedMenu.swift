@@ -946,7 +946,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
         // many hidden menus can exhaust the process's dispatch-thread allowance and starve
         // unrelated asynchronous work. There are no pixels to preserve offscreen, so finish now.
         let canAnimate = duration > 0 && window?.isVisible == true
-        let fadeOut: @MainActor @Sendable () -> Void = {
+        let fadeOut: @MainActor @Sendable () -> Void = { [self] in
             Self.fadeOut(self, duration: duration) { [weak self] in
                 self?.removeFromSuperview()
             }

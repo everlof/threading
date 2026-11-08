@@ -132,6 +132,21 @@ try:
                             'native window', process).splitlines()[0]
         xdo('windowfocus', '--sync', window)
         composer = open_composer(app, process)
+        # This journey starts with Codex's missing-model-catalogue case. Select that identity
+        # explicitly; the app's shared New Chats default can legitimately prefer Claude.
+        provider_choice = eventually(lambda: child_by_id(composer, 'linux.composer.provider'),
+                                     'initial provider choice', process)
+        assert provider_choice.get_action_iface().do_action(0)
+        choices = eventually(lambda: child_by_id(composer, 'linux.composer.choices'),
+                             'initial provider menu', process)
+        codex_choice = eventually(lambda: next((choices.get_child_at_index(index)
+            for index in range(choices.get_child_count())
+            if choices.get_child_at_index(index).get_name() == 'Codex'), None),
+            'Codex fixture identity', process)
+        assert codex_choice.get_action_iface().do_action(0)
+        eventually(lambda: provider_choice.get_name() == 'Identity: Codex',
+                   'Codex fixture selected', process)
+        composer = open_composer(app, process)
         greeting = child_by_id(composer, 'linux.composer.greeting').get_name()
         assert greeting
         xdo('key', 'Escape')

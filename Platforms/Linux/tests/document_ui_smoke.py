@@ -48,6 +48,12 @@ def capture(name):
     subprocess.run(['import', '-window', window, str(output / name)], check=True, timeout=8)
 
 
+def clipboard_matches(expected):
+    result = subprocess.run(['xclip', '-selection', 'clipboard', '-target', 'UTF8_STRING', '-o'],
+                            capture_output=True, timeout=3)
+    return result.returncode == 0 and result.stdout == expected.encode('utf-8')
+
+
 try:
     opened = eventually(lambda s: any(c['title'].startswith('Select this') for c in s['controls']), 'first document frame')
     first_frame_seconds = time.monotonic() - started
@@ -76,14 +82,18 @@ try:
     xdo('key', 'ctrl+a')
     selected = eventually(lambda s: any(c['title'] == paragraph['title'] and c['selectedLength'] > 0
                                        for c in s['controls']), 'selected paragraph')
+    # Worker layout can redraw a frame before the queued copy key is handled. Keep an
+    # earlier image owner to prove that the test waits for the clipboard transition.
+    subprocess.run(['xclip', '-selection', 'clipboard', '-target', 'image/png'],
+                   input=(output / 'document-open.png').read_bytes(), check=True, timeout=8)
+    assert not clipboard_matches(paragraph['title'])
     serial = state()['serial']
     xdo('key', 'ctrl+c')
-    eventually(lambda s: s['serial'] > serial, 'copy key handled')
-    copied = subprocess.check_output(['xclip', '-selection', 'clipboard', '-o'], text=True, timeout=8)
-    assert copied == paragraph['title'], (copied, paragraph['title'])
+    eventually(lambda s: s['serial'] > serial, 'frame after copy request')
+    eventually(lambda _: clipboard_matches(paragraph['title']), 'exact Unicode clipboard receipt')
     xdo('key', 'BackSpace')
     eventually(lambda s: s['serial'] > selected['serial'], 'read-only key redraw')
-    assert any(c['title'] == copied for c in state()['controls'])
+    assert any(c['title'] == paragraph['title'] for c in state()['controls'])
     capture('document-selected.png')
 
     xdo('key', 'ctrl+shift+t')

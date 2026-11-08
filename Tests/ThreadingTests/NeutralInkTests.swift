@@ -4,9 +4,9 @@ import XCTest
 
 @MainActor
 final class NeutralInkTests: XCTestCase {
-    override func tearDown() {
+    override func tearDown() async throws {
         Design.Accessibility.increaseContrastOverrideForTesting = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func resolve(_ ground: NeutralInk.RGBA, increased: Bool = false) -> NeutralInk? {

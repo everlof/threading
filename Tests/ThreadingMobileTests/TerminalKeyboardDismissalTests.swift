@@ -355,6 +355,7 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
             }
             .environmentObject(store)
             .mobileTheme(RemoteThemePalette(nil))
+            .dynamicTypeSize(.large)
             .ignoresSafeArea()
         )
         let window = hostedWindow(rootViewController: host, size: Fixture.barWindowSize)
@@ -496,7 +497,12 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         renderer.proposedSize = ProposedViewSize(width: size.width, height: size.height)
         renderer.scale = scale
         renderer.isOpaque = false
-        return try alphaBitmap(of: XCTUnwrap(renderer.uiImage?.cgImage, "SwiftUI rendered no image"))
+        let image = try XCTUnwrap(renderer.uiImage, "SwiftUI rendered no image")
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Action control ink"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        return try alphaBitmap(of: XCTUnwrap(image.cgImage))
     }
 
     /// The window as drawn, which is the only place a SwiftUI `ScrollView`'s content appears:
@@ -508,6 +514,10 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         let image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Terminal key bar"
+        attachment.lifetime = .keepAlways
+        add(attachment)
         return try alphaBitmap(of: XCTUnwrap(image.cgImage, "the window drew no image"))
     }
 

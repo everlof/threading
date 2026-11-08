@@ -128,7 +128,7 @@ final class WorkroomsPreferencesViewController: NSViewController {
                 snapshot.people.append(PersonEntry(person: person,
                                                    devices: try await store.workroomDevices(person: person.id),
                                                    invitation: try await store.latestWorkroomInvitation(person: person.id),
-                                                   app: await RemoteAccessCoordinator.shared.access(forWorkroomPerson: person.id)))
+                                                   app: RemoteAccessCoordinator.shared.access(forWorkroomPerson: person.id)))
             }
             // Newest rooms last in storage order; the page shows the newest few.
             var rooms: [LinkedWorkroom] = []

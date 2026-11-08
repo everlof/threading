@@ -293,23 +293,17 @@ public enum ThemedTableRowDefaults {
             #if !os(Linux)
             // `assumeIsolated` for the reason `validateProposedFirstResponder` gives: AppKit
             // calls the override above on the main thread and says so nowhere in its types.
-            MainActor.assumeIsolated { AppThemeRefresh.repaintIfNeeded(recycled) }
+            _ = MainActor.assumeIsolated { AppThemeRefresh.repaintIfNeeded(recycled) }
             #endif
             return recycled
         }
         guard identifier == rowViewKey else { return nil }
 
-        #if os(Linux)
         return MainActor.assumeIsolated {
             let row = ThemedTableRowView()
             row.identifier = identifier
             return row
         }
-        #else
-        let row = ThemedTableRowView()
-        row.identifier = identifier
-        return row
-        #endif
     }
 }
 

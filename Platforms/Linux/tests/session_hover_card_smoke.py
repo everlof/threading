@@ -73,12 +73,14 @@ with log_path.open('w') as log:
                                 '/bin/sh', '/bin/true'], env=environment,
                                stdout=log, stderr=log)
     try:
+        # The restore ledger is published after renderer initialization; its initial
+        # visible X11 handle may already have been replaced by then.
+        eventually(lambda: 'STARTUP_RESTORE_PLAN count=0' in log_path.read_text(),
+                   'restoration ledger', process)
         window = eventually(lambda: subprocess.run([
             'xdotool', 'search', '--all', '--onlyvisible', '--pid', str(process.pid),
             '--name', '^Threading'], capture_output=True, text=True).stdout.splitlines(),
             'native window', process)[0]
-        eventually(lambda: 'STARTUP_RESTORE_PLAN count=0' in log_path.read_text(),
-                   'restoration ledger', process)
         subprocess.run(['xdotool', 'mousemove', '--window', window, '80', '128'],
                        check=True, timeout=5)
         card = eventually(lambda: re.search(

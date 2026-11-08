@@ -135,9 +135,10 @@ def agent_stopped():
 
 
 try:
+    row = eventually(saved_row, 'saved agent row without restore selection')
+    # Accessibility is registered after SDL has created its renderer and final X11 handle.
     window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
                                     str(process.pid)).splitlines()[0], 'installed window')
-    row = eventually(saved_row, 'saved agent row without restore selection')
     assert all(item.get_role_name() != 'terminal' for item in children()), \
         'window attached the daemon child before the menu opened'
     initial_input = input_log.read_bytes()

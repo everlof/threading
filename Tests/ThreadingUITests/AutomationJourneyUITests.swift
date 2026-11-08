@@ -88,12 +88,13 @@ final class AutomationJourneyUITests: XCTestCase {
         try Data("Verify the automation workspace.".utf8).write(to: instructions)
         try Data("Uncommitted product work must survive.".utf8).write(to: fixture.project.appendingPathComponent("dirty.txt"))
         let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        try FileManager.default.removeItem(at: fixture.freshTape)
-        try FileManager.default.copyItem(at: repository.appendingPathComponent("Fixtures/AgentScenarios/codex-automation-workspace-fresh.json"), to: fixture.freshTape)
+        let automationTape = fixture.freshTape.deletingLastPathComponent().appendingPathComponent("automation-fresh.json")
+        try FileManager.default.copyItem(at: repository.appendingPathComponent("Fixtures/AgentScenarios/codex-automation-workspace-fresh.json"), to: automationTape)
         let app = XCUIApplication()
         _ = sandbox.configure(app)
         fixture.configure(app, scenarioRoot: sandbox.root)
         app.launchEnvironment["THREADING_UI_SCENARIO_AUTOMATION_WORKSPACE"] = "1"
+        app.launchEnvironment["THREADING_UI_SCENARIO_AUTOMATION_TAPE"] = automationTape.path
         application = app
         sandbox.launch(app)
         let row = app.outlines.staticTexts["Automations"].firstMatch

@@ -139,9 +139,10 @@ try:
         process = subprocess.Popen([binary, '--app', str(store), socket, '/bin/cat'],
                                    env=environment, stdin=subprocess.DEVNULL,
                                    stdout=log, stderr=log)
+        # Accessibility is registered after SDL has created its renderer and final X11 handle.
+        app = eventually(application, 'AT-SPI application')
         window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
                                         str(process.pid)).splitlines()[0], 'native window')
-        app = eventually(application, 'AT-SPI application')
         xdo('windowfocus', '--sync', window, 'key', 'Return')
         primary = eventually(lambda: child('linux.open-in.primary'), 'Open In primary')
         chooser = eventually(lambda: child('linux.open-in.chooser'), 'Open In chooser')

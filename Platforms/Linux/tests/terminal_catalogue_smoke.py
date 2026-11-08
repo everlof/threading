@@ -116,7 +116,7 @@ def terminal_header(expected_name):
     return eventually(read, 'saved terminal name in the live page header')
 
 
-def row(identifier, terminal=False):
+def row(identifier, terminal=False, retained=True):
     def read():
         listed = app.get_child_at_index(0).get_child_at_index(0)
         assert listed.get_role_name() == 'list'
@@ -130,9 +130,11 @@ def row(identifier, terminal=False):
                     if listed.get_child_at_index(index).get_accessible_id() == identifier)
         assert item.get_state_set().contains(Atspi.StateType.SELECTED)
         if terminal:
-            assert '[' + identifier[:8] + '] retained' in item.get_name()
+            label = item.get_name()
+            assert '[' + identifier[:8] + ']' in label, label
+            assert (' retained' in label) == retained, (label, retained)
         return item
-    return eventually(read, 'one retained catalogue row with its durable identity')
+    return eventually(read, 'one catalogue row with its durable identity and current lifecycle')
 
 
 def assert_owner(number):
@@ -187,7 +189,7 @@ with log_path.open('w+') as log:
         title(r'^Threading terminal - exited 0( \[(history cut|restored)\])?$')
         key('ctrl+shift+p')
         picker()
-        row(saved_id, terminal=True)
+        row(saved_id, terminal=True, retained=False)
         key('Return')
         ready(2)
         restarted_pid = assert_owner(2)

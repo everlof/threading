@@ -164,7 +164,7 @@ final class ProxyCaptureService {
         guard activeApproval == nil, !shuttingDown, !revokingClientAccess,
               let next = approvals.first(where: { !resolvingApprovals.contains($0.token) }) else { return }
         activeApproval = next.token
-        Task {
+        Task { [self] in
             let grant = await clientGrants.lookup(address: next.request.address, scope: next.worker.scope)
             guard activeApproval == next.token, workers[next.owner] === next.worker else { return }
             if grant.remembered { resolveClient(next, decision: .capture, grantRevision: grant.revision); return }

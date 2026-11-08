@@ -2070,7 +2070,7 @@ struct MobileUsageDailyPlot: View, Equatable {
     }
 
     var body: some View {
-        Chart {}
+        Chart { ChartContentBuilder.buildBlock() }
         .chartXScale(domain: geometry.domain)
         .chartYScale(domain: 0...1)
         .chartPlotStyle { plot in
@@ -2214,7 +2214,7 @@ struct MobileUsageLimitChart: View, Equatable {
     var body: some View {
         let plan = limitChartPlan(detail)
         return VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
-            Chart {}
+            Chart { ChartContentBuilder.buildBlock() }
             .chartXScale(domain: MobileUsageLimitChartDomain.range(for: detail))
             .chartYScale(domain: 0...1)
             .chartPlotStyle { plot in

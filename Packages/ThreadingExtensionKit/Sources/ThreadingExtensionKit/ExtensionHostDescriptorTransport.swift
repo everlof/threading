@@ -77,14 +77,7 @@ public final class ExtensionHostDescriptorTransport: @unchecked Sendable {
     /// serialized: a socket carries no request identifiers, so the reply is only attributable
     /// while exactly one request is outstanding.
     public static func shared(for descriptor: Int32) -> ExtensionHostDescriptorTransport {
-        registryLock.lock()
-        defer { registryLock.unlock() }
-        if let existing = transports[descriptor] {
-            return existing
-        }
-        let transport = ExtensionHostDescriptorTransport(descriptor: descriptor)
-        transports[descriptor] = transport
-        return transport
+        registry.shared(for: descriptor)
     }
 
     /// Drops the cached transport for a descriptor that is being closed.
@@ -94,13 +87,31 @@ public final class ExtensionHostDescriptorTransport: @unchecked Sendable {
     /// kernel recycles descriptor numbers and the cache is keyed by number — there is nothing
     /// else stable to key it by.
     public static func forget(descriptor: Int32) {
-        registryLock.lock()
-        defer { registryLock.unlock() }
-        transports.removeValue(forKey: descriptor)
+        registry.forget(descriptor: descriptor)
     }
 
-    private static let registryLock = NSLock()
-    private static var transports: [Int32: ExtensionHostDescriptorTransport] = [:]
+    private static let registry = Registry()
+
+    /// Every access to the descriptor map holds `lock`; exchanges retain their own serial queue.
+    private final class Registry: @unchecked Sendable {
+        private let lock = NSLock()
+        private var transports: [Int32: ExtensionHostDescriptorTransport] = [:]
+
+        func shared(for descriptor: Int32) -> ExtensionHostDescriptorTransport {
+            lock.lock()
+            defer { lock.unlock() }
+            if let existing = transports[descriptor] { return existing }
+            let transport = ExtensionHostDescriptorTransport(descriptor: descriptor)
+            transports[descriptor] = transport
+            return transport
+        }
+
+        func forget(descriptor: Int32) {
+            lock.lock()
+            defer { lock.unlock() }
+            transports.removeValue(forKey: descriptor)
+        }
+    }
 
     /// A response header block larger than this is a host that is not speaking this protocol.
     private static let maximumHeaderBytes = 64 * 1024

@@ -342,6 +342,16 @@ enum TerminalKeyBarMetrics {
     /// are measured at.
     static let glyphFont: Font = .subheadline
 
+    /// SF Symbols state their optical alignment rectangle separately from the image baseline.
+    /// A positive lower inset reserves space for a composite badge; negative insets are the
+    /// ordinary ink overshoot and must not lift a plain chassis off the row's ground line.
+    @MainActor
+    static func baselineInset(for systemName: String) -> CGFloat {
+        let inset = UIImage(systemName: systemName, withConfiguration:
+            UIImage.SymbolConfiguration(textStyle: .subheadline))?.alignmentRectInsets.bottom ?? 0
+        return max(0, inset)
+    }
+
     /// The padding that stands a glyph control's *ink* on `keyPadding` at the bar's edge. The
     /// control is the full target with its symbol centred, so between the frame's edge and the
     /// ink lies the control's optical inset on that edge, and the row pulls the frame out over
@@ -394,6 +404,18 @@ private struct TerminalKeyCapButtonStyle: ButtonStyle {
             .onChange(of: configuration.isPressed) { _, isPressed in
                 pressChanged(isPressed)
             }
+    }
+}
+
+/// The bar owns its separators and cap margins. System scroll-edge material would soften the
+/// short horizontal run and the neighboring fixed controls instead of just clipping its caps.
+private struct TerminalKeyBarScrollEdges: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.scrollEdgeEffectHidden()
+        } else {
+            content
+        }
     }
 }
 
@@ -477,13 +499,17 @@ struct TerminalKeyBarActionControls: View {
     /// only on the glyph itself — so both trailing controls were a fraction of the tap target
     /// they reserve. `contentShape` is what makes the reserved area the real one.
     private func trailingIcon(_ systemName: String) -> some View {
-        Image(systemName: systemName)
+        let baselineInset = TerminalKeyBarMetrics.baselineInset(for: systemName)
+        return Image(systemName: systemName)
             .font(TerminalKeyBarMetrics.glyphFont)
             .foregroundStyle(theme.secondaryLabel)
             .frame(
                 width: MobileDesign.Size.minimumTapTarget,
                 height: TerminalKeyBarMetrics.actionHeight
             )
+            .alignmentGuide(.firstTextBaseline) { dimensions in
+                dimensions[.firstTextBaseline] - baselineInset
+            }
             .contentShape(Rectangle())
     }
 }
@@ -597,6 +623,7 @@ struct TerminalKeyBar: View {
                     .padding(.vertical, MobileDesign.Spacing.tight)
                     .frame(minHeight: TerminalKeyBarMetrics.actionHeight)
                 }
+                .modifier(TerminalKeyBarScrollEdges())
                 .disabled(!canSend)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -621,6 +648,7 @@ struct TerminalKeyBar: View {
                 .padding(.horizontal, TerminalKeyBarMetrics.keyPadding)
                 .padding(.vertical, MobileDesign.Spacing.tight)
             }
+            .modifier(TerminalKeyBarScrollEdges())
             .disabled(!canSend)
 
             keyboardToggle

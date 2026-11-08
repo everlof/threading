@@ -201,7 +201,7 @@ final class SessionExecutionLocusTracker {
             || report.event == .subagentStarted || report.event == .subagentStopped
             ? .descendantProcess : .lifecycle
         let resolver = self.resolver
-        resolutionQueue.async {
+        resolutionQueue.async { [weak self] in
             let reportedCheckout = resolver(reported)
             let ownedCheckout = resolver(owned)
             Task { @MainActor [weak self] in
@@ -251,7 +251,7 @@ final class SessionExecutionLocusTracker {
         }
 
         let resolver = self.resolver
-        resolutionQueue.async {
+        resolutionQueue.async { [weak self] in
             let reported = candidates.compactMap(resolver)
             let ownedCheckout = resolver(owned)
             Task { @MainActor [weak self] in

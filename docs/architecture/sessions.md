@@ -527,6 +527,19 @@ immediately instead — its title is a UIKit `titleView` installed on appearance
 deferred cleanup of a removed principal item wipes that navigation item, so holding the slot
 through the fade left the chat with no two-line title at all.
 
+The editor and its first-line controls are a concrete `SessionDraftPromptRow` view, and the
+run-settings menus are a separate `SessionDraftChoiceStrip`. Inlining those trees in the
+composer's `VStack` exhausted the physical iPhone's main-thread stack during SwiftUI's navigation
+transition preference pass. Extracting only the editor passed the simulator but still crashed
+on the phone: the November 8 report reached the stack guard while constructing the model picker
+through `composer` → `choiceStrip` → `runMenu`. A computed `some View` property keeps its full
+underlying value type, so moving expressions into another getter does not bound that stack use.
+The concrete children defer their bodies to SwiftUI's own evaluation and keep the parent value
+small; bindings leave draft, focus, overflow, choices and attachment decisions with the existing
+screen. The regression pushes the draft through the same navigation command as New and the
+project's +, edits its focused prompt, and returns to the list. It must run on a physical phone;
+a root-only render or simulator pass does not prove that transition fits the device's stack.
+
 That draft uses the same native `IntrinsicTextView` paste contract as an existing conversation,
 not SwiftUI's visually similar `TextField`: text keeps UIKit's insertion-point paste and undo,
 while a file-only paste stages files in the shared attachment tray. Photos and Files are explicit
@@ -588,9 +601,16 @@ into an unrequested retry.
 The old worktree may be removed while that move waits. Settlement can use the project's saved
 repository identity only for the already-persisted destination, only when the source path is
 absent, and only after the destination's current repository and worktree identities are checked.
-A fresh move still requires a live source checkout. The session menu keeps Retry and Cancel
-visible when the old checkout has disappeared; otherwise the durable failure would hold app
-messages with no recovery action in the menu.
+A fresh **explicit user request** may also use that saved repository identity when the source
+path is absent. The chosen destination is still resolved live and must be an attached checkout
+of that exact repository. Observations and agent-initiated moves cannot use this recovery, and
+an existing replacement folder cannot borrow the missing checkout's identity. A successful move
+clears only `project-folder-missing` in the same store transaction; unrelated launch failures
+remain. The session menu keeps Choose Existing Checkout, Retry and Cancel
+available when the old checkout has disappeared; otherwise a saved chat could have no usable
+launch directory and no route to choose one. The failure pane leads with the same checkout picker,
+also exposed by `session.chooseCheckout`. Claude's copy transaction preserves its transcript and
+subagents before ownership changes, even though the source execution folder no longer exists.
 
 Process observations are evidence for the request, not repeated requests. Once the durable move
 exists, a root process briefly observed in the source checkout cannot clear its sibling-checkout
@@ -648,6 +668,12 @@ pane retains its tab identities but reconstructs Review and Overview, the two co
 capture a project root at construction; refreshing either old controller would re-read the source
 checkout and leave exactly the split view where the sidebar names one branch while Review names
 another. Standalone terminals retain their own checkout and working directory.
+
+Remote sharing follows the stable session ID across this replacement. The runtime retires the
+old mirror without ending the chat, and reconnecting guests wait for the replacement surface
+under the existing startup deadline. Only the currently owned terminal or conversation surface
+may report an exit to the mirror registry; an outgoing process cannot close a new connection.
+See [remote lifecycle](../REMOTE_ACCESS.md) for reconnect and submission-receipt semantics.
 
 For a persistent terminal, the outgoing provider process can still be visible while this
 replacement is being composed. The external-owner preflight recognizes it only through a fresh

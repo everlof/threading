@@ -194,8 +194,7 @@ try:
         window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid', process.pid,
             '--name', '^Threading experiment - '), 'window').splitlines()[0]
         xdo('windowfocus', '--sync', window)
-        if provider == 'claude':
-            select_account('Claude Code')
+        select_account('Claude Code' if provider == 'claude' else 'Codex')
         prompt = f'Model test {case} $(literal) 日本語'
         assert editor.get_editable_text_iface().set_text_contents(prompt)
         expected_model = expected_effort = None
@@ -259,9 +258,13 @@ try:
                 window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid', process.pid,
                     '--name', '^Threading experiment - '), 'restarted window').splitlines()[0]
                 xdo('windowfocus', '--sync', window)
+                # No session was committed, so the restarted draft uses the configured agent.
+                # Hidden-model preferences belong to the account we are testing, not that default.
+                select_account('Codex')
                 assert editor.get_editable_text_iface().set_text_contents(prompt)
                 menu = open_models()
                 assert cell('Plain · Auto') is None, 'hidden model must survive restart'
+                eventually(lambda: control('model-effort.show-hidden-models'), 'persisted hidden-model footer')
                 xdo('key', 'Tab', 'space')
                 eventually(lambda: control('linux.composer.choices') is None, 'show hidden closes picker')
                 open_models()

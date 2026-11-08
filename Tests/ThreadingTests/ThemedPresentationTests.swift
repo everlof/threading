@@ -516,15 +516,12 @@ final class ThemedPresentationTests: XCTestCase {
         XCTAssertTrue(window.childWindows?.contains(panel) == true)
 
         popover = nil
-        let detached = expectation(description: "panel detached on owner deinit")
-        DispatchQueue.main.async {
-            XCTAssertNil(panel.parent)
-            XCTAssertFalse(panel.isVisible)
-            XCTAssertNil(panel.contentViewController)
-            XCTAssertEqual(observer.changes, [true, false])
-            detached.fulfill()
-        }
-        wait(for: [detached], timeout: 1)
+        // Main-actor destruction detaches synchronously. A queued assertion only measures
+        // unrelated main-queue backlog and can time out after the complete rendering suite.
+        XCTAssertNil(panel.parent)
+        XCTAssertFalse(panel.isVisible)
+        XCTAssertNil(panel.contentViewController)
+        XCTAssertEqual(observer.changes, [true, false])
     }
 
     // MARK: - Popovers and dropdowns in one window

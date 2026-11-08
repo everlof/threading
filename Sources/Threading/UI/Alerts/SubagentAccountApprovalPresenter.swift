@@ -50,17 +50,21 @@ enum SubagentAccountApprovalPresenter {
             request.deny()
             return
         }
-        let card = SubagentAccountApprovalCard(request: request)
         let parent = ProjectStore.shared.session(withID: request.parentID)?.displayTitle ?? ""
         request.refresh()
-        ConfirmationAlert.choose(ChoiceRequest(
+        ConfirmationAlert.choose(choiceRequest(request, parentTitle: parent),
+            in: window, presentation: pending.presentation) { _ in request.deny() }
+    }
+
+    static func choiceRequest(_ request: SubagentAccountApproval, parentTitle: String) -> ChoiceRequest {
+        ChoiceRequest(
             prompt: .approveSubagentAccount,
             title: L10n.string("Approve subagent account"),
-            message: parent,
+            message: parentTitle,
             options: [],
             cancelTitle: L10n.string("Cancel"),
             style: .informational,
-            accessory: card.scrollableAccessory()
-        ), in: window, presentation: pending.presentation) { _ in request.deny() }
+            accessory: SubagentAccountApprovalCard(request: request).scrollableAccessory()
+        )
     }
 }

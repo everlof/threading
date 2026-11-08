@@ -3446,7 +3446,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         backgroundWork.forget()
         apply(.status(.ended(code: status)))
         promptContentContainer.isHidden = true
-        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+        AgentRuntime.shared.conversationSurfaceDidEnd(self, sessionID: sessionID)
         delegate?.conversation(self, didExitWithCode: status)
     }
 

@@ -672,7 +672,7 @@ final class AgentSessionViewController: NSViewController {
             session.terminate()
             return
         }
-        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+        AgentRuntime.shared.terminalSurfaceDidEnd(self, sessionID: sessionID)
         session.terminate()
         isRunning = false
         activityTracker.markDormant()
@@ -1290,7 +1290,7 @@ final class AgentSessionViewController: NSViewController {
                         stored.remoteUsesCopiedAccount = account.usesCopiedLogin
                     }
                     guard pinned.succeeded else { throw RemoteConversationFailure.notPrepared }
-                    DispatchQueue.global(qos: .userInitiated).async {
+                    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                         let launch = unencoded.encode()
                         DispatchQueue.main.async { [weak self] in
                             MainActor.assumeIsolated {
@@ -2240,7 +2240,7 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         isRunning = false
         activityTracker.markDormant()
         resetTranscriptFallbackObservation()
-        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+        AgentRuntime.shared.terminalSurfaceDidEnd(self, sessionID: sessionID)
 
         EventLog.shared.record(.session, "Agent exited", [
             "session": sessionID.uuidString,
@@ -2302,7 +2302,7 @@ extension AgentSessionViewController: AgentTerminalRuntimeSurface {
               session.detachFromHost(by: deadline, idleExpiresAt: idleExpiresAt) else {
             return false
         }
-        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+        AgentRuntime.shared.terminalSurfaceDidEnd(self, sessionID: sessionID)
         isRunning = false
         resetTranscriptFallbackObservation()
         return true

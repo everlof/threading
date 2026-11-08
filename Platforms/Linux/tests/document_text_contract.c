@@ -19,7 +19,8 @@ static double seconds(void) {
     return time.tv_sec + time.tv_nsec / 1e9;
 }
 
-static PangoLayout *reference(const char *text, int width, int alignment, int character_wrap) {
+static PangoLayout *reference(const char *text, int width, int alignment, int character_wrap,
+                              double line_spacing) {
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
     cairo_t *cr = cairo_create(surface);
     cairo_font_options_t *options = cairo_font_options_create();
@@ -34,6 +35,7 @@ static PangoLayout *reference(const char *text, int width, int alignment, int ch
     pango_layout_set_text(layout, text, -1);
     pango_layout_set_width(layout, width * PANGO_SCALE);
     pango_layout_set_wrap(layout, character_wrap ? PANGO_WRAP_CHAR : PANGO_WRAP_WORD_CHAR);
+    pango_layout_set_spacing(layout, (int)lround(line_spacing * PANGO_SCALE));
     pango_layout_set_alignment(layout, alignment == 1 ? PANGO_ALIGN_CENTER :
                                       alignment == 2 ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT);
     pango_layout_set_justify(layout, alignment == 3);
@@ -121,13 +123,13 @@ static char *content(int rows) {
     return g_string_free(text, FALSE);
 }
 
-static int compare_sample(const char *text, int alignment, int char_wrap) {
+static int compare_spaced_sample(const char *text, int alignment, int char_wrap, double line_spacing) {
     TATMetrics metrics;
     int lines;
     TATDocumentLayout *document = tat_document_create((const uint8_t *)text, (int)strlen(text),
-        0, 0, 0, 13, WIDTH, char_wrap, alignment, 1, &metrics, &lines);
+        0, 0, 0, 13, WIDTH, char_wrap, alignment, line_spacing, 1, &metrics, &lines);
     assert(document);
-    PangoLayout *expected = reference(text, WIDTH, alignment, char_wrap);
+    PangoLayout *expected = reference(text, WIDTH, alignment, char_wrap, line_spacing);
     int measured_width, measured_height;
     pango_layout_get_pixel_size(expected, &measured_width, &measured_height);
     assert(metrics.height == measured_height);
@@ -165,11 +167,15 @@ static int compare_sample(const char *text, int alignment, int char_wrap) {
     assert(!tat_document_render(document, actual, sizeof(actual), WIDTH, HEIGHT + 1, 0, 0, NULL));
     assert(!tat_document_render(document, actual, 1, WIDTH, HEIGHT, 0, 0, NULL));
     assert(tat_document_hit(document, NAN, 0) == -1);
-    printf("PASS full Unicode document: bytes=%zu lines=%d height=%d alignment=%d char_wrap=%d visited<=%d\n",
-        strlen(text), lines, metrics.height, alignment, char_wrap, maximum_visits);
+    printf("PASS full Unicode document: bytes=%zu lines=%d height=%d alignment=%d char_wrap=%d spacing=%.3f visited<=%d\n",
+        strlen(text), lines, metrics.height, alignment, char_wrap, line_spacing, maximum_visits);
     tat_document_destroy(document);
     g_object_unref(expected);
     return maximum_visits;
+}
+
+static int compare_sample(const char *text, int alignment, int char_wrap) {
+    return compare_spaced_sample(text, alignment, char_wrap, 0);
 }
 
 static int compare_double(const void *first, const void *second) {
@@ -182,10 +188,10 @@ static void benchmark(const char *text, int rows) {
     TATMetrics metrics;
     int lines;
     TATDocumentLayout *document = tat_document_create((const uint8_t *)text, (int)strlen(text),
-        0, 0, 0, 13, WIDTH, 0, 0, 1, &metrics, &lines);
+        0, 0, 0, 13, WIDTH, 0, 0, 0, 1, &metrics, &lines);
     assert(document);
     double preparation = seconds() - start;
-    PangoLayout *expected = reference(text, WIDTH, 0, 0);
+    PangoLayout *expected = reference(text, WIDTH, 0, 0, 0);
     start = seconds();
     int reference_width, reference_height;
     pango_layout_get_pixel_size(expected, &reference_width, &reference_height);
@@ -218,6 +224,9 @@ static void *run(void *unused) {
     for (int alignment = 0; alignment <= 3; alignment++)
         compare_sample("12345\n\nעברית\n4567\nLatin\n\r\n中文\u2028tail\n", alignment, 0);
     char *expected = content(1000);
+    compare_spaced_sample(expected, 0, 0, 5.5);
+    compare_spaced_sample(expected, 0, 0, 5.501);
+    compare_spaced_sample(expected, 2, 1, 1.25);
     for (int alignment = 0; alignment <= 3; alignment++) compare_sample(expected, alignment, 0);
     compare_sample(expected, 0, 1);
     benchmark(expected, 1000);
@@ -235,7 +244,9 @@ static void *run(void *unused) {
     uint8_t invalid[] = { 0xff };
     TATMetrics metrics;
     int lines;
-    assert(!tat_document_create(invalid, 1, 0, 0, 0, 13, WIDTH, 0, 0, 1, &metrics, &lines));
+    assert(!tat_document_create(invalid, 1, 0, 0, 0, 13, WIDTH, 0, 0, 0, 1, &metrics, &lines));
+    assert(!tat_document_create((const uint8_t *)"text", 4, 0, 0, 0, 13, WIDTH,
+                                0, 0, NAN, 1, &metrics, &lines));
     atomic_store(&finished, 1);
     return NULL;
 }

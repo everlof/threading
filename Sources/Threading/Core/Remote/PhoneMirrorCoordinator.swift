@@ -114,6 +114,7 @@ final class PhoneMirrorCoordinator {
 
     static let shared = PhoneMirrorCoordinator(environment: .system)
 
+    @MainActor
     private final class Session {
         let id: String
         var device: PhoneMirrorDevice

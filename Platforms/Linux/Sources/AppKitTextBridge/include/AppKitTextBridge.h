@@ -104,10 +104,12 @@ int tat_label_render(TATLabelLayout *label, uint8_t *rgba, int capacity,
 // an indexed line plan, so it belongs on a bounded worker, never in layout/draw/pointer callbacks.
 // Each plan owns a private font map. All operations on a plan must share one serial owner.
 // Rendering returns only an A8 viewport tile (at most 2048x128), independent of document height.
+// Line spacing adds 0...128 pixels between lines, including paragraph boundaries.
 typedef struct TATDocumentLayout TATDocumentLayout;
 TATDocumentLayout *tat_document_create(const uint8_t *utf8, int length,
     int monospace, int weight, int italic, double pixel_size, int wrap_width,
-    int char_wrapping, int alignment, int antialias, TATMetrics *metrics, int *line_count);
+    int char_wrapping, int alignment, double line_spacing, int antialias,
+    TATMetrics *metrics, int *line_count);
 void tat_document_destroy(TATDocumentLayout *document);
 int tat_document_hit(TATDocumentLayout *document, double x, double y);
 int tat_document_render(TATDocumentLayout *document, uint8_t *coverage, int capacity,

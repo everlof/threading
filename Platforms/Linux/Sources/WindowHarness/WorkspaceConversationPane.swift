@@ -82,7 +82,9 @@ final class WorkspaceConversationPane: WorkspacePane {
     private var decisionOrder: [NSView] = []
     var title: String { "Threading conversation · \(runtime.status)" }
     var activity: NativeSessionActivity { runtime.activity }
-    var needsPolling: Bool { false }
+    // A measured tail can owe one more frame without another user or provider event.
+    // Once it settles the native loop returns to its blocking idle wait.
+    var needsPolling: Bool { needsPresentation }
     func takeInitialViewport() -> (Int, Int)? { nil }
 
     init(runtime: NativeWorkspaceSession, pageName: String, icon: NSImage?, onReveal: @escaping () -> Void) {
@@ -748,13 +750,19 @@ final class WorkspaceConversationPane: WorkspacePane {
         publishConfigurationAccessibility(window: window, originX: originX, size: size)
         publishSpeedAccessibility(window: window, originX: originX, size: size)
         publishContextAccessibility(window: window, originX: originX, size: size)
-        needsPresentation = false
+        // Revealing an estimated tail row can measure it during this paint and grow the
+        // document after the earlier scroll. Keep a frame owed until that measured tail
+        // is visible; consuming the invalidation here stranded tall question cards below
+        // the composer. Each pass still materializes only the viewport's rows.
+        let tailNeedsLayout = followTail && scroll.contentView.bounds.maxY < table.frame.maxY - 1
+        needsPresentation = tailNeedsLayout
         presentedSize = size
         displayRevision = owner.displayRevision
         func waiting(_ view: NSView) -> Bool {
             (view as? NSTextField)?.isWaitingForCompleteTextViewport == true || view.subviews.contains(where: waiting)
         }
-        let prepared = runtime.rowsPrepared && !waiting(table) && !status.isWaitingForCompleteTextViewport
+        let prepared = runtime.rowsPrepared && !tailNeedsLayout
+            && !waiting(table) && !status.isWaitingForCompleteTextViewport
         let composerTop = WorkspacePaneChrome.headerPixelHeight + Int((size.height - composer.frame.maxY) * WorkspaceDisplay.scale)
         let sendPoint = submit.convert(NSPoint(x: submit.bounds.midX, y: submit.bounds.midY), to: root)
         print("COMPOSER_FRAME x=\(originX + Int(composer.frame.minX * WorkspaceDisplay.scale)) y=\(composerTop) width=\(Int(composer.bounds.width * WorkspaceDisplay.scale)) height=\(Int(composer.bounds.height * WorkspaceDisplay.scale)) send=\(originX + Int(sendPoint.x * WorkspaceDisplay.scale)),\(WorkspacePaneChrome.headerPixelHeight + Int((size.height - sendPoint.y) * WorkspaceDisplay.scale)) enabled=\(submit.isEnabled) focused=\(owner.firstResponder === composer.linuxEditor) scrolls=\(composer.linuxEditorScrollView.hasVerticalScroller)")

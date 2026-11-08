@@ -1,7 +1,7 @@
 /// The character transition used when the visible name of the active chat changes.
 ///
 /// Raw values mirror LabelMorph's presets, but remain available to hosts without that renderer.
-public enum ChatNameMorphStyle: String, CaseIterable {
+public enum ChatNameMorphStyle: String, CaseIterable, Sendable {
     case automatic
     case shapeMorph
     case crossfade

@@ -395,30 +395,32 @@ final class SupervisionCommandService {
                 return completion(.failure(refusal.toolWords))
             }
             let needsApproval = SubagentAccountApproval.requiresApproval(plan: plan, parent: parent)
-            let launch: (Bool) -> Void = { [weak self] approved in
+            let launch: (SubagentAccountApproval.Approval?) -> Void = { [weak self] approved in
                 guard let self else { return completion(.failure("The command ended before launch.")) }
-                guard approved else {
+                guard let approved else {
                     return completion(.failure("The subagent's account choice was not approved. No subagent was started. Do not retry with another account unless the user asks."))
                 }
-                self.launchApprovedSubagent(plan, brief: brief, parentID: sessionID,
-                    accountName: accountName, hasAccountApproval: needsApproval,
+                self.launchApprovedSubagent(approved.plan, brief: brief, parentID: sessionID,
+                    accountName: approved.accountName, hasAccountApproval: needsApproval,
+                    funding: approved.funding,
                     lifetime: lifetime, completion: completion)
             }
             guard needsApproval else {
-                return launch(true)
+                return launch(.init(plan: plan, accountName: accountName, funding: .includedUsage))
             }
-            let account = self.discoverAccounts(plan.kind).first { $0.handle == plan.accountHandle }
+            let accounts = self.discoverAccounts(plan.kind).filter(\.isEnabled)
+            let account = accounts.first { $0.handle == plan.accountHandle }
             guard account != nil || !plan.kind.supportsAccounts else {
                 return completion(.failure(ControlRefusal.accountUnknown.toolWords))
             }
             let request = SubagentAccountApproval(
                 parentID: sessionID, plan: plan, brief: brief, accountName: accountName, account: account,
-                read: { account.map { self.usage.reading(for: $0) } ?? .notFetched },
-                refresh: { done in
-                    guard let account else { return done() }
+                accounts: accounts,
+                read: { self.usage.reading(for: $0) },
+                refresh: { account, done in
                     self.usage.refresh(account, force: true, settled: done)
                 },
-                limits: { account.map { CustomLimitSettings.shared.rules(for: $0.id) } ?? [] },
+                limits: { CustomLimitSettings.shared.rules(for: $0) },
                 completion: launch
             )
             lifetime.onCancel = { [weak request] in request?.deny() }
@@ -430,7 +432,7 @@ final class SupervisionCommandService {
     /// or create a row before the account and the parent's current authority have been checked.
     private func launchApprovedSubagent(
         _ plan: ScheduledSessionPlan, brief: String, parentID: SessionID, accountName: String,
-        hasAccountApproval: Bool,
+        hasAccountApproval: Bool, funding: SubagentAccountApproval.Funding,
         lifetime: SubagentLaunchLifetime,
         completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
     ) {
@@ -468,11 +470,11 @@ final class SupervisionCommandService {
             // after the card has retired its cancellation callback.
             guard let account = discoverAccounts(plan.kind).first(where: {
                 $0.isEnabled && $0.handle == plan.accountHandle
-            }), case .current(let reading) = usage.reading(for: account),
-                  Date().timeIntervalSince(reading.observedAt) <= SubagentAccountApproval.maximumReadingAge,
-                  LimitEscapeRanking.hasHeadroom(.init(accountID: account.id, usage: reading,
-                    limits: CustomLimitSettings.shared.rules(for: account.id)), metering: plan.model) else {
-                return completion(.failure("The approved account is no longer available with fresh usage and headroom. No subagent was started."))
+            }), let currentFunding = SubagentAccountApproval.funding(
+                for: account, reading: usage.reading(for: account),
+                rules: CustomLimitSettings.shared.rules(for: account.id), model: plan.model, at: Date()),
+                  currentFunding == .includedUsage || funding == .credits else {
+                return completion(.failure("The approved account is no longer available with fresh usage and the approved funding. No subagent was started."))
             }
             return launch()
         }

@@ -2985,12 +2985,12 @@ enum ComposerDefaults {
     /// dragged narrower than 415 — the divider stopped dead well short of its floor, and carrying
     /// on shut the column instead. Under the split view's own priorities the same measurement can
     /// only ever answer "as wide as there is room for".
-    static let columnMeasurePriority = PromptChrome.openingColumnMeasurePriority
+    @MainActor static let columnMeasurePriority = PromptChrome.openingColumnMeasurePriority
 
     /// Below `columnMeasurePriority`, so the column goes on filling the pane rather than hugging
     /// its widest row — which is what a stack does the moment its own hugging outranks the
     /// measurement, and is the narrowing that measurement exists to prevent.
-    static let columnHuggingPriority = PromptChrome.openingColumnHuggingPriority
+    @MainActor static let columnHuggingPriority = PromptChrome.openingColumnHuggingPriority
 
     /// Below `columnMeasurePriority`: a narrow pane shortens the location breadcrumb before it
     /// abandons the column measurement or breaks the pane insets. The identity chip remains the

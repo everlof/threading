@@ -57,6 +57,11 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     source is ours to change.
   - Used by `DeviceLogsPlugin`. Its platform floor was macOS 14 and carried no `@available(macOS 14)`
     anywhere, so it is 13 here; the package builds and its 68 tests pass there.
+  - `LazyLogDocument` and its mutable lazy-line metadata belong to the main actor. Background
+    parsing snapshots the callbacks before dispatch, reads immutable `DataHolder` bytes, and
+    returns Sendable log values; it never reads or mutates a document from its worker. The
+    legacy synchronous loader remains explicit, while normal full loading keeps file/scan/parse
+    work off main.
   - **Two answers, not one.** `DeviceLogRow.time` is the characters the line wrote, which is what
     someone checking a timestamp wants. `DeviceLogRow.timestamp` is an instant that sorts and
     subtracts, which is what a range query wants. Do not use the instant to draw the column: a
@@ -420,6 +425,10 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     drawing through a CoreGraphics engine, display link on 14+ / 60Hz timer on 13) and the
     UIKit one. SwiftUI ships in the package but neither app touches it, so each stays in its
     own framework.
+  - Drawing functions are `@Sendable` values over caller-owned contexts. Polygon paths capture
+    finished length tables by value; the global drawing catalogue owns no mutable animation
+    state. On Swift 6.2+, each native view's isolated deinitializer releases its display link on
+    the main actor, including when the last reference is dropped elsewhere.
   - **The UIKit front end is ours.** Upstream ships SwiftUI and AppKit; `ThinkingOrbUIView.swift`
     adds the same class over the same engine for UIKit, behind
     `#if canImport(UIKit) && !canImport(AppKit)`. Two things differ from a transliteration. It
@@ -467,6 +476,11 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `GlyphPath` reflects iOS outlines across the glyph baseline. Omitting that conversion leaves
     settled bitmap glyphs correct but turns the in-flight Shape Morph upside down, which a static
     screenshot cannot expose.
+  - Effect protocols and their factory are `@MainActor`, matching the label and layer tree that
+    invoke them. The shared scramble timer runs on the main run loop. Raster caches remain
+    usable from rendering workers: one lock-owning cache object contains all four maps, and
+    every lookup, raster insertion and flush holds that lock. The strict generic iOS build
+    checks both simulator architectures; a warm single-architecture build can hide this debt.
   - **Tempo is ours.** `MorphPreset.recommendedTiming` is tuned to show an effect off — one
     large title, watched — and the wrapper brings it to the app's own pace before every morph:
     the per-character duration scaled by `Design.Motion.nameMorphTempo`, and the stagger held

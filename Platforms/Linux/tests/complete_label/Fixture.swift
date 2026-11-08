@@ -77,7 +77,54 @@ struct CompleteLabelFixture {
         _ = try await settle("reexpand", { label.isCompleteTextLayoutReady && label.isCompleteTextViewportReady })
         precondition(label.intrinsicContentSize.height > 10_000)
         precondition(label.selectedTextRange == NSRange(location: 8, length: 7), "collapse/expand lost the selected source range")
+
+        let plainHeight = label.intrinsicContentSize.height
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 3.75
+        label.attributedStringValue = NSAttributedString(string: text, attributes: [
+            .font: NSFont.systemFont(ofSize: 17, weight: .semibold),
+            .foregroundColor: NSColor(red: 0.8, green: 0.1, blue: 0.15, alpha: 1),
+            .paragraphStyle: paragraph
+        ])
+        scroll.contentView.scroll(to: .zero)
+        let styled = try await settle("uniform attributed prose", {
+            label.isCompleteTextLayoutReady && label.isCompleteTextViewportReady
+        })
+        precondition(label.intrinsicContentSize.height > plainHeight,
+                     "uniform prose lost its larger reading font or line spacing")
+        var redInk = 0
+        for offset in stride(from: 0, to: styled.pixels.count, by: 4) {
+            let red = Int(styled.pixels[offset])
+            let green = Int(styled.pixels[offset + 1])
+            if red > green * 2 && green < 100 { redInk += 1 }
+        }
+        precondition(redInk > 100, "uniform prose lost its attributed ink")
+        try PNGWriter.write(styled, to: URL(fileURLWithPath: "out/complete-label/styled-head.png"))
+        copied = nil
+        label.selectAll(nil)
+        label.copy(nil)
+        _ = try await settle("styled whole copy", { copied != nil })
+        precondition(copied == text)
+        scroll.contentView.scroll(to: CGPoint(x: 0, y: label.frame.height - 180))
+        _ = try await settle("styled tail", { label.isCompleteTextViewportReady })
+        let measuredHeight = label.intrinsicContentSize.height
+        let tailOffset = scroll.contentView.bounds.minY
+        let restyled = NSMutableAttributedString(attributedString: label.attributedStringValue)
+        restyled.addAttribute(.foregroundColor, value: NSColor.black,
+                             range: NSRange(location: 0, length: restyled.length))
+        label.attributedStringValue = restyled
+        precondition(label.intrinsicContentSize.height == measuredHeight,
+                     "restyling must retain measured geometry until worker delivery")
+        _ = try await settle("restyled tail", {
+            label.isCompleteTextLayoutReady && label.isCompleteTextViewportReady
+        })
+        precondition(scroll.contentView.bounds.minY == tailOffset, "restyling jumped away from the tail")
+        let mixed = NSMutableAttributedString(attributedString: label.attributedStringValue)
+        mixed.addAttribute(.foregroundColor, value: NSColor.white, range: NSRange(location: 0, length: 5))
+        label.attributedStringValue = mixed
+        _ = paint()
+        precondition(!label.isCompleteTextLayoutReady, "mixed runs must not silently become one uniform style")
         NSPasteboard.general.writeString = nil
-        print("PASS complete selectable label: head/tail pixels, whole copy, queued grapheme selection, resize and collapse/expand")
+        print("PASS complete selectable label: head/tail pixels, whole copy, grapheme selection, resize, collapse/expand and uniform attributed prose")
     }
 }

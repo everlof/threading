@@ -36,7 +36,10 @@ final class CompletePlainLabelState {
     func update(_ desired: CompleteTextRecipe, text: String) {
         guard recipe != desired else { return }
         if sourceGeneration != desired.generation {
-            metrics = nil
+            // Keep the last measured geometry until the worker replaces it. Restyling
+            // attributed prose creates a new source generation even when only its ink
+            // changed; falling back to eight lines here clamps a deep scroll to the top.
+            // Pixels and selection still belong exclusively to the new source.
             commands.removeAll()
             selectedRange = NSRange(location: 0, length: 0)
             anchor = nil

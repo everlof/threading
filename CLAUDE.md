@@ -562,7 +562,10 @@ when you need to know what is already published. To exercise the hook, pipe fabr
 into `scripts/pre_push.sh` directly. The sole scripted publication exception is
 `scripts/publish_local_release.sh`: it names the tested commit's outer `master` and one annotated
 tag as explicit refspecs and disables recursion in both configuration and the push option. Do not generalize its
-push primitive into a convenience command. Before either ref moves it runs both `scripts/test.sh
+push primitive into a convenience command. The full-release driver
+`scripts/release_all.py` also publishes an explicit, nonrecursive outer-master source ref when
+stale remote-host components require it, after its full Mac/iOS and GUI gates. It never pushes
+submodules. Before either app-release ref moves the local publisher runs both `scripts/test.sh
 all` and `scripts/ci.sh`, then proves the clean checkout still points at the commit those gates
 tested; the locally invoked publisher skips only that duplicate quality-gate run.
 

@@ -124,8 +124,8 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
     >(initialState: [])
     private var occupied: [NWListener] = []
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         appSettingsSuiteName = "RemoteListenerDoorTests.\(UUID().uuidString)"
         appSettingsDefaults = UserDefaults(suiteName: appSettingsSuiteName)!
         appSettings = AppSettings(defaults: appSettingsDefaults)
@@ -148,7 +148,7 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         }
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         server?.stop()
         server = nil
         RemoteIdentityTestStore.erase(identityDirectory)
@@ -161,7 +161,7 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         }
         appSettingsDefaults = nil
         appSettings = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Port

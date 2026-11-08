@@ -94,14 +94,19 @@ final class UIScenarioEvidenceCapture {
 
     private init(configuration: Configuration) {
         self.configuration = configuration
-        timer = Timer.scheduledTimer(
+        let timer = Timer(
             timeInterval: 0.1,
             target: self,
             selector: #selector(checkForRequest),
             userInfo: nil,
             repeats: true
         )
-        timer?.tolerance = 0.02
+        timer.tolerance = 0.02
+        // Rename and other synchronous prompts run AppKit's modal event loop. Evidence must
+        // still be requested while that dialog is open, not only after the user dismisses it.
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .modalPanel)
+        self.timer = timer
     }
 
     private func invalidate() {

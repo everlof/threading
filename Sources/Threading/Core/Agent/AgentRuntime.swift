@@ -1232,12 +1232,28 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         conversations[sessionID]?.terminate(preservingViewport: true)
     }
 
-    /// Replaces a process for the same conversation without dropping its scenario provider.
+    /// An outgoing process may report its exit after its replacement has started. Only the
+    /// surface still owned by this session can end its remote connection or startup wait.
+    func terminalSurfaceDidEnd(_ surface: any AgentTerminalRuntimeSurface, sessionID: SessionID) {
+        guard controllers[sessionID] === surface else { return }
+        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+    }
+
+    func conversationSurfaceDidEnd(
+        _ surface: any AgentConversationRuntimeSurface,
+        sessionID: SessionID
+    ) {
+        guard conversations[sessionID] === surface else { return }
+        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+    }
+
+    /// Replaces a process for the same conversation, keeping remote guests able to rejoin.
     func discardForRelaunch(sessionID: SessionID) {
 #if DEBUG
         let fixturePlan = fixtureLaunchPlanProviders[sessionID]
 #endif
-        discard(sessionID: sessionID)
+        RemoteSessionMirrorRegistry.shared.sessionWillRelaunch(sessionID)
+        discardRuntime(sessionID: sessionID, preservingViewport: true)
 #if DEBUG
         if let fixturePlan {
             _ = installFixtureLaunchPlan(for: sessionID, provider: fixturePlan)
@@ -1247,6 +1263,11 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     /// Terminates the agent and releases its terminal, returning the session to dormant.
     func discard(sessionID: SessionID, preservingViewport: Bool = true) {
+        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
+        discardRuntime(sessionID: sessionID, preservingViewport: preservingViewport)
+    }
+
+    private func discardRuntime(sessionID: SessionID, preservingViewport: Bool) {
         processResidencyRecency.forget(sessionID)
         terminalOwnerships.removeValue(forKey: sessionID)
         ClaudeTranscriptLocations.shared.forget(sessionID)
@@ -1273,10 +1294,6 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             }
         }
 
-        // No notification exists for a discarded controller, so the mirror is told explicitly:
-        // a remote watcher must learn the session ended rather than wait on a dead socket.
-        RemoteSessionMirrorRegistry.shared.sessionDiscarded(sessionID)
-
         // The runtime being discarded may already have queued a process-table scan of its own
         // descendants. Those processes are about to die, and where they were working is a fact
         // about the runtime that is leaving, not about the one a relaunch is about to start —
@@ -1292,14 +1309,13 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             conversation.removeFromPresentation()
         }
 
-        guard let controller = controllers[sessionID] else { return }
+        guard let controller = controllers.removeValue(forKey: sessionID) else { return }
         discardedRuntime = true
         controller.terminate()
         subagentStates[sessionID]?.stopWorking(
             message: "Stopped when the session process ended."
         )
         controller.removeFromPresentation()
-        controllers[sessionID] = nil
     }
 
     func preserveCheckoutMoveOutbox(sessionID: SessionID) {

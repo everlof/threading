@@ -97,7 +97,7 @@ with log_path.open('w') as log:
                                      '--pid', str(process.pid), '--name', '^Threading'],
                                     capture_output=True, text=True, timeout=5)
             return result.stdout.splitlines()[0] if result.stdout else None
-        wid = eventually(window, 'graphical window did not open')
+        eventually(window, 'graphical window did not open')
         try:
             resumed = eventually(lambda: [item for item in launches() if item['resume']]
                                  if len([item for item in launches() if item['resume']]) == count else None,
@@ -108,6 +108,8 @@ with log_path.open('w') as log:
         assert {item['id'].lower() for item in resumed} == {item.lower() for item in ids}, resumed
         assert all(later['at'] - earlier['at'] >= .7
                    for earlier, later in zip(resumed, resumed[1:])), resumed
+        # SDL can replace its first X11 handle while creating the renderer.
+        wid = eventually(window, 'restored background window disappeared')
         subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'key', 'alt+F4'],
                        check=True, timeout=5)
         assert process.wait(timeout=10) == 0, log_path.read_text()[-5000:]
@@ -150,13 +152,14 @@ with selected_log.open('w') as log:
                                      '--pid', str(process.pid), '--name', '^Threading'],
                                     capture_output=True, text=True, timeout=5)
             return result.stdout.splitlines()[0] if result.stdout else None
-        wid = eventually(selected_window, 'selected restore window did not open')
+        eventually(selected_window, 'selected restore window did not open')
         eventually(lambda: 'TERMINAL_FRAME ' in selected_log.read_text(),
                    f'selected saved session did not open: {selected_log.read_text()[-5000:]}')
         resumed = eventually(lambda: launches()[prior:] if len(launches()) >= prior + 2 else None,
                              f'selected and background sessions did not resume: '
                              f'{selected_log.read_text()[-5000:]}', timeout=25)
         assert {item['id'].lower() for item in resumed} == {item.lower() for item in ids}, resumed
+        wid = eventually(selected_window, 'selected restore window disappeared')
         subprocess.run(['xdotool', 'windowfocus', '--sync', wid, 'key', 'alt+F4'],
                        check=True, timeout=5)
         assert process.wait(timeout=10) == 0, selected_log.read_text()[-5000:]

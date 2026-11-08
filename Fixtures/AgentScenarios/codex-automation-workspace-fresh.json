@@ -33,24 +33,24 @@
       "payload": "{\"id\":2,\"result\":{\"thread\":{\"id\":\"fixture-thread-automation\",\"name\":\"Update status fixture\",\"model\":\"gpt-5.6\"}}}\n"
     },
     {
-      "channel": "stdin",
-      "kind": "expectHost",
-      "payload": "{\"id\":3,\"method\":\"skills/list\",\"params\":{\"cwds\":[\"${SCENARIO_ROOT}/project/.threading/local/automations/workspace-task\"]}}"
-    },
-    {
-      "channel": "stdout",
-      "kind": "emitAgent",
-      "payload": "{\"id\":3,\"result\":{\"data\":[{\"cwd\":\"${SCENARIO_ROOT}/project/.threading/local/automations/workspace-task\",\"skills\":[],\"errors\":[]}]}}\n"
-    },
-    {
       "kind": "expectHost",
       "channel": "stdin",
-      "payload": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"fixture-thread-automation\"}}"
+      "payload": "{\"id\":3,\"method\":\"turn/start\",\"params\":{\"threadId\":\"fixture-thread-automation\"}}"
     },
     {
       "kind": "emitAgent",
       "channel": "stdout",
-      "payload": "{\"id\":4,\"result\":{\"turn\":{\"id\":\"fixture-automation-turn\",\"status\":\"inProgress\"}}}\n"
+      "payload": "{\"id\":3,\"result\":{\"turn\":{\"id\":\"fixture-automation-turn\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":4,\"method\":\"skills/list\",\"params\":{\"cwds\":[\"${SCENARIO_ROOT}/project/.threading/local/automations/workspace-task\"]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":4,\"result\":{\"data\":[{\"cwd\":\"${SCENARIO_ROOT}/project/.threading/local/automations/workspace-task\",\"skills\":[],\"errors\":[]}]}}\n"
     },
     {
       "kind": "emitAgent",

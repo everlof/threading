@@ -24,7 +24,7 @@ final class MobileBrowserProxy: @unchecked Sendable {
     func start() async throws -> UInt16 {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                queue.async {
+                queue.async { [self] in
                     guard !self.stopped, self.listener == nil else {
                         continuation.resume(throwing: CancellationError()); return
                     }

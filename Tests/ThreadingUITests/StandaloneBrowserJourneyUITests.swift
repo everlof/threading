@@ -9,8 +9,7 @@ final class StandaloneBrowserJourneyUITests: XCTestCase {
         let app = XCUIApplication()
         sandbox.configure(app)
         defer { app.terminate(); try? sandbox.remove() }
-        app.launch()
-        app.activate()
+        sandbox.launch(app)
         let address = app.textFields["browser.address"]
         XCTAssertTrue(address.waitForExistence(timeout: 20))
         try recordScenarioScreenshot(
@@ -43,7 +42,11 @@ final class StandaloneBrowserJourneyUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts[coldPath].waitForExistence(timeout: 20))
         XCTAssertTrue(app.windows["Welcome to Threading"].exists,
                       "The cold URL must work while first-launch setup is still unfinished")
-        let coldWindow = app.windows.containing(.staticText, identifier: coldPath).firstMatch
+        // WebKit headings expose different legacy and modern AX types on newer macOS.
+        // Identify the host window by its own address control, then verify the page inside it.
+        let coldWindow = browserWindow(in: app, at: server.url(path: coldPath + "#part%202"))
+        XCTAssertTrue(coldWindow.waitForExistence(timeout: 5))
+        XCTAssertTrue(coldWindow.staticTexts[coldPath].exists)
         XCTAssertEqual(coldWindow.textFields["browser.address"].value as? String,
                        server.url(path: coldPath + "#part%202").absoluteString)
 
@@ -57,8 +60,14 @@ final class StandaloneBrowserJourneyUITests: XCTestCase {
             checkpoint: "standalone-browser-external-link", order: 2, title: "External link opened",
             description: "Launch Services opens the exact requested URL in a user-owned browser, including before setup is complete.",
             journey: "Standalone browsing", in: sandbox,
-            of: app.windows.containing(.staticText, identifier: warmPath).firstMatch
+            of: browserWindow(in: app, at: server.url(path: warmPath))
         )
+    }
+
+    private func browserWindow(in app: XCUIApplication, at url: URL) -> XCUIElement {
+        app.windows.matching(identifier: "standalone-browser").containing(NSPredicate(
+            format: "identifier == %@ AND value == %@", "browser.address", url.absoluteString
+        )).firstMatch
     }
 }
 

@@ -159,13 +159,8 @@ enum SessionSnoozeAction {
         guard FileManager.default.fileExists(atPath: databaseURL.path) else {
             throw WindowFailure("session store does not exist")
         }
-        let lock = Glibc.open(root.appendingPathComponent("host.lock").path,
-                              O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard lock >= 0 else { throw WindowFailure("cannot open session store lock") }
-        defer { Glibc.close(lock) }
-        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else {
-            throw WindowFailure("session store is already owned")
-        }
+        let lease = try LinuxStoreMutation.acquire(at: root)
+        defer { lease.close() }
         let database = try ProjectDatabase(url: databaseURL)
         defer { database.close() }
         return try body(database)

@@ -806,7 +806,7 @@ final class SubagentSessionState {
         transcriptReductionGeneration[threadID] = generation
         let sessionID = self.sessionID
 
-        DispatchQueue.global(qos: .userInitiated).async { [events] in
+        DispatchQueue.global(qos: .userInitiated).async { [events, weak self] in
             let span = PerformanceRecorder.shared.begin(
                 "subagent.transcript.reduce",
                 category: "conversation",

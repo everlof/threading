@@ -538,11 +538,7 @@ final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent {
     }
 
     private func setup() {
-        #if os(Linux)
-        titleLabel.font = Design.Typography.heading()
-        #else
         titleLabel.applyFont(usesClassicRequester ? .controlRegular : .heading)
-        #endif
         titleLabel.isHidden = usesClassicRequester
         titleLabel.maximumNumberOfLines = 0
         // Fitting size is queried before the copy stack has bounds. Start at the narrowest real
@@ -551,11 +547,7 @@ final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent {
         let requesterInsets: CGFloat = usesClassicRequester ? 8 : 0
         titleLabel.preferredMaxLayoutWidth = ThemedAlertLayout.minimumCopyWidth - requesterInsets
 
-        #if os(Linux)
-        messageLabel.font = Design.Typography.body()
-        #else
         messageLabel.applyFont(usesClassicRequester ? .controlRegular : .body)
-        #endif
         messageLabel.maximumNumberOfLines = 0
         messageLabel.preferredMaxLayoutWidth = ThemedAlertLayout.minimumCopyWidth - requesterInsets
         messageLabel.isHidden = alert.informativeText.isEmpty
@@ -685,8 +677,8 @@ final class ThemedAlertContentView: ThemedAlertBodyView, ThemedComponent {
 
     private func applyTheme() {
         #if os(Linux)
-        titleLabel.font = Design.Typography.heading()
-        messageLabel.font = Design.Typography.body()
+        titleLabel.applyFont(.heading)
+        messageLabel.applyFont(.body)
         titleLabel.textColor = Design.Text.label
         messageLabel.textColor = Design.Text.secondary
         iconView.image = Design.Symbol.image(symbolName, slot: ThemedAlertLayout.iconSize,

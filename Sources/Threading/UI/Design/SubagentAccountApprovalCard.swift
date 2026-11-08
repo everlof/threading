@@ -8,6 +8,9 @@ final class SubagentAccountApprovalCard: NSView {
     private let usageLabel = NSTextField(wrappingLabelWithString: "")
     private let freshnessLabel = NSTextField(wrappingLabelWithString: "")
     private let stateLabel = NSTextField(wrappingLabelWithString: "")
+    private let creditLabel = NSTextField(wrappingLabelWithString: "")
+    private let accountPicker = ThemedPopUp(frame: .zero)
+    private var offeredFunding: SubagentAccountApproval.Funding = .includedUsage
     private lazy var approveButton = ThemedButton(
         title: L10n.string("Approve and Start"), target: self, action: #selector(approve))
     private lazy var refreshButton = ThemedButton(
@@ -25,26 +28,37 @@ final class SubagentAccountApprovalCard: NSView {
             title: L10n.string("Approve subagent account"),
             detail: L10n.string("This starts one subagent on the account below."),
             symbol: "person.crop.circle.badge.checkmark")
-        let accountName: String
-        if let account = request.account {
-            accountName = account.displayName == account.handle.name
-                ? account.displayName : "\(account.displayName) (\(account.handle.name))"
-        } else {
-            accountName = request.accountName
-        }
         let identity = label(
-            [request.plan.kind.displayName, accountName,
+            [request.plan.kind.displayName,
              request.plan.model ?? L10n.string("Default model")].joined(separator: " · "),
             primary: true)
+        accountPicker.setAccessibilityLabel(L10n.string("Subagent account"))
+        accountPicker.setAccessibilityIdentifier("conversation.subagent-account-approval.account")
+        for account in request.accounts {
+            var item = ThemedMenuItem(title: Self.accountTitle(account), onChoose: { [weak request] in
+                request?.selectAccount(account.id)
+            })
+            item.representedValue = account.id
+            if let usage = request.reading(for: account).usage {
+                AccountUsageMenu.apply(usage, to: &item, metering: request.plan.model,
+                                       at: request.observedNow, limits: request.rules(for: account))
+            }
+            accountPicker.addItem(item)
+        }
+        if request.accounts.isEmpty {
+            accountPicker.addItem(withTitle: request.account.map(Self.accountTitle) ?? request.accountName)
+        }
+        accountPicker.isEnabled = request.accounts.count > 1
         let task = label(SessionNaming.promptTitle(from: request.brief) ?? L10n.string("Subagent task"))
         task.setAccessibilityLabel(L10n.string("Subagent task"))
-        for field in [usageLabel, freshnessLabel, stateLabel] {
+        for field in [usageLabel, freshnessLabel, stateLabel, creditLabel] {
             field.applyFont(.caption, in: .conversation)
             field.textColor = Design.Text.secondary
             field.isSelectable = true
         }
         usageLabel.setAccessibilityIdentifier("conversation.subagent-account-approval.usage")
         freshnessLabel.setAccessibilityIdentifier("conversation.subagent-account-approval.freshness")
+        creditLabel.setAccessibilityIdentifier("conversation.subagent-account-approval.credits")
         approveButton.emphasis = .primary
         denyButton.emphasis = .tertiary
         approveButton.setAccessibilityIdentifier("conversation.subagent-account-approval.approve")
@@ -52,7 +66,8 @@ final class SubagentAccountApprovalCard: NSView {
         refreshButton.setAccessibilityIdentifier("conversation.subagent-account-approval.refresh")
         // No Return key equivalent: typing into the composer must never approve an arrival.
         let actions = ControlRowView(leading: [denyButton], trailing: [refreshButton, approveButton])
-        let column = NSStackView(views: [header, identity, task, usageLabel, freshnessLabel, stateLabel, actions])
+        let column = NSStackView(views: [header, identity, accountPicker, task, usageLabel,
+                                       creditLabel, freshnessLabel, stateLabel, actions])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = Design.Spacing.medium
@@ -99,10 +114,25 @@ final class SubagentAccountApprovalCard: NSView {
         return field
     }
 
+    private static func accountTitle(_ account: AgentAccount) -> String {
+        account.displayName == account.handle.name
+            ? account.displayName : "\(account.displayName) (\(account.handle.name))"
+    }
+
     private func update() {
         let now = request.observedNow
         let rules = request.rules
         let usage = request.reading.usage
+        let funding = request.funding
+        if let selected = accountPicker.indexOfItem(where: {
+            ($0.representedValue as? AccountID) == request.account?.id
+        }) {
+            accountPicker.selectItem(at: selected)
+        }
+        creditLabel.stringValue = usage?.creditBalance.map {
+            L10n.format("Credit balance: %@", String($0.prefix(80)))
+        } ?? ""
+        creditLabel.isHidden = creditLabel.stringValue.isEmpty
         // Provider data is bounded before creating any display text or views.
         let windows = usage?.windows(metering: request.plan.model) ?? []
         usageLabel.stringValue = windows.prefix(8).map { window in
@@ -129,18 +159,23 @@ final class SubagentAccountApprovalCard: NSView {
             stateLabel.stringValue = L10n.string("Refreshing usage…")
         } else if request.reading.error != nil {
             stateLabel.stringValue = L10n.string("Usage could not be refreshed. Try again before approving.")
-        } else if !request.canApprove {
-            stateLabel.stringValue = L10n.string("A fresh reading with room under your limits is required. Refresh usage to try again.")
+        } else if funding == .credits {
+            stateLabel.stringValue = L10n.string("The included allowance is exhausted. This start may spend purchased credits on this account.")
+        } else if funding == nil {
+            stateLabel.stringValue = L10n.string("A fresh reading with available usage or credits, within your limits, is required. Choose another account or refresh usage.")
         } else {
             stateLabel.stringValue = L10n.string("Approval applies only to this start and this account.")
         }
-        approveButton.isEnabled = request.canApprove
+        approveButton.isEnabled = funding != nil
+        offeredFunding = funding ?? .includedUsage
+        approveButton.title = offeredFunding == .credits
+            ? L10n.string("Approve with Credits") : L10n.string("Approve and Start")
         refreshButton.isEnabled = !request.isRefreshing
         refreshButton.isHidden = request.account == nil
         onLayoutChange?()
     }
 
-    @objc private func approve() { request.approve() }
+    @objc private func approve() { request.approve(funding: offeredFunding) }
     @objc private func deny() { request.deny() }
     @objc private func refreshUsage() { request.refresh() }
 }

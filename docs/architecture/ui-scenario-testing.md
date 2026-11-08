@@ -142,6 +142,8 @@ not include separate child windows. Themed confirmations deliberately use child 
 theme-authored corners, so following only `attachedSheet` silently captured the empty parent
 instead of the proxy approval. `ThemedAlert.isPresentationWindow` keeps that private panel type
 owned by the design layer while allowing the Debug evidence harness to find it even without focus.
+The capture-request timer runs in common and modal-panel modes: a synchronous Rename dialog
+keeps AppKit in its modal loop, where a default-mode-only timer never services the request.
 
 Every UI run gets a unique result bundle and a static HTML gallery under
 `.build/ui-test-reports/`. The runner prints the exact `index.html` path and an `open` command.
@@ -560,6 +562,9 @@ workspace cwd through the recorded Codex handshake and a root-relative fixture r
 DEBUG-only sandbox flag installs the sealed fixture helper for only the bounded newly created
 workspace session; it cannot fall through to a real account's CLI. An outside file edit then
 pauses future runs. No fixture sends mail or changes a production checkout.
+The background automation has its own tape; the initially selected chat keeps its idle-chat
+handshake. An unattended launch sends its prepared first turn before requesting composer skills,
+so the automation tape verifies that ordering and the workspace cwd in the subsequent skill request.
 
 ### File change and relaunch recovery
 

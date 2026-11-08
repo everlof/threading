@@ -49,7 +49,8 @@ with sqlite3.connect(store / 'threading.db') as database:
         record.update(customTitle=title, accountHandle=account, hasLaunched=False)
         database.execute('UPDATE session SET data = ? WHERE id = ?', (json.dumps(record), identifier))
         expected[identifier] = f'[{provider}] {title} [{account}] [{identifier[:8]}]'
-    before = dict(database.execute('SELECT id, data FROM session'))
+    before = {identifier: json.loads(payload) for identifier, payload
+              in database.execute('SELECT id, data FROM session')}
 marker = root / 'shell-starts.jsonl'
 child = Path(__file__).with_name('saved_terminal_child.py').resolve()
 owned = None
@@ -181,7 +182,9 @@ def same_shell():
     records = [json.loads(line) for line in marker.read_text().splitlines()]
     assert len(records) == 1, 'opening the picker or fallback replaced the live shell'
     with sqlite3.connect(store / 'threading.db') as database:
-        assert dict(database.execute('SELECT id, data FROM session')) == before
+        actual = {identifier: json.loads(payload) for identifier, payload
+                  in database.execute('SELECT id, data FROM session')}
+        assert actual == before, ('unexpected durable session mutation', actual, before)
         saved = json.loads(database.execute('SELECT data FROM project').fetchone()[0])['terminals']
     assert len(saved) == 1
     current = ('terminal-' + saved[0]['id'], records[0]['pid'])
@@ -193,6 +196,16 @@ def same_shell():
     return True
 
 
+def expect_snooze_expired():
+    identifier = provider_ids['codex']
+    expected[identifier] = expected[identifier].removesuffix(' Snoozed') + ' Woke'
+    record = before[identifier]
+    deadline = record.pop('snoozedUntil')
+    record.pop('snoozedAt')
+    record.pop('hadTurnInFlightWhenSnoozed', None)
+    record['wake'] = {'reason': 'timeReached', 'wokeAt': deadline}
+
+
 def capture(name):
     destination = Path('out') / (name + '.png')
     subprocess.run(['import', '-window', window, str(destination)], check=True, timeout=10)
@@ -202,23 +215,26 @@ def capture(name):
     for index in range(2):
         row = listed.get_child_at_index(index)
         rect = row.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-        # The shared Mac session content owns a 16pt icon slot, inset 4pt in the row.
-        # Two pixels around its 32px bounds make the corner-transparency check meaningful.
-        geometry = f'36x36+{rect.x + 6}+{rect.y + 4}'
+        # A 13pt mark is centered in the shared 16pt slot, inset 4pt in the row.
+        # At 2x, sample the complete 26px ink plus one pixel on every side. The
+        # larger slot's outer corners cross the rounded selection plate itself.
+        mark_side = 28
+        geometry = f'{mark_side}x{mark_side}+{rect.x + 10}+{rect.y + (rect.height - mark_side) // 2}'
         raw = subprocess.run(['convert', str(destination), '-crop', geometry, '+repage',
                               '-depth', '8', 'rgba:-'], check=True, capture_output=True, timeout=5).stdout
-        assert len(raw) == 36 * 36 * 4
+        assert len(raw) == mark_side * mark_side * 4
         pixels = [raw[i:i + 4] for i in range(0, len(raw), 4)]
         background = pixels[0]
         mask = tuple(pixel != background for pixel in pixels)
-        assert 20 < sum(mask) < 36 * 36 - 20, (name, index, 'empty or opaque-square mark', sum(mask))
-        assert not any(mask[y * 36 + x] for x, y in [(0, 0), (35, 0), (0, 35), (35, 35)])
+        assert 20 < sum(mask) < mark_side * mark_side - 20, (name, index, 'empty or opaque-square mark', sum(mask))
+        last = mark_side - 1
+        assert not any(mask[y * mark_side + x] for x, y in [(0, 0), (last, 0), (0, last), (last, last)])
         if row.get_accessible_id() == selected_id:
             contrast = max(pixel_contrast(pixel, background) for pixel in pixels)
             assert contrast >= 3, (name, index, 'selected provider mark lost its contrast', contrast)
         # The production title is one line beside the mark. The older diagnostic identity
         # line must not overlap it; complete identity remains in the AT-SPI row label above.
-        title_geometry = f'120x24+{rect.x + 52}+{rect.y + 7}'
+        title_geometry = f'120x32+{rect.x + 52}+{rect.y + (rect.height - 32) // 2}'
         title = subprocess.run(['convert', str(destination), '-crop', title_geometry, '+repage',
                                 '-depth', '8', 'rgba:-'], check=True, capture_output=True, timeout=5).stdout
         assert any(title[i:i + 4] != background for i in range(0, len(title), 4)), \
@@ -227,7 +243,7 @@ def capture(name):
         contrast = max(pixel_contrast(pixel, background) for pixel in title_pixels)
         assert contrast >= 4.5, (name, index, 'session title lost its contrast', contrast)
         # Sample below the complete glyph line, including its descenders.
-        detail_geometry = f'120x4+{rect.x + 52}+{rect.y + 40}'
+        detail_geometry = f'120x4+{rect.x + 52}+{rect.y + rect.height - 8}'
         detail = subprocess.run(['convert', str(destination), '-crop', detail_geometry, '+repage',
                                  '-depth', '8', 'rgba:-'], check=True, capture_output=True, timeout=5).stdout
         assert len(detail) == 120 * 4 * 4
@@ -265,14 +281,16 @@ try:
             database.execute("DELETE FROM app_state WHERE key IN ('selectedSessionID', 'selectedTerminalID')")
             # JSONEncoder stores Date as seconds since 2001. Both an empty workspace and a
             # retained terminal must refresh an idle picker across a real snooze deadline.
-            now = time.time() - 978307200
+            now = int(time.time() - 978307200)
             identifier = provider_ids['codex']
             record = json.loads(database.execute('SELECT data FROM session WHERE id = ?',
                                                   (identifier,)).fetchone()[0])
             record.update(snoozedAt=now - 60, snoozedUntil=now + 20)
+            record.pop('wake', None)
             database.execute('UPDATE session SET data = ? WHERE id = ?', (json.dumps(record), identifier))
-            expected[identifier] += ' Snoozed'
-            before = dict(database.execute('SELECT id, data FROM session'))
+            expected[identifier] = expected[identifier].removesuffix(' Woke') + ' Snoozed'
+            before = {identifier: json.loads(payload) for identifier, payload
+                      in database.execute('SELECT id, data FROM session')}
         log_path = Path('out/provider-marks-' + label + '.log')
         with log_path.open('w+') as log:
             process = subprocess.Popen([launch_binary, '--app', str(store), endpoint, '/usr/bin/python3',
@@ -286,7 +304,7 @@ try:
                     selected_id = eventually(idle_labels, 'snoozed row before any terminal exists')
                     subprocess.run(['import', '-window', window, 'out/provider-marks-idle-snoozed.png'],
                                    check=True, timeout=5)
-                    expected[provider_ids['codex']] = expected[provider_ids['codex']].removesuffix(' Snoozed')
+                    expect_snooze_expired()
                     # No key, pointer event or action may wake the Swift loop during this wait.
                     # AT-SPI property reads alone must keep responding through the deadline.
                     assert eventually(idle_labels, 'no-terminal snooze deadline expires', timeout=25) == selected_id
@@ -323,7 +341,7 @@ try:
                 eventually(lambda: navigator_background() == light_background, 'restored provider palette frame')
                 capture('provider-marks-' + label + '-codex-selected-light-restored')
                 if missing:
-                    expected[provider_ids['codex']] = expected[provider_ids['codex']].removesuffix(' Snoozed')
+                    expect_snooze_expired()
                     # No input or selection change drives this update. The visible expiry must
                     # invalidate both the cached raster and accessibility while preserving UUID.
                     eventually(lambda: labels(identifiers[1]), 'visible snooze deadline expires', timeout=25)

@@ -3,10 +3,214 @@ import ThreadingRemoteKit
 import XCTest
 @testable import Threading
 
-/// The host-owned handoff from a dormant row to its first live terminal mirror.
+/// Host-owned startup and process replacement keep a remote chat attached to its stable row.
 @MainActor
 final class RemoteDormantSessionStartupTests: HostedStoreTestCase {
     private var connectionDelegates: [DormantStartupConnectionDelegate] = []
+
+    /// Share Chat's browser socket must reconnect when the checkout replaces its process.
+    /// `ended` permanently disables the shipping browser's reconnect loop.
+    func testSharedChatReconnectsAfterCheckoutMoveWithoutEndingOrRepeatingInput() async throws {
+        let fixture = try dormantSession()
+        let registry = RemoteSessionMirrorRegistry.shared
+        installTerminalApplicationOnce()
+        let source = try XCTUnwrap(ProjectStore.shared.project(forSessionID: fixture.sessionID))
+        let sourceURL = URL(fileURLWithPath: source.folderPath)
+        _ = try GitProcess.run(["init", "-b", "main"], in: sourceURL)
+        _ = try GitProcess.run([
+            "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "commit", "--allow-empty", "-m", "Fixture"
+        ], in: sourceURL)
+        let destinationURL = sourceURL.appendingPathComponent("sibling")
+        _ = try GitProcess.run([
+            "worktree", "add", "-b", "shared-work", destinationURL.path
+        ], in: sourceURL)
+        let destination = try XCTUnwrap(GitInfo.worktreeLocation(for: destinationURL.path))
+        let guest = RemoteAuthorization(
+            shareID: "checkout-guest", capability: .interact,
+            scope: .session(fixture.sessionID), principal: .guest,
+            member: RemoteMember(id: "guest", displayName: "Guest", deviceID: "browser")
+        )
+        let authority = RemoteAuthorityStore()
+        authority.set(guest, forToken: "checkout-token")
+        let identity = RemoteIdentityTestStore.make(label: "CheckoutRelaunch")
+        defer { RemoteIdentityTestStore.erase(identity.directory) }
+        let server = RemoteAccessServer(
+            services: RemoteAccessCoordinator.makeServerServices(appSettings: .shared),
+            identityProvider: identity.store
+        )
+        server.authorizer = authority
+        defer { server.stop() }
+        let listening = expectation(description: "checkout fixture listening")
+        var port: UInt16?
+        server.start(configuration: RemoteListenerConfiguration(
+            preferredPort: try XCTUnwrap(FreeLocalPort.quiet())
+        )) { outcome in
+            port = outcome.port
+            listening.fulfill()
+        }
+        await fulfillment(of: [listening], timeout: 5)
+        let link = try XCTUnwrap(RemoteConnectionLink(
+            baseURL: URL(string: "http://127.0.0.1:\(try XCTUnwrap(port))")!,
+            token: "checkout-token"
+        ))
+        let socketURL = try XCTUnwrap(link.webSocketURL(sessionID: fixture.sessionID.uuidString))
+        let plan = AgentLaunchPlan(
+            executable: "/bin/cat", arguments: [], resumeState: .unavailable
+        )
+        let original = AgentRuntime.shared.makeController(for: fixture.session)
+        original.startRemoteTerminalFixture(plan: plan)
+        defer { AgentRuntime.shared.discard(sessionID: fixture.sessionID) }
+        registry.setInputControlFromOwner(.collaborative, sessionID: fixture.sessionID)
+
+        let browser = try CheckoutSocketProbe(url: socketURL)
+        defer { browser.stop() }
+        await fulfillment(of: [browser.hello], timeout: 5)
+        XCTAssertEqual(registry.submitTerminalLine(
+            "", to: fixture.sessionID, device: "browser", authorization: guest,
+            requestID: "before-move"
+        ), .accepted)
+
+        // Optional real-browser companion. It opens the shipping assets on this same listener
+        // and asks for the move only after its guest socket has received hello.
+        let browserProof = ProcessInfo.processInfo.environment["THREADING_CHECKOUT_BROWSER_PROOF"]
+            .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+        if let browserProof {
+            try FileManager.default.createDirectory(at: browserProof, withIntermediateDirectories: true)
+            let invitation = "http://127.0.0.1:\(try XCTUnwrap(port))/#checkout-token"
+            try Data(invitation.utf8).write(to: browserProof.appendingPathComponent("url"))
+            try await waitForBrowserMarker("move", in: browserProof)
+        }
+
+        let moved = ProjectStore.shared.moveSessionsToCheckout(
+            [fixture.sessionID], checkoutPath: destination.root.path,
+            repositoryIdentity: destination.repositoryIdentity,
+            worktreeIdentity: destination.worktreeIdentity, branch: "shared-work"
+        )
+        guard case .moved = moved else { return XCTFail("checkout move failed: \(moved)") }
+        // Both foreground and background checkout-move handlers use this runtime boundary.
+        AgentRuntime.shared.discardForRelaunch(sessionID: fixture.sessionID)
+        await fulfillment(of: [browser.closed], timeout: 5)
+        XCTAssertEqual(browser.task.closeCode, .goingAway)
+        XCTAssertFalse(browser.types.contains("ended"), "ended disables browser reconnection")
+        XCTAssertTrue(authority.isCurrent(guest), "moving a chat must not revoke its membership")
+
+        let reconnect = try CheckoutSocketProbe(url: socketURL)
+        defer { reconnect.stop() }
+        await fulfillment(of: [reconnect.starting], timeout: 5)
+        XCTAssertFalse(reconnect.types.contains("ended"), "a reconnect must wait for replacement")
+        XCTAssertEqual(registry.submitTerminalLine(
+            "", to: fixture.sessionID, device: "browser", authorization: guest,
+            requestID: "before-move"
+        ), .accepted, "a lost acknowledgement must replay even while the process is absent")
+
+        let stored = try XCTUnwrap(ProjectStore.shared.session(withID: fixture.sessionID))
+        let replacement = AgentRuntime.shared.makeController(for: stored)
+        replacement.startRemoteTerminalFixture(plan: plan)
+        await fulfillment(of: [reconnect.hello], timeout: 5)
+        if let browserProof {
+            try await waitForBrowserMarker("reconnected", in: browserProof)
+        }
+        XCTAssertEqual(registry.meResponse(for: guest).sessions.map(\.id), [fixture.sessionID.uuidString])
+        XCTAssertEqual(ProjectStore.shared.project(forSessionID: fixture.sessionID)?.folderPath, destination.root.path)
+        AgentRuntime.shared.terminalSurfaceDidEnd(original, sessionID: fixture.sessionID)
+        XCTAssertEqual(registry.followers(of: fixture.sessionID).count, browserProof == nil ? 1 : 2,
+                       "a late exit from the outgoing process cannot close the replacement")
+        XCTAssertEqual(registry.submitTerminalLine(
+            "different input", to: fixture.sessionID, device: "browser", authorization: guest,
+            requestID: "before-move"
+        ), .conflict, "a retry cannot become a second submission in the new checkout")
+        XCTAssertEqual(registry.submitTerminalLine(
+            "", to: fixture.sessionID, device: "browser", authorization: guest,
+            requestID: "after-move"
+        ), .accepted, "the guest must still be able to use the replacement process")
+
+        // A real close must still end the browser's session, unlike process replacement.
+        AgentRuntime.shared.discard(sessionID: fixture.sessionID)
+        await fulfillment(of: [reconnect.closed], timeout: 5)
+        XCTAssertTrue(reconnect.types.contains("ended"))
+    }
+
+    private func waitForBrowserMarker(_ name: String, in directory: URL) async throws {
+        let deadline = ContinuousClock.now + .seconds(60)
+        let marker = directory.appendingPathComponent(name)
+        while !FileManager.default.fileExists(atPath: marker.path), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path), "browser missed \(name)")
+    }
+
+    func testRelaunchPreservesAnExistingStartupWaiter() throws {
+        let fixture = try dormantSession()
+        let registry = RemoteSessionMirrorRegistry.shared
+        installTerminalApplicationOnce()
+        registry.noteSessionStarting(fixture.sessionID)
+        let phone = authenticatedConnection()
+        var didAttach = false
+        XCTAssertEqual(registry.attachOrWaitForStartup(
+            phone, to: fixture.sessionID, authorization: Self.ownerInteract,
+            authorizationIsCurrent: { true }, didAttach: { didAttach = true }
+        ), .waitingForStartup)
+
+        AgentRuntime.shared.discardForRelaunch(sessionID: fixture.sessionID)
+        let replacement = AgentRuntime.shared.makeController(for: fixture.session)
+        defer { AgentRuntime.shared.discard(sessionID: fixture.sessionID) }
+        replacement.startRemoteTerminalFixture(plan: AgentLaunchPlan(
+            executable: "/bin/sleep", arguments: ["30"], resumeState: .unavailable
+        ))
+        XCTAssertTrue(didAttach, "replacement must not cancel a socket already waiting on startup")
+        XCTAssertTrue(registry.isAttached(phone, to: fixture.sessionID))
+    }
+
+    func testLateNativeExitCannotCancelReplacementStartup() throws {
+        let fixture = try dormantSession()
+        let project = try XCTUnwrap(ProjectStore.shared.project(forSessionID: fixture.sessionID))
+        XCTAssertEqual(ProjectStore.shared.setUsesNativeUI(true, for: fixture.sessionID), .applied)
+        let session = try XCTUnwrap(ProjectStore.shared.session(withID: fixture.sessionID))
+        let original = try XCTUnwrap(AgentRuntime.shared.makeConversation(for: session, in: project))
+        _ = original.view
+        AgentRuntime.shared.discardForRelaunch(sessionID: fixture.sessionID)
+        let replacement = try XCTUnwrap(AgentRuntime.shared.makeConversation(for: session, in: project))
+        _ = replacement.view
+        defer { AgentRuntime.shared.discard(sessionID: fixture.sessionID) }
+
+        original.handleExit(0)
+        let registry = RemoteSessionMirrorRegistry.shared
+        let phone = authenticatedConnection()
+        XCTAssertEqual(registry.attachOrWaitForStartup(
+            phone, to: fixture.sessionID, authorization: Self.ownerInteract,
+            authorizationIsCurrent: { true },
+            didAttach: { XCTFail("the replacement has not started its stream") }
+        ), .waitingForStartup, "the outgoing stream cannot cancel replacement startup")
+
+        replacement.handleExit(1)
+        XCTAssertEqual(registry.attachOrWaitForStartup(
+            authenticatedConnection(), to: fixture.sessionID, authorization: Self.ownerInteract,
+            authorizationIsCurrent: { true }, didAttach: { XCTFail("the replacement exited") }
+        ), .dormant, "the current stream must still end a failed startup")
+    }
+
+    func testQueuedTerminalExitCannotDiscardItsReplacement() async throws {
+        let fixture = try dormantSession()
+        let container = TerminalContainerViewController(recovery: true)
+        let original = AgentRuntime.shared.makeController(for: fixture.session)
+        container.agentSession(original, didExitWithCode: 0)
+        AgentRuntime.shared.discardForRelaunch(sessionID: fixture.sessionID)
+        let replacement = AgentRuntime.shared.makeController(for: fixture.session)
+        defer { AgentRuntime.shared.discard(sessionID: fixture.sessionID) }
+
+        let outgoingExitDrained = expectation(description: "outgoing exit callback drained")
+        DispatchQueue.main.async { outgoingExitDrained.fulfill() }
+        await fulfillment(of: [outgoingExitDrained], timeout: 2)
+        XCTAssertTrue(AgentRuntime.shared.terminalRuntimeSurface(for: fixture.sessionID) === replacement)
+
+        container.agentSession(replacement, didExitWithCode: 0)
+        let currentExitDrained = expectation(description: "current exit callback drained")
+        DispatchQueue.main.async { currentExitDrained.fulfill() }
+        await fulfillment(of: [currentExitDrained], timeout: 2)
+        XCTAssertNil(AgentRuntime.shared.terminalRuntimeSurface(for: fixture.sessionID),
+                     "the current process's exit must still discard its runtime")
+    }
 
     func testWaitingSocketAttachesWhenDormantTerminalProcessStarts() throws {
         let previousRemoteAccess = AppSettings.shared.remoteAccessEnabled
@@ -221,6 +425,51 @@ final class RemoteDormantSessionStartupTests: HostedStoreTestCase {
             RemoteSessionMirrorRegistry.shared.detach(connection)
         }
         return connection
+    }
+}
+
+/// Reads the actual browser wire through the real server, with all state confined to main.
+@MainActor
+private final class CheckoutSocketProbe {
+    let task: URLSessionWebSocketTask
+    let hello = XCTestExpectation(description: "browser receives hello")
+    let starting = XCTestExpectation(description: "browser waits for replacement")
+    let closed = XCTestExpectation(description: "browser socket closes")
+    private(set) var types: [String] = []
+    private var reader: Task<Void, Never>?
+
+    init(url: URL) throws {
+        task = URLSession.shared.webSocketTask(with: url)
+        let auth = RemoteClientMessage(
+            type: "auth", token: "checkout-token", device: "browser",
+            protocolVersion: RemoteProtocol.current,
+            protocolMinimum: RemoteProtocol.minimumSupported
+        )
+        let text = String(decoding: try JSONEncoder().encode(auth), as: UTF8.self)
+        task.resume()
+        reader = Task { [weak self, task] in
+            do {
+                try await task.send(.string(text))
+                while !Task.isCancelled {
+                    let message = try await task.receive()
+                    guard let self, case .string(let text) = message,
+                          let object = try JSONSerialization.jsonObject(with: Data(text.utf8))
+                            as? [String: Any],
+                          let type = object["type"] as? String else { continue }
+                    let first = !types.contains(type)
+                    types.append(type)
+                    if first && type == "hello" { hello.fulfill() }
+                    if first && type == "sessionStarting" { starting.fulfill() }
+                }
+            } catch {
+                self?.closed.fulfill()
+            }
+        }
+    }
+
+    func stop() {
+        reader?.cancel()
+        task.cancel(with: .normalClosure, reason: nil)
     }
 }
 

@@ -518,6 +518,8 @@ final class SessionRowActionsTests: XCTestCase {
                 "Interface",
                 "Claude Remote Control",
                 L10n.string("Mute Notifications"),
+                L10n.string("Mute Checkout Notices"),
+                L10n.string("Mute All Checkout Notices"),
                 // Beside Mute rather than beside Theme: both are conduct — what this chat does
                 // when nobody is watching — while Theme and Sound are presentation.
                 SessionActionMenuDefaults.limitRecoveryMenuTitle,

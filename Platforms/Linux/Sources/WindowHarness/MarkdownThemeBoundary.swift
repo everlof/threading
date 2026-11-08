@@ -65,7 +65,7 @@ extension NSView {
 extension Design {
     // Recipes used by the shared conversation/Markdown rows in this fixed-theme host.
     enum FontRole: Equatable {
-        case body, reading, emphasizedBody, subheading, caption, heading
+        case body, reading, emphasizedBody, subheading, caption, heading, numericBody
         case placeholderTitle, welcomeGreeting, control, controlRegular
         case detail(weight: NSFont.Weight = .regular)
         case numericDetail(weight: NSFont.Weight = .regular)
@@ -78,6 +78,7 @@ extension Design {
             case .emphasizedBody: .systemFont(ofSize: 13, weight: .semibold)
             case .detail(let weight): Design.Typography.detail(weight: weight)
             case .numericDetail(let weight): Design.Typography.numericDetail(weight: weight)
+            case .numericBody: Design.Typography.numericBody()
             case .placeholderTitle: .systemFont(ofSize: 15, weight: .medium)
             case .welcomeGreeting: .systemFont(ofSize: 20, weight: .semibold)
             case .subheading: .systemFont(ofSize: 12, weight: .regular)

@@ -1052,10 +1052,10 @@ try:
         window_log = output / 'native-remembered-restart.log'
         with window_log.open('w') as log:
             process = subprocess.Popen(fresh_command, env=environment, stdout=log, stderr=log)
+        model = eventually(lambda: control('linux.composer.model-effort'), 'restarted model chip')
         window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid', process.pid,
             '--name', '^Threading').splitlines()[0], 'restarted window')
         xdo('windowfocus', '--sync', window)
-        model = eventually(lambda: control('linux.composer.model-effort'), 'restarted model chip')
         eventually(lambda: 'Other Model · High' in model.get_name(), 'native choice restored')
         capture('native-remembered-model.png')
     print(f'PASS {provider} composer {mode}, AT-SPI menu, durable native session and provider turns')

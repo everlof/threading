@@ -103,6 +103,12 @@ Escaping completions are part of the boundary. Mark one `@Sendable` when it cros
 actor, propagate that contract to the API that stores it, and make every terminal path complete
 exactly once.
 
+A weak capture in an inner callback does not make its enclosing worker weak. If that worker
+only returns a result to an owner, capture the owner weakly at both boundaries. If a handshake
+must retain its owner until it has installed a weak listener, state the outer strong capture
+explicitly. This keeps lifetime intent visible and avoids the compiler's implicit-strong-capture
+diagnostic without changing callback isolation.
+
 Hosted UI tests use XCTest's async `setUp()` and `tearDown()` hooks for main-actor fixtures.
 The synchronous hooks remain nonisolated even when the test class is `@MainActor`; capturing
 the test instance in `MainActor.assumeIsolated` does not repair that ownership. Async hooks

@@ -28,16 +28,16 @@ final class MobileAccountImages: ObservableObject {
                     guard data.count <= 32 * 1024, image(id) == nil,
                           pending.count < 64, pending.insert(id).inserted else { continue }
                     remaining -= 1
-                    worker.async {
-                    let image = UIImage(data: data)?.preparingForDisplay()
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        pending.remove(id)
-                        if let image {
-                            images.setObject(image, forKey: id as NSString)
-                            revision &+= 1
+                    worker.async { [weak self] in
+                        let image = UIImage(data: data)?.preparingForDisplay()
+                        Task { @MainActor [weak self] in
+                            guard let self else { return }
+                            pending.remove(id)
+                            if let image {
+                                images.setObject(image, forKey: id as NSString)
+                                revision &+= 1
+                            }
                         }
-                    }
                     }
                 }
             }

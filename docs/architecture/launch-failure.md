@@ -144,6 +144,23 @@ Selection no longer retries. The retry is a button on the surface, which is a de
 a side effect of navigating, and it clears the record first so the gate that sent us there does
 not refuse it.
 
+### A missing worktree leads with a replacement checkout
+
+A local Git chat whose execution folder was removed offers **Choose Existing Checkout…** before
+Try Again. The session menu and command palette reach the same operation. The source project's
+persisted repository identity confines an explicit user choice to that repository; the host does
+not guess a destination from a child process's last directory. Managed and automation workspaces
+retain their own recovery owners. A move keeps the same chat and provider identifier, copies
+Claude's checkout-scoped transcript and subagents, and clears the missing-folder diagnosis only
+with the successful ownership transaction. Retry remains useful if the original folder is restored.
+
+This extends the host-only launch-recovery surface. Themes own its controls; checkout validation,
+transcript custody, durable identity, and launch remain host-owned. Its presentation is three
+fixed actions, O(1) per selection even at 10,000 saved chats. It adds no discovery scan, transcript
+render, polling, or per-frame work; the existing picker and checkout coordinator own the chosen
+destination and background transcript copy. `MissingCheckoutRecoveryTests` captures the real
+window and verifies deleted-worktree → choice → transcript/subagent copy → same-ID relaunch.
+
 ### A missing CLI leads with its cure
 
 `executable-missing` is the one cause whose remedy is known and is not "again", so its actions are

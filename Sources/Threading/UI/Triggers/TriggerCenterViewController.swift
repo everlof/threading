@@ -931,7 +931,7 @@ final class TriggerCenterViewController: NSViewController {
     private func editAutomation(_ pair: (definition: TriggerDefinition, revision: TriggerRevision)?) {
         let config = pair.map { AutomationConfiguration(definition: $0.definition, revision: $0.revision) } ?? projectID.map { AutomationConfiguration(projectID: $0) }
         let automationID = pair?.definition.id ?? TriggerID()
-        Task { @MainActor in
+        Task { @MainActor [self] in
         let sources = ((try? await store.sources()) ?? []).filter { !$0.isDeleted }
         let editor = AutomationEditorViewController(configuration: config, sources: sources)
         editor.lockedProjectID = projectID ?? pair?.revision.projectAutomation.map { _ in pair!.revision.projectID }

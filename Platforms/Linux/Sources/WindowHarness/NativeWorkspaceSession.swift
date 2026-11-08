@@ -1192,10 +1192,8 @@ final class NativeWorkspaceSession {
 
     nonisolated static func withDatabase<T>(store: String, body: (ProjectDatabase) throws -> T) throws -> T {
         let root = URL(fileURLWithPath: store, isDirectory: true)
-        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { throw WindowFailure("Cannot open store lock.") }
-        defer { Glibc.close(fd) }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("Store is already owned.") }
+        let lease = try LinuxStoreMutation.acquire(at: root)
+        defer { lease.close() }
         let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
         defer { database.close() }
         return try body(database)

@@ -1064,14 +1064,8 @@ final class BrowserViewController: NSViewController {
     }
 
     private func observeRuleWeights() {
-        for observe in [
-            { self.appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.reweigh() } },
-            {
-                self.appEvents.observe(AccessibilityDisplayOptionsDidChange.self) {
-                    [weak self] _ in self?.reweigh()
-                }
-            }
-        ] { observe() }
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.reweigh() }
+        appEvents.observe(AccessibilityDisplayOptionsDidChange.self) { [weak self] _ in self?.reweigh() }
     }
 
     private func reweigh() {

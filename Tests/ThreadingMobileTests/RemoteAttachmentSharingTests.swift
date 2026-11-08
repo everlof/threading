@@ -77,7 +77,10 @@ final class RemoteAttachmentSharingTests: XCTestCase {
     }
 
     func testBuiltAppExplainsAddOnlyPhotosAccess() {
-        XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "NSPhotoLibraryAddUsageDescription"))
+        XCTAssertEqual(
+            Bundle.main.object(forInfoDictionaryKey: "NSPhotoLibraryAddUsageDescription") as? String,
+            "Save images you choose from chat attachments to your photo library."
+        )
         XCTAssertNil(Bundle.main.object(forInfoDictionaryKey: "NSPhotoLibraryUsageDescription"))
     }
 

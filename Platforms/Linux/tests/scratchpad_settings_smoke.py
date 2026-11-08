@@ -74,6 +74,7 @@ def launch(name):
     log = (output / f'{name}.log').open('w+')
     process = subprocess.Popen([binary, '--app', str(store), endpoint, '/bin/sh'],
         env=environment, stdout=log, stderr=log)
+    eventually(lambda: control('sidebar.settings'), 'Settings footer after renderer creation')
     window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
         process.pid, '--name', '^Threading').splitlines()[0], 'workspace window')
     xdo('windowfocus', '--sync', window)
@@ -107,19 +108,40 @@ def chats_page():
     xdo('windowmove', window, 0, 0)
     eventually(lambda: 'SETTINGS_FRAME 880x859' in Path(log.name).read_text(),
                'tall Chats page')
-    eventually(lambda: float(re.findall(
-        r'SETTINGS_SCRATCHPAD_ANCHOR kind=choose x=[\d.]+ y=([\d.-]+)',
-        Path(log.name).read_text())[-1]) > 0, 'Scratchpad controls laid out')
+    visible_anchor('SCRATCHPAD', 'choose')
+
+
+def visible_anchor(category, kind):
+    pattern = rf'SETTINGS_{category}_ANCHOR kind={kind} x=([\d.-]+) y=([\d.-]+) width=([\d.]+) height=([\d.]+)'
+    geometry = xdo('getwindowgeometry', '--shell', window)
+    window_width = int(re.search(r'^WIDTH=(\d+)$', geometry, re.MULTILINE).group(1))
+    window_height = int(re.search(r'^HEIGHT=(\d+)$', geometry, re.MULTILINE).group(1))
+    for _ in range(60):
+        anchor = tuple(map(float, eventually(lambda: re.findall(pattern,
+            Path(log.name).read_text()), f'{kind} button')[-1]))
+        _, y, _, height = anchor
+        if y >= 30 and y + height <= window_height - 120:
+            return anchor
+        # Chats grows with shared settings. Scroll the mounted page and wait for each
+        # rendered frame instead of assuming every section fits in a tall window.
+        xdo('mousemove', '--window', window, window_width - 100, window_height // 2,
+            'click', 5 if y < 30 else 4)
+        def scrolled():
+            current_y = float(re.findall(pattern, Path(log.name).read_text())[-1][1])
+            return current_y > y if y < 30 else current_y < y
+        # Pointer movement also renders a frame, before the following wheel event.
+        # Wait for the target itself to move so no queued wheel invalidates the click.
+        eventually(scrolled, f'{kind} scroll rendered')
+    raise AssertionError(f'{kind} did not scroll into view: {anchor}')
 
 
 def click_anchor(category, kind):
-    pattern = rf'SETTINGS_{category}_ANCHOR kind={kind} x=([\d.]+) y=([\d.]+) width=([\d.]+) height=([\d.]+)'
-    x, y, width, height = map(float, eventually(lambda: re.findall(pattern,
-        Path(log.name).read_text()), f'{kind} button')[-1])
+    x, y, width, height = visible_anchor(category, kind)
     window_height = int(re.search(r'^HEIGHT=(\d+)$',
         xdo('getwindowgeometry', '--shell', window), re.MULTILINE).group(1))
-    xdo('mousemove', '--window', window, round(240 + x + width / 2),
-        round(window_height - y - height / 2), 'click', 1)
+    point = round(240 + x + width / 2), round(window_height - y - height / 2)
+    print(f'CLICK_SETTINGS_ANCHOR {category} {kind} point={point}', flush=True)
+    xdo('mousemove', '--window', window, *point, 'click', 1)
 
 
 def project_id(path):
@@ -129,6 +151,36 @@ def project_id(path):
                 assert json.loads(payload)['folderPath'] == str(path)
                 return identifier
     raise AssertionError('Scratchpad project missing')
+
+
+def choose_folder(picker, destination):
+    picker_pid = int(xdo('getwindowpid', picker))
+    xdo('windowfocus', '--sync', picker, 'key', 'ctrl+l')
+
+    def location_entry():
+        desktop = Atspi.get_desktop(0)
+        for index in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(index)
+            if app.get_process_id() != picker_pid:
+                continue
+            return next((node for node in descendants(app)
+                         if node.get_role_name() in ('text', 'entry')
+                         and node.get_state_set().contains(Atspi.StateType.FOCUSED)), None)
+        return None
+
+    eventually(location_entry, 'GTK location entry focused')
+    subprocess.run(['xclip', '-selection', 'clipboard'], input=str(destination),
+                   text=True, check=True, timeout=5)
+    xdo('key', 'ctrl+a', 'ctrl+v')
+    # GTK's clipboard insertion is asynchronous, and its location entry can be
+    # replaced by completion. Read back through its keyboard copy path.
+    time.sleep(.2)
+    xdo('key', 'ctrl+a', 'ctrl+c')
+    selected = subprocess.check_output(['xclip', '-o', '-selection', 'clipboard'],
+                                       text=True, timeout=5)
+    assert Path(selected).is_dir() and Path(selected).resolve() == destination.resolve(), (
+        'GTK selected a different folder', selected, str(destination))
+    xdo('key', 'Return')
 
 
 try:
@@ -167,11 +219,7 @@ try:
     xdo('windowmove', window, 0, 0)
     eventually(lambda: 'SETTINGS_FRAME 420x859' in Path(log.name).read_text(),
                'narrow Scratchpad page')
-    xdo('mousemove', '--window', window, 500, 600)
-    xdo('click', '--repeat', '35', '--delay', '80', 5)
-    eventually(lambda: float(re.findall(
-        r'SETTINGS_SCRATCHPAD_ANCHOR kind=choose x=[\d.]+ y=([\d.-]+)',
-        Path(log.name).read_text())[-1]) >= 30, 'narrow Scratchpad fully visible', timeout=60)
+    visible_anchor('SCRATCHPAD', 'choose')
     subprocess.run(['import', '-window', window, str(output / 'scratchpad-narrow.png')],
                    check=True, timeout=5)
     opened = Path(log.name).read_text().count('SETTINGS_HELP_OPENED')
@@ -190,11 +238,7 @@ try:
     click_anchor('SCRATCHPAD', 'choose')
     picker = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--name',
         'Choose the folder to keep the scratchpad in').splitlines()[0], 'folder picker')
-    xdo('windowfocus', '--sync', picker, 'key', 'ctrl+l')
-    xdo('type', '--clearmodifiers', '--delay', '5', str(destination))
-    xdo('key', 'Return')
-    if not target.exists():
-        xdo('key', 'Return')
+    choose_folder(picker, destination)
     eventually(lambda: f'SCRATCHPAD_MOVED {target}' in Path(log.name).read_text(),
                'Scratchpad relocated')
     eventually(lambda: 'SETTINGS_FRAME' in Path(log.name).read_text().split(
@@ -238,6 +282,9 @@ try:
     print('PASS Scratchpad Settings: chooser, durable move, retained notes and project identity, default return, lazy first location')
 finally:
     if process is not None:
+        if process.poll() is None and 'window' in globals():
+            subprocess.run(['import', '-window', window, str(output / 'failure.png')],
+                           check=False, timeout=5)
         process.kill()
         process.wait(timeout=5)
     if log is not None:

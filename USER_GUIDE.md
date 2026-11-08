@@ -309,9 +309,13 @@ the number of subagents; when folded, it summarizes children working or waiting 
 A subagent on its parent's provider and account starts without an extra account question.
 Another account or provider requires **Approve and Start** in the parent chat. The card names
 the exact account and model, shows its usage windows, reset times, your limits and the reading's
-timestamp, and offers **Refresh Usage**. Unknown, failed, exhausted or old readings cannot be
-approved; providers without usage reporting say so explicitly. “Best” is resolved to a specific
-account before you decide. Approval covers only that start; **Deny** starts nothing. The card
+timestamp, and offers **Refresh Usage**. You can choose another enabled account of the same
+provider directly in the card; its usage refreshes before you approve. When included usage is
+exhausted but the provider reports purchased credits, the card shows the balance and offers
+**Approve with Credits**. This may spend those credits for this start; your own account limits
+still apply. Unknown, failed or old readings cannot be approved; providers without usage
+reporting say so explicitly. “Best” is resolved to a specific account before you decide.
+Approval covers only that start and the account you chose; **Deny** starts nothing. The card
 cannot be approved by another agent or by the provider's automatic permission mode. Pending
 requests expire after five minutes and are cancelled when the parent's turn or session ends.
 A terminal parent shows the same controls in a confirmation naming the parent.
@@ -1316,10 +1320,15 @@ The pane shows **“<name>” couldn't start**, a plain sentence about what happ
 output the agent printed, in a box you can select and copy. The record survives quitting the app,
 so a failure you come back to tomorrow still says what went wrong.
 
-Four things you can do with it:
+The available actions depend on the cause:
 
 - **Try Again** relaunches. Some failures are weather — a login that had just lapsed, a CLI
   mid-upgrade — and asking again is the cheapest thing that works.
+- **Choose Existing Checkout…** appears first when a local Git chat's worktree folder is gone.
+  Choose an existing checkout of the same repository to move and resume the same saved chat.
+  Its name and history are kept, including Claude's subagent conversations. This is also available
+  under **Move to Checkout** in the chat menu and through the command palette. Threading does not
+  choose a different branch for you. If you restore the original folder, **Try Again** works too.
 - **Copy Details** puts the whole account on the clipboard: the sentence, the exit code, the
   conversation file, and the output.
 - **Report a Problem…** opens the usual report sheet with all of that already written in, for you
@@ -1730,6 +1739,9 @@ provider conversation, name, account, settings, attachments, scheduled messages 
 checkpoints stay with it. Files, processes, relaunch, Git Review and agent tools use the new
 checkout afterwards. A standalone terminal does not move with the chat; its working directory is
 independent.
+
+**Share Chat** access stays with the chat. Connected browser and iPhone guests reconnect
+automatically when its agent restarts in the new checkout; they do not need a new invitation.
 
 An idle chat moves immediately. If a turn is active, the submenu shows **Pending** and offers
 **Cancel Checkout Move**. Threading waits for that turn's final Git checkpoint, moves the chat,

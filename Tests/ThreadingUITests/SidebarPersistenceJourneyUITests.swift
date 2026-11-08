@@ -13,18 +13,18 @@ final class SidebarPersistenceJourneyUITests: XCTestCase {
 
         for title in ["Headings for Lone Branches", "Compact Tree", "Show Five Chats per Project"] {
             openArrangement(in: app)
-            app.menuItems[title].click()
+            app.windows.menuItems[title].click()
         }
         openArrangement(in: app)
-        app.menuItems.matching(NSPredicate(format: "label BEGINSWITH %@", "Sort by")).firstMatch.click()
-        let nameOrder = app.menuItems["Sort by Name"]
+        app.windows.menuItems.matching(NSPredicate(format: "label BEGINSWITH %@", "Sort by")).firstMatch.click()
+        let nameOrder = app.windows.menuItems["Sort by Name"]
         XCTAssertTrue(nameOrder.waitForExistence(timeout: 5))
         nameOrder.click()
         openArrangement(in: app)
-        app.menuItems["Z to A"].click()
+        app.windows.menuItems["Z to A"].click()
         openArrangement(in: app)
-        app.menuItems.matching(NSPredicate(format: "label BEGINSWITH %@", "Group by")).firstMatch.click()
-        let noGrouping = app.menuItems["None"]
+        app.windows.menuItems.matching(NSPredicate(format: "label BEGINSWITH %@", "Group by")).firstMatch.click()
+        let noGrouping = app.windows.menuItems["None"]
         XCTAssertTrue(noGrouping.waitForExistence(timeout: 5))
         noGrouping.click()
 
@@ -41,8 +41,8 @@ final class SidebarPersistenceJourneyUITests: XCTestCase {
             assertSelected("Show Five Chats per Project", false, in: app)
             assertSelected("Z to A", true, in: app)
             assertSelected("A to Z", false, in: app)
-            XCTAssertFalse(app.menuItems["Headings for Lone Branches"].isEnabled)
-            XCTAssertTrue(app.menuItems.matching(NSPredicate(
+            XCTAssertFalse(app.windows.menuItems["Headings for Lone Branches"].isEnabled)
+            XCTAssertTrue(app.windows.menuItems.matching(NSPredicate(
                 format: "label BEGINSWITH %@ AND label CONTAINS %@", "Group by", "None"
             )).firstMatch.exists)
             try recordScenarioScreenshot(
@@ -58,7 +58,7 @@ final class SidebarPersistenceJourneyUITests: XCTestCase {
         let button = app.buttons["Grouping and Sorting"]
         XCTAssertTrue(button.waitForExistence(timeout: 10))
         button.click()
-        XCTAssertTrue(app.menuItems["Compact Tree"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.windows.menuItems["Compact Tree"].waitForExistence(timeout: 5))
     }
 
     private func closeLaunchBrowser(in app: XCUIApplication) {
@@ -72,7 +72,7 @@ final class SidebarPersistenceJourneyUITests: XCTestCase {
         _ title: String, _ selected: Bool, in app: XCUIApplication,
         file: StaticString = #filePath, line: UInt = #line
     ) {
-        let item = app.menuItems[title]
+        let item = app.windows.menuItems[title]
         XCTAssertTrue(item.exists, title, file: file, line: line)
         XCTAssertEqual((item.value as? NSNumber)?.boolValue, selected, title, file: file, line: line)
     }

@@ -91,6 +91,9 @@ open menu and visible terminal grid. `scripts/export_theme_snapshot.py` regenera
 `LinuxThemeSnapshotTests` compares its values with production theme resolution on macOS. The
 Linux AppKit shim only resolves the selected named colors. Full theme configuration and the
 Mac presenter's complete menu interaction model remain open.
+Shared labels use `applyFont(.role)` on both platforms. Add a missing role to the Linux font
+adapter instead of assigning a font inside a Linux branch of a shared source: those assignments
+still violate the common font boundary. The adapter resolves the same Linux font metrics.
 `tests/page_title/run.sh` links the production `PageTitleView` with a Linux Pango label adapter
 for its Apple-only title animation. The native workspace now links the production
 `MorphingTitleLabel` wrapper too; only its glyph renderer is Pango-backed on Linux. The
@@ -197,6 +200,10 @@ General page row and themed popup as macOS.
 On clean close, a worker now records the store's live agent identities from one daemon survey,
 augmented by the bounded in-memory runtime set. A fast open/close with no live agents preserves
 an unconsumed prior record.
+The agent-catalogue smoke peer answers that startup survey before arming the explicit new-agent
+handshake gate. The first connection is a survey, not a creation; delaying it would test a
+fixture timeout before the import/admission overlap even begins. The creation gate still uses
+the shipping hello deadline and asserts that the gated connection requests exactly one spawn.
 The wider type audit found three separate `ChatNameMorphStyle` declarations and two
 `ControlPermissionDecision` declarations. Both now have one production enum, reached through
 module aliases or CoreSlice links. `ThemedMenuAnchor` and its presentation observer likewise
@@ -270,6 +277,8 @@ project, saved-agent and saved-terminal cells reuse the production row content. 
 owns exact selection, actions, terminal admission and AT-SPI publication. The installed X11
 `native_outline_smoke.py` checks 5,100 projects, expanded children, scrolling, pointer and
 keyboard selection, resize and middle/tail project restoration.
+The first and last visible accessibility rows may be clipped; the outline viewport ends above
+the Settings footer. Interior rows still require their full shared project or session height.
 `tests/sidebar_visible_rows/run.sh` (in the Linux build environment) checks the actual outline
 source and row resolver with 5,100 projects, two independently expanded branches and 2,048
 bounded children. It keeps mounted views within the viewport and preserves selection through
@@ -359,6 +368,9 @@ keyboard/pointer ranges and explicit clipboard services. The native window now a
 shared `MarkdownView` and `ThemedDocumentTableView`. Run `WindowHarness --document-ui-fixture
 OUTPUT_DIRECTORY` to mount the complete document in the preview shell; `tests/document_ui_smoke.py`
 checks selection/copy, read-only text, code, tables, light/dark appearance, resize and paging.
+The copy check starts with an image on the native clipboard and waits for the exact UTF-8
+selection. Worker layout can advance the frame serial before the queued copy key is handled;
+reading immediately could decode the preceding image as text before the selection arrives.
 The diagnostic prepares a provider envelope through the production `StreamEvent` parser and
 `ConversationTimeline` on a worker, then renders the authoritative assistant reply. The same
 timeline contracts run in CoreSliceHarness and Mac XCTest, including 1,000/10,000-turn histories.
@@ -386,8 +398,14 @@ middle edits remap cheap row metadata without rebuilding surviving cells.
 production wire/timeline path and mounts the exact pinned NativeDiffAppKit renderer in the shared
 row host. Its palette uses the production `DiffInk`, `PerceptualColor`, `ThemeContrast` and diff
 theme adapter over the checked Threading theme export. The native journey verifies row-wash
-pixels, Unicode copy, read-only text, live light/dark changes and width reflow. `vendor-diff.sh`
-verifies the renderer and license against their recorded revision; the package includes that license.
+pixels, Unicode copy, read-only text, live light/dark changes and width reflow. The fixture checks
+the shared row's current 24-point column margins and the diff's 14-point sign gutter, both text origin and width;
+its old 12-point margin expectation predates the shared transcript/composer alignment.
+It waits for the uniformly styled context row's complete layout before capturing or clicking:
+that row's worker can change the height above the rich row after the rich row has reflowed.
+Each copy starts with a different clipboard value, so an earlier copy cannot satisfy it.
+`vendor-diff.sh` verifies the renderer and license against their recorded revision; the package
+includes that license.
 The shared app `DiffView` adapter is mounted, including its source-reference and context-preview
 construction. Contextual action menus, `ToolCallView` and the native session UI integration remain open.
 Attributed and bounded labels retain the 4096-byte/64-span/eight-line drawing limits; long rich
@@ -398,6 +416,16 @@ paints only viewport lines, and paragraph preparation runs in the fixture's dedi
 Unlimited selectable plain labels now use a serial worker for full source shaping, grapheme
 indexing, selection and viewport rasterization. Requests coalesce per label and discard stale
 deliveries; automatic table row heights and the native fixture repaint after worker completion.
+Uniformly attributed prose uses the same complete worker path, preserving its font, ink and
+paragraph line spacing. Classification reads one effective attribute range and at most three
+attributes; it never walks the transcript during layout. Mixed runs retain the bounded rich-label
+path. This distinction matters because the shared `ProseLabel` now carries reading typography
+in an attributed string: restricting the complete path to plain strings left expanded user
+messages showing only their bounded prefix. Indexed paragraph plans include the spacing between
+paragraphs as well as wrapped lines, checked against complete Pango pixels, selection and hits.
+Complete labels retain their last measured geometry until a replacement arrives while discarding
+old-source pixels immediately. Restyling attributed prose otherwise briefly measured only eight
+lines, which clamped a reader at the tail back to the top during a theme change.
 `CompleteLabelHarness` checks complete head/tail pixels, copy, grapheme navigation and selection
 through resize/collapse. `WindowHarness --user-bubble-ui-fixture OUTPUT_DIRECTORY` mounts the
 unchanged production `UserMessageBubbleView`; the installed runtime journey checks its fade,
@@ -430,6 +458,9 @@ bounded shared policy. The native host prepares account routing, history and chi
 on a serial worker, then mounts the shared production rows and prompt editor. Codex and Claude
 launch plans are available, and the ordinary journey is verified for both against deterministic
 peers speaking each provider's production wire.
+The cross-row selection gesture finds the heading and first prose line in the rendered
+column. Fixed Y coordinates scaled from 1× missed the reply at 2×, where the preceding user
+bubble wraps; the clipboard assertion still requires text from both selected lines.
 The native prompt footer includes Speed for supported models, using the same menu vocabulary
 as the opening composer. Its two explicit choices take effect in the active conversation and
 persist with the session; the inherited choice takes effect when the provider next starts.
@@ -445,7 +476,12 @@ and the session's mode first. Codex questions appear as the production question 
 editable `NSTextField` edits through an AppKit-style field editor. `tests/native_permission_smoke.py`
 checks policy auto-allow, Deny, Allow for Session, that Return in the composer never answers a
 card, a production tool row opened and closed with the pointer, and a two-page question answered
-by choice and by typed text. Claude's hook-based
+by choice and by typed text. Tail following retains a pending frame when measuring a newly
+visible row grows the document after scrolling. Otherwise a tall question at 2× could remain
+below the composer while the frame reported ready. The host reports readiness only once that
+measured tail is visible, requests a frame only while one is owed, and returns to blocking idle
+afterwards. The question journey checks that its controls lie inside the transcript viewport.
+Claude's hook-based
 permission route, chart cards, other providers' workspace launch routes and
 the complete production conversation controller remain open. A wrapping label reports its
 single-line natural width, as AppKit does, and an automatic-height row is re-measured when a
@@ -595,6 +631,8 @@ Native file drops use the same worker and durable identity path. Ordinary files 
 and a drop path must fit the bridge's 1,023-byte bound without truncation. The two-scale
 `empty_sidebar_smoke.py` journey drives real GTK-to-SDL drag input, checks duplicate identity,
 and captures the shared empty message in both appearances.
+The daemon assertion preserves every initially live child and refuses any new process identity;
+already exited records may age out while the drag journey runs against the shared daemon.
 The header `+` opens **Add Project** with **Start New Project…**, **Use an Existing Folder…**,
 and a separated **New Scratchpad** choice. New Project asks for a folder name and place;
 Scratchpad creates or reopens `~/Threading/Scratchpad` without a chooser. Both select their
@@ -615,6 +653,8 @@ unchanged. A failed ownership query does not authorize a start, and a lost spawn
 authorize a retry. A definitive refusal permits another explicit activation and fresh survey.
 Newly created shells enter the saved-terminal picker as soon as their record is saved. Project
 and saved-row navigation share one retained runtime, including after a same-ID restart.
+The catalogue journey checks that `retained` disappears when the child exits and returns only
+after explicit activation has created the next live owner of that same saved terminal.
 Saved shells remember their live working directory through local OSC 7 reports and a one-second
 Linux root-process sample. Sampling requires the daemon's original PID/start-time identity;
 older replies still permit live OSC updates. Reopening uses the remembered directory, with the
@@ -925,6 +965,12 @@ commits. An unset chat permission mode follows the app default on terminal and n
 including resume; the record remains unset so a later default can take effect. Native permission
 brokering keeps the mode the running process actually started with until its mode changes live
 or it starts again.
+Provider-specific composer journeys select their identity through the real picker before
+checking permissions or model choices. The permission journey also checks the saved provider;
+both providers can inherit without emitting override flags, so an argv-only check could pass
+while exercising the wrong default agent.
+The hidden-model restart case reselects its account before inspecting the persisted rows:
+closing an uncommitted draft intentionally does not change the default agent for the next launch.
 A chat's explicit choice wins; Follow General Setting uses the saved startup choice; Agent's
 Setting leaves provider configuration in charge. Attachments, Scratchpad and
 full popover chrome remain parity work. The native reply now mounts the same
@@ -950,10 +996,14 @@ task-only title and a second native turn without the standing text.
 The Scratchpad row uses the same shared row source and path rules on both hosts. Linux moves an
 existing Scratchpad through its off-UI database helper, retains the project identity and user
 files, and saves the new location before reporting success. `tests/scratchpad_settings_smoke.py`
-exercises the real folder picker, move, restart and Use Default return. Chats also mounts the
+exercises the real folder picker, move, restart and Use Default return. It scrolls each target
+into the rendered viewport, including returning to the earlier help controls; shared settings
+can grow beyond even a tall window. Chats also mounts the
 unchanged shared `HelpPopoverButton` for its New Chats rows, Opening Message caption and
 Scratchpad row. Linux's popover shim places the shared explanation inside the SDL window and
 returns focus when Escape closes it.
+The journey waits for the target anchor to move after each wheel event: pointer movement can
+render an earlier frame with the old coordinates, leaving a wheel queued ahead of the click.
 The native reply also exposes Model, Mode and Effort chips in the Mac footer order. Model
 choices come from the same bounded account catalogue as the opening composer, respect hidden
 models, and mount at most six themed menu rows at once. Codex saves model and effort for its next
@@ -1364,6 +1414,23 @@ at most 256; traces contain timing and numeric state, without user text. Runner 
 The tests identify their own application/window process, and wait for GTK dialogs to become
 visible before attempting focus.
 
+Startup-restore fixtures resolve the X11 window after terminal/native readiness, before
+capture or Alt-F4. Retention waits for its restored process set; accessibility fixtures wait for
+the application or row registration, which follows renderer creation. SDL can replace its first
+visible X11 window while initializing the software
+renderer: a measured launch changed from `0x600002` to `0x600008` before the first conversation
+frame. Caching the earlier handle made successful restores fail with `BadWindow` or leave
+ImageMagick waiting for a nonexistent capture target. Quit/native logs survive fixture cleanup.
+
+Graphical store workers share one process-local lease per canonical store before taking the
+nonblocking `host.lock`. Startup Snooze reconciliation, native preparation and restore-record
+consumption previously mistook each other's short writes for a different host and could strand
+a selected native conversation with "Store is already owned." Local waits are bounded to five
+seconds; another process still fails immediately at the OS lock. Terminal-directory metadata
+keeps its immediate refusal/retry path so storage cannot delay terminal input. The registry holds
+only active stores. The startup contract holds a writer while native preparation enters, then
+checks successful handoff, independent stores and external exclusion.
+
 This host-only diagnostic mode admits at most eight manually opened runtimes across terminals
 and agents; the separately bounded startup plan may retain more. It requests frames only for
 the visible terminal. It saves each new
@@ -1394,6 +1461,12 @@ name. A reserved status region
 shows durable wake/snooze attention or `Retained` for a cached runtime; it does not claim agent
 activity. Visible snooze deadlines refresh even before a terminal is opened. The native wait
 keeps accessibility responsive while waiting for the next deadline.
+The provider-mark journey checks the `Snoozed` → `Woke` label transition and the exact durable
+time-reached receipt; viewing the catalogue must preserve all other session fields and the
+existing terminal child. Re-snoozing its fixture clears the old receipt just as the real action does.
+Its image samples follow the row's actual vertical center and bottom padding. The mark sample
+contains the complete 13-point ink with a one-pixel margin, avoiding the selection plate's
+rounded edge; the no-second-line sample stays below descenders in the shared 28-point row.
 The session menu's `Custom time…` Snooze choice opens a separate themed sheet. Its day/time
 options, rows and internal constraints are shared with macOS; the host returns the chosen moment
 to the existing exact-session durable Snooze transaction. Standalone windows admit its full

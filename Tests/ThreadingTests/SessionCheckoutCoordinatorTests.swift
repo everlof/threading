@@ -241,6 +241,9 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
     func testAtomicMoveRollsBackInMemoryWhenTheStoreGenerationIsStale() throws {
         let source = try XCTUnwrap(store.addProject(folderURL: main))
         let moving = try XCTUnwrap(store.addSession(to: source.id, kind: .codex))
+        let diagnosis = SessionLaunchFailure(origin: .preflight, summary: "Its folder is missing",
+            knownCause: SessionLaunchFailure.missingProjectFolderCause)
+        _ = store.update(sessionID: moving.id) { $0.lastLaunchFailure = diagnosis }
         let competingState = StateManager(appSupportDirectory: root.appendingPathComponent("state"))
         let competingStore = ProjectStore(stateManager: competingState)
         defer { competingState.closeDatabase() }
@@ -256,9 +259,11 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         ), .persistenceRefused)
 
         XCTAssertEqual(store.project(forSessionID: moving.id)?.id, source.id)
+        XCTAssertEqual(store.session(withID: moving.id)?.lastLaunchFailure, diagnosis)
         XCTAssertFalse(store.projects.contains { $0.folderPath == sibling.path })
         let reloaded = ProjectStore(stateManager: competingState)
         XCTAssertEqual(reloaded.project(forSessionID: moving.id)?.id, source.id)
+        XCTAssertEqual(reloaded.session(withID: moving.id)?.lastLaunchFailure, diagnosis)
         XCTAssertFalse(reloaded.projects.contains { $0.folderPath == sibling.path })
     }
 
@@ -630,6 +635,108 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
             failure(coordinator.validate(checkoutPath: main.path, forSessionID: session.id)),
             .sourceNotCheckout
         )
+    }
+
+    func testUserCanRecoverAChatWhoseWorktreeWasRemoved() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: sibling))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let transcriptID = TranscriptID("saved-conversation")
+        _ = store.update(sessionID: session.id) {
+            $0.customTitle = "GAMMA"
+            $0.resumeState = .resumable(transcriptID)
+            $0.hasLaunched = true
+            $0.lastLaunchFailure = SessionLaunchFailure(origin: .preflight,
+                summary: "Its folder is missing", knownCause: SessionLaunchFailure.missingProjectFolderCause)
+        }
+        try git(["worktree", "remove", "--force", sibling.path], in: main)
+        let coordinator = makeCoordinator()
+        guard case .queued = coordinator.requestMove(sessionID: session.id, checkoutPath: main.path,
+            authorityBasis: .explicitUserRequest, reason: "User chose a replacement checkout",
+            policy: .allowExplicitRequests) else { return XCTFail("Recovery must be allowed") }
+
+        let reloaded = ProjectStore(stateManager: state)
+        let recovered = try XCTUnwrap(reloaded.session(withID: session.id))
+        XCTAssertEqual(reloaded.project(forSessionID: session.id)?.folderPath, main.path)
+        XCTAssertEqual(recovered.customTitle, "GAMMA")
+        XCTAssertEqual(recovered.resumeState.transcriptID, transcriptID)
+        XCTAssertNil(recovered.lastLaunchFailure)
+        XCTAssertNil(SessionLaunchFailure.refusingReopen(of: recovered, hasLiveSurface: false))
+        XCTAssertTrue(coordinator.isHoldingInput(sessionID: session.id))
+        coordinator.runtimeRelaunchDidStart(sessionID: session.id)
+        XCTAssertFalse(coordinator.isHoldingInput(sessionID: session.id))
+    }
+
+    func testMissingWorktreeRecoveryRequiresUserChoiceAndSameRepository() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: sibling))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        try git(["worktree", "remove", "--force", sibling.path], in: main)
+        let coordinator = makeCoordinator()
+        for basis in [SessionCheckoutAuthorityBasis.agentInitiated, .observedExecution] {
+            guard case .failed = coordinator.requestMove(sessionID: session.id, checkoutPath: main.path,
+                authorityBasis: basis, reason: "inferred", policy: .allowSameRepository)
+            else { return XCTFail("An inference cannot recover a missing worktree") }
+        }
+        XCTAssertEqual(failure(coordinator.validate(checkoutPath: other.path, forSessionID: session.id,
+            recoveringMissingSource: true)), .differentRepository)
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
+    }
+
+    func testChoosingTheRestoredOriginalCheckoutAlsoResumesTheChat() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        _ = store.update(sessionID: session.id) {
+            $0.lastLaunchFailure = SessionLaunchFailure(origin: .preflight, summary: "Its folder is missing",
+                knownCause: SessionLaunchFailure.missingProjectFolderCause)
+        }
+        let resumed = expectation(description: "restored checkout resumes")
+        let observer = NotificationCenter.default.observe(SessionCheckoutDidMove.self) { event in
+            if event.sessionID == session.id { resumed.fulfill() }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        guard case .queued = makeCoordinator().requestMove(sessionID: session.id, checkoutPath: main.path,
+            authorityBasis: .explicitUserRequest, reason: "The original folder was restored",
+            policy: .allowExplicitRequests) else { return XCTFail("Expected recovery") }
+        wait(for: [resumed], timeout: 2)
+        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
+        XCTAssertNil(store.session(withID: session.id)?.lastLaunchFailure)
+    }
+
+    func testRememberedIdentityCannotOverrideAReplacedSourceFolder() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: sibling))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        try git(["worktree", "remove", "--force", sibling.path], in: main)
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+        XCTAssertEqual(failure(makeCoordinator().validate(checkoutPath: main.path,
+            forSessionID: session.id, recoveringMissingSource: true)), .sourceNotCheckout)
+        try makeRepository(at: sibling, branch: "replacement")
+        XCTAssertEqual(failure(makeCoordinator().validate(checkoutPath: main.path,
+            forSessionID: session.id, recoveringMissingSource: true)), .differentRepository)
+    }
+
+    func testRecoveryCannotGuessTheRepositoryOfAnUnknownMissingFolder() throws {
+        let folder = root.appendingPathComponent("never-a-checkout")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let project = try XCTUnwrap(store.addProject(folderURL: folder))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        try FileManager.default.removeItem(at: folder)
+        XCTAssertEqual(failure(makeCoordinator().validate(checkoutPath: main.path,
+            forSessionID: session.id, recoveringMissingSource: true)), .sourceNotCheckout)
+    }
+
+    func testCheckoutMoveRetainsUnrelatedLaunchFailures() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: sibling))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let diagnosis = SessionLaunchFailure(origin: .preflight, summary: "Broken transcript",
+            knownCause: "transcript-invalid")
+        _ = store.update(sessionID: session.id) { $0.lastLaunchFailure = diagnosis }
+        try git(["worktree", "remove", "--force", sibling.path], in: main)
+        guard case .queued = makeCoordinator().requestMove(sessionID: session.id,
+            checkoutPath: main.path, authorityBasis: .explicitUserRequest,
+            reason: "User chose a replacement checkout", policy: .allowExplicitRequests)
+        else { return XCTFail("Expected move") }
+        XCTAssertEqual(store.project(forSessionID: session.id)?.folderPath, main.path)
+        XCTAssertEqual(store.session(withID: session.id)?.lastLaunchFailure, diagnosis)
     }
 
     func testFailedMoveCanRetryAfterItsSourceWorktreeWasRemoved() throws {

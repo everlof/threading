@@ -20,7 +20,7 @@ enum ProjectLaunchPreflight {
 
         var knownCause: String {
             switch self {
-            case .missing: "project-folder-missing"
+            case .missing: SessionLaunchFailure.missingProjectFolderCause
             case .notDirectory: "project-path-not-directory"
             }
         }

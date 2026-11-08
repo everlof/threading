@@ -150,7 +150,7 @@ def ready(turn):
 def card():
     """The presented card's action centres, from the newest frame, or None once it has gone."""
     lines = [line for line in frames() if line.startswith(('PERMISSION_FRAME ', 'CONVERSATION_FRAME '))]
-    if len(lines) < 2 or not lines[-2].startswith('PERMISSION_FRAME '):
+    if len(lines) < 2 or not lines[-2].startswith('PERMISSION_FRAME ') or 'prepared=true' not in lines[-1]:
         return None
     fields = lines[-2].split()[2:]
     return {name: tuple(map(int, value.split(','))) for name, value in (field.split('=') for field in fields)}
@@ -159,7 +159,7 @@ def card():
 def question():
     """The question card's controls, from the newest frame, or None when none is shown."""
     lines = [line for line in frames() if line.startswith(('PERMISSION_FRAME ', 'QUESTION_FRAME ', 'CONVERSATION_FRAME '))]
-    if not lines or not lines[-1].startswith('CONVERSATION_FRAME '):
+    if not lines or not lines[-1].startswith('CONVERSATION_FRAME ') or 'prepared=true' not in lines[-1]:
         return None
     for line in reversed(lines[:-1]):
         if line.startswith('CONVERSATION_FRAME '):
@@ -265,6 +265,11 @@ try:
     key('Return')
     controls = eventually(lambda: (question() or {}).get('Blue') and question(), 'question card')
     assert {'Red', 'Blue', 'Cancel'} <= set(controls), controls
+    composer_line = next(line for line in reversed(frames()) if line.startswith('COMPOSER_FRAME '))
+    composer = dict(part.split('=', 1) for part in composer_line.split()[1:])
+    viewport_bottom = int(composer['y']) - 36 * scale
+    assert all(41 * scale < y < viewport_bottom for _, y in controls.values()), (
+        'question controls must follow the measured tail into the transcript viewport', controls)
     capture('question-card.png')
     click(controls['Blue'])
     click(eventually(lambda: (question() or {}).get('Next'), 'next question'))

@@ -117,10 +117,6 @@ with log_path.open('w') as log:
                                 '/bin/sh', '/bin/true'], env=environment,
                                stdout=log, stderr=log)
     try:
-        window = eventually(lambda: subprocess.run(
-            ['xdotool', 'search', '--all', '--onlyvisible', '--pid', str(process.pid),
-             '--name', '^Threading'], capture_output=True, text=True).stdout.splitlines(),
-            'window did not open', process)[0]
         eventually(lambda: len([event for event in events() if event['event'] == 'loaded']) == 6,
                    'six native conversations did not load', process)
         retired = eventually(lambda: retired_ids() if len(retired_ids()) == 2 else None,
@@ -132,6 +128,12 @@ with log_path.open('w') as log:
         assert len([pid for pid in loaded.values() if alive(pid)]) == 4, loaded
         assert 'CONVERSATION_FRAME' not in log_path.read_text(), \
             'background restore built a hidden conversation pane'
+        # SDL can replace its first X11 handle when the renderer starts. Resolve the
+        # live window after restoration, immediately before the real quit gesture.
+        window = eventually(lambda: subprocess.run(
+            ['xdotool', 'search', '--all', '--onlyvisible', '--pid', str(process.pid),
+             '--name', '^Threading'], capture_output=True, text=True,
+            timeout=5).stdout.splitlines(), 'restored window did not open', process)[0]
         subprocess.run(['xdotool', 'windowfocus', '--sync', window, 'key', 'alt+F4'],
                        check=True, timeout=5)
         assert process.wait(timeout=10) == 0, log_path.read_text()[-5000:]

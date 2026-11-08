@@ -2055,7 +2055,9 @@ final class TerminalContainerViewController: NSViewController {
         let sessionID = session.id
         launchFailureView.configure(
             title: L10n.format("%@ couldn’t start", session.displayTitle),
-            summary: failure.summary,
+            summary: failure.summary + (canRecoverMissingCheckout(failure, sessionID: sessionID)
+                ? "\n\n" + L10n.string("Choose an existing checkout of this repository to resume the saved conversation.")
+                : ""),
             output: failure.detail,
             actions: launchFailureActions(failure, sessionID: sessionID, kind: session.kind)
         )
@@ -2072,6 +2074,21 @@ final class TerminalContainerViewController: NSViewController {
         sessionID: SessionID,
         kind: AgentKind
     ) -> [LaunchFailureAction] {
+        if canRecoverMissingCheckout(failure, sessionID: sessionID) {
+            return [
+                LaunchFailureAction(title: L10n.string("Choose Existing Checkout…"), emphasis: .primary) { [weak self] in
+                    (self?.view.window?.windowController as? MainWindowController)?
+                        .chooseSessionCheckout(sessionID)
+                },
+                LaunchFailureAction(title: L10n.string("Try Again")) { [weak self] in
+                    self?.relaunchAfterFailure(sessionID: sessionID)
+                },
+                LaunchFailureAction(title: L10n.string("Copy Details")) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(failure.report, forType: .string)
+                }
+            ]
+        }
         if failure.knownCause == SessionLaunchDiagnosis.Cause.executableMissing {
             return missingExecutableActions(failure, sessionID: sessionID, kind: kind)
         }
@@ -2126,6 +2143,14 @@ final class TerminalContainerViewController: NSViewController {
             )
         }
         return actions
+    }
+
+    private func canRecoverMissingCheckout(_ failure: SessionLaunchFailure, sessionID: SessionID) -> Bool {
+        guard failure.knownCause == SessionLaunchFailure.missingProjectFolderCause,
+              let session = ProjectStore.shared.session(withID: sessionID),
+              let project = ProjectStore.shared.project(forSessionID: sessionID) else { return false }
+        return session.managedWorkspace == nil && session.automationWorkspace == nil
+            && project.executionHost == nil && project.lastKnownRepositoryIdentity != nil
     }
 
     /// A missing CLI is the one failure whose cure is known and is not "again": the install comes
@@ -2878,7 +2903,9 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
         let launchRefusal = controller.launchRefusal
 
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self,
+                  AgentRuntime.shared.terminalRuntimeSurface(for: sessionID) === controller
+            else { return }
 
             AgentRuntime.shared.discard(sessionID: sessionID)
 
@@ -3048,6 +3075,8 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
 
 extension TerminalContainerViewController: ConversationViewControllerDelegate {
     func conversation(_ controller: ConversationViewController, didExitWithCode code: Int32) {
+        guard AgentRuntime.shared.conversationRuntimeSurface(for: controller.sessionID) === controller
+        else { return }
         if code == AgentChildProcessDefaults.spawnFailureStatus,
            controller.sessionID == currentSessionID,
            let stored = ProjectStore.shared.session(withID: controller.sessionID),

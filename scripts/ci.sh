@@ -11,13 +11,15 @@
 # app; the companion is neither embedded nor published by that lane. This mode therefore keeps
 # every repository, package, service and Mac shipping gate
 # while omitting only the ThreadingMobile build and test lanes. Ordinary CI remains the superset.
+# `--full-release` runs the complete Mac plan together with both mobile lanes.
 set -euo pipefail
 
 include_mobile=1
 case "${1:-}" in
     "") ;;
     --mac-release) include_mobile=0 ;;
-    *) printf 'error: usage: scripts/ci.sh [--mac-release]\n' >&2; exit 1 ;;
+    --full-release) ;;
+    *) printf 'error: usage: scripts/ci.sh [--mac-release|--full-release]\n' >&2; exit 1 ;;
 esac
 
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -164,6 +166,7 @@ python3 "${repository_directory}/scripts/tests/test_remote_components.py"
 
 say "Testing the local release driver"
 python3 "${repository_directory}/scripts/tests/test_local_release_driver.py"
+python3 "${repository_directory}/scripts/tests/test_full_release_driver.py"
 python3 "${repository_directory}/scripts/tests/test_local_release_credentials.py"
 python3 "${repository_directory}/scripts/tests/test_sentry_release.py"
 python3 "${repository_directory}/scripts/tests/test_testflight_release.py"
@@ -178,6 +181,8 @@ node "${repository_directory}/Service/ThreadingControlPlane/scripts/verify-repor
 
 mac_test_level=fast
 if [[ "${include_mobile}" == "0" ]]; then
+    mac_test_level=mac-all
+elif [[ "${1:-}" == "--full-release" ]]; then
     mac_test_level=mac-all
 fi
 say "Testing Threading (${mac_test_level}, complete concurrency checking)"

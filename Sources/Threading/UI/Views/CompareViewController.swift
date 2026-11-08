@@ -267,7 +267,7 @@ final class CompareViewController: NSViewController {
 
         let oldPath = oldPath
         let newPath = newPath
-        Self.queue.async {
+        Self.queue.async { [weak self] in
             let comparison = Self.compare(oldPath: oldPath, newPath: newPath)
             Task { @MainActor [weak self] in
                 guard let self, expected == self.generation else { return }

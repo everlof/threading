@@ -108,6 +108,51 @@ final class MobileWorkroomTests: XCTestCase {
         }
     }
 
+    /// The participant's screens drawn whole from the demo fixtures — the inbox, an open question
+    /// with its form and the conversation before it, and an answered one — for review.
+    @MainActor
+    func testRendersTheWorkroomScreensWhole() throws {
+        guard let out = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"], !out.isEmpty else {
+            throw XCTSkip("Set THREADING_RENDER_OUT to draw the workroom screens")
+        }
+        let suite = "MobileWorkroomTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let scenes: [(scene: String, name: String, height: CGFloat, view: (RemoteAppModel) -> AnyView)] = [
+            ("workroom-inbox", "workroom-inbox", 1_400, { _ in
+                AnyView(NavigationStack { WorkroomInboxView(isRoot: true, openSettings: {}) })
+            }),
+            ("workroom-question", "workroom-question-open", 2_600, { _ in
+                AnyView(NavigationStack { WorkroomQuestionView(questionID: MobileWorkroomFixture.questionID) })
+            }),
+            ("workroom-question", "workroom-question-answered", 2_200, { _ in
+                AnyView(NavigationStack { WorkroomQuestionView(questionID: MobileWorkroomFixture.answeredID) })
+            }),
+        ]
+        for scene in scenes {
+            setenv(MobileDemoScene.environmentKey, scene.scene, 1)
+            defer { unsetenv(MobileDemoScene.environmentKey) }
+            let model = RemoteAppModel(continuity: MobileSessionContinuityStore(defaults: defaults))
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: scene.height))
+            // The app's root sets the theme's scheme; without it the form's labels draw in the
+            // light scheme's ink on the theme's dark panels, which is not what anyone sees.
+            let host = UIHostingController(rootView: scene.view(model)
+                .environment(\.colorScheme, .dark)
+                .environmentObject(model)
+                .environmentObject(RemoteNotificationManager(defaults: defaults)))
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 1.5))
+            host.view.layoutIfNeeded()
+            let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
+                host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+            }
+            try XCTUnwrap(image.pngData())
+                .write(to: URL(fileURLWithPath: out).appendingPathComponent("\(scene.name).png"))
+            window.isHidden = true
+        }
+    }
+
     /// The brightness of each pixel row of `image` at `x` points, top to bottom.
     private func luminances(of image: UIImage, atX x: CGFloat) throws -> [CGFloat] {
         let cgImage = try XCTUnwrap(image.cgImage)

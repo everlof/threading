@@ -548,15 +548,9 @@ public final class ThemeRedraw {
     private let appEvents = AppEventObservations()
 
     public init(_ view: NSView) {
-        for observe in [
-            { self.appEvents.observe(AppThemeDidChange.self) { [weak view] _ in view?.restyle() } },
-            { self.appEvents.observe(ProfileDidChange.self) { [weak view] _ in view?.restyle() } },
-            {
-                self.appEvents.observe(AccessibilityDisplayOptionsDidChange.self) {
-                    [weak view] _ in view?.restyle()
-                }
-            }
-        ] { observe() }
+        appEvents.observe(AppThemeDidChange.self) { [weak view] _ in view?.restyle() }
+        appEvents.observe(ProfileDidChange.self) { [weak view] _ in view?.restyle() }
+        appEvents.observe(AccessibilityDisplayOptionsDidChange.self) { [weak view] _ in view?.restyle() }
     }
 }
 

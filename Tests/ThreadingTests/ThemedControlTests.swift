@@ -8277,6 +8277,8 @@ final class ThemedControlTests: HostedStoreTestCase {
         // that entry disappears so this exception cannot silently outlive its visual proof.
         let shippingSurfaceComponentsByEvidence: [String: Set<String>] = [
             "brand-interactions": ["SidebarBrandContentView"],
+            "subagent-account-approval": ["SubagentAccountApprovalCard", "SidebarSubagentSummaryView",
+                                          "SidebarSubagentConnectorView"],
             "sidebar-session-rows": ["SidebarNavigatorContentView", "SidebarSessionRowAssembly",
                                      "SidebarSessionTrailingSlot", "SidebarTerminalRowAssembly"],
             "session-menu": ["ThemedMenuPanelView", "ThemedMenuDocumentView",

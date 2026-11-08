@@ -112,7 +112,7 @@ def run_window(stage, show_pane, expected_loads):
                                          '--pid', str(process.pid), '--name', '^Threading'],
                                         capture_output=True, text=True, timeout=5)
                 return result.stdout.splitlines()[0] if result.stdout else None
-            wid = eventually(window, 'native restore window did not open')
+            eventually(window, 'native restore window did not open')
             eventually(lambda: sum(event.get('event') == 'loaded'
                                    and event.get('id') == provider_id
                                    for event in events()) >= expected_loads,
@@ -120,6 +120,10 @@ def run_window(stage, show_pane, expected_loads):
             if show_pane:
                 eventually(lambda: 'CONVERSATION_FRAME' in log_path.read_text(),
                            lambda: f'selected native pane did not render: {log_path.read_text()[-4000:]}')
+            # Renderer creation can replace SDL's initial X11 window. Only the handle after
+            # native readiness belongs to the rendered pane and can receive capture/quit.
+            wid = eventually(window, 'native restore window disappeared after loading')
+            if show_pane:
                 subprocess.run(['import', '-window', wid,
                                 str(root / ('held-native.png' if held else 'selected-native.png'))],
                                check=True, timeout=8)
@@ -130,6 +134,7 @@ def run_window(stage, show_pane, expected_loads):
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
+            Path(f'out/{root.name}-{stage}.log').write_text(log_path.read_text())
     return log_path.read_text()
 
 

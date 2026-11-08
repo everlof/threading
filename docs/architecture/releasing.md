@@ -1,5 +1,13 @@
 # Releasing & Automatic Updates
 
+For an agent driving both Apple apps, start with
+[`full-release.md`](../operations/full-release.md) and `scripts/release_all.py`.
+It keeps logs on disk, reports compact checkpoints, runs the complete Mac/iOS quality gate and
+GUI journeys before committing, refreshes stale remote-host components, publishes the Mac app,
+uploads the exact iOS archive and optionally submits it to App Review. The existing publishers
+retain their checks. `ci.sh --full-release` includes the entire Mac plan and the mobile lanes;
+`--mac-release` retains its direct-distribution scope.
+
 How a distributable Threading.app is produced, and how Sparkle updates it. Sparkle is wired in:
 `Core/Updates` is the only place that imports it, the switch is Settings ▸ General ▸ Software
 Updates, and what an update check reveals is on the Privacy page. The custom `SPUUserDriver` is
@@ -1371,6 +1379,7 @@ to. The Marketeer CLI reads the same three `ASC_*` names, which is why they are 
 |---|---|---|
 | `validate` | Runs CI and production readiness checks, archives, exports and runs `altool --validate-app` | Reads; creates profiles if missing |
 | `beta` | Requires an unchanged clean checkout, runs the same checks/build/validation, uploads its dSYMs to Sentry, then the IPA to TestFlight | Uploads a build |
+| `submit_review` | Uses `receipt:<path>` from `beta` to select the exact uploaded version/build, submit it, and verify Apple's review state; release after approval stays manual | Submits to App Review |
 | `beta_metadata` | Updates the beta description, feedback/privacy links and Beta App Review contact/instructions; submits no build | Writes beta metadata |
 | `internal_testers` | Creates the internal group `MJUKIS` (access to all builds) and adds the testers | Writes testers |
 | `download_metadata` | Replaces `fastlane/metadata` with the live listing | Reads |
@@ -1416,6 +1425,15 @@ These automated checks do not replace a distributed-build device test: pair with
 exercise cellular and forced TURN (UDP/TCP/TLS), foreground/background recovery, production APNs,
 credential revocation and a consented, symbolicated Sentry crash. The October review did not
 perform that device matrix or publish a new iOS archive.
+
+For resumable full releases, `beta receipt:<path>` writes the source revision, archive paths,
+version/build and SHA-256 of the validated IPA before uploading. A retry reuses that archive;
+it never allocates another build number or adopts the latest build. A confirmed uploaded receipt
+can resume Sentry deployment or submission. If Apple has the number but local upload success was
+not recorded, the lane refuses ambiguous recovery. `submit_review` rejects changed source or IPA,
+selects only the recorded build, and treats an already-submitted matching build as success. It
+never cancels another submission. Fastlane 2.240.1 or newer is required because Apple's builds
+endpoint no longer accepts the older default `betaBuildMetrics` relationship.
 
 ### The legal-notice phase cannot be script-sandboxed
 

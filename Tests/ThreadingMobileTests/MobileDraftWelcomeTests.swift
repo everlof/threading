@@ -298,6 +298,83 @@ final class MobileDraftWelcomeTests: XCTestCase {
 
     // MARK: - Render
 
+    /// Pushing exercises SwiftUI's transition preference pass, which evaluates the destination
+    /// on top of the navigation stack. Rendering a draft as the root missed the physical-phone
+    /// stack overflow when the editor and run-setting menus were large inline generic values.
+    /// Run on a physical phone too: its stack is smaller than the simulator's.
+    func testPushingANewDraftMountsAFocusedEditorAndCanReturnToTheList() async throws {
+        let idleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
+        UIApplication.shared.isIdleTimerDisabled = true
+        defer { UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled }
+        let suite = "MobileDraftWelcomeTests.navigation.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let continuity = MobileSessionContinuityStore(defaults: defaults)
+        let model = RemoteAppModel(continuity: continuity)
+        model.startDemo()
+        let root = DraftNavigationHost(model: model)
+            .environmentObject(model)
+            .environmentObject(continuity)
+            .environmentObject(MobileTerminalKeyboardStore())
+            .environmentObject(RemoteNotificationManager())
+            .mobileTheme(RemoteThemePalette(theme(mode: .dark, welcome: nil)))
+        let controller = UIHostingController(rootView: root)
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer {
+            window.endEditing(true)
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await Task.sleep(for: .milliseconds(200))
+
+        // Exercise the same command as both the floating New button and the project's +.
+        let firstProject = try XCTUnwrap(model.me?.newSessionCatalog?.projects.first?.name)
+        for projectName in [nil, firstProject] {
+            XCTAssertEqual(scene?.activationState, .foregroundActive)
+            MobileSessionNavigationTransition.draft(in: projectName, onto: model)
+            try await Task.sleep(for: .milliseconds(800))
+            window.layoutIfNeeded()
+            let editor = try XCTUnwrap(promptEditor(in: window))
+            XCTAssertTrue(editor.isFirstResponder)
+            XCTAssertGreaterThan(editor.bounds.width, 0)
+            XCTAssertGreaterThan(editor.bounds.height, 0)
+            editor.insertText("A fresh draft")
+            XCTAssertEqual(editor.text, "A fresh draft")
+
+            window.endEditing(true)
+            model.navigationPath.removeAll()
+            try await Task.sleep(for: .milliseconds(600))
+            XCTAssertNil(promptEditor(in: window), "Back removes the draft's editor")
+        }
+    }
+
+    private struct DraftNavigationHost: View {
+        @ObservedObject var model: RemoteAppModel
+
+        var body: some View {
+            NavigationStack(path: $model.navigationPath) {
+                Text("Chats")
+                    .navigationDestination(for: MobileNavigationRoute.self) { route in
+                        if case let .draft(draft) = route {
+                            SessionDraftView(draft: draft)
+                        }
+                    }
+            }
+        }
+    }
+
+    private func promptEditor(in view: UIView) -> IntrinsicTextView? {
+        if let editor = view as? IntrinsicTextView,
+           editor.accessibilityLabel == MobileL10n.string("Prompt") {
+            return editor
+        }
+        return view.subviews.lazy.compactMap { self.promptEditor(in: $0) }.first
+    }
+
     func testTheDraftDrawsAWelcomeInLightAndDark() throws {
         for mode in [RemoteThemeMode.dark, .light] {
             let ink = mode == .dark ? "#FF00FF" : "#B0008C"

@@ -1,4 +1,6 @@
-import ActivityKit
+// ActivityKit's asynchronous update/end API predates Sendable annotations on Activity.
+// The app's reference and lifecycle remain owned by the main actor.
+@preconcurrency import ActivityKit
 import Foundation
 import ThreadingGlanceKit
 import ThreadingRemoteKit

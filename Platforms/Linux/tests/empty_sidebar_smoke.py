@@ -33,9 +33,9 @@ def daemon_children(capture_name):
     snapshot = json.loads(subprocess.check_output(
         [daemon, 'sessions', '--json', '--socket', endpoint], text=True, timeout=8))
     (output / (capture_name + '.json')).write_text(json.dumps(snapshot, indent=2) + '\n')
-    # Earlier journeys share this daemon. Their uptime advances and children may still
-    # be reaped; import must preserve process identity, not freeze mutable metadata.
-    return {(item['id'], item['pid']) for item in snapshot}
+    # Earlier journeys share this daemon. Exited records expire independently while
+    # live children must keep both their process identity and running state.
+    return {(item['id'], item['pid']): item.get('exit') for item in snapshot}
 
 
 initial_children = daemon_children('daemon-before')
@@ -189,7 +189,14 @@ try:
         drop(folder)
         eventually(lambda: log_path.read_text().count('PROJECT_IMPORTED ') == 2, 'duplicate folder handled')
         assert records() == first, 'duplicate drop changed project identity or fields'
-        assert daemon_children('daemon-after') == initial_children, 'folder import changed daemon children'
+        final_children = daemon_children('daemon-after')
+        assert final_children.keys() <= initial_children.keys(), 'folder import created a daemon child'
+        for identity, exit_code in initial_children.items():
+            if exit_code is None:
+                assert identity in final_children and final_children[identity] is None, (
+                    'folder import lost or exited a live child', identity)
+            elif identity in final_children:
+                assert final_children[identity] == exit_code, ('exited child changed identity', identity)
         key('alt+F4')
         assert process.wait(timeout=5) == 0
         print(f'PASS empty sidebar scale={scale}: no fake row, accessible hint, live theme, native Unicode folder drop, file refusal and duplicate identity')

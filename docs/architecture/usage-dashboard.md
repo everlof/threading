@@ -199,6 +199,11 @@ summary survive this boundary. The equatable plot receives values rather than cl
 whole dashboard. This removes the per-point AreaMark/LineMark graph (720 marks at four providers
 × 90 days) when the lazy sheet mounts or remounts the chart.
 
+Both axes-only charts construct empty content explicitly with `ChartContentBuilder.buildBlock()`.
+With the iOS 27 SDK, a bare `Chart {}` resolves through `EmptyView`'s new iOS-27-only conformance,
+which is invalid for the app's iOS 17 floor. The explicit chart builder preserves empty marks
+and the existing Canvas geometry without introducing an unavailable conformance.
+
 The phone's limit chart uses Swift Charts for axes and a single clipped Canvas for the marks.
 Its immutable geometry keeps each observed window in a separate path, closes every area on zero,
 and never joins or stacks across a reset. Native marks per observation were unnecessary SwiftUI

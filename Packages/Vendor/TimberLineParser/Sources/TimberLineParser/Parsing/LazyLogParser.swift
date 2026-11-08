@@ -31,7 +31,7 @@ public struct MultilineMergeOptions: Sendable {
 // MARK: - Data Holder
 
 /// Wrapper class to hold Data with a single reference point
-public final class DataHolder {
+public final class DataHolder: Sendable {
     public let data: Data
 
     public init(data: Data) {
@@ -43,6 +43,7 @@ public final class DataHolder {
 
 /// A log line that lazily computes its content and metadata
 /// Initially only stores byte range; parsing happens on-demand or via background task
+@MainActor
 public final class LazyLogLine: Identifiable {
     public let id: Int
     public let byteRange: Range<Int>
@@ -84,7 +85,7 @@ public final class LazyLogLine: Identifiable {
         return str
     }
 
-    /// Called by background parser to set metadata and cache content string
+    /// Publishes parsed metadata and cached content on the document's main-actor owner.
     public func setMetadata(timestamp: Date?, level: LogLevel, contentString: String) {
         self.timestamp = timestamp
         self.level = level
@@ -93,7 +94,7 @@ public final class LazyLogLine: Identifiable {
     }
 
     /// Get raw bytes for this line (for parsing)
-    public func getBytes() -> [UInt8] {
+    public nonisolated func getBytes() -> [UInt8] {
         Array(holder.data[byteRange])
     }
 }
@@ -101,6 +102,7 @@ public final class LazyLogLine: Identifiable {
 // MARK: - Lazy Log Document
 
 /// A document that holds raw Data and provides lazy access to lines
+@MainActor
 public final class LazyLogDocument {
     public let url: URL
     private var dataHolder: DataHolder?
@@ -118,10 +120,10 @@ public final class LazyLogDocument {
     private let multilineOptions: MultilineMergeOptions
 
     // Callback for when parsing updates occur
-    public var onParsingProgress: ((Double) -> Void)?
-    public var onParsingComplete: (() -> Void)?
+    public var onParsingProgress: (@MainActor @Sendable (Double) -> Void)?
+    public var onParsingComplete: (@MainActor @Sendable () -> Void)?
     /// Called when line count is known (after LineScan phase)
-    public var onLinesScanned: ((Int) -> Void)?
+    public var onLinesScanned: (@MainActor @Sendable (Int) -> Void)?
 
     /// Access to underlying data (for compatibility)
     public var data: Data { dataHolder?.data ?? Data() }
@@ -145,7 +147,7 @@ public final class LazyLogDocument {
     /// Load the document synchronously - finds line boundaries using SIMD
     /// - Warning: This runs on the calling thread. For large files, use `startFullBackgroundLoad()` instead.
     public func load() {
-        guard let dataHolder = dataHolder else {
+        guard dataHolder != nil else {
             // If data not loaded yet, load it now (backwards compatibility)
             do {
                 let signpostID = ParserSignpost.signposter.makeSignpostID()
@@ -200,13 +202,13 @@ public final class LazyLogDocument {
         let fileURL = url
         let multilineOpts = multilineOptions
 
+        // Snapshot the main-actor callbacks before handing immutable input to the worker.
+        let onLinesScanned = self.onLinesScanned
+        let onProgress = onParsingProgress
+        let onComplete = onParsingComplete
+
         DispatchQueue.global(qos: .userInitiated).async {
             ThreadAssertions.assertNotMainThread()
-
-            // Capture callbacks at start of async block
-            let onLinesScanned = strongSelf.onLinesScanned
-            let onProgress = strongSelf.onParsingProgress
-            let onComplete = strongSelf.onParsingComplete
 
             // Phase 1: Load file
             let fileSignpostID = ParserSignpost.signposter.makeSignpostID()
@@ -266,12 +268,12 @@ public final class LazyLogDocument {
 
     /// Parse line ranges directly into LogLine array without intermediate LazyLogLine objects
     /// This is more memory efficient and avoids thread-safety issues
-    private static func parseRangesDirectly(
+    private nonisolated static func parseRangesDirectly(
         data: Data,
         ranges: [(start: Int, end: Int)],
         lineCount: Int,
         multilineOptions: MultilineMergeOptions = .default,
-        onProgress: ((Double) -> Void)?
+        onProgress: (@MainActor @Sendable (Double) -> Void)?
     ) -> ([LogLine], LogStatistics) {
         ThreadAssertions.assertNotMainThread()
 
@@ -443,9 +445,10 @@ public final class LazyLogDocument {
                 batchStringConvertTime = 0
                 batchLogLineCreateTime = 0
 
-                // Report progress synchronously - caller handles main thread dispatch
                 let progress = Double(parsedCount) / Double(lineCount)
-                onProgress?(progress)
+                DispatchQueue.main.async {
+                    onProgress?(progress)
+                }
             }
         }
 
@@ -483,7 +486,7 @@ public final class LazyLogDocument {
     }
 
     /// Check if a line is a continuation line (no timestamp + starts with whitespace or numbered pattern)
-    private static func isContinuationLine(bytes: [UInt8]) -> Bool {
+    private nonisolated static func isContinuationLine(bytes: [UInt8]) -> Bool {
         guard !bytes.isEmpty else { return false }
 
         let firstByte = bytes[0]
@@ -529,7 +532,7 @@ public final class LazyLogDocument {
                 onProgress: onProgress
             )
 
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 self?.convertedLines = logLines
                 self?.convertedStatistics = stats
                 onComplete?()
@@ -547,10 +550,10 @@ public final class LazyLogDocument {
 
     /// Parse all lines and convert to LogLine array in a single pass (synchronous version for GCD)
     /// Returns the LogLine array and computed statistics
-    private static func parseAllLinesAndConvertSync(
+    private nonisolated static func parseAllLinesAndConvertSync(
         lines: [LazyLogLine],
         lineCount: Int,
-        onProgress: ((Double) -> Void)?
+        onProgress: (@MainActor @Sendable (Double) -> Void)?
     ) -> ([LogLine], LogStatistics) {
         // Assert we're not on main thread - this is heavy work
         ThreadAssertions.assertNotMainThread()

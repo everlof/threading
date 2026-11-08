@@ -44,9 +44,9 @@ def paragraph(current):
 
 
 def copied_text(expected):
-    result = subprocess.run(['xclip', '-selection', 'clipboard', '-o'], text=True,
+    result = subprocess.run(['xclip', '-selection', 'clipboard', '-target', 'UTF8_STRING', '-o'],
                             capture_output=True, timeout=3)
-    return result.returncode == 0 and result.stdout == expected
+    return result.returncode == 0 and result.stdout == expected.encode('utf-8')
 
 
 def page(key):

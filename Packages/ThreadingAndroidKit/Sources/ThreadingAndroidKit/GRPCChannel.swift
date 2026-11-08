@@ -53,6 +53,7 @@ public final class GRPCChannel: @unchecked Sendable {
     private let maximumMessageSize: Int
     fileprivate let queue: DispatchQueue
     private var connection: NWConnection?
+    private var pendingConnect: CheckedContinuation<Void, Error>?
     private var protocolState = HTTP2ClientConnection()
     private var calls: [UInt32: Call] = [:]
     private var pings: [[UInt8]: (Result<Void, Error>) -> Void] = [:]
@@ -77,7 +78,11 @@ public final class GRPCChannel: @unchecked Sendable {
 
     public func connect(timeout: TimeInterval = 3) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            queue.async {
+            queue.async { [self] in
+                if let closedError = self.closedError {
+                    continuation.resume(throwing: closedError)
+                    return
+                }
                 guard self.connection == nil, let endpointPort = NWEndpoint.Port(rawValue: self.port) else {
                     continuation.resume(throwing: Failure.connectFailed("already connected"))
                     return
@@ -90,15 +95,9 @@ public final class GRPCChannel: @unchecked Sendable {
                 parameters.requiredInterfaceType = .loopback
                 let connection = NWConnection(host: NWEndpoint.Host(self.host), port: endpointPort, using: parameters)
                 self.connection = connection
-                var resumed = false
-                let finish: (Result<Void, Error>) -> Void = { result in
-                    guard !resumed else { return }
-                    resumed = true
-                    continuation.resume(with: result)
-                }
+                self.pendingConnect = continuation
                 self.queue.asyncAfter(deadline: .now() + timeout) {
-                    if !resumed {
-                        finish(.failure(Failure.timedOut))
+                    if self.finishConnect(.failure(Failure.timedOut)) {
                         self.fail(.timedOut)
                     }
                 }
@@ -109,12 +108,12 @@ public final class GRPCChannel: @unchecked Sendable {
                         self.protocolState.start()
                         self.flushOutput()
                         self.receiveLoop()
-                        finish(.success(()))
+                        self.finishConnect(.success(()))
                     case .failed(let error):
-                        finish(.failure(Failure.connectFailed(error.localizedDescription)))
+                        self.finishConnect(.failure(Failure.connectFailed(error.localizedDescription)))
                         self.fail(.connectionLost(error.localizedDescription))
                     case .waiting(let error):
-                        finish(.failure(Failure.connectFailed(error.localizedDescription)))
+                        self.finishConnect(.failure(Failure.connectFailed(error.localizedDescription)))
                         self.fail(.connectFailed(error.localizedDescription))
                     case .cancelled:
                         self.fail(.connectionLost("cancelled"))
@@ -309,9 +308,19 @@ public final class GRPCChannel: @unchecked Sendable {
         })
     }
 
+    /// Both connection callbacks and its deadline run on `queue`, which owns this one receipt.
+    @discardableResult
+    private func finishConnect(_ result: Result<Void, Error>) -> Bool {
+        guard let continuation = pendingConnect else { return false }
+        pendingConnect = nil
+        continuation.resume(with: result)
+        return true
+    }
+
     private func fail(_ failure: Failure) {
         guard closedError == nil else { return }
         closedError = failure
+        finishConnect(.failure(failure))
         connection?.stateUpdateHandler = nil
         connection?.cancel()
         let pending = calls

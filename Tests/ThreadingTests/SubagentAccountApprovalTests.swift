@@ -7,6 +7,8 @@ final class SubagentAccountApprovalTests: HostedStoreTestCase {
     static let now = Date(timeIntervalSince1970: 1_799_000_000)
     static let account = AgentAccount(provider: .claude, handle: AccountHandle(storedName: "work"),
                                       configPath: "/tmp/subagent-account-fixture", displayName: "Work")
+    static let otherAccount = AgentAccount(provider: .claude, handle: AccountHandle(storedName: "personal"),
+        configPath: "/tmp/subagent-personal-fixture", displayName: "Personal")
 
     static func plan(kind: AgentKind = .claude, account: AccountHandle = SubagentAccountApprovalTests.account.handle) -> ScheduledSessionPlan {
         ScheduledSessionPlan(projectID: ProjectID(), kind: kind, accountHandle: account,
@@ -28,8 +30,9 @@ final class SubagentAccountApprovalTests: HostedStoreTestCase {
         completion: @escaping (Bool) -> Void = { _ in }
     ) -> SubagentAccountApproval {
         SubagentAccountApproval(parentID: parentID, plan: plan(), brief: "Review the login API",
-            accountName: "Work", account: account, read: { reading }, refresh: { $0() },
-            limits: { [] }, now: { now }, completion: completion)
+            accountName: "Work", account: account, accounts: [account, otherAccount],
+            read: { _ in reading }, refresh: { _, done in done() },
+            limits: { _ in [] }, now: { now }, completion: { completion($0 != nil) })
     }
 
     func testOnlyTheSameProviderAndAccountCanStartWithoutApproval() {
@@ -60,9 +63,9 @@ final class SubagentAccountApprovalTests: HostedStoreTestCase {
         var finishRefresh: (() -> Void)?
         var decisions: [Bool] = []
         let request = SubagentAccountApproval(parentID: SessionID(), plan: Self.plan(), brief: "Review",
-            accountName: "Work", account: Self.account, read: { reading },
-            refresh: { finishRefresh = $0 }, limits: { [] }, now: { Self.now },
-            completion: { decisions.append($0) })
+            accountName: "Work", account: Self.account, read: { _ in reading },
+            refresh: { _, done in finishRefresh = done }, limits: { _ in [] }, now: { Self.now },
+            completion: { decisions.append($0 != nil) })
         request.refresh()
         request.approve()
         XCTAssertTrue(decisions.isEmpty)
@@ -97,8 +100,8 @@ final class SubagentAccountApprovalTests: HostedStoreTestCase {
         var now = Self.now
         var decisions: [Bool] = []
         let request = SubagentAccountApproval(parentID: SessionID(), plan: Self.plan(), brief: "Review",
-            accountName: "Work", account: Self.account, read: { .current(Self.usage()) },
-            refresh: { $0() }, limits: { [] }, now: { now }, completion: { decisions.append($0) })
+            accountName: "Work", account: Self.account, read: { _ in .current(Self.usage()) },
+            refresh: { _, done in done() }, limits: { _ in [] }, now: { now }, completion: { decisions.append($0 != nil) })
         XCTAssertTrue(request.canApprove)
         now = now.addingTimeInterval(121)
         request.approve()
@@ -108,12 +111,189 @@ final class SubagentAccountApprovalTests: HostedStoreTestCase {
 
     func testYourLimitStillBlocksApprovalWhenProviderHasCapacity() {
         let request = SubagentAccountApproval(parentID: SessionID(), plan: Self.plan(), brief: "Review",
-            accountName: "Work", account: Self.account, read: { .current(Self.usage()) },
-            refresh: { $0() }, limits: { [CustomLimit(windowID: "5h", bound: 0.6, tier: .hold)] },
+            accountName: "Work", account: Self.account, read: { _ in .current(Self.usage()) },
+            refresh: { _, done in done() }, limits: { _ in [CustomLimit(windowID: "5h", bound: 0.6, tier: .hold)] },
             now: { Self.now }, completion: { _ in XCTFail("No start may pass the user's limit") })
         XCTAssertFalse(request.canApprove)
         request.approve()
         XCTAssertFalse(request.isResolved)
+    }
+
+    func testCreditsRequireTheirOwnExplicitApprovalAndNeverConsumeResetCredits() throws {
+        XCTAssertEqual(Self.request(reading: .current(Self.usage(fraction: 0.99))).funding, .includedUsage,
+                       "A human start can use the remaining allowance; automatic ranking keeps its reserve")
+        var usage = Self.usage(fraction: 1)
+        usage.creditBalance = "25.50"
+        let request = Self.request(reading: .current(usage))
+        XCTAssertEqual(request.funding, .credits)
+        request.approve()
+        XCTAssertFalse(request.isResolved, "Ordinary approval cannot authorize purchased credits")
+        request.approve(funding: .credits)
+        XCTAssertTrue(request.isResolved)
+
+        for balance in [nil, "0", "-1", "NaN", "inf", "unknown"] as [String?] {
+            usage.creditBalance = balance
+            usage.resetCredits = 3
+            XCTAssertFalse(Self.request(reading: .current(usage)).canApprove)
+        }
+        usage.creditBalance = "25.50"
+        XCTAssertFalse(Self.request(reading: .stale(usage, error: .decoding)).canApprove)
+        let expired = Self.usage(fraction: 1, at: Self.now.addingTimeInterval(-121))
+        var oldCredits = expired
+        oldCredits.creditBalance = "25.50"
+        XCTAssertFalse(Self.request(reading: .current(oldCredits)).canApprove)
+        XCTAssertNil(SubagentAccountApproval.funding(for: Self.account, reading: .current(usage),
+            rules: [CustomLimit(windowID: "5h", bound: 0.6, tier: .hold)], model: nil, at: Self.now))
+    }
+
+    func testSelectingAccountDiscardsOldRefreshAndRequiresAnotherExplicitApproval() throws {
+        var callbacks: [() -> Void] = []
+        var fetched: [AccountID] = []
+        var decisions: [SubagentAccountApproval.Approval] = []
+        let request = SubagentAccountApproval(parentID: SessionID(), plan: Self.plan(), brief: "Review",
+            accountName: "Work", account: Self.account, accounts: [Self.account, Self.otherAccount],
+            read: { account in .current(Self.usage(fraction: account == Self.account ? 1 : 0.2)) },
+            refresh: { account, done in fetched.append(account.id); callbacks.append(done) },
+            limits: { _ in [] }, now: { Self.now }, completion: { if let answer = $0 { decisions.append(answer) } })
+        let card = SubagentAccountApprovalCard(request: request)
+        let picker = try XCTUnwrap(descendants(card).compactMap { $0 as? ThemedPopUp }.first)
+        request.refresh()
+        picker.chooseItem(at: 1)
+        XCTAssertEqual(request.plan.accountHandle, Self.otherAccount.handle)
+        XCTAssertEqual(request.accountName, "Personal")
+        XCTAssertEqual(fetched, [Self.account.id, Self.otherAccount.id])
+        callbacks[0]()
+        XCTAssertTrue(request.isRefreshing, "Previous account cannot finish the selected account's refresh")
+        XCTAssertFalse(request.canApprove)
+        callbacks[1]()
+        XCTAssertTrue(request.canApprove)
+        XCTAssertTrue(decisions.isEmpty)
+        request.approve()
+        XCTAssertEqual(decisions.map(\.plan.accountHandle), [Self.otherAccount.handle])
+        request.selectAccount(Self.account.id)
+        XCTAssertEqual(request.plan.accountHandle, Self.otherAccount.handle, "An answered proposal is immutable")
+    }
+
+    func testCreditsCannotBypassUnknownWindowsModelLimitsOrYourOwnLimits() {
+        let readings = [
+            AccountUsage(windows: [], planLabel: nil, observedAt: Self.now, source: .api),
+            AccountUsage(windows: [.init(id: "7d", label: "Weekly", fraction: nil,
+                resetsAt: Self.now.addingTimeInterval(60), windowDuration: 604_800)],
+                planLabel: nil, observedAt: Self.now, source: .api),
+            AccountUsage(windows: [.init(id: "7d", label: "Weekly", fraction: 1,
+                resetsAt: Self.now.addingTimeInterval(-1), windowDuration: 604_800)],
+                planLabel: nil, observedAt: Self.now, source: .api)
+        ]
+        for var usage in readings {
+            usage.creditBalance = "20"
+            XCTAssertFalse(Self.request(reading: .current(usage)).canApprove)
+        }
+        var usage = Self.usage(fraction: 1)
+        usage.creditBalance = "20"
+        for tier: CustomLimitTier in [.show, .notify, .hold, .park] {
+            XCTAssertNil(SubagentAccountApproval.funding(for: Self.account, reading: .current(usage),
+                rules: [CustomLimit(windowID: "5h", bound: 0.6, tier: tier)], model: nil, at: Self.now))
+        }
+        var scopedUsage = Self.usage(fraction: 0.2)
+        scopedUsage.modelWindows = [.init(id: "Fable", label: "Weekly · Fable", fraction: 1,
+            resetsAt: Self.now.addingTimeInterval(3_600), windowDuration: 604_800, scopeName: "Fable")]
+        XCTAssertNil(SubagentAccountApproval.funding(for: Self.account, reading: .current(scopedUsage),
+            rules: [], model: "claude-fable-5[1m]", at: Self.now))
+        scopedUsage.creditBalance = "20"
+        XCTAssertEqual(SubagentAccountApproval.funding(for: Self.account, reading: .current(scopedUsage),
+            rules: [], model: "claude-fable-5[1m]", at: Self.now), .credits)
+    }
+
+    func testOnlyEnabledAccountsOfTheProposedProviderCanBeSelected() {
+        let disabled = AgentAccount(provider: .claude, handle: .standard,
+            configPath: "/tmp/subagent-disabled", isEnabled: false)
+        let otherProvider = AgentAccount(provider: .codex, handle: .standard,
+            configPath: "/tmp/subagent-codex")
+        let request = SubagentAccountApproval(parentID: SessionID(), plan: Self.plan(), brief: "Review",
+            accountName: "Work", account: Self.account, accounts: [Self.account, disabled, otherProvider],
+            read: { _ in .current(Self.usage()) }, refresh: { _, done in done() }, limits: { _ in [] },
+            now: { Self.now }, completion: { _ in })
+        XCTAssertEqual(request.accounts, [Self.account])
+        request.selectAccount(disabled.id)
+        request.selectAccount(otherProvider.id)
+        XCTAssertEqual(request.plan.accountHandle, Self.account.handle)
+    }
+
+    func testAccountChooserKeepsAThousandAccountsAsValuesWithoutFetchingThem() throws {
+        let accounts = (0..<1_000).map { index in
+            AgentAccount(provider: .claude, handle: AccountHandle(storedName: "account-\(index)"),
+                         configPath: "/tmp/subagent-\(index)", displayName: "Account \(index)")
+        }
+        var refreshes = 0
+        let request = SubagentAccountApproval(parentID: SessionID(), plan: Self.plan(account: accounts[0].handle),
+            brief: "Review", accountName: accounts[0].displayName, account: accounts[0], accounts: accounts,
+            read: { _ in .notFetched }, refresh: { _, done in refreshes += 1; done() },
+            limits: { _ in [] }, completion: { _ in })
+        let card = SubagentAccountApprovalCard(request: request)
+        let picker = try XCTUnwrap(descendants(card).compactMap { $0 as? ThemedPopUp }.first)
+        XCTAssertEqual(picker.numberOfItems, 1_000)
+        XCTAssertLessThan(descendants(card).count, 40)
+        XCTAssertEqual(refreshes, 0)
+        picker.chooseItem(at: 999)
+        XCTAssertEqual(request.plan.accountHandle, accounts[999].handle)
+        XCTAssertEqual(refreshes, 1)
+    }
+
+    func testRendersTerminalApprovalWithCreditsAndAccountSwitching() throws {
+        let oldTheme = AppThemePalette.current
+        let oldAppearance = NSApp.appearance
+        defer { AppThemePalette.set(oldTheme); NSApp.appearance = oldAppearance }
+        let output = URL(fileURLWithPath: ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+                         ?? NSTemporaryDirectory())
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        let themes: [(String, AppTheme, NSAppearance.Name)] = [
+            ("light", .system, .aqua), ("dark", .system, .darkAqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua),
+            ("swiss", AppThemeStyles.swissMinimalist, .aqua)
+        ]
+        for (name, theme, appearanceName) in themes {
+            AppThemePalette.set(theme)
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            NSApp.appearance = appearance
+            var result: Result<Void, Error>?
+            appearance.performAsCurrentDrawingAppearance {
+                result = Result {
+                    var usage = Self.usage(fraction: 1)
+                    usage.creditBalance = "25.50"
+                    let request = Self.request(reading: .current(usage))
+                    let choice = SubagentAccountApprovalPresenter.choiceRequest(request, parentTitle: "Review")
+                    let content = ConfirmationAlert.makeAlert(choice).makeContentView()
+                    let host = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
+                    host.appearance = appearance
+                    host.contentView = content
+                    host.setContentSize(content.fittingSize)
+                    AppThemeRefresh.repaint(content)
+                    content.layoutSubtreeIfNeeded()
+                    let picker = try XCTUnwrap(descendants(content).compactMap { $0 as? ThemedPopUp }.first)
+                    XCTAssertTrue(picker.isEnabled)
+                    picker.chooseItem(at: 1)
+                    XCTAssertEqual(request.plan.accountHandle, Self.otherAccount.handle)
+                    let approve = try XCTUnwrap(descendants(content).first {
+                        $0.accessibilityIdentifier() == "conversation.subagent-account-approval.approve"
+                    } as? ThemedButton)
+                    XCTAssertEqual(approve.title, L10n.string("Approve with Credits"))
+                    XCTAssertTrue(approve.isEnabled)
+                    content.layoutSubtreeIfNeeded()
+                    let buttonRect = approve.convert(approve.bounds, to: content)
+                    XCTAssertTrue(content.bounds.contains(buttonRect), "Approval must fit the terminal dialog")
+                    let point = NSPoint(x: buttonRect.midX, y: buttonRect.midY)
+                    let hit = content.hitTest(point)
+                    XCTAssertTrue(hit === approve || hit?.isDescendant(of: approve) == true)
+                    let image = try XCTUnwrap(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+                    content.cacheDisplay(in: content.bounds, to: image)
+                    try XCTUnwrap(image.representation(using: .png, properties: [:]))
+                        .write(to: output.appendingPathComponent("subagent-approval-terminal-\(name).png"))
+                    _ = approve.performPrimaryAction()
+                    XCTAssertTrue(request.isResolved)
+                }
+            }
+            try XCTUnwrap(result).get()
+        }
     }
 
     func testToolDoesNotSpawnBeforeApprovalOrAfterDenialAndUsesTheExactApprovedAccount() async throws {
@@ -233,6 +413,47 @@ final class SubagentAccountApprovalTests: HostedStoreTestCase {
         bestRequest.approve()
         await fulfillment(of: [bestStart], timeout: 2)
         XCTAssertEqual(launched.last?.accountHandle, Self.account.handle)
+
+        let switched = expectation(description: "The owner's chosen account reaches the actual launch")
+        service.startSubagent(arguments, for: parent.id) { result in
+            XCTAssertFalse(result.isError)
+            switched.fulfill()
+        }
+        let switchRequest = try XCTUnwrap(proposed)
+        let selectionReady = expectation(description: "Selected login refreshed")
+        switchRequest.onChange = { if !switchRequest.isRefreshing { selectionReady.fulfill() } }
+        switchRequest.selectAccount(standard.id)
+        await fulfillment(of: [selectionReady], timeout: 3)
+        switchRequest.approve()
+        await fulfillment(of: [switched], timeout: 2)
+        XCTAssertEqual(launched.last?.accountHandle, .standard)
+
+        var paidUsage = Self.usage(fraction: 1, at: now)
+        paidUsage.creditBalance = "12.50"
+        usage.acceptAuthoritative(paidUsage, for: Self.account)
+        let paidStart = expectation(description: "Explicit credit consent survives final admission")
+        service.startSubagent(arguments, for: parent.id) { result in
+            XCTAssertFalse(result.isError)
+            paidStart.fulfill()
+        }
+        let paidRequest = try XCTUnwrap(proposed)
+        XCTAssertEqual(paidRequest.funding, .credits)
+        paidRequest.approve(funding: .credits)
+        await fulfillment(of: [paidStart], timeout: 2)
+        XCTAssertEqual(launched.last?.accountHandle, Self.account.handle)
+
+        let countBeforeSpentCredits = launched.count
+        let creditsSpent = expectation(description: "Credits are checked again at admission")
+        service.startSubagent(arguments, for: parent.id) { result in
+            XCTAssertTrue(result.isError)
+            creditsSpent.fulfill()
+        }
+        let creditsSpentRequest = try XCTUnwrap(proposed)
+        paidUsage.creditBalance = "0"
+        usage.acceptAuthoritative(paidUsage, for: Self.account)
+        creditsSpentRequest.approve(funding: .credits)
+        await fulfillment(of: [creditsSpent], timeout: 2)
+        XCTAssertEqual(launched.count, countBeforeSpentCredits)
     }
 
     func testQueueIsBoundedAndTerminationDeniesEveryPendingStart() throws {
@@ -277,7 +498,13 @@ final class SubagentAccountApprovalTests: HostedStoreTestCase {
         let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
                             ?? NSTemporaryDirectory())
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        for (name, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+        let themes: [(String, AppTheme, NSAppearance.Name)] = [
+            ("light", .system, .aqua), ("dark", .system, .darkAqua),
+            ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua),
+            ("swiss", AppThemeStyles.swissMinimalist, .aqua)
+        ]
+        for (name, theme, appearanceName) in themes {
+            AppThemePalette.set(theme)
             let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
             NSApp.appearance = appearance
             var result: Result<Void, Error>?
@@ -338,6 +565,19 @@ final class SubagentAccountApprovalTests: HostedStoreTestCase {
             let hit = content.hitTest(point)
             XCTAssertTrue(hit === approve || hit?.isDescendant(of: approve) == true)
         }
+        var paidUsage = Self.usage(fraction: 1)
+        paidUsage.creditBalance = "25.50"
+        chat.cancelSubagentAccountApprovals()
+        let paidRequest = Self.request(parentID: parent.id, reading: .current(paidUsage))
+        chat.presentSubagentAccountApproval(paidRequest)
+        try capture("\(name)-credits")
+        let paidCard = try XCTUnwrap(chat.activeSubagentAccountCard)
+        let paidButton = try XCTUnwrap(descendants(paidCard).first {
+            $0.accessibilityIdentifier() == "conversation.subagent-account-approval.approve"
+        } as? ThemedButton)
+        XCTAssertEqual(paidButton.title, L10n.string("Approve with Credits"))
+        XCTAssertTrue(paidButton.isEnabled)
+
         guard name == "dark" else { return }
         let outline = try XCTUnwrap(descendants(main.sidebarViewController.view)
             .first { $0 is NSOutlineView } as? NSOutlineView)

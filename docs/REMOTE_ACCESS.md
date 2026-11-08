@@ -1457,6 +1457,26 @@ stored `SessionLaunchFailure` is standing answers `sessionLaunchFailed` instead,
 words as "Couldn’t start session". The record is retired once a launch outlives its young-process
 window, so one standing at a discard belongs to that exit.
 
+**A checkout move replaces a process without ending its shared chat.**
+`AgentRuntime.discardForRelaunch` retires the outgoing mirror with a retryable WebSocket close,
+without the `ended` frame that disables both browser and iPhone reconnection. The same session ID
+and guest membership authorize the fresh connection; a reconnect arriving before the replacement
+is ready waits on the existing 60-second host-owned startup transaction. Pending startup waiters
+and bounded submission receipts survive, so a lost acknowledgement cannot duplicate a prompt in
+the destination checkout. A genuine stop, archival, deletion or launch failure still ends the
+socket. Process-exit notifications are checked against the runtime's current surface identity;
+neither synchronous teardown nor a late exit from the outgoing process can end its replacement.
+This transition normally serves one to three subscribers; its stress bound is the listener's
+32-connection ceiling. Each process replacement visits only that session's subscribers and keeps
+one bounded startup timer, with no new catalogue scan or client polling loop.
+`RemoteDormantSessionStartupTests` covers the real server socket, checkout transaction, delayed
+startup, replay receipts, late exits and genuine stop. For the shipping browser companion, run
+`testSharedChatReconnectsAfterCheckoutMoveWithoutEndingOrRepeatingInput` with
+`THREADING_CHECKOUT_BROWSER_PROOF` set to a fresh directory, then run
+`python3 scripts/check_shared_chat_checkout_browser.py <directory>` once its `url` file appears.
+It uses Playwright Chromium to verify automatic reconnect, draft preservation and a new accepted
+submission, and leaves a screenshot beside the fixture URL.
+
 A fresh socket gets the same words. Until 2026-09-19 only a warm resume was told `sessionDormant`
 or `sessionClosed`; a new socket to a chat whose agent had exited got the 4004 close alone, which
 the phone read as a lost network and redialled every eight seconds for as long as that chat's
@@ -2413,8 +2433,13 @@ because each carries a background. `contentShape` makes the reserved area the re
 The action row's SF Symbols also cannot be aligned by their equal frames: the customization
 badge hangs below its keyboard chassis while the Direct-input glyph is a plain chassis of a
 different height, so centering each composite image puts the two boxes on different rows. Their
-group aligns on the symbols' first text baseline, which rests both chassis on one ground line —
-the ground line, not the tops, is the shared property, and the test asserts exactly that.
+group aligns on the symbols' first text baseline, adjusted by the symbol's positive lower
+alignment-rectangle inset. Composite symbols reserve that inset for their badge; leaving it out
+lifted the keyboard chassis on iOS 27. Negative insets represent ordinary ink overshoot and stay
+unchanged. The ground line, not the tops, is the shared property, and the rendered test asserts it.
+Both horizontal cap runs hide the system scroll-edge effect. The bar already owns its separators
+and padding; iOS 27's soft edge material blurred the entire short top run, including neighboring
+fixed controls, and made its plates appear to touch the separators.
 
 iPhone and browser continuity is scoped to the exact saved Mac and session. Native and atomic
 terminal drafts are written locally as they change, pending request ids survive a reconnect, and

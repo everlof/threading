@@ -153,7 +153,7 @@ final class RemoteAutomationsViewController: NSViewController {
     }
     private func edit(_ automation: ControllerAutomation?, endpoint: RemoteAutomationEndpoint, host: RemoteHostRecord) {
         let automationID = automation?.id.description ?? UUID().uuidString
-        Task { @MainActor in
+        Task { @MainActor [self] in
         do {
         let response = try await AutomationCommands.remote(.init(operation: "workers", remote: endpoint), destination: host.sshDestination)
         let page = try await Task.detached(priority: .utility) {

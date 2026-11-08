@@ -21,6 +21,8 @@ import Foundation
 /// because the handling they need is the same and only the words differ.
 struct SessionLaunchFailure: Codable, Equatable {
 
+    static let missingProjectFolderCause = "project-folder-missing"
+
     // MARK: - Types
 
     /// Whether the process said this, or Threading knew before starting one.

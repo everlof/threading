@@ -4,21 +4,40 @@
   "platform": "macOS",
   "entries": [
     {
+      "id": "missing-checkout-recovery",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Missing checkout recovery",
+      "description": "The shipping session pane offers another checkout when the old worktree is gone, preserving the saved conversation on resume.",
+      "states": ["Missing worktree"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["1100×760 shipping window"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/MissingCheckoutRecoveryTests.swift",
+        "test": "ThreadingTests/MissingCheckoutRecoveryTests/testRecoveryInTheShippingWindowPreservesTheConversationAndResumes"
+      },
+      "capture": {"glob": "missing-checkout-recovery-*.png"}
+    },
+    {
       "id": "subagent-account-approval",
       "kind": "surface",
       "status": "implemented",
       "priority": "critical",
       "title": "Subagent account approval and hierarchy",
       "description": "The owner-only account decision with usage evidence in the shipping conversation and main-window sidebar, including persistent child connectors in the compact tree.",
-      "states": ["Fresh usage", "Explicit one-start approval", "Nested subagents", "Compact tree", "Collapsed parent", "Usage unavailable", "Usage exhausted"],
+      "states": ["Fresh usage", "Explicit one-start approval", "Account switching", "Purchased-credit approval", "Terminal confirmation", "Nested subagents", "Compact tree", "Collapsed parent", "Usage unavailable", "Usage exhausted"],
       "matrix": {
-        "themes": ["System"],
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark"],
         "sizes": ["1120×760-point main window", "900×700-point main window"]
       },
       "source": {
         "path": "Tests/ThreadingTests/SubagentAccountApprovalTests.swift",
-        "tests": ["ThreadingTests/SubagentAccountApprovalTests/testRendersApprovalAndSubagentHierarchyInShippingShell"]
+        "tests": ["ThreadingTests/SubagentAccountApprovalTests/testRendersApprovalAndSubagentHierarchyInShippingShell", "ThreadingTests/SubagentAccountApprovalTests/testRendersTerminalApprovalWithCreditsAndAccountSwitching"]
       },
       "capture": { "glob": "subagent-approval-*.png" }
     },

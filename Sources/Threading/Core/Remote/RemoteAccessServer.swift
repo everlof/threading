@@ -1107,7 +1107,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             )
         case RemoteClipboardPolicy.readyType, RemoteClipboardPolicy.resultType:
             guard let authorization = connection.authorization else { return }
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [self] in
                 guard self.authorizer?.isCurrent(authorization) == true else { return }
                 self.services.mirrors.clipboardMessage(
                     parsed, from: connection,
@@ -4327,7 +4327,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             terminalReplayBudget: replayBudget
         ) else { return }
 
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [self] in
             guard self.authorizer?.isCurrent(authorization) == true else {
                 connection.sendClose(code: 4003, reason: "Share revoked")
                 return
@@ -4795,7 +4795,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidSessionParking")))
             return
         }
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [self] in
             guard self.authorizer?.isCurrent(authorization) == true else {
                 connection.sendClose(code: 4003, reason: "Share revoked")
                 return

@@ -439,10 +439,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: file.path) else {
             throw WindowFailure("store does not exist")
         }
-        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
-        defer { Glibc.close(fd) }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let lease = try LinuxStoreMutation.acquire(at: root)
+        defer { lease.close() }
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
         guard let project = try database.projectRecord(id: owner),
@@ -503,10 +501,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         let root = URL(fileURLWithPath: store, isDirectory: true)
         let file = root.appendingPathComponent("threading.db")
         guard FileManager.default.fileExists(atPath: file.path) else { throw WindowFailure("store does not exist") }
-        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
-        defer { Glibc.close(fd) }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let lease = try LinuxStoreMutation.acquire(at: root)
+        defer { lease.close() }
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
         if let id {
@@ -580,10 +576,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         let root = URL(fileURLWithPath: store, isDirectory: true)
         let file = root.appendingPathComponent("threading.db")
         guard FileManager.default.fileExists(atPath: file.path) else { throw WindowFailure("store does not exist") }
-        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
-        defer { Glibc.close(fd) }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let lease = try LinuxStoreMutation.acquire(at: root)
+        defer { lease.close() }
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
         switch kind {
@@ -756,12 +750,8 @@ final class GraphicalTerminal: @unchecked Sendable {
             guard FileManager.default.fileExists(atPath: file.path) else {
                 throw WindowFailure("terminal store disappeared")
             }
-            let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-            guard fd >= 0 else { throw WindowFailure("cannot open terminal metadata lock") }
-            defer { Glibc.close(fd) }
-            guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-                throw WindowFailure("terminal metadata store is busy")
-            }
+            let lease = try LinuxStoreMutation.acquire(at: root, waitForLocalWriter: false)
+            defer { lease.close() }
             // Metadata cannot hold input/output behind SQLite's ordinary five-second wait.
             let database = try ProjectDatabase(url: file, busyTimeoutMilliseconds: 0)
             defer { database.close() }
@@ -818,10 +808,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         }
         let root = URL(fileURLWithPath: store, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
-        defer { Glibc.close(fd) }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let lease = try LinuxStoreMutation.acquire(at: root)
+        defer { lease.close() }
         let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
         defer { database.close() }
         let records = try database.projectRecords()
@@ -870,10 +858,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         let root = URL(fileURLWithPath: store, isDirectory: true)
         let file = root.appendingPathComponent("threading.db")
         guard FileManager.default.fileExists(atPath: file.path) else { throw WindowFailure("store does not exist") }
-        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
-        defer { Glibc.close(fd) }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let lease = try LinuxStoreMutation.acquire(at: root)
+        defer { lease.close() }
         let database = try ProjectDatabase(url: file)
         defer { database.close() }
         // The 5,100-session stress fixture for navigation establishes this bound: a fresh
@@ -1121,10 +1107,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: root.appendingPathComponent("threading.db").path) else {
             throw WindowFailure("store does not exist")
         }
-        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
-        defer { Glibc.close(fd) }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let lease = try LinuxStoreMutation.acquire(at: root)
+        defer { lease.close() }
         let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
         defer { database.close() }
         guard let record = try database.sessionRecord(id: id) else { return false }
@@ -1157,10 +1141,8 @@ final class GraphicalTerminal: @unchecked Sendable {
                                     codex: String?, claude: String?) throws -> (AgentLaunchPlan, String) {
         guard shell.hasPrefix("/") else { throw WindowFailure("shell must be an absolute path") }
         let root = URL(fileURLWithPath: store, isDirectory: true)
-        let fd = Glibc.open(root.appendingPathComponent("host.lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
-        defer { Glibc.close(fd) }
-        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw WindowFailure("store is already owned") }
+        let lease = try LinuxStoreMutation.acquire(at: root)
+        defer { lease.close() }
         let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
         defer { database.close() }
         guard let record = try database.sessionRecord(id: sessionID),
@@ -1253,13 +1235,8 @@ final class GraphicalTerminal: @unchecked Sendable {
         guard let store = createdTerminalStore else { return }
         do {
             let root = URL(fileURLWithPath: store, isDirectory: true)
-            let fd = Glibc.open(root.appendingPathComponent("host.lock").path,
-                                O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-            guard fd >= 0 else { throw WindowFailure("cannot open store lock") }
-            defer { Glibc.close(fd) }
-            guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-                throw WindowFailure("store is already owned")
-            }
+            let lease = try LinuxStoreMutation.acquire(at: root)
+            defer { lease.close() }
             let database = try ProjectDatabase(url: root.appendingPathComponent("threading.db"))
             defer { database.close() }
             try database.clearSelectedTerminalID(ifMatches: id)

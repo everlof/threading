@@ -7108,7 +7108,7 @@ final class ComponentGalleryViewController: NSViewController {
         )
         replaceExtensionProcessPreview(with: nil)
 
-        DispatchQueue.global(qos: .userInitiated).async { [directory] in
+        DispatchQueue.global(qos: .userInitiated).async { [directory, weak self] in
             let result: Result<
                 (ExtensionManifest, ExtensionProcessSession.Started),
                 Error

@@ -158,7 +158,8 @@ final class SessionCheckoutCoordinator {
 
     func validate(
         checkoutPath: String,
-        forSessionID sessionID: SessionID
+        forSessionID sessionID: SessionID,
+        recoveringMissingSource: Bool = false
     ) -> Result<ValidatedSessionCheckout, SessionCheckoutValidationFailure> {
         guard checkoutPath.hasPrefix("/") else { return .failure(.pathMustBeAbsolute) }
         guard let sourceProject = projects.project(forSessionID: sessionID),
@@ -172,18 +173,20 @@ final class SessionCheckoutCoordinator {
             .standardizedFileURL.resolvingSymlinksInPath().path
         let requestedPath = URL(fileURLWithPath: checkoutPath, isDirectory: true)
             .standardizedFileURL.resolvingSymlinksInPath().path
-        // A queued move can outlive the checkout it is leaving. Its persisted repository
-        // identity is enough to finish that exact move after the old worktree is removed;
-        // it must not authorize a fresh request or a different destination.
+        // A removed worktree must not trap its chats. A deliberate user choice may use the
+        // saved repository identity; observations cannot. A queued move retains its exact
+        // destination authority. Neither fallback applies to an existing, replaced folder.
         let pending = session.pendingCheckoutMove
+        let mayUseSavedIdentity = recoveringMissingSource || (
+            pending?.checkoutPath == requestedPath
+                && sourceProject.lastKnownRepositoryIdentity == pending?.repositoryIdentity
+        )
         let sourceRepositoryIdentity = GitInfo.worktreeLocation(
             for: canonicalSourcePath,
             refresh: true
         )?.repositoryIdentity
-            ?? (pending?.checkoutPath == requestedPath
-                && !fileManager.fileExists(atPath: canonicalSourcePath)
-                && sourceProject.lastKnownRepositoryIdentity == pending?.repositoryIdentity
-                ? pending?.repositoryIdentity : nil)
+            ?? (mayUseSavedIdentity && !fileManager.fileExists(atPath: canonicalSourcePath)
+                ? sourceProject.lastKnownRepositoryIdentity : nil)
         guard let sourceRepositoryIdentity else {
             return .failure(.sourceNotCheckout)
         }
@@ -237,7 +240,8 @@ final class SessionCheckoutCoordinator {
         if let pending = projects.session(withID: sessionID)?.pendingCheckoutMove {
             return .alreadyPending(pending)
         }
-        switch validate(checkoutPath: checkoutPath, forSessionID: sessionID) {
+        switch validate(checkoutPath: checkoutPath, forSessionID: sessionID,
+                        recoveringMissingSource: authorityBasis == .explicitUserRequest) {
         case .failure(let failure):
             return .failed(failure.localizedDescription)
         case .success(let checkout):

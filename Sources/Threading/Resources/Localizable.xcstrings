@@ -4818,6 +4818,17 @@
         }
       }
     },
+    "A fresh reading with available usage or credits, within your limits, is required. Choose another account or refresh usage." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En aktuell avläsning med tillgänglig användning eller krediter inom dina gränser krävs. Välj ett annat konto eller uppdatera användningen."
+          }
+        }
+      }
+    },
     "A fresh reading with room under your limits is required. Refresh usage to try again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9790,6 +9801,17 @@
         }
       }
     },
+    "Approve with Credits" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänn med krediter"
+          }
+        }
+      }
+    },
     "Approve with Face ID on iPhone" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14634,6 +14656,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj en exakt synlig etikett eller inlämnad värde från en valkontroll."
+          }
+        }
+      }
+    },
+    "Choose an existing checkout of this repository to resume the saved conversation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj en befintlig utcheckning av det här arkivet för att återuppta den sparade konversationen."
           }
         }
       }
@@ -20468,6 +20501,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skapar inbjudan…"
+          }
+        }
+      }
+    },
+    "Credit balance: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kreditsaldo: %@"
           }
         }
       }
@@ -26558,6 +26602,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Finfördelad GitHub-token"
+          }
+        }
+      }
+    },
+    "Finish or cancel the pending checkout move before choosing another checkout." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slutför eller avbryt den väntande flytten innan du väljer en annan utcheckning."
           }
         }
       }
@@ -59285,6 +59340,17 @@
         }
       }
     },
+    "Subagent account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Underagentens konto"
+          }
+        }
+      }
+    },
     "Subagent of %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63657,6 +63723,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bilden kunde inte dekodas."
+          }
+        }
+      }
+    },
+    "The included allowance is exhausted. This start may spend purchased credits on this account." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den inkluderade användningen är förbrukad. Den här starten kan använda köpta krediter på kontot."
           }
         }
       }

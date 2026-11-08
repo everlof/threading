@@ -129,13 +129,15 @@ try:
                 window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid', process.pid,
                     '--name', '^Threading experiment - '), 'window').splitlines()[0]
                 xdo('windowfocus', '--sync', window)
-                if provider == 'claude':
-                    assert control('linux.composer.provider').get_action_iface().do_action(0)
+                provider_name = 'Claude Code' if provider == 'claude' else 'Codex'
+                provider_chip = control('linux.composer.provider')
+                if provider_chip.get_name() != f'Identity: {provider_name}':
+                    assert provider_chip.get_action_iface().do_action(0)
                     row = eventually(lambda: next((node for node in descendants(app)
-                        if node.get_role_name() == 'list item' and node.get_name() == 'Claude Code'), None),
-                        'Claude identity')
+                        if node.get_role_name() == 'list item' and node.get_name() == provider_name), None),
+                        f'{provider_name} identity')
                     assert row.get_action_iface().do_action(0)
-                    eventually(lambda: control('linux.composer.provider').get_name() == 'Identity: Claude Code',
+                    eventually(lambda: control('linux.composer.provider').get_name() == f'Identity: {provider_name}',
                                'selected provider')
                 chip = eventually(lambda: control('linux.composer.permissions'), 'permission chip')
                 assert chip.get_name() == "Permissions: Agent's Setting"
@@ -217,6 +219,7 @@ try:
                     rows = database.execute('SELECT data FROM session').fetchall()
                 assert len(rows) == 1, rows
                 record = json.loads(rows[0][0])
+                assert record['kind'] == provider, record
                 assert record.get('permissionMode') == mode and record['hasLaunched'], record
                 (output / f'{case}-launch.json').write_text(json.dumps(report, indent=2))
                 process.terminate()

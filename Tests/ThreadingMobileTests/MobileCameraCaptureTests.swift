@@ -16,8 +16,8 @@ final class MobileCameraCaptureTests: XCTestCase {
     func testTheBuiltCameraPurposeCoversPairingAndMessagePhotos() throws {
         let purpose = try XCTUnwrap(Bundle.main.infoDictionary?["NSCameraUsageDescription"] as? String)
         XCTAssertEqual(purpose, "Scan a private Threading pairing code or take a photo to attach to a message.")
-        XCTAssertNil(Bundle.main.infoDictionary?["NSPhotoLibraryAddUsageDescription"],
-                     "capturing an attachment must not require saving it in Photos")
+        // Camera capture does not save to Photos. The separate Save Image action owns the
+        // app's add-only Photos purpose and permission tests in RemoteAttachmentSharingTests.
     }
 
     func testPortraitCaptureIsAnUprightBoundedJPEG() async throws {

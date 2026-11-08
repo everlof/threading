@@ -46,6 +46,12 @@ open class NSTextField: NSView {
 
     private var preparedUTF8: [UInt8] = []
     private var attributedStorage: NSAttributedString?
+    private struct UniformTextStyle {
+        let font: NSFont
+        let color: NSColor
+        let lineSpacing: CGFloat
+    }
+    private var uniformAttributedStyle: UniformTextStyle?
     private var naturalMetrics: TATMetrics?
     private var scaledMetrics: (scale: CGFloat, metrics: TATMetrics)?
     private var unwrappedWidth: (scale: CGFloat, width: CGFloat)?
@@ -66,6 +72,7 @@ open class NSTextField: NSView {
             textStorage = newValue
             textGeneration &+= 1
             attributedStorage = nil
+            uniformAttributedStyle = nil
             selectedTextRange = NSRange(location: 0, length: 0)
             selectionAnchor = nil
             setAccessibilityRole(isEditable ? .textField : .staticText)
@@ -94,8 +101,24 @@ open class NSTextField: NSView {
             // The drawing leaf reads only a bounded prefix. A full immutable copy here would
             // synchronously duplicate an arbitrarily long source before the first paint.
             attributedStorage = newValue
+            uniformAttributedStyle = uniformStyle(in: newValue)
             invalidateTextMetrics()
         }
+    }
+
+    /// One effective range and at most three attributes: classification never walks the
+    /// transcript. Mixed runs keep the bounded rich-label path; shaping stays on the worker.
+    private func uniformStyle(in value: NSAttributedString) -> UniformTextStyle? {
+        guard value.length > 0 else { return nil }
+        var range = NSRange()
+        let attributes = value.attributes(at: 0, effectiveRange: &range)
+        guard range.length == value.length, attributes.count <= 3,
+              attributes.keys.allSatisfy({ $0 == .font || $0 == .foregroundColor || $0 == .paragraphStyle })
+        else { return nil }
+        let spacing = (attributes[.paragraphStyle] as? NSParagraphStyle)?.lineSpacing ?? 0
+        return UniformTextStyle(font: (attributes[.font] as? NSFont) ?? .systemFont(ofSize: 13),
+            color: (attributes[.foregroundColor] as? NSColor) ?? .black,
+            lineSpacing: spacing.isFinite ? max(0, spacing) : 0)
     }
     open var font: NSFont? = .systemFont(ofSize: 13) { didSet { invalidateTextMetrics() } }
     open var textColor: NSColor? = .labelColor { didSet { labelLayout = nil; needsDisplay = true } }
@@ -603,7 +626,8 @@ open class NSTextField: NSView {
 
     private func drawSelectableLabel() {
         if let context = NSGraphicsContext.current,
-           let complete = completePlainText(at: context.scale), let color = textColor,
+           let complete = completePlainText(at: context.scale),
+           let color = uniformAttributedStyle?.color ?? textColor,
            complete.draw(in: context, rect: visibleRect, color: color,
                          selection: window?.firstResponder === self ? selectedTextRange : NSRange(location: 0, length: 0),
                          attributes: selectedTextAttributes) { return }
@@ -615,7 +639,8 @@ open class NSTextField: NSView {
     }
 
     private var usesCompletePlainText: Bool {
-        isSelectable && attributedStorage == nil && maximumNumberOfLines == 0 && !usesSingleLineMode &&
+        isSelectable && (attributedStorage == nil || uniformAttributedStyle != nil)
+            && maximumNumberOfLines == 0 && !usesSingleLineMode &&
             (effectiveLineBreakMode == .byWordWrapping || effectiveLineBreakMode == .byCharWrapping)
     }
 
@@ -667,10 +692,17 @@ open class NSTextField: NSView {
         case .right: horizontal = 2
         case .justified: horizontal = 3
         }
+        let face = uniformAttributedStyle?.font ?? font ?? .systemFont(ofSize: 13)
+        let weight: Int32 = face.weight.rawValue >= NSFont.Weight.bold.rawValue ? 3 :
+            face.weight.rawValue >= NSFont.Weight.semibold.rawValue ? 2 :
+            face.weight.rawValue >= NSFont.Weight.medium.rawValue ? 1 : 0
+        let spacing = min(128, (uniformAttributedStyle?.lineSpacing ?? 0) * scale)
         let recipe = CompleteTextRecipe(generation: textGeneration, width: Int(ceil(width * scale)),
-            scale: Double(scale), size: Double(max(1, min(128, (font?.pointSize ?? 13) * scale))),
-            monospace: isMonospace, weight: pangoWeight, italic: font?.isItalic == true ? 1 : 0,
-            characterWrapping: effectiveLineBreakMode == .byCharWrapping ? 1 : 0, alignment: horizontal)
+            scale: Double(scale), size: Double(max(1, min(128, face.pointSize * scale))),
+            monospace: face.familyName?.contains("Mono") == true ? 1 : 0,
+            weight: weight, italic: face.isItalic ? 1 : 0,
+            characterWrapping: effectiveLineBreakMode == .byCharWrapping ? 1 : 0,
+            alignment: horizontal, lineSpacing: Double(spacing))
         completeLabel?.update(recipe, text: textStorage)
         return completeLabel
     }

@@ -159,9 +159,9 @@ def pixel(path, x, y):
 
 
 try:
+    app = eventually(application, 'AT-SPI application')
     window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid',
                                     str(process.pid)).splitlines()[0], 'installed window')
-    app = eventually(application, 'AT-SPI application')
     actions = eventually(lambda: child('linux.page-actions'), 'saved-agent Actions button')
     assert actions.get_name() == 'Session context menu'
     assert child('linux.page-title').get_name()

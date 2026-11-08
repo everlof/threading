@@ -19,7 +19,7 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
     /// while `127.0.0.2` is not, and the door rules classify by interface name, so an address
     /// reported on `en9` is the LAN door's whatever the address happens to be. That keeps this
     /// off the developer's real Wi-Fi.
-    private static let lanAddress = RemoteNetworkAddress(
+    nonisolated private static let lanAddress = RemoteNetworkAddress(
         interfaceName: "en9",
         address: "::1",
         isIPv6: true
@@ -31,7 +31,7 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
     /// that binds — which is the shape a real tailnet has anyway, an IPv4 and an IPv6 address on
     /// one interface, and it proves the door reports itself bound while one of its addresses
     /// cannot be taken.
-    private static let tailnetAddresses = [
+    nonisolated private static let tailnetAddresses = [
         RemoteNetworkAddress(interfaceName: "utun9", address: "100.100.1.1"),
         RemoteNetworkAddress(interfaceName: "utun9", address: "::1", isIPv6: true)
     ]
@@ -45,8 +45,8 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
     private let addresses = OSAllocatedUnfairLock<[RemoteNetworkAddress]>(initialState: [])
     private var sessions: [URLSession] = []
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         appSettingsSuiteName = "RemoteListenerTLSTests.\(UUID().uuidString)"
         appSettingsDefaults = UserDefaults(suiteName: appSettingsSuiteName)!
         appSettings = AppSettings(defaults: appSettingsDefaults)
@@ -63,7 +63,7 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
         server.recordListenerDiagnostic = { _, _, _ in }
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         for session in sessions { session.invalidateAndCancel() }
         sessions.removeAll()
         server?.stop()
@@ -76,7 +76,7 @@ final class RemoteListenerTLSTests: HostedStoreTestCase {
         }
         appSettingsDefaults = nil
         appSettings = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - The pinned door

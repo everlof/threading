@@ -4661,6 +4661,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sidebarViewController.promptToRenameSession(sessionID)
     }
 
+    func chooseSessionCheckout(_ sessionID: SessionID) {
+        guard isCommandTargetSessionAvailable(sessionID) else { return }
+        sidebarViewController.chooseCheckoutForMove(sessionID: sessionID)
+    }
+
     /// Lightweight values for the palette's virtualized second step. The project store already
     /// owns these records in memory; only strings and stable ids cross into the command plane.
     func commandSessionOptions(for commandID: String) -> [HostCommandInputOption] {

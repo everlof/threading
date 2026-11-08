@@ -885,9 +885,12 @@ extension ProjectSidebarViewController {
     /// canonical path and lets `SessionCheckoutCoordinator` revalidate its worktree identity.
     private func checkoutMoveEntry(for session: AgentSession) -> ThemedMenuEntry? {
         guard session.managedWorkspace == nil,
+              session.automationWorkspace == nil,
               let source = projectStore.project(forSessionID: session.id) else { return nil }
+        guard source.executionHost == nil else { return nil }
         let sourceIsCheckout = GitInfo.worktreeLocation(for: source.folderPath) != nil
-        guard sourceIsCheckout || session.pendingCheckoutMove != nil else { return nil }
+        let canChooseCheckout = sourceIsCheckout || source.lastKnownRepositoryIdentity != nil
+        guard canChooseCheckout || session.pendingCheckoutMove != nil else { return nil }
 
         var submenu: [ThemedMenuEntry] = []
         if let pending = session.pendingCheckoutMove {
@@ -919,7 +922,7 @@ extension ProjectSidebarViewController {
                     self.presentProjectNotice(L10n.string("The checkout move could not be cancelled."))
                 }
             })
-            if sourceIsCheckout { submenu.append(.separator) }
+            if canChooseCheckout { submenu.append(.separator) }
         }
 
         if sourceIsCheckout {
@@ -932,6 +935,8 @@ extension ProjectSidebarViewController {
                 })
             }
             if !siblings.isEmpty { submenu.append(.separator) }
+        }
+        if canChooseCheckout {
             submenu.append(action(
                 L10n.string("Choose Existing Checkout…"),
                 symbol: "folder.badge.plus"
@@ -947,30 +952,40 @@ extension ProjectSidebarViewController {
         ))
     }
 
-    private func chooseCheckoutForMove(sessionID: SessionID) {
+    func chooseCheckoutForMove(sessionID: SessionID) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
         panel.message = L10n.string("Choose an existing checkout of this repository.")
+        panel.prompt = L10n.string("Move Chat")
+        if let project = projectStore.project(forSessionID: sessionID) {
+            panel.directoryURL = URL(fileURLWithPath: project.folderPath).deletingLastPathComponent()
+        }
         panel.begin { [weak self] response in
             guard response == .OK, let path = panel.url?.path else { return }
             self?.requestCheckoutMove(for: sessionID, to: path)
         }
     }
 
-    private func requestCheckoutMove(for sessionID: SessionID, to path: String) {
+    func requestCheckoutMove(for sessionID: SessionID, to path: String) {
         let result = SessionCheckoutCoordinator.shared.requestMove(
             sessionID: sessionID,
             checkoutPath: path,
             authorityBasis: .explicitUserRequest,
-            reason: L10n.string("Chosen from the session menu"),
+            reason: "The user selected an existing checkout.",
             policy: .allowSameRepository,
             approval: true
         )
-        if case .failed(let message) = result {
+        switch result {
+        case .failed(let message):
             presentProjectNotice(message, title: L10n.string("Couldn’t Move Chat"))
+        case .alreadyPending:
+            presentProjectNotice(L10n.string("Finish or cancel the pending checkout move before choosing another checkout."),
+                title: L10n.string("Couldn’t Move Chat"))
+        case .queued, .approvalRequired, .denied:
+            break
         }
     }
 

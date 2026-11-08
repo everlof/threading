@@ -10,9 +10,9 @@ final class AppThemePreviewDockTests: XCTestCase {
 
     private var storedThemeID: AppThemeID?
 
-    override func tearDown() {
+    override func tearDown() async throws {
         if let storedThemeID { ThemeAssetStore.removeAll(for: storedThemeID) }
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testEachAppearanceGetsItsTileAtTheSampleWindowsWidth() throws {

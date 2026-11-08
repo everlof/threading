@@ -21,6 +21,10 @@
     ],
     "environmentVariableEntries" : [
       {
+        "key" : "THREADING_CHECKOUT_BROWSER_PROOF",
+        "value" : "$(THREADING_CHECKOUT_BROWSER_PROOF)"
+      },
+      {
         "key" : "THREADING_MANAGED_AGENT_LIVE_TESTS",
         "value" : "$(THREADING_MANAGED_AGENT_LIVE_TESTS)"
       },

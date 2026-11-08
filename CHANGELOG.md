@@ -16,6 +16,32 @@ it for the tester: what to try, and what is known to be rough. When the stable r
 own section describes the whole change, not the difference since the last beta; nobody on stable
 saw the betas.
 
+## [0.11.0]
+
+### Added
+
+- Answer Workroom questions in the iPhone app, with invitations you can scan and a Workroom
+  panel in each Mac chat. Questions and replies support Markdown on Mac, iPhone and the web.
+- Mirror a browser page full screen on a paired iPhone.
+- Chats can communicate across checkouts of the same repository while retaining their history.
+
+### Changed
+
+- Choose and approve the account a subagent will use before it starts.
+- Browser tools can work inside page frames, and background pages keep rendering while the
+  screen is locked.
+- Native conversations share the available composer and transcript space more consistently.
+
+### Fixed
+
+- Idle terminal agents receive mail without overwriting a draft you are typing.
+- Resumed Codex terminals use their saved working directory and custom command path.
+- Workroom inboxes reconnect when switching Macs, and phone tables fit wrapped text.
+- Opening a new chat on iPhone no longer crashes the app.
+- Terminal keys stay sharp and aligned on iPhone.
+- The Linux preview shows complete long chat text and keeps question controls in view.
+- Device Logs stays available to agents across panel and capture changes.
+
 ## [0.10.0]
 
 ### Added

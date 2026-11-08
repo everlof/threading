@@ -335,7 +335,7 @@ final class ProviderArchiveSync {
         changedAt: Date,
         completion: @escaping Completion
     ) {
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             let snapshot = ProviderArchiveSnapshot.read(
                 account: account,
                 sessionIDs: [transcriptID]
@@ -410,7 +410,7 @@ final class ProviderArchiveSync {
         ThreadingLogger.session.info(
             "Provider archive reconciliation pass started accounts=\(work.count, privacy: .public) sessions=\(work.reduce(0) { $0 + $1.candidates.count }, privacy: .public)"
         )
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             let readings: [(Batch, ProviderArchiveSnapshot?)] = work.map { batch in
                 let ids = Set(batch.candidates.map(\.transcriptID))
                 return (batch, ProviderArchiveSnapshot.read(

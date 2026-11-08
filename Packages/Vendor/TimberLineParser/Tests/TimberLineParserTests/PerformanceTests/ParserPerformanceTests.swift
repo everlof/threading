@@ -7,6 +7,7 @@
 import XCTest
 @testable import TimberLineParser
 
+@MainActor
 final class ParserPerformanceTests: XCTestCase {
 
     // MARK: - Helper

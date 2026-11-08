@@ -80,6 +80,7 @@ def launch(name):
     process = subprocess.Popen([binary, '--app', str(store), endpoint,
                                 '/usr/bin/python3', str(child), str(marker)],
                                env=environment, stdout=log, stderr=log)
+    eventually(app, 'AT-SPI application after renderer creation')
     window = eventually(lambda: xdo('search', '--all', '--onlyvisible', '--pid', process.pid,
                                     '--name', '^Threading').splitlines()[0], 'native window')
 

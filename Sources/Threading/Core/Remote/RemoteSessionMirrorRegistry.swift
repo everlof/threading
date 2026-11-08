@@ -3696,30 +3696,46 @@ final class RemoteSessionMirrorRegistry {
 
     // MARK: - Session lifecycle
 
+    /// A checkout move replaces the process, not the shared chat. Close the outgoing socket
+    /// without `ended`, which permanently stops both browser and iPhone reconnects. A fresh
+    /// connection reauthorizes normally and waits on the bounded host-owned startup transaction.
+    func sessionWillRelaunch(_ sessionID: SessionID) {
+        noteSessionStarting(sessionID)
+        releaseSessionMirror(sessionID, endedReason: nil)
+    }
+
     /// Called by `AgentRuntime` when a session is discarded or the app is quitting: tells every
     /// watcher the mirror ended so the CLI is not left blocked and the client stops waiting.
     func sessionDiscarded(_ sessionID: SessionID) {
         let endedReason = discardEndedReason(for: sessionID)
         cancelSessionStartup(sessionID, reason: "Session closed", endedReason: endedReason)
+        promptReplayCache.remove(sessionID: sessionID.uuidString)
+        attentionRequestPolicy.remove(sessionID: sessionID.uuidString)
+        releaseSessionMirror(sessionID, endedReason: endedReason)
+    }
+
+    /// Release only process-owned state on replacement. Submission receipts survive so a
+    /// reconnect retry cannot submit an already accepted message twice in the new checkout.
+    private func releaseSessionMirror(_ sessionID: SessionID, endedReason: String?) {
         pendingConversationBroadcasts.removeValue(forKey: sessionID)?.cancel()
         latestWorkspaceActivity.removeValue(forKey: sessionID)
         typingConnections.removeValue(forKey: sessionID)
-        promptReplayCache.remove(sessionID: sessionID.uuidString)
-        attentionRequestPolicy.remove(sessionID: sessionID.uuidString)
         defer { followersChanged(sessionID) }
-        // Archival and discard are authorization changes, so a held grid ends here rather than
-        // at its own expiry. The mirror is about to go with it; this cancels the timers.
+        // The old process's grid cannot outlive its mirror, including across a relaunch.
         mirrors[sessionID]?.viewportLeases.dropHeld()
         guard let mirror = mirrors[sessionID] else { return }
         _ = terminalApplication?.setViewport(nil, for: sessionID)
         removeTap(sessionID: sessionID)
-        let ended = encode(RemoteEndedDTO(reason: endedReason))
+        let ended = endedReason.map { encode(RemoteEndedDTO(reason: $0)) }
         for connection in mirror.subscribers.values {
-            connection.sendText(ended)
+            if let ended { connection.sendText(ended) }
             // `ended` is useful UI state, but it is not revocation. Closing the socket is what
             // prevents a client that ignores `ended` from typing into a later relaunch of the
             // same session id with its already-authenticated connection.
-            connection.sendClose(code: RemoteWebSocket.CloseCode.goingAway, reason: "Session closed")
+            connection.sendClose(
+                code: RemoteWebSocket.CloseCode.goingAway,
+                reason: endedReason == nil ? "Session restarting" : "Session closed"
+            )
             let key = ObjectIdentifier(connection)
             cancelTerminalHydration(for: key)
             sessionByConnection.removeValue(forKey: key)

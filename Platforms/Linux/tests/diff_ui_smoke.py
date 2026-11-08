@@ -39,6 +39,18 @@ def field(current):
     return next((c for c in current['controls'] if '// Unicode' in c['title']), None)
 
 
+def layout_ready(current):
+    # This uniformly styled row uses the complete-text worker. A rich row can reflow
+    # first while this earlier row still has its old height and moves the hit target.
+    return any(c['title'].startswith('    // Keep this shared context') and
+               c['completeTextReady'] and c['completeViewportReady'] for c in current['controls'])
+
+
+def reset_clipboard():
+    subprocess.run(['xclip', '-selection', 'clipboard', '-target', 'UTF8_STRING'],
+                   input=b'Before diff copy', check=True, timeout=3)
+
+
 def capture(name):
     path = output / name
     subprocess.run(['import', '-window', window, str(path)], check=True, timeout=8)
@@ -57,13 +69,14 @@ def check_washes(path, current):
 
 
 def copied(expected):
-    result = subprocess.run(['xclip', '-selection', 'clipboard', '-o'], text=True,
+    result = subprocess.run(['xclip', '-selection', 'clipboard', '-target', 'UTF8_STRING', '-o'],
                             capture_output=True, timeout=3)
-    return result.returncode == 0 and result.stdout == expected
+    return result.returncode == 0 and result.stdout == expected.encode('utf-8')
 
 
 try:
-    first = eventually(lambda s: field(s) is not None and s['diffLines'] == 8, 'authoritative diff row')
+    first = eventually(lambda s: field(s) is not None and s['diffLines'] == 8 and layout_ready(s),
+                       'authoritative diff row and complete text layout')
     first_seconds = time.monotonic() - started
     assert first['timelineRows'] == 2 and first['streamingCleared'], first
     assert first['totalRows'] == first['mountedRows'] == first['liveContents'] == 1, first
@@ -71,12 +84,18 @@ try:
     assert first['appDiffViews'] == 1 and first['contextReference'] == 'greeting.swift', first
     assert first['contextPreviewRows'] == 3, first
     wide = field(first)
-    assert abs(wide['width'] - 644) <= 2, ('shared host lost its 344-point content width', wide)
+    # The 368-point table gives the shared column 24-point margins. The diff then
+    # reserves its 14-point sign gutter and four points on each side of the text.
+    expected_width = (368 - 2 * 24 - 14 - 2 * 4) * 2
+    expected_x = (176 + 24 + 14 + 4) * 2
+    assert abs(wide['width'] - expected_width) <= 2, ('shared column or diff text width', wide)
+    assert abs(wide['x'] - expected_x) <= 2, ('shared column or diff text origin', wide)
     (output / 'wide-state.json').write_text(json.dumps(first, indent=2))
     assert 80 < wide['y'] < 700 and wide['height'] > 30, wide
     window = subprocess.check_output(['xdotool', 'search', '--name', 'Threading document renderer'], text=True).splitlines()[-1]
     xdo('windowfocus', '--sync', window)
     check_washes(capture('diff-light.png'), first)
+    reset_clipboard()
     xdo('mousemove', '--window', window, wide['x'] + 30, wide['y'] + 8, 'click', 1)
     xdo('key', 'ctrl+a', 'ctrl+c')
     selected = eventually(lambda s: field(s)['selectedLength'] > 0, 'diff text selection')
@@ -85,15 +104,17 @@ try:
     xdo('type', '--clearmodifiers', 'MUTATED')
     assert field(state())['title'] == wide['title'], 'diff became editable'
     xdo('key', 'ctrl+shift+t')
-    dark = eventually(lambda s: s['dark'] and field(s) is not None, 'diff live dark palette')
+    dark = eventually(lambda s: s['dark'] and field(s) is not None and layout_ready(s), 'diff live dark palette')
     assert dark['addedWash'] != first['addedWash'] and dark['removedWash'] != first['removedWash'], dark
     check_washes(capture('diff-dark.png'), dark)
     xdo('windowsize', '--sync', window, 840, 640)
-    narrow = eventually(lambda s: field(s) is not None and field(s)['width'] < wide['width'], 'diff width reflow')
+    narrow = eventually(lambda s: field(s) is not None and field(s)['width'] < wide['width'] and layout_ready(s),
+                        'diff width reflow and complete text layout')
     assert field(narrow)['height'] > wide['height'], (wide, field(narrow))
     (output / 'narrow-state.json').write_text(json.dumps(narrow, indent=2))
     assert narrow['mountedRows'] == narrow['liveContents'] == narrow['constructedCells'] == 1, narrow
     check_washes(capture('diff-narrow.png'), narrow)
+    reset_clipboard()
     xdo('mousemove', '--window', window, field(narrow)['x'] + 30, field(narrow)['y'] + 8, 'click', 1)
     xdo('key', 'ctrl+a', 'ctrl+c')
     eventually(lambda s: copied(wide['title']), 'narrow Unicode diff clipboard')

@@ -64,7 +64,7 @@ public struct AppThemeDidChange: AppEvent {
 /// `DesignSettings` already names exactly six values and is compiled from the application's own
 /// file. This supplies them without a `UserDefaults` the plugin has no business reading: the host
 /// installs what the user chose.
-public struct AppSettings {
+public struct AppSettings: Sendable {
 
     public nonisolated(unsafe) static var appTextSize: AppTextSize = .standard
     public nonisolated(unsafe) static var chromeFontFamily: String?
@@ -195,6 +195,7 @@ public final class ExtensionAppearanceRegistry: @unchecked Sendable {
 /// resolve through types the kit already has, so this states the same two answers rather than
 /// copying two numbers that could drift.
 public enum PaneHeaderDefaults {
+    @MainActor
     public static var height: CGFloat { PaneHeaderView.bandHeight }
     public static let inset: CGFloat = Design.Spacing.medium
 }

@@ -702,8 +702,9 @@ value; notification chrome remains owned by the operating system.
 
 ## Gate for every new surface
 
-**Subagent account approval** is deliberately host-only. The frozen provider/account/model,
-usage freshness and limits, refresh pacing, one-start decision, queue and cancellation remain
+**Subagent account approval** is deliberately host-only. The proposed provider/model, owner-only
+account selection, usage freshness and limits, explicit purchased-credit consent, refresh pacing,
+one-start decision, queue and cancellation remain
 Threading-owned. Neither an extension nor a supervising agent can answer it. The inline card
 uses shared themed controls, and the terminal fallback uses an always-asking confirmation.
 The sidebar connector and child-count summary are host-owned relationship chrome outside the

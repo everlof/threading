@@ -12,6 +12,7 @@ struct CompleteTextRecipe: Equatable, Sendable {
     let italic: Int32
     let characterWrapping: Int32
     let alignment: Int32
+    let lineSpacing: Double
 }
 
 struct CompleteTextViewport: Equatable, Sendable {
@@ -109,7 +110,7 @@ final class CompletePlainTextWorker: @unchecked Sendable {
             let created = bytes.withUnsafeBufferPointer {
                 tat_document_create($0.baseAddress, Int32($0.count), recipe.monospace,
                     recipe.weight, recipe.italic, recipe.size, Int32(recipe.width),
-                    recipe.characterWrapping, recipe.alignment, 1, &metric, &lines)
+                    recipe.characterWrapping, recipe.alignment, recipe.lineSpacing, 1, &metric, &lines)
             }
             guard let created else { return nil }
             handle = created

@@ -154,8 +154,13 @@ def verify_viewport(app, log_path, expected, total):
         assert rect.x == 0, \
             (index, rect.x, expected[first + index])
         row_height = 30 if expected[first + index] in project_id_set else 28
-        if index > 0 and rect.y + rect.height < window_height:
+        # The outline ends above the Settings footer, not at the window bottom.
+        # Its first and last visible rows can both be clipped by that viewport.
+        if 0 < index < listed.get_child_count() - 1:
             assert rect.height == row_height, \
+                (index, expected[first + index], rect.height, row_height)
+        else:
+            assert rect.height <= row_height, \
                 (index, expected[first + index], rect.height, row_height)
     return frame, listed
 
