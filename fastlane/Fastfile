@@ -432,9 +432,19 @@ def build_for_app_store
     skip_profile_detection: true
   )
   plist = File.join(archive, "Products/Applications/ThreadingMobile.app/Info.plist")
-  version = get_info_plist_value(path: plist, key: "CFBundleShortVersionString")
+  version = app_store_archive_version(plist)
   { ipa: ipa, archive: archive, sentry_receipt: File.join(output, "sentry-release.txt"),
     number: build_number, version: version }
+end
+
+def app_store_archive_version(plist)
+  version, result = Open3.capture2("/usr/bin/plutil", "-extract", "CFBundleShortVersionString",
+                                  "raw", "-expect", "string", "-o", "-", plist)
+  version = version.strip
+  unless result.success? && version.match?(/\A\d+(?:\.\d+){0,2}\z/)
+    UI.user_error!("Archive has no valid marketing version")
+  end
+  version
 end
 
 # A receipt binds retries and review to the validated archive, never to Apple's changing "latest".

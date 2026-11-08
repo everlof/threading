@@ -1,6 +1,7 @@
 """Exercise the real beta lane without signing, uploading, or contacting services."""
 import json
 import os
+import plistlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -194,6 +195,32 @@ class ScreenshotReleaseTests(unittest.TestCase):
 
 
 class TestFlightReleaseTests(unittest.TestCase):
+    @unittest.skipUnless(Path("/usr/bin/plutil").exists(), "requires macOS plist extraction")
+    def test_archive_version_reads_binary_and_xml_plists_and_rejects_invalid_values(self):
+        harness = HARNESS.split("$calls = []")[0] + r'''
+begin
+  value = app_store_archive_version(ARGV.fetch(1))
+rescue => error
+  failure = error.message
+end
+puts JSON.generate(value: value, failure: failure)
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "Info.plist"
+            for fmt in [plistlib.FMT_BINARY, plistlib.FMT_XML]:
+                for version in ["1.0", "2.3.4", True, "invalid"]:
+                    with self.subTest(format=fmt, version=version):
+                        path.write_bytes(plistlib.dumps({"CFBundleShortVersionString": version}, fmt=fmt))
+                        result = subprocess.run(
+                            ["ruby", "-e", harness, str(ROOT / "fastlane/Fastfile"), str(path)],
+                            capture_output=True, text=True, check=True,
+                        )
+                        value = json.loads(result.stdout)
+                        if isinstance(version, str) and version != "invalid":
+                            self.assertEqual(value, {"value": version, "failure": None})
+                        else:
+                            self.assertIn("no valid marketing version", value["failure"])
+
     def run_lane(self, **environment):
         env = {key: value for key, value in os.environ.items()
                if key not in {"FAIL_AT", "DIRTY_AT", "CHANGE_AT"}}

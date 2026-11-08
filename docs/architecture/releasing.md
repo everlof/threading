@@ -1400,6 +1400,10 @@ line, which reaches the widget extension too, so the two can never disagree. The
 reason. The marketing version is still the project's `MARKETING_VERSION`, which is independent of
 the Mac app's (see the previous section).
 
+Read the archived marketing version with `plutil` and require a dotted numeric string. The
+archive's Info.plist is binary; Fastlane's XML-only `get_info_plist_value` can rescue its parse
+failure and return the logger's boolean result, which must never become a receipt's version.
+
 Because the internal group has access to all builds, a processed upload reaches its testers with
 no distribution step, and internal testing needs no Beta App Review. External testing does.
 `beta_metadata` populated the English beta description, feedback email, privacy policy URL and
