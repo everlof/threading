@@ -1421,6 +1421,10 @@ visible X11 window while initializing the software
 renderer: a measured launch changed from `0x600002` to `0x600008` before the first conversation
 frame. Caching the earlier handle made successful restores fail with `BadWindow` or leave
 ImageMagick waiting for a nonexistent capture target. Quit/native logs survive fixture cleanup.
+Worktree-creation fixtures apply the same rule to the separate SDL prompt: wait for the
+owned child process to publish its dialog and branch field through AT-SPI, then resolve that
+process's live X11 window. A title match followed by a fixed sleep could retain the replaced
+startup window and strand ImageMagick before the fixture could type its branch.
 
 Graphical store workers share one process-local lease per canonical store before taking the
 nonblocking `host.lock`. Startup Snooze reconciliation, native preparation and restore-record

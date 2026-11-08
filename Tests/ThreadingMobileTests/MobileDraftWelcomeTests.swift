@@ -312,12 +312,14 @@ final class MobileDraftWelcomeTests: XCTestCase {
         let continuity = MobileSessionContinuityStore(defaults: defaults)
         let model = RemoteAppModel(continuity: continuity)
         model.startDemo()
+        var rootHasAppeared = false
         let root = DraftNavigationHost(model: model)
             .environmentObject(model)
             .environmentObject(continuity)
             .environmentObject(MobileTerminalKeyboardStore())
             .environmentObject(RemoteNotificationManager())
             .mobileTheme(RemoteThemePalette(theme(mode: .dark, welcome: nil)))
+            .onAppear { rootHasAppeared = true }
         let controller = UIHostingController(rootView: root)
         let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
         let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
@@ -329,17 +331,22 @@ final class MobileDraftWelcomeTests: XCTestCase {
             window.isHidden = true
             window.rootViewController = nil
         }
-        try await Task.sleep(for: .milliseconds(200))
+        let ready = try await waitForNavigation {
+            rootHasAppeared && window.isKeyWindow
+        }
+        XCTAssertTrue(ready, "The navigation host must appear before opening a draft")
 
         // Exercise the same command as both the floating New button and the project's +.
         let firstProject = try XCTUnwrap(model.me?.newSessionCatalog?.projects.first?.name)
         for projectName in [nil, firstProject] {
             XCTAssertEqual(scene?.activationState, .foregroundActive)
             MobileSessionNavigationTransition.draft(in: projectName, onto: model)
-            try await Task.sleep(for: .milliseconds(800))
+            let focused = try await waitForNavigation {
+                self.promptEditor(in: window)?.isFirstResponder == true
+            }
             window.layoutIfNeeded()
             let editor = try XCTUnwrap(promptEditor(in: window))
-            XCTAssertTrue(editor.isFirstResponder)
+            XCTAssertTrue(focused, "The pushed draft must acquire focus without a second tap")
             XCTAssertGreaterThan(editor.bounds.width, 0)
             XCTAssertGreaterThan(editor.bounds.height, 0)
             editor.insertText("A fresh draft")
@@ -347,9 +354,19 @@ final class MobileDraftWelcomeTests: XCTestCase {
 
             window.endEditing(true)
             model.navigationPath.removeAll()
-            try await Task.sleep(for: .milliseconds(600))
-            XCTAssertNil(promptEditor(in: window), "Back removes the draft's editor")
+            let returned = try await waitForNavigation { self.promptEditor(in: window) == nil }
+            XCTAssertTrue(returned, "Back removes the draft's editor")
         }
+    }
+
+    /// UIKit navigation and first-responder delivery complete asynchronously. Observe their
+    /// actual result instead of assuming the simulator has finished after a fixed sleep.
+    private func waitForNavigation(_ condition: () -> Bool) async throws -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !condition(), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        return condition()
     }
 
     private struct DraftNavigationHost: View {

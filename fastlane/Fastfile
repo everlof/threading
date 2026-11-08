@@ -7,7 +7,7 @@ require "json"
 require "open3"
 require "shellwords"
 require "digest"
-require "tmpdir"
+require "fileutils"
 
 default_platform(:ios)
 
@@ -26,6 +26,7 @@ INTERNAL_GROUP = "MJUKIS"
 
 MARKETEER_DOCUMENT = File.join(FASTLANE_DIRECTORY, "marketeer", "Threading.marketeer")
 MARKETEER_EXPORT_DIRECTORY = File.join(REPOSITORY, "build", "app-store-screenshots")
+MARKETEER_EXPORT_SIZES = %w[6.9 6.5 6.3 6.1].freeze
 MARKETEER_BUNDLED_CLI = File.expand_path(
   "~/Library/Application Support/Threading/Plugins/Marketeer.bundle/Contents/Helpers/marketeer"
 )
@@ -267,27 +268,50 @@ platform :ios do
       end
     end
 
-    FileUtils.rm_rf(MARKETEER_EXPORT_DIRECTORY)
-    sh(marketeer_cli, "export", MARKETEER_DOCUMENT, "--out", MARKETEER_EXPORT_DIRECTORY)
+    render_marketing_screenshots(MARKETEER_EXPORT_DIRECTORY)
     UI.success("App Store screenshots: #{MARKETEER_EXPORT_DIRECTORY}")
   end
 
-  desc "Compare the Marketeer document with the editable App Store version's screenshots."
+  desc "Read Apple's actual screenshot processing states for the editable App Store version."
   lane :screenshots_status do
-    marketeer_with_credentials("status", MARKETEER_DOCUMENT)
+    asc_api_key
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    version = app&.get_edit_app_store_version(platform: "IOS")
+    UI.user_error!("No editable iOS App Store version") unless version
+    version.get_app_store_version_localizations.each do |localization|
+      localization.get_app_screenshot_sets.each do |set|
+        screenshots = set.app_screenshots || []
+        UI.message(JSON.generate(
+          locale: localization.locale, display: set.screenshot_display_type,
+          complete: screenshots.count(&:complete?), total: screenshots.count,
+          pending: screenshots.reject(&:complete?).map do |screenshot|
+            {file: screenshot.file_name, delivery: screenshot.asset_delivery_state}
+          end
+        ))
+      end
+    end
   end
 
-  desc "Print the screenshot upload plan for App Store Connect; apply:true performs it."
-  desc "release_copy:true keeps Marketeer's upload bookkeeping out of the tested checkout."
+  desc "Render the screenshot upload plan; apply:true replaces screenshots and verifies processing."
+  desc "The source document is never changed by an upload."
   lane :upload_screenshots do |options|
-    if options[:release_copy]
-      Dir.mktmpdir("threading-release-screenshots-") do |directory|
-        document = File.join(directory, "Threading.marketeer")
-        FileUtils.cp_r(MARKETEER_DOCUMENT, document)
-        sync_marketing_screenshots(document, options[:apply])
-      end
-    else
-      sync_marketing_screenshots(MARKETEER_DOCUMENT, options[:apply])
+    render_marketing_screenshots(MARKETEER_EXPORT_DIRECTORY)
+    UI.message("Replace editable-version screenshots from #{MARKETEER_EXPORT_DIRECTORY} " \
+               "(#{MARKETEER_EXPORT_SIZES.join(', ')} inches); apply:true uploads them.")
+    if options[:apply]
+      deliver(
+        api_key: asc_api_key,
+        app_identifier: APP_IDENTIFIER,
+        platform: "ios",
+        screenshots_path: MARKETEER_EXPORT_DIRECTORY,
+        skip_binary_upload: true,
+        skip_metadata: true,
+        overwrite_screenshots: true,
+        screenshot_processing_timeout: 900,
+        force: true,
+        submit_for_review: false,
+        run_precheck_before_submit: false
+      )
     end
   end
 end
@@ -473,15 +497,17 @@ def marketeer_slides
   JSON.parse(output).fetch("slides").sort_by { |slide| slide.fetch("index") }
 end
 
-# The Marketeer CLI reads ASC_ISSUER_ID, ASC_KEY_ID and ASC_KEY_PATH itself, so the credentials
-# stay out of the logged command line.
-def marketeer_with_credentials(*arguments)
-  ENV["ASC_KEY_PATH"] = asc_credentials[:key_path]
-  sh(marketeer_cli, *arguments)
-end
-
-def sync_marketing_screenshots(document, apply)
-  arguments = ["sync", document]
-  arguments << "--yes" if apply
-  marketeer_with_credentials(*arguments)
+def render_marketing_screenshots(directory)
+  FileUtils.rm_rf(directory)
+  locale_directory = File.join(directory, "en-US")
+  # Apple's historical API names do not match current display diagonals: 6.1-inch
+  # exports belong to APP_IPHONE_58, while APP_IPHONE_61 accepts 6.3-inch images.
+  # Deliver maps pixel dimensions and verifies processing/checksums after upload.
+  # The source is English-only. Legacy documents without localization metadata ignore
+  # --locale-subfolders, so supply Deliver's locale directory explicitly.
+  sh(marketeer_cli, "export", MARKETEER_DOCUMENT, "--out", locale_directory,
+     "--sizes", MARKETEER_EXPORT_SIZES.join(","))
+  expected = SCREENSHOT_CAPTURES.count * MARKETEER_EXPORT_SIZES.count
+  actual = Dir.glob(File.join(locale_directory, "*.png")).count
+  UI.user_error!("Expected #{expected} marketing screenshots, rendered #{actual}") unless actual == expected
 end

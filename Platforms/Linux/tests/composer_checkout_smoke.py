@@ -81,14 +81,35 @@ def xdo(*args):
 
 
 def worktree_prompt(branch, process):
+    def ready_prompt(candidate):
+        if candidate.get_name() != 'Threading Linux':
+            return False
+        pid = candidate.get_process_id()
+        try:
+            status = Path(f'/proc/{pid}/status').read_text()
+        except FileNotFoundError:
+            return False
+        if not any(line.split() == ['PPid:', str(process.pid)]
+                   for line in status.splitlines()):
+            return False
+        frame = child_matching(candidate, lambda child: child.get_role_name() == 'frame')
+        prompt = child_by_id(frame, 'linux.prompt.worktree') if frame else None
+        return prompt is not None and child_by_id(prompt, 'linux.prompt.branch') is not None
+
+    prompt_app = eventually(lambda: child_matching(Atspi.get_desktop(0), ready_prompt),
+                            'ready New Worktree prompt', process)
+    # SDL may replace its first X11 window when the renderer starts. Accessibility is
+    # published after the first frame; resolve the live window only after that point.
+    prompt_pid = prompt_app.get_process_id()
+
     def dialog():
         result = subprocess.run(['xdotool', 'search', '--all', '--onlyvisible',
+                                 '--pid', str(prompt_pid),
                                  '--name', '^New Worktree$'], capture_output=True,
                                 text=True, timeout=5)
         return result.stdout.splitlines()[0] if result.returncode == 0 else None
 
     window = eventually(dialog, 'New Worktree prompt', process)
-    time.sleep(.4)
     subprocess.run(['import', '-window', window,
                     str(output / f'{branch}-prompt.png')], check=True, timeout=5)
     xdo('windowfocus', '--sync', window)

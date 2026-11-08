@@ -68,8 +68,10 @@ build. A confirmed upload is never repeated while Apple's build list catches up.
 build without a confirmed upload receipt stops for reconciliation rather
 than claiming an unrelated upload. `submit_review receipt:<path>` requires the recorded upload
 and verifies the exact selected build and review state. Interrupted submissions can be retried.
-Before submission the driver uploads the listing and synchronizes the reviewed Marketeer slides
-from a disposable copy, keeping upload bookkeeping out of the clean tested source tree.
+Before submission the driver uploads the listing, renders the reviewed Marketeer slides at all
+required iPhone sizes, and uploads them through Fastlane. Fastlane maps pixel dimensions to
+Apple's historical display groups and verifies processing and checksums. The source document
+stays unchanged. `bundle exec fastlane ios screenshots_status` reads Apple's actual states.
 
 Logs and receipts live in ignored `build/full-release/<tag>/`. Keep them until the release is
 finished. One checkout-wide lock prevents two drivers from publishing concurrently. The lock

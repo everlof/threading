@@ -27,16 +27,15 @@ Requires a clean, tested checkout and compatible production service. changelog:"
 
 wait:false returns before App Store Connect finishes processing.
 
-`receipt:<path>` records the exact validated IPA and source revision for retries and App Review.
-
 ### ios submit_review
 
 ```sh
-[bundle exec] fastlane ios submit_review receipt:<path>
+[bundle exec] fastlane ios submit_review
 ```
 
-Submit the beta receipt's exact build to App Review and verify Apple's state. Release after
-approval stays manual. Re-running an already submitted matching build only verifies its state.
+Submit the exact beta receipt's build to App Review; leave release after approval manual.
+
+receipt:<path> is required. Re-running an already submitted build only verifies its state.
 
 ### ios validate
 
@@ -98,7 +97,7 @@ captures. With neither, it renders the document as it stands.
 [bundle exec] fastlane ios screenshots_status
 ```
 
-Compare the Marketeer document with the editable App Store version's screenshots.
+Read Apple's actual screenshot processing states for the editable App Store version.
 
 ### ios upload_screenshots
 
@@ -106,9 +105,9 @@ Compare the Marketeer document with the editable App Store version's screenshots
 [bundle exec] fastlane ios upload_screenshots
 ```
 
-Print the screenshot upload plan for App Store Connect; apply:true performs it.
+Render the screenshot upload plan; apply:true replaces screenshots and verifies processing.
 
-`release_copy:true` keeps Marketeer's upload bookkeeping out of the tested checkout.
+The source document is never changed by an upload.
 
 ----
 

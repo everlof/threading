@@ -121,6 +121,77 @@ end
 puts JSON.generate(calls: $calls, failure: failure)
 '''
 
+SCREENSHOT_HARNESS = HARNESS.split("begin\n  $lanes.fetch(:beta)")[0] + r'''
+module UI
+  def self.message(*); end
+end
+Object.send(:remove_const, :MARKETEER_EXPORT_DIRECTORY)
+MARKETEER_EXPORT_DIRECTORY = ARGV.fetch(1)
+def marketeer_cli; "/fixture/marketeer"; end
+def sh(*arguments)
+  record("render", arguments)
+  output = arguments[arguments.index("--out") + 1]
+  FileUtils.mkdir_p(output)
+  count = ENV["EMPTY_RENDER"] == "1" ? 0 : 20
+  count.times { |index| File.write(File.join(output, "#{index}.png"), "fixture") }
+end
+def deliver(**arguments); record("upload", arguments); end
+begin
+  $lanes.fetch(:upload_screenshots).call(apply: ENV["APPLY"] == "1")
+rescue => error
+  failure = error.message
+end
+puts JSON.generate(calls: $calls, failure: failure)
+'''
+
+
+class ScreenshotReleaseTests(unittest.TestCase):
+    def run_screenshots(self, **environment):
+        env = {key: value for key, value in os.environ.items()
+               if key not in {"FAIL_AT", "APPLY", "EMPTY_RENDER"}}
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                ["ruby", "-e", SCREENSHOT_HARNESS, str(ROOT / "fastlane/Fastfile"),
+                 str(Path(directory) / "screenshots")],
+                capture_output=True, text=True, check=True, env=dict(env, **environment),
+            )
+        return json.loads(result.stdout)
+
+    def test_dry_run_renders_every_required_size_without_upload(self):
+        result = self.run_screenshots()
+        self.assertIsNone(result["failure"])
+        self.assertEqual([call["name"] for call in result["calls"]], ["render"])
+        arguments = result["calls"][0]["arguments"]
+        self.assertEqual(arguments[1], "export")
+        self.assertEqual(arguments[arguments.index("--sizes") + 1], "6.9,6.5,6.3,6.1")
+        self.assertEqual(Path(arguments[arguments.index("--out") + 1]).name, "en-US")
+
+    def test_upload_uses_rendered_pixels_and_waits_for_processing(self):
+        result = self.run_screenshots(APPLY="1")
+        self.assertIsNone(result["failure"])
+        self.assertEqual([call["name"] for call in result["calls"]], ["render", "upload"])
+        render, upload = [call["arguments"] for call in result["calls"]]
+        self.assertEqual(Path(upload["screenshots_path"]) / "en-US",
+                         Path(render[render.index("--out") + 1]))
+        self.assertTrue(upload["overwrite_screenshots"])
+        self.assertGreater(upload["screenshot_processing_timeout"], 0)
+        self.assertTrue(upload["skip_binary_upload"])
+        self.assertTrue(upload["skip_metadata"])
+        self.assertFalse(upload["submit_for_review"])
+
+    def test_render_and_upload_failures_stop_the_lane(self):
+        for stage in ["render", "upload"]:
+            with self.subTest(stage=stage):
+                result = self.run_screenshots(APPLY="1", FAIL_AT=stage)
+                self.assertIsNotNone(result["failure"])
+                if stage == "render":
+                    self.assertNotIn("upload", [call["name"] for call in result["calls"]])
+
+    def test_empty_render_cannot_erase_remote_screenshots(self):
+        result = self.run_screenshots(APPLY="1", EMPTY_RENDER="1")
+        self.assertIn("rendered 0", result["failure"])
+        self.assertNotIn("upload", [call["name"] for call in result["calls"]])
+
 
 class TestFlightReleaseTests(unittest.TestCase):
     def run_lane(self, **environment):

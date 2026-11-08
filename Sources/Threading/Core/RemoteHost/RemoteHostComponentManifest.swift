@@ -17,7 +17,7 @@ import Foundation
 enum RemoteHostComponentManifest {
 
     /// The release tag carrying these assets.
-    static let release = "remote-components-377bd95c09a1"
+    static let release = "remote-components-78d6fa5a10e8"
 
     /// Where the assets are, one directory for the release.
     static let baseURL = "https://github.com/everlof/threading/releases/download/"
@@ -27,33 +27,33 @@ enum RemoteHostComponentManifest {
             kind: .daemon,
             architecture: .arm64,
             assetName: "threading-ptyd-arm64.gz",
-            assetSHA256: "b754840f45d16608784633ff02d3b2e45a48bca112b2bbee70da4298ce7c7ca2",
-            assetByteCount: 22286355,
-            sha256: "d52370db7ca52294853d7c9ef356341798bade5aa3ce8543f78b604610cd9552"
+            assetSHA256: "94bf3535849720eeb955967ba982d1effd91e5b11bf83e51d58f64af86e4ddbd",
+            assetByteCount: 22293816,
+            sha256: "67be7cd5b740cb6c94683a837bc122fb927626e05e475bea4f5907790445e058"
         ),
         RemoteHostComponent(
             kind: .bridge,
             architecture: .arm64,
             assetName: "threading-mcp-bridge-arm64.gz",
-            assetSHA256: "7902cb3451957e93c42076bf835eb92e1b0a0a9b9d95616cda068b255d8fbb7e",
-            assetByteCount: 21829955,
-            sha256: "54a211d8aa179614a4712597195920f7cbde15476054a639a502688b299fbc24"
+            assetSHA256: "a4eff1200f9d12a71890b1d49b0ba37bcab260e9a7218224c97e71da9e9ec309",
+            assetByteCount: 21829957,
+            sha256: "9abb44b99d72b03dc0654a57468b5a3f754bf7a0e1ec2be2a293414c06161fa2"
         ),
         RemoteHostComponent(
             kind: .daemon,
             architecture: .amd64,
             assetName: "threading-ptyd-amd64.gz",
-            assetSHA256: "4066520c004669524205240ca07c5e2fac1776ebdbfd12ed5c420eca9da37464",
-            assetByteCount: 23109923,
-            sha256: "0c810590e62a9adecc05e581d7a6b0ef3861baa74334edf801c7e804f779b591"
+            assetSHA256: "b2e1ca3a1ea3f57f67bed47409b092abc022d3fa13cb274620b272fd557d67f4",
+            assetByteCount: 23114689,
+            sha256: "6131bd4d2dbb95f92f492302cc79d3add4bf3df5f91a77b5c2fec29c95cc1c20"
         ),
         RemoteHostComponent(
             kind: .bridge,
             architecture: .amd64,
             assetName: "threading-mcp-bridge-amd64.gz",
-            assetSHA256: "7bc150d9de5591ae6d515b4e27abef26c8e330ccf1ac5f8a0eb179c09fd50530",
-            assetByteCount: 22601530,
-            sha256: "b99210fe851de4316108353da94c956dfe199dfb6cb225df0d2718d397abd02f"
+            assetSHA256: "48a4c1472392746fa4d43b6f6d2bc878d08b2d70712300d806bf6e1a41a1b4a1",
+            assetByteCount: 22601532,
+            sha256: "0df26925ed4d5b1600688f6815ef3cd7d1dcac3b11baccea1c9db2083210b242"
         )
     ]
 

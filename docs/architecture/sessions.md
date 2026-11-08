@@ -539,6 +539,9 @@ small; bindings leave draft, focus, overflow, choices and attachment decisions w
 screen. The regression pushes the draft through the same navigation command as New and the
 project's +, edits its focused prompt, and returns to the list. It must run on a physical phone;
 a root-only render or simulator pass does not prove that transition fits the device's stack.
+The test observes the host's appearance, the editor becoming first responder, and its removal on
+Back within bounded waits. Fixed 200/800/600 ms sleeps raced UIKit's asynchronous navigation and
+keyboard delivery in the full simulator suite; they did not establish those lifecycle states.
 
 That draft uses the same native `IntrinsicTextView` paste contract as an existing conversation,
 not SwiftUI's visually similar `TextField`: text keeps UIKit's insertion-point paste and undo,

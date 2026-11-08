@@ -283,7 +283,7 @@ class Release:
         if submit_review:
             self.step("metadata", fastlane + ["metadata"], revision, env=lane_env)
             self.assert_snapshot(revision, tree)
-            self.step("screenshots", fastlane + ["upload_screenshots", "apply:true", "release_copy:true"],
+            self.step("screenshots", fastlane + ["upload_screenshots", "apply:true"],
                       revision, env=lane_env)
             self.assert_snapshot(revision, tree)
             self.step("review", fastlane + ["submit_review", f"receipt:{receipt}"], revision,

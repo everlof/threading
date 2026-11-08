@@ -1385,8 +1385,8 @@ to. The Marketeer CLI reads the same three `ASC_*` names, which is why they are 
 | `download_metadata` | Replaces `fastlane/metadata` with the live listing | Reads |
 | `metadata` | Uploads `fastlane/metadata` to the editable version; never submits | Writes the listing |
 | `screenshots` | Places captures into the Marketeer document and renders the App Store PNGs | No |
-| `screenshots_status` | Marketeer's slot-by-slot comparison with the editable version | Reads |
-| `upload_screenshots` | Marketeer's sync plan; `apply:true` performs it | Writes with `apply:true` |
+| `screenshots_status` | Apple's actual processing states for the editable version's screenshots | Reads |
+| `upload_screenshots` | Renders the upload plan; `apply:true` replaces screenshots and verifies processing | Writes with `apply:true` |
 
 **A version's first `metadata` upload needs an App Review detail.** For version 1.0, `deliver`
 stopped with fastlane's "No data" before writing any field, because the version had no App
@@ -1522,10 +1522,25 @@ manifest and those answers are two declarations of one fact and have to change t
 size, linked to app `6806755208`. `screenshots capture:true` runs
 `scripts/capture_marketing_ios.sh`, puts `01-sessions`, `02-claude-tui`, `03-claude-usage-menu`,
 `04-codex-tui` and `05-settings` into the slides in that order (`SCREENSHOT_CAPTURES` in the
-Fastfile), and renders into `build/app-store-screenshots`. Upload goes through Marketeer's own
-checksum-aware sync, not `deliver`, which is why `metadata` passes `skip_screenshots`. The slide
-copy, layout and background are edited in the Marketeer pane or app; the lane only replaces the
-captures. The app is iPhone-only, so the document needs no iPad slides.
+Fastfile), and renders into `build/app-store-screenshots/en-US` at 6.9, 6.5,
+6.3 and 6.1 inches. The slide copy, layout and background are edited in the Marketeer pane or
+app; the lane only replaces the captures. The app is iPhone-only, so it needs no iPad slides.
+
+Marketeer owns rendering; Fastlane's `deliver` owns upload and processing verification.
+On 2026-11-08 Marketeer's sync reported success while Apple rejected five 1170×2532 images
+with `SPEC_MISMATCH`: it mapped the 6.1-inch export to `APP_IPHONE_61`, whose historical API name
+now represents the 6.3-inch display. Fastlane maps those pixels to `APP_IPHONE_58` and maps the
+1206×2622 export to `APP_IPHONE_61`. Explicit exports include the 6.3-inch screenshots required by
+[Apple's current specifications](https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications).
+`upload_screenshots` renders a reviewable local plan without uploading by default. `apply:true`
+replaces the editable version's screenshots for the exported locales, waits for processing,
+and verifies uploaded checksums through the pinned Fastlane uploader. It changes neither the
+source document nor its upload bookkeeping, uploads no binary or metadata, and never submits
+for review. `screenshots_status` reads Apple's delivery states directly; it does not infer
+success from Marketeer's local checksums. The English-only source has no localization metadata,
+so the lane supplies the `en-US` directory explicitly rather than relying on Marketeer's
+`--locale-subfolders`, which that document format ignores. An incomplete render stops before
+any remote screenshot replacement. `metadata` continues to skip screenshots.
 
 ### Before the first App Store submission
 
