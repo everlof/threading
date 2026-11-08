@@ -1,75 +1,75 @@
 {
   "schemaVersion": 1,
   "description": "Per-component size of the exported, arm64-thinned Threading.app, on disk and as raw deflate (what ditto -c -k writes). Lower sizes are accepted; growth past the noise allowance, or a new component, requires an intentional baseline update. See docs/architecture/releasing.md#the-bundle-size-ratchet.",
-  "measuredFrom": "2026-10-26 v0.10.0 clean Developer ID Release archive/export at b891b88b2, arm64-thinned and signature-verified by scripts/release.sh; baseline reviewed for the shared tools and on-demand plugin release.",
+  "measuredFrom": "2026-11-08 v0.11.0 clean Developer ID Release archive/export at e20e525c9889336dbbe6055129b9dfe355089719, Xcode 27.2, arm64-thinned and signature-verified by scripts/release.sh before notarization; reviewed host/shared-UI growth for the next 0.11.1 release, docs/decisions/bundle-size-levers.md section 2.",
   "components": {
     "Contents/(everything else)": {
-      "diskBytes": 166583,
-      "compressedBytes": 38124
+      "diskBytes": 166586,
+      "compressedBytes": 38141
     },
     "Contents/Frameworks/(items under 1 MiB)": {
-      "diskBytes": 273634,
-      "compressedBytes": 78358
+      "diskBytes": 273541,
+      "compressedBytes": 77587
     },
     "Contents/Frameworks/Sparkle.framework": {
       "diskBytes": 1534646,
-      "compressedBytes": 531451
+      "compressedBytes": 531467
     },
     "Contents/Frameworks/ThreadingDesignKit.framework": {
-      "diskBytes": 11272195,
-      "compressedBytes": 4359934
+      "diskBytes": 12071318,
+      "compressedBytes": 4622566
     },
     "Contents/Frameworks/WebRTC.framework": {
       "diskBytes": 11929224,
       "compressedBytes": 5664792
     },
     "Contents/Helpers/(items under 1 MiB)": {
-      "diskBytes": 1665888,
-      "compressedBytes": 602067
+      "diskBytes": 1631088,
+      "compressedBytes": 581510
     },
     "Contents/Helpers/scc": {
       "diskBytes": 4376544,
-      "compressedBytes": 1645513
+      "compressedBytes": 1645505
     },
     "Contents/Helpers/threading-wasm-extension-runner": {
-      "diskBytes": 1064224,
-      "compressedBytes": 408915
+      "diskBytes": 1063536,
+      "compressedBytes": 404179
     },
     "Contents/MacOS/Threading": {
-      "diskBytes": 54576320,
-      "compressedBytes": 23222708
+      "diskBytes": 55184064,
+      "compressedBytes": 23400736
     },
     "Contents/PlugIns/(items under 1 MiB)": {
-      "diskBytes": 214688,
-      "compressedBytes": 74523
+      "diskBytes": 214419,
+      "compressedBytes": 73113
     },
     "Contents/Resources/(items under 1 MiB)": {
-      "diskBytes": 1436535,
-      "compressedBytes": 460494
+      "diskBytes": 1436660,
+      "compressedBytes": 460451
     },
     "Contents/Resources/Assets.car": {
-      "diskBytes": 2193608,
-      "compressedBytes": 2146690
+      "diskBytes": 2203624,
+      "compressedBytes": 2155834
     },
     "Contents/Resources/ExtensionSDK": {
-      "diskBytes": 2203155,
-      "compressedBytes": 544349
+      "diskBytes": 2207239,
+      "compressedBytes": 545620
     },
     "Contents/Resources/FirstPartyExtensions": {
-      "diskBytes": 1411242,
-      "compressedBytes": 342149
+      "diskBytes": 1411651,
+      "compressedBytes": 342237
     },
     "Contents/Resources/Mermaid": {
       "diskBytes": 2822080,
       "compressedBytes": 751167
     },
     "Contents/Resources/en.lproj": {
-      "diskBytes": 1635890,
-      "compressedBytes": 173483
+      "diskBytes": 1678914,
+      "compressedBytes": 177841
     },
     "Contents/Resources/sv.lproj": {
-      "diskBytes": 1685354,
-      "compressedBytes": 281700
+      "diskBytes": 1729612,
+      "compressedBytes": 289123
     }
   }
 }

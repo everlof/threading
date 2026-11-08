@@ -16,7 +16,7 @@ it for the tester: what to try, and what is known to be rough. When the stable r
 own section describes the whole change, not the difference since the last beta; nobody on stable
 saw the betas.
 
-## [0.11.0]
+## [0.11.1]
 
 ### Added
 

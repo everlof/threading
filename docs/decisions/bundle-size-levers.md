@@ -110,6 +110,20 @@ accepted with the release's shared Device Logs and Bluetooth tools. The complete
 baseline, which was measured from an uncommitted shared-runtime checkout; the new
 per-component baseline records the delivered layout and locks in the net saving.
 
+**Clean release export reviewed 2026-11-08.** The Developer ID export of `e20e525c9889`
+(the `v0.11.0` source tag, before notarization) is 101.93 MB on disk / 41.76 MB compressed,
+compared with 100.46 / 41.33 MB at the `v0.10.0` baseline. The host executable is
+55.18 / 23.40 MB and `ThreadingDesignKit.framework` is 12.07 / 4.62 MB: increases of
+0.61 / 0.18 MB and 0.80 / 0.26 MB respectively. The host gained Linked Workroom's remote
+question and notification paths, phone mirroring and the per-chat Workroom pane; the shared
+kit gained reusable composer, transcript, menu, table and prompt components. This is intended
+code growth. The component inventory remains the same 17 entries; WebRTC, Sparkle, Mermaid
+and `scc` remain at their prior sizes. The reviewed baseline records every component from this
+thinned, signature-verified export and keeps the existing 128 KiB / 1% noise allowance.
+The exported app is retained at `build/full-release/v0.11.0/reviewed-export/Threading.app`.
+That tag has no published app release; the baseline update ships under `v0.11.1` rather than
+moving the existing source tag.
+
 **Stripping is already complete.** `STRIP_INSTALLED_PRODUCT=YES`, `STRIP_STYLE=all`,
 `STRIP_SWIFT_SYMBOLS=YES`, dead-stripping and whole-module `-O` are all in effect for the
 archive; the shipped main binary has 3.4k symbols left (the exports dyld needs) and a 1.1 MB
