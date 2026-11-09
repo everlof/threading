@@ -1441,6 +1441,10 @@ selects only the recorded build, and treats an already-submitted matching build 
 never cancels another submission. Fastlane 2.240.1 or newer is required because Apple's builds
 endpoint no longer accepts the older default `betaBuildMetrics` relationship.
 
+Set and verify the version's `release_type: MANUAL` through App Store Connect before submission.
+Deliver's `automatic_release: false` does not change that field when metadata upload is skipped.
+An already-submitted exact build can have this setting repaired without submitting it again.
+
 ### The legal-notice phase cannot be script-sandboxed
 
 `validate` and `beta` build into `build/testflight/DerivedData`, and the first archive there

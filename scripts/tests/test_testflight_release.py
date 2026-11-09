@@ -64,10 +64,15 @@ module UI
   def self.success(*); end
 end
 RemoteBuild = Struct.new(:id)
-RemoteVersion = Struct.new(:id, :version_string, :platform, :app_store_state) do
+RemoteVersion = Struct.new(:id, :version_string, :platform, :app_store_state, :release_type) do
   def get_build; RemoteBuild.new(ENV.fetch("SELECTED_BUILD", "recorded-build")); end
+  def update(attributes:)
+    record("release-setting", attributes)
+    self.release_type = attributes.fetch(:release_type)
+    self
+  end
 end
-$version = RemoteVersion.new("version-id", "1.0", "IOS", ENV.fetch("STORE_STATE", "PREPARE_FOR_SUBMISSION"))
+$version = RemoteVersion.new("version-id", "1.0", "IOS", ENV.fetch("STORE_STATE", "PREPARE_FOR_SUBMISSION"), ENV.fetch("RELEASE_TYPE", "AFTER_APPROVAL"))
 module Spaceship
   module ConnectAPI
     class App
@@ -342,6 +347,10 @@ class AppReviewSubmissionTests(unittest.TestCase):
         self.assertTrue(submit["skip_binary_upload"])
         self.assertTrue(submit["submit_for_review"])
         self.assertFalse(submit["automatic_release"])
+        names = [call["name"] for call in result["calls"]]
+        self.assertLess(names.index("release-setting"), names.index("submit"))
+        setting = next(call["arguments"] for call in result["calls"] if call["name"] == "release-setting")
+        self.assertEqual(setting, {"release_type": "MANUAL"})
         self.assertEqual(result["calls"][-1]["arguments"]["app_store_state"], "WAITING_FOR_REVIEW")
 
     def test_unconfirmed_upload_and_different_selected_build_refuse(self):
@@ -354,9 +363,14 @@ class AppReviewSubmissionTests(unittest.TestCase):
                 self.assertNotIn("submit", [call["name"] for call in result["calls"]])
 
     def test_already_submitted_exact_build_is_idempotent(self):
-        result = self.run_submission(STORE_STATE="IN_REVIEW")
+        result = self.run_submission(STORE_STATE="IN_REVIEW", RELEASE_TYPE="MANUAL")
         self.assertIsNone(result["failure"])
         self.assertNotIn("submit", [call["name"] for call in result["calls"]])
+        self.assertNotIn("release-setting", [call["name"] for call in result["calls"]])
+        automatic = self.run_submission(STORE_STATE="IN_REVIEW")
+        self.assertIsNone(automatic["failure"])
+        self.assertIn("release-setting", [call["name"] for call in automatic["calls"]])
+        self.assertNotIn("submit", [call["name"] for call in automatic["calls"]])
 
     def test_submission_error_or_unconfirmed_remote_state_has_no_success_receipt(self):
         for env in [{"FAIL_AT": "submit"}, {"AFTER_STATE": "READY_FOR_REVIEW"}]:
